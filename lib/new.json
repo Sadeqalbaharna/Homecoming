@@ -1,0 +1,35 @@
+flutter run -d windows ^
+  --dart-define=API_BASE_URL=https://kai-sup4.onrender.com
+  --dart-define=API_KEY_VALUE=8c620de050a50e7842151326f3775f82
+
+
+  flutter run -d windows ^
+  --dart-define=API_BASE_URL=https://<your-host> ^
+  --dart-define=API_KEY_VALUE=<your-key>
+
+dart
+Copy
+Edit
+
+
+curl
+
+curl.exe -k "https://www.googleapis.com/customsearch/v1?q=test&key=AIzaSyDn1-1b9AUqxlV7mWFYUWPvRwvI2l5NCk8&cx=55de057cd04434b4d"
+
+
+curl.exe --ssl-no-revoke -sS ^
+  -H "x-api-key: 8c620de050a50e7842151326f3775f82" ^
+  -H "Content-Type: application/json" ^
+  -d "{\"q\":\"breaking news\"}" ^
+  https://kai-sup4.onrender.com/search
+
+
+  GET /diag_cse?api_key=8c620de050a50e7842151326f3775f82
+
+
+  Invoke-WebRequest "http://localhost:5000/diag_cse?api_key=8c620de050a50e7842151326f3775f82" |
+  Select-Object -ExpandProperty Content
+
+
+  flutter run -d windows --dart-define=API_BASE_URL=https://kai-sup4.onrender.com --dart-define=API_KEY_VALUE=8c620de050a50e7842151326f3775f82
+

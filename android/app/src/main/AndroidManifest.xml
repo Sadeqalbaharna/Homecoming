@@ -1,0 +1,49 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.homecoming.homecoming_app">
+
+    <!-- Needed for Flask calls + ElevenLabs playback -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Needed for microphone recording (long-press to talk) -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- If you later add true system overlay bubbles, you'll also need:
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    and some extra native setup. Not required for the in-app overlay.
+    -->
+
+    <application
+        android:name="${applicationName}"
+        android:label="homecoming_app"
+        android:icon="@mipmap/ic_launcher"
+        android:usesCleartextTraffic="false">
+        <!-- usesCleartextTraffic=false is fine since you're using HTTPS.
+             Set true only if you ever point to http:// during dev. -->
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:theme="@style/LaunchTheme"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize">
+
+            <!-- This keeps your Flutter UI visible when the screen is locked, if needed -->
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+
+        </activity>
+
+        <!-- This is required by Flutter to show a splash while launching -->
+        <meta-data
+            android:name="io.flutter.embedding.android.NormalTheme"
+            android:resource="@style/NormalTheme"
+            />
+        <meta-data
+            android:name="flutterEmbedding"
+            android:value="2" />
+    </application>
+</manifest>

@@ -1,0 +1,43 @@
+name: homecoming_app
+description: Overlay avatar app (mobile + desktop)
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # UI
+  lottie: ^3.1.0
+  gif: ^2.3.0
+  # Desktop-specific packages (will be ignored on mobile)
+  window_manager: ^0.3.9
+  flutter_acrylic: ^1.1.4
+  # Net
+  dio: ^5.5.0
+  # Audio (choose ONE lib → audioplayers)
+  audioplayers: ^6.0.0
+  # State management
+  hooks_riverpod: ^2.5.1
+  flutter_hooks: ^0.20.5
+  # Storage & data
+  shared_preferences: ^2.2.2
+  path_provider: ^2.1.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/avatar/kai_talk.json
+    - assets/avatar/images/mage.png
+    - assets/avatar/idle.gif
+    - assets/avatar/attention.gif
+    - assets/avatar/thinking.gif
+    - assets/avatar/speaking.gif
+
