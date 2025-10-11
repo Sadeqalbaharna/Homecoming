@@ -1,8 +1,8 @@
-# # Homecoming AI Avatar App
+# Homecoming AI Avatar App 🤖
 
-A cross-platform Flutter application featuring Kai, an AI avatar with personality and mood dynamics.
+A cross-platform Flutter application featuring Kai, an AI avatar with personality and mood dynamics, now with Firebase cloud persistence!
 
-## Features
+## ✨ Features
 
 - **Pure Flutter Implementation**: No Python backend required
 - **Cross-Platform Support**: Desktop (Windows, macOS, Linux) and Mobile (Android, iOS)
@@ -11,16 +11,38 @@ A cross-platform Flutter application featuring Kai, an AI avatar with personalit
 - **Dynamic Personality**: Personality traits, mood states, and user affinity tracking
 - **Animated Avatar**: Multiple GIF states (idle, attention, thinking, speaking)
 - **Real-time Personality Changes**: Visual feedback for personality/mood adjustments
+- **🔥 Firebase Integration**: Cloud data persistence and cross-device sync
+- **📱 Firebase App Distribution**: Automated testing distribution
 
-## Requirements
+## 🚀 For Testers
 
-### API Keys (Optional but recommended)
+### Get the Latest Build
+This app is distributed via Firebase App Distribution for testing:
+
+1. **Check your email** for Firebase App Distribution invitation
+2. **Download Firebase App Distribution** from Google Play Store
+3. **Install Homecoming AI Avatar** from the distribution app
+4. **Test and provide feedback** through the Firebase console
+
+### Testing Focus Areas
+- 🤖 **AI Conversations**: Test chat functionality and personality changes
+- 🔊 **Voice Synthesis**: Verify text-to-speech works properly
+- 📱 **Cross-Device Sync**: Install on multiple devices and verify data syncs
+- 🌐 **Offline Mode**: Test app functionality without internet
+- 🔄 **Firebase Sync**: Verify personality data saves to cloud
+
+## 🛠️ For Developers
+
+### Requirements
+
+#### API Keys (Optional but recommended)
 - **OpenAI API Key**: For AI chat functionality
 - **ElevenLabs API Key**: For text-to-speech features
 
-### Flutter Environment
+#### Development Environment
 - Flutter SDK 3.0.0 or higher
 - Dart SDK 3.0.0 or higher
+- Firebase project (homecoming-74f73)
 
 ## Installation
 
@@ -219,6 +241,33 @@ Kai features a dynamic personality system with:
 - **Windows**: May require Visual Studio Build Tools
 - **macOS**: Requires Xcode for iOS builds
 - **Android**: Ensure Android SDK is properly configured
+
+## 📱 Firebase App Distribution
+
+### Quick Setup for Phone Testing
+
+1. **Configure GitHub Secrets** (see `FIREBASE_DISTRIBUTION_SETUP.md`)
+   ```bash
+   FIREBASE_APP_ID=your_app_id
+   FIREBASE_SERVICE_ACCOUNT_JSON=your_service_account_json
+   ```
+
+2. **Push to Deploy**
+   ```bash
+   git push origin main
+   # Automatically builds and distributes to testers!
+   ```
+
+3. **Monitor Distribution**
+   - Check Firebase Console for download stats
+   - View GitHub Actions for build status
+   - Collect feedback from testers
+
+### Links
+- 📊 **Firebase Console**: https://console.firebase.google.com/project/homecoming-74f73
+- 🔧 **GitHub Actions**: https://github.com/Sadeqalbaharna/Homecoming/actions
+- 📚 **Setup Guide**: [FIREBASE_DISTRIBUTION_SETUP.md](FIREBASE_DISTRIBUTION_SETUP.md)
+- 🔥 **Firebase Integration**: [FIREBASE_INTEGRATION.md](FIREBASE_INTEGRATION.md)
 
 ## License
 

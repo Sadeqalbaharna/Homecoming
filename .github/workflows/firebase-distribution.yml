@@ -38,7 +38,9 @@ jobs:
       run: |
         flutter build apk --release \
           --dart-define=OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" \
-          --dart-define=ELEVENLABS_API_KEY="${{ secrets.ELEVENLABS_API_KEY }}"
+          --dart-define=ELEVENLABS_API_KEY="${{ secrets.ELEVENLABS_API_KEY }}" \
+          --dart-define=FIREBASE_PROJECT_ID="homecoming-74f73" \
+          --dart-define=FIREBASE_DATABASE_URL="https://homecoming-74f73-default-rtdb.firebaseio.com"
       
     - name: Upload APK to Firebase App Distribution
       uses: wzieba/Firebase-Distribution-Github-Action@v1
@@ -59,9 +61,11 @@ jobs:
           - AI Avatar with dynamic personality
           - OpenAI GPT integration
           - ElevenLabs voice synthesis
+          - Firebase cloud persistence
           - Cross-platform Flutter UI
           
           📱 Install and test with your API keys securely embedded!
+          📊 Data syncs to Firebase project: homecoming-74f73
           
     - name: Create GitHub Release
       if: github.event_name == 'push'
