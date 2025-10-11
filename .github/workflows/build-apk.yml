@@ -1,0 +1,57 @@
+name: Build APK with Secrets
+
+on:
+  workflow_dispatch: # Manual trigger only
+    inputs:
+      build_type:
+        description: 'Build Type'
+        required: true
+        default: 'release'
+        type: choice
+        options:
+        - debug
+        - release
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Setup Java
+      uses: actions/setup-java@v3
+      with:
+        distribution: 'zulu'
+        java-version: '17'
+        
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.24.0'
+        channel: 'stable'
+        cache: true
+        
+    - name: Get dependencies
+      run: flutter pub get
+      
+    - name: Build APK with Secrets
+      run: |
+        flutter build apk --${{ github.event.inputs.build_type }} \
+          --dart-define=OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" \
+          --dart-define=ELEVENLABS_API_KEY="${{ secrets.ELEVENLABS_API_KEY }}"
+      
+    - name: Upload APK Artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: homecoming-${{ github.event.inputs.build_type }}-apk
+        path: build/app/outputs/flutter-apk/app-${{ github.event.inputs.build_type }}.apk
+        retention-days: 30
+        
+    - name: Show Download Instructions
+      run: |
+        echo "🎉 APK Build Complete!"
+        echo "📱 Download your APK from the 'Actions' tab -> 'Artifacts' section"
+        echo "🔧 Build Type: ${{ github.event.inputs.build_type }}"
+        echo "🔑 API Keys: Securely included from repository secrets"

@@ -158,12 +158,28 @@ class AIConfig {
 ### CI/CD (GitHub Actions):
 Store secrets in GitHub repository settings and use them in workflows:
 
+**Setting up GitHub Secrets:**
+1. Go to your repository on GitHub
+2. Click Settings → Secrets and variables → Actions  
+3. Click "New repository secret"
+4. Add:
+   - Name: `OPENAI_API_KEY`, Value: your OpenAI API key
+   - Name: `ELEVENLABS_API_KEY`, Value: your ElevenLabs API key
+
+**GitHub Actions Workflow:**
 ```yaml
 - name: Build APK
-  run: flutter build apk --release --dart-define=OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
-  env:
-    OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+  run: |
+    flutter build apk --release \
+      --dart-define=OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }} \
+      --dart-define=ELEVENLABS_API_KEY=${{ secrets.ELEVENLABS_API_KEY }}
 ```
+
+**✅ Your Repository Now Has:**
+- Automated APK builds with secure API keys
+- Manual build triggers via GitHub Actions
+- Automatic releases with APK downloads
+- Web builds for hosting
 
 ## 📱 For Phone Installation
 

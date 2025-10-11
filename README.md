@@ -57,10 +57,17 @@ flutter run --dart-define=OPENAI_API_KEY=your-key --dart-define=ELEVENLABS_API_K
 ```
 
 **📖 See [API_SECURITY.md](API_SECURITY.md) for complete security guide**
+**🚀 See [GITHUB_ACTIONS.md](GITHUB_ACTIONS.md) for automated builds**
 
 ### Getting API Keys:
 - **OpenAI**: https://platform.openai.com/api-keys
 - **ElevenLabs**: https://elevenlabs.io/app/speech-synthesis (Optional)
+
+### 🤖 Automated Builds (NEW!)
+Your repository now has GitHub Actions that automatically build APKs with your API keys:
+1. **Manual Builds**: Actions tab → "Build APK with Secrets" → Run workflow
+2. **Auto Releases**: Push to main branch creates releases with APKs
+3. **Secure**: Uses repository secrets, never exposes API keys
 
 ## Running the App
 
