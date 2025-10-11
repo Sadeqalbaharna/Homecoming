@@ -8,13 +8,11 @@ import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Configuration class to hold all API keys
+/// Uses environment variables for secure secret management
 class AIConfig {
-  // PUT YOUR REAL OPENAI API KEY HERE:
-  static const String openaiApiKey = 'your-openai-api-key-here';
-  
-  // PUT YOUR REAL ELEVENLABS API KEY HERE (optional for voice):
-  static const String elevenlabsApiKey = 'your-elevenlabs-api-key-here';
-  
+  // API keys loaded from environment variables (never commit real keys to git!)
+  static const String openaiApiKey = String.fromEnvironment('OPENAI_API_KEY', defaultValue: '');
+  static const String elevenlabsApiKey = String.fromEnvironment('ELEVENLABS_API_KEY', defaultValue: '');
   static const String googleApiKey = String.fromEnvironment('GOOGLE_API_KEY', defaultValue: '');
   static const String googleCseId = String.fromEnvironment('GOOGLE_CSE_ID', defaultValue: '');
   

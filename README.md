@@ -35,15 +35,32 @@ cd homecoming_app
 flutter pub get
 ```
 
-### 3. Configure API Keys
-Edit `lib/services/ai_service.dart` and add your API keys:
-```dart
-class AIConfig {
-  static const String openAIApiKey = 'your-openai-api-key-here';
-  static const String elevenLabsApiKey = 'your-elevenlabs-api-key-here'; // Optional
-  static const String googleApiKey = ''; // Optional - not currently used
-}
+### 3. Configure API Keys - SECURE METHOD
+**⚠️ NEVER commit real API keys to Git repositories!**
+
+The app uses secure environment variables. Choose one method:
+
+#### Method 1: Environment Variables (Recommended)
+```bash
+# Set environment variables on your system
+export OPENAI_API_KEY="your-actual-openai-key"
+export ELEVENLABS_API_KEY="your-actual-elevenlabs-key"
+
+# Run with environment variables
+flutter run --dart-define=OPENAI_API_KEY=$OPENAI_API_KEY --dart-define=ELEVENLABS_API_KEY=$ELEVENLABS_API_KEY
 ```
+
+#### Method 2: Build-time Definition
+```bash
+# Run with inline keys
+flutter run --dart-define=OPENAI_API_KEY=your-key --dart-define=ELEVENLABS_API_KEY=your-key
+```
+
+**📖 See [API_SECURITY.md](API_SECURITY.md) for complete security guide**
+
+### Getting API Keys:
+- **OpenAI**: https://platform.openai.com/api-keys
+- **ElevenLabs**: https://elevenlabs.io/app/speech-synthesis (Optional)
 
 ## Running the App
 
