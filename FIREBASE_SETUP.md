@@ -1,23 +1,49 @@
 # Firebase Setup Guide for Homecoming App
 
-Follow these steps to integrate Firebase with your Homecoming AI Avatar app.
+🚀 **Complete setup for Firebase App Distribution with GitHub Actions automation**
 
-## 1. Create Firebase Project
+## 🎯 Quick Setup Checklist
 
+### ☐ Step 1: Create Firebase Project
 1. Go to [Firebase Console](https://console.firebase.google.com)
 2. Click "Create a project"
 3. Enter project name: `homecoming-ai-avatar`
 4. Enable Google Analytics (optional)
-5. Select Analytics account or create new one
-6. Click "Create project"
+5. Click "Create project"
 
-## 2. Add Android App
-
+### ☐ Step 2: Add Android App
 1. In Firebase Console, click "Add app" → Android
-2. Enter Android package name: `com.homecoming.homecoming_app`
-3. Enter app nickname: `Homecoming AI Avatar`
+2. **Package name**: `com.homecoming.homecoming_app` ⚠️ (Must match exactly!)
+3. **App nickname**: `Homecoming AI Avatar`
 4. Download `google-services.json`
 5. Place file in `android/app/google-services.json`
+
+### ☐ Step 3: Enable App Distribution
+1. In Firebase Console → "App Distribution" (left sidebar)
+2. Click "Get started"
+3. Add testers by email address
+4. Create a group called "testers"
+5. Note your **App ID** for GitHub secrets
+
+### ☐ Step 4: Create Service Account for Automation
+1. Go to [Google Cloud Console](https://console.cloud.google.com)
+2. Select your Firebase project
+3. "IAM & Admin" → "Service Accounts" → "Create Service Account"
+4. **Name**: `github-actions-firebase`
+5. **Role**: `Firebase App Distribution Admin`
+6. Create and download JSON key file
+
+### ☐ Step 5: Add GitHub Repository Secrets
+In your GitHub repository → Settings → Secrets → Actions:
+
+1. **`FIREBASE_APP_ID`**: From Firebase Console → Project Settings → App ID
+2. **`FIREBASE_SERVICE_ACCOUNT_JSON`**: Entire contents of JSON file from Step 4
+
+**Your secrets should now include:**
+- ✅ `OPENAI_API_KEY`
+- ✅ `ELEVENLABS_API_KEY`  
+- ✅ `FIREBASE_APP_ID`
+- ✅ `FIREBASE_SERVICE_ACCOUNT_JSON`
 
 ## 3. Add iOS App (if building for iOS)
 

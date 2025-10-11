@@ -63,11 +63,24 @@ flutter run --dart-define=OPENAI_API_KEY=your-key --dart-define=ELEVENLABS_API_K
 - **OpenAI**: https://platform.openai.com/api-keys
 - **ElevenLabs**: https://elevenlabs.io/app/speech-synthesis (Optional)
 
-### 🤖 Automated Builds (NEW!)
-Your repository now has GitHub Actions that automatically build APKs with your API keys:
+### 🤖 Automated Builds & Distribution (NEW!)
+Your repository now has complete CI/CD with Firebase App Distribution:
+
+#### 🚀 **GitHub Actions Automation**
 1. **Manual Builds**: Actions tab → "Build APK with Secrets" → Run workflow
 2. **Auto Releases**: Push to main branch creates releases with APKs
 3. **Secure**: Uses repository secrets, never exposes API keys
+
+#### 📱 **Firebase App Distribution**  
+1. **Automatic Distribution**: APKs automatically distributed to testers
+2. **Email Notifications**: Testers get download links via email
+3. **Professional Distribution**: No manual APK sharing needed
+
+**📖 Setup Guides:**
+- **[API_SECURITY.md](API_SECURITY.md)** - Secure API key management
+- **[GITHUB_ACTIONS.md](GITHUB_ACTIONS.md)** - Automated builds
+- **[FIREBASE_SETUP.md](FIREBASE_SETUP.md)** - Firebase project setup
+- **[FIREBASE_DISTRIBUTION.md](FIREBASE_DISTRIBUTION.md)** - Distribution workflow
 
 ## Running the App
 
