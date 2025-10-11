@@ -25,6 +25,9 @@ dependencies:
   # Storage & data
   shared_preferences: ^2.2.2
   path_provider: ^2.1.1
+  # Firebase Integration
+  firebase_core: ^3.6.0
+  firebase_database: ^11.1.4
 
 dev_dependencies:
   flutter_test:
@@ -36,8 +39,9 @@ flutter:
   assets:
     - assets/avatar/kai_talk.json
     - assets/avatar/images/mage.png
-    - assets/avatar/idle.gif
-    - assets/avatar/attention.gif
-    - assets/avatar/thinking.gif
-    - assets/avatar/speaking.gif
+    # GIF assets (comment out if files don't exist)
+    # - assets/avatar/idle.gif
+    # - assets/avatar/attention.gif
+    # - assets/avatar/thinking.gif
+    # - assets/avatar/speaking.gif
 

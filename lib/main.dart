@@ -13,8 +13,11 @@ import 'package:flutter_acrylic/flutter_acrylic.dart' as acrylic;
 import 'package:window_manager/window_manager.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:firebase_core/firebase_core.dart';
 
 import 'services/ai_service.dart';
+import 'services/firebase_service.dart';
+import 'firebase_options.dart';
 
 /// ===== Layout / Window =====
 const double kSpriteSize = 170;
@@ -45,6 +48,19 @@ final aiService = AIService();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // Initialize Firebase
+  try {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+    await FirebaseService.initialize();
+    print('✅ Firebase initialized successfully');
+  } catch (e) {
+    print('⚠️ Firebase initialization failed: $e');
+    print('📱 App will continue with local storage only');
+  }
+  
   await acrylic.Window.initialize();
   await windowManager.ensureInitialized();
   await acrylic.Window.setEffect(

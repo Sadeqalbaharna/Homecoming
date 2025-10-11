@@ -1,4 +1,4 @@
-// AI Service - Pure Flutter/Dart implementation
+// AI Service - Pure Flutter/Dart implementation with Firebase integration
 // Replaces the Python Flask backend
 
 import 'dart:async';
@@ -6,6 +6,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'firebase_service.dart';
 
 /// Configuration class to hold all API keys
 /// Uses environment variables for secure secret management
@@ -166,22 +167,40 @@ class AIService {
     return affinity;
   }
 
-  /// Save personality to local storage
+  /// Save personality to local storage and Firebase
   Future<void> savePersonality(String personaId, Map<String, int> personality) async {
     final prefs = await _prefsInstance;
     for (final entry in personality.entries) {
       final key = '${personaId}_personality_${entry.key}';
       await prefs.setInt(key, entry.value);
     }
+    
+    // Also save to Firebase
+    await FirebaseService.savePersonalityData(
+      personaId: personaId,
+      personalityData: {
+        'personality': personality,
+        'lastUpdated': DateTime.now().millisecondsSinceEpoch,
+      },
+    );
   }
 
-  /// Save mood to local storage
+  /// Save mood to local storage and Firebase
   Future<void> saveMood(String personaId, Map<String, int> mood) async {
     final prefs = await _prefsInstance;
     for (final entry in mood.entries) {
       final key = '${personaId}_mood_${entry.key}';
       await prefs.setInt(key, entry.value);
     }
+    
+    // Also save to Firebase
+    await FirebaseService.savePersonalityData(
+      personaId: '${personaId}_mood',
+      personalityData: {
+        'mood': mood,
+        'lastUpdated': DateTime.now().millisecondsSinceEpoch,
+      },
+    );
   }
 
   /// Save affinity to local storage
@@ -414,10 +433,18 @@ ${history.join('\n')}''';
       if (delta != 0) actualDeltas[trait] = delta;
     }
 
-    // Save updated state
+    // Save updated state to both local and Firebase
     await savePersonality(personaId, newPersonality);
     await saveMood(personaId, newMood);
     await _saveMessage(personaId, text, reply);
+    
+    // Save conversation to Firebase
+    await FirebaseService.saveConversation(
+      personaId: personaId,
+      userMessage: text,
+      aiResponse: reply,
+      personalityDeltas: actualDeltas,
+    );
 
     // Generate TTS
     final ttsBytes = await synthesizeTTS(reply);
