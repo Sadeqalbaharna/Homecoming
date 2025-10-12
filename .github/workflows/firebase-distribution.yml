@@ -42,15 +42,23 @@ jobs:
           --dart-define=FIREBASE_PROJECT_ID="homecoming-74f73" \
           --dart-define=FIREBASE_DATABASE_URL="https://homecoming-74f73-default-rtdb.europe-west1.firebasedatabase.app"
       
+    - name: Setup Firebase CLI
+      run: |
+        npm install -g firebase-tools
+        
+    - name: Authenticate Firebase
+      run: |
+        echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}' > firebase-service-account.json
+        export GOOGLE_APPLICATION_CREDENTIALS=firebase-service-account.json
+        firebase projects:list
+      
     - name: Upload APK to Firebase App Distribution
-      uses: wzieba/Firebase-Distribution-Github-Action@v1
-      with:
-        appId: ${{ secrets.FIREBASE_APP_ID }}
-        serviceCredentialsFileContent: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
-        groups: testers
-        file: build/app/outputs/flutter-apk/app-release.apk
-        releaseNotes: |
-          🤖 Homecoming AI Avatar - Build #${{ github.run_number }}
+      run: |
+        export GOOGLE_APPLICATION_CREDENTIALS=firebase-service-account.json
+        firebase appdistribution:distribute build/app/outputs/flutter-apk/app-release.apk \
+          --app ${{ secrets.FIREBASE_APP_ID }} \
+          --groups testers \
+          --release-notes "🤖 Homecoming AI Avatar - Build #${{ github.run_number }}
           
           📅 Build Date: ${{ github.event.head_commit.timestamp }}
           🔧 Commit: ${{ github.sha }}
@@ -65,7 +73,11 @@ jobs:
           - Cross-platform Flutter UI
           
           📱 Install and test with your API keys securely embedded!
-          📊 Data syncs to Firebase project: homecoming-74f73
+          📊 Data syncs to Firebase project: homecoming-74f73"
+          
+    - name: Cleanup service account file
+      if: always()
+      run: rm -f firebase-service-account.json
           
     - name: Create GitHub Release
       if: github.event_name == 'push'
