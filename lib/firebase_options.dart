@@ -42,22 +42,22 @@ class DefaultFirebaseOptions {
   }
 
   static const FirebaseOptions web = FirebaseOptions(
-    apiKey: 'AIzaSyC0V5F_placeholder_web_key',
-    appId: '1:placeholder:web:placeholder',
-    messagingSenderId: 'placeholder',
+    apiKey: 'AIzaSyAZbMeDAKarfsRZGwg5QQBfH2iIEr_P444',
+    appId: '1:632366966739:web:web_app_placeholder',
+    messagingSenderId: '632366966739',
     projectId: 'homecoming-74f73',
     authDomain: 'homecoming-74f73.firebaseapp.com',
-    databaseURL: 'https://homecoming-74f73-default-rtdb.firebaseio.com',
-    storageBucket: 'homecoming-74f73.appspot.com',
+    databaseURL: 'https://homecoming-74f73-default-rtdb.europe-west1.firebasedatabase.app',
+    storageBucket: 'homecoming-74f73.firebasestorage.app',
   );
 
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'AIzaSyC0V5F_placeholder_android_key',
-    appId: '1:placeholder:android:placeholder',
-    messagingSenderId: 'placeholder',
+    apiKey: 'AIzaSyAZbMeDAKarfsRZGwg5QQBfH2iIEr_P444',
+    appId: '1:632366966739:android:351bee9e47901e29ac3126',
+    messagingSenderId: '632366966739',
     projectId: 'homecoming-74f73',
-    databaseURL: 'https://homecoming-74f73-default-rtdb.firebaseio.com',
-    storageBucket: 'homecoming-74f73.appspot.com',
+    databaseURL: 'https://homecoming-74f73-default-rtdb.europe-west1.firebasedatabase.app',
+    storageBucket: 'homecoming-74f73.firebasestorage.app',
   );
 
   static const FirebaseOptions ios = FirebaseOptions(

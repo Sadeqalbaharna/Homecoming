@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "632366966739",
+    "firebase_url": "https://homecoming-74f73-default-rtdb.europe-west1.firebasedatabase.app",
+    "project_id": "homecoming-74f73",
+    "storage_bucket": "homecoming-74f73.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:632366966739:android:351bee9e47901e29ac3126",
+        "android_client_info": {
+          "package_name": "com.homecoming.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAZbMeDAKarfsRZGwg5QQBfH2iIEr_P444"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
