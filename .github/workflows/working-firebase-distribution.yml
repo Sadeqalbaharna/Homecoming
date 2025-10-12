@@ -1,0 +1,93 @@
+name: Working Firebase Distribution
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      release_notes:
+        description: 'Release Notes'
+        required: false
+        default: 'New build with latest features'
+
+jobs:
+  build-and-distribute:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Setup Java
+      uses: actions/setup-java@v3
+      with:
+        distribution: 'zulu'
+        java-version: '17'
+        
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.24.0'
+        channel: 'stable'
+        cache: true
+        
+    - name: Get Flutter dependencies
+      run: flutter pub get
+      
+    - name: Build Android APK (Release)
+      run: |
+        flutter build apk --release \
+          --dart-define=OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" \
+          --dart-define=ELEVENLABS_API_KEY="${{ secrets.ELEVENLABS_API_KEY }}"
+      
+    - name: Firebase App Distribution
+      uses: wzieba/Firebase-Distribution-Github-Action@v1.7.0
+      with:
+        appId: ${{ secrets.FIREBASE_APP_ID }}
+        serviceCredentialsFileContent: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+        groups: testers
+        file: build/app/outputs/flutter-apk/app-release.apk
+        releaseNotes: |
+          🤖 Homecoming AI Avatar - Build #${{ github.run_number }}
+          
+          📅 Built: ${{ github.event.head_commit.timestamp }}
+          🔧 Commit: ${{ github.sha }}
+          
+          ${{ github.event.inputs.release_notes || 'Automated build with latest updates' }}
+          
+          ✨ Features:
+          - AI Avatar with dynamic personality
+          - OpenAI GPT integration
+          - ElevenLabs voice synthesis  
+          - Firebase cloud persistence
+          - Cross-platform Flutter UI
+          
+          📱 Ready for testing!
+          
+    - name: Upload APK as artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: homecoming-release-apk
+        path: build/app/outputs/flutter-apk/app-release.apk
+        
+    - name: Create GitHub Release
+      if: github.event_name == 'push'
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: v${{ github.run_number }}
+        release_name: Homecoming AI Avatar v${{ github.run_number }}
+        body: |
+          🚀 **Homecoming AI Avatar** - Automated Release
+          
+          📱 **Firebase Distribution**: APK distributed to testers
+          📅 **Build Date**: ${{ github.event.head_commit.timestamp }}
+          🔧 **Commit**: ${{ github.sha }}
+          
+          ## ✨ What's New
+          ${{ github.event.inputs.release_notes || 'Latest updates and improvements' }}
+          
+          Download from Firebase App Distribution or GitHub Releases.
+        draft: false
+        prerelease: false

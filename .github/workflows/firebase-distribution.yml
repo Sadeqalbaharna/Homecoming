@@ -1,9 +1,10 @@
-name: Build and Deploy to Firebase App Distribution
+name: Build and Deploy to Firebase App Distribution (DISABLED)
 
-on:
-  push:
-    branches: [ main ]
-  workflow_dispatch:
+# Temporarily disabled due to authentication issues
+# on:
+#   push:
+#     branches: [ main ]
+#   workflow_dispatch:
     inputs:
       release_notes:
         description: 'Release Notes'
