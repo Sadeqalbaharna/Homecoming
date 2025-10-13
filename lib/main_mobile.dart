@@ -47,23 +47,49 @@ final aiService = AIService();
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  // Initialize Firebase
+  // Show loading state while initializing
+  runApp(const MaterialApp(
+    home: Scaffold(
+      backgroundColor: Color(0xFF0D0A07),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            CircularProgressIndicator(color: Color(0xFFFFE7B0)),
+            SizedBox(height: 20),
+            Text(
+              'Initializing Kai...',
+              style: TextStyle(color: Colors.white, fontSize: 18),
+            ),
+          ],
+        ),
+      ),
+    ),
+  ));
+  
+  // Initialize Firebase with error handling
+  bool firebaseInitialized = false;
   try {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
     );
     await FirebaseService.initialize();
+    firebaseInitialized = true;
     print('✅ Firebase initialized successfully');
   } catch (e) {
     print('⚠️ Firebase initialization failed: $e');
     print('📱 App will continue with local storage only');
   }
   
-  runApp(const KaiMobileApp());
+  // Run the actual app
+  runApp(KaiMobileApp(firebaseInitialized: firebaseInitialized));
 }
 
 class KaiMobileApp extends StatelessWidget {
-  const KaiMobileApp({super.key});
+  final bool firebaseInitialized;
+  
+  const KaiMobileApp({super.key, required this.firebaseInitialized});
+  
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -74,13 +100,16 @@ class KaiMobileApp extends StatelessWidget {
         primarySwatch: Colors.amber,
         brightness: Brightness.dark,
       ),
-      home: const _MobileKai(),
+      home: _MobileKai(firebaseInitialized: firebaseInitialized),
     );
   }
 }
 
 class _MobileKai extends StatefulWidget {
-  const _MobileKai();
+  final bool firebaseInitialized;
+  
+  const _MobileKai({required this.firebaseInitialized});
+  
   @override
   State<_MobileKai> createState() => _MobileKaiState();
 }
@@ -424,13 +453,23 @@ class _MobileKaiState extends State<_MobileKai>
     return Scaffold(
       backgroundColor: const Color(0xFF0D0A07),
       appBar: AppBar(
-        title: Text(
-          'Kai - AI Avatar',
-          style: TextStyle(color: _isClone ? Colors.redAccent : Colors.white),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Kai - AI Avatar',
+              style: TextStyle(color: _isClone ? Colors.redAccent : Colors.white, fontSize: 16),
+            ),
+            if (!widget.firebaseInitialized)
+              Text(
+                'Local Mode',
+                style: TextStyle(color: Colors.orange, fontSize: 10),
+              ),
+          ],
         ),
-        backgroundColor: Colors.black.withOpacity(0.3),
+        backgroundColor: Colors.black.withOpacity(0.8),
         elevation: 0,
-        centerTitle: true,
+        centerTitle: false,
         actions: [
           IconButton(
             onPressed: _togglePersona,
