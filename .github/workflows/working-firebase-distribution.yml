@@ -36,13 +36,21 @@ jobs:
         
     - name: Get Flutter dependencies
       run: flutter pub get
+    
+    - name: Debug API Keys (masked)
+      run: |
+        echo "OpenAI Key length: $(echo -n '${{ secrets.OPENAI_API_KEY }}' | wc -c)"
+        echo "ElevenLabs Key length: $(echo -n '${{ secrets.ELEVENLABS_API_KEY }}' | wc -c)"
       
     - name: Build Android APK (Release)
+      env:
+        OPENAI_KEY: ${{ secrets.OPENAI_API_KEY }}
+        ELEVENLABS_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
       run: |
         flutter build apk --release \
           -t lib/main_mobile.dart \
-          --dart-define=OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" \
-          --dart-define=ELEVENLABS_API_KEY="${{ secrets.ELEVENLABS_API_KEY }}"
+          --dart-define=OPENAI_API_KEY="$OPENAI_KEY" \
+          --dart-define=ELEVENLABS_API_KEY="$ELEVENLABS_KEY"
       
     - name: Setup Service Account
       run: |
