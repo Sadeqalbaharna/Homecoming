@@ -95,6 +95,43 @@ jobs:
         http_code=$(echo "$response" | tail -n1)
         if [ "$http_code" -eq 200 ] || [ "$http_code" -eq 201 ]; then
           echo "✅ Successfully uploaded to Firebase App Distribution!"
+          
+          # Extract release name from response
+          release_name=$(echo "$response" | head -n -1 | jq -r '.name // empty')
+          if [ -n "$release_name" ]; then
+            echo "📤 Distributing to testers group..."
+            
+            # Distribute to testers group
+            distribute_response=$(curl -w "\n%{http_code}" -X PATCH \
+              "https://firebaseappdistribution.googleapis.com/v1/$release_name" \
+              -H "Authorization: Bearer ${{ steps.auth.outputs.token }}" \
+              -H "Content-Type: application/json" \
+              -d '{
+                "displayVersion": "Build #${{ github.run_number }}",
+                "releaseNotes": {
+                  "text": "🤖 Homecoming AI Avatar - Build #${{ github.run_number }}\n\n📅 Built: ${{ github.event.head_commit.timestamp }}\n🔧 Latest updates with AI features"
+                }
+              }')
+            
+            echo "📋 Distribution Response:"
+            echo "$distribute_response"
+            
+            # Distribute to testers group
+            group_response=$(curl -w "\n%{http_code}" -X POST \
+              "https://firebaseappdistribution.googleapis.com/v1/$release_name:distribute" \
+              -H "Authorization: Bearer ${{ steps.auth.outputs.token }}" \
+              -H "Content-Type: application/json" \
+              -d '{
+                "testerEmails": [],
+                "groupAliases": ["testers"]
+              }')
+            
+            echo "📱 Testers Distribution Response:"
+            echo "$group_response"
+            echo "✅ APK distributed to testers group!"
+          else
+            echo "⚠️ Could not extract release name from response"
+          fi
         else
           echo "❌ Upload failed with HTTP code: $http_code"
           exit 1
