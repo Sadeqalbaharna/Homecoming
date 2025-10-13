@@ -40,29 +40,20 @@ jobs:
           --dart-define=OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" \
           --dart-define=ELEVENLABS_API_KEY="${{ secrets.ELEVENLABS_API_KEY }}"
       
+    - name: Setup Firebase CLI
+      run: |
+        curl -sL https://firebase.tools | bash
+        echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}' > $HOME/firebase-service-account.json
+        export GOOGLE_APPLICATION_CREDENTIALS=$HOME/firebase-service-account.json
+        firebase --version
+        
     - name: Firebase App Distribution
-      uses: wzieba/Firebase-Distribution-Github-Action@v1.7.0
-      with:
-        appId: ${{ secrets.FIREBASE_APP_ID }}
-        serviceCredentialsFileContent: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
-        groups: testers
-        file: build/app/outputs/flutter-apk/app-release.apk
-        releaseNotes: |
-          🤖 Homecoming AI Avatar - Build #${{ github.run_number }}
-          
-          📅 Built: ${{ github.event.head_commit.timestamp }}
-          🔧 Commit: ${{ github.sha }}
-          
-          ${{ github.event.inputs.release_notes || 'Automated build with latest updates' }}
-          
-          ✨ Features:
-          - AI Avatar with dynamic personality
-          - OpenAI GPT integration
-          - ElevenLabs voice synthesis  
-          - Firebase cloud persistence
-          - Cross-platform Flutter UI
-          
-          📱 Ready for testing!
+      run: |
+        export GOOGLE_APPLICATION_CREDENTIALS=$HOME/firebase-service-account.json
+        firebase appdistribution:distribute build/app/outputs/flutter-apk/app-release.apk \
+          --app ${{ secrets.FIREBASE_APP_ID }} \
+          --groups testers \
+          --release-notes "Homecoming AI Avatar Build #${{ github.run_number }} - Latest updates with AI features"
           
     - name: Upload APK as artifact
       uses: actions/upload-artifact@v4
