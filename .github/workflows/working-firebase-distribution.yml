@@ -65,19 +65,17 @@ jobs:
           📱 Ready for testing!
           
     - name: Upload APK as artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: homecoming-release-apk
         path: build/app/outputs/flutter-apk/app-release.apk
         
     - name: Create GitHub Release
       if: github.event_name == 'push'
-      uses: actions/create-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      uses: softprops/action-gh-release@v2
       with:
         tag_name: v${{ github.run_number }}
-        release_name: Homecoming AI Avatar v${{ github.run_number }}
+        name: Homecoming AI Avatar v${{ github.run_number }}
         body: |
           🚀 **Homecoming AI Avatar** - Automated Release
           
@@ -89,5 +87,6 @@ jobs:
           ${{ github.event.inputs.release_notes || 'Latest updates and improvements' }}
           
           Download from Firebase App Distribution or GitHub Releases.
+        files: build/app/outputs/flutter-apk/app-release.apk
         draft: false
         prerelease: false
