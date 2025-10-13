@@ -40,19 +40,42 @@ jobs:
           --dart-define=OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" \
           --dart-define=ELEVENLABS_API_KEY="${{ secrets.ELEVENLABS_API_KEY }}"
       
-    - name: Debug Service Account JSON
+    - name: Setup Google Auth
       run: |
-        echo "Checking service account JSON format..."
-        echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}' | jq . || echo "Invalid JSON format detected"
+        echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}' > service-account.json
         
-    - name: Firebase App Distribution
-      uses: wzieba/Firebase-Distribution-Github-Action@v1.7.0
-      with:
-        appId: ${{ secrets.FIREBASE_APP_ID }}
-        serviceCredentialsFileContent: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
-        groups: testers
-        file: build/app/outputs/flutter-apk/app-release.apk
-        releaseNotes: "Homecoming AI Avatar Build #${{ github.run_number }} - Latest updates with AI features"
+    - name: Get Access Token
+      id: auth
+      run: |
+        pip install google-auth google-auth-oauthlib google-auth-httplib2
+        python3 -c "
+        import json
+        from google.oauth2 import service_account
+        from google.auth.transport.requests import Request
+        
+        # Load service account
+        with open('service-account.json') as f:
+            service_account_info = json.load(f)
+        
+        credentials = service_account.Credentials.from_service_account_info(
+            service_account_info,
+            scopes=['https://www.googleapis.com/auth/cloud-platform']
+        )
+        
+        # Get access token
+        credentials.refresh(Request())
+        print(f'::set-output name=token::{credentials.token}')
+        "
+        
+    - name: Upload to Firebase App Distribution
+      run: |
+        curl -X POST \
+          "https://firebaseappdistribution.googleapis.com/v1/projects/homecoming-74f73/apps/${{ secrets.FIREBASE_APP_ID }}/releases" \
+          -H "Authorization: Bearer ${{ steps.auth.outputs.token }}" \
+          -H "Content-Type: application/octet-stream" \
+          -H "X-Goog-Upload-File-Name: app-release.apk" \
+          -H "X-Goog-Upload-Protocol: raw" \
+          --data-binary @build/app/outputs/flutter-apk/app-release.apk
           
     - name: Upload APK as artifact
       uses: actions/upload-artifact@v4
