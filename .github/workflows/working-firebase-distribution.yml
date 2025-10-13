@@ -54,12 +54,25 @@ jobs:
       
     - name: Build Android APK (Release)
       run: |
-        echo "Building with API keys..."
+        echo "Building standard mobile version..."
         flutter build apk --release \
           -t lib/main_mobile.dart \
           --dart-define=OPENAI_API_KEY='${{ secrets.OPEN_API_KEY }}' \
           --dart-define=ELEVENLABS_API_KEY='${{ secrets.ELEVENLABS_API_KEY }}'
-        echo "Build complete!"
+        
+        # Rename the standard APK
+        mv build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/kai-mobile.apk
+        
+        echo "Building transparent overlay version..."
+        flutter build apk --release \
+          -t lib/main_overlay.dart \
+          --dart-define=OPENAI_API_KEY='${{ secrets.OPEN_API_KEY }}' \
+          --dart-define=ELEVENLABS_API_KEY='${{ secrets.ELEVENLABS_API_KEY }}'
+        
+        # Rename the overlay APK
+        mv build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/kai-overlay.apk
+        
+        echo "Build complete! Created both versions."
       
     - name: Setup Service Account
       run: |
@@ -106,44 +119,57 @@ jobs:
         echo "🔑 Setting up Firebase authentication with service account..."
         export GOOGLE_APPLICATION_CREDENTIALS=service-account.json
         
-        echo "� Uploading APK using Firebase CLI..."
-        firebase appdistribution:distribute build/app/outputs/flutter-apk/app-release.apk \
+        echo "📤 Uploading Overlay APK using Firebase CLI..."
+        firebase appdistribution:distribute build/app/outputs/flutter-apk/kai-overlay.apk \
           --app ${{ secrets.FIREBASE_APP_ID }} \
           --groups testers \
-          --release-notes "🤖 Homecoming AI Avatar - Build #${{ github.run_number }} - Latest updates with AI features" \
+          --release-notes "✨ Kai Overlay v${{ github.run_number }} - Transparent floating overlay with Firebase logging! Tap Kai to expand chat." \
           --debug
         
         if [ $? -eq 0 ]; then
-          echo "✅ Successfully distributed APK to Firebase App Distribution!"
-          echo "� Testers should receive notifications shortly!"
+          echo "✅ Successfully distributed Overlay APK to Firebase App Distribution!"
+          echo "📱 Testers should receive notifications shortly!"
         else
           echo "❌ Firebase CLI distribution failed"
           exit 1
         fi
           
-    - name: Upload APK as artifact
+    - name: Upload APKs as artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: homecoming-release-apk
-        path: build/app/outputs/flutter-apk/app-release.apk
+        name: homecoming-apks
+        path: |
+          build/app/outputs/flutter-apk/kai-mobile.apk
+          build/app/outputs/flutter-apk/kai-overlay.apk
         
     - name: Create GitHub Release
       if: github.event_name == 'push'
       uses: softprops/action-gh-release@v2
       with:
         tag_name: v${{ github.run_number }}
-        name: Homecoming AI Avatar v${{ github.run_number }}
+        name: Kai AI Avatar v${{ github.run_number }} - Overlay Edition
         body: |
-          🚀 **Homecoming AI Avatar** - Automated Release
+          🚀 **Kai AI Avatar** - Overlay Edition
           
-          📱 **Firebase Distribution**: APK distributed to testers
+          ## 📦 Downloads
+          - **kai-overlay.apk** - ✨ NEW: Transparent floating overlay (recommended)
+          - **kai-mobile.apk** - Standard full-screen version
+          
+          ## ✨ Features
+          - 🎭 Transparent overlay that floats over other apps
+          - 💬 Chat with GPT-4o powered AI
+          - 🎤 Voice responses with ElevenLabs
+          - 🔥 Firebase conversation logging
+          - 🎨 Tap Kai to expand/collapse chat
+          
+          📱 **Firebase Distribution**: Both APKs sent to testers
           📅 **Build Date**: ${{ github.event.head_commit.timestamp }}
           🔧 **Commit**: ${{ github.sha }}
           
-          ## ✨ What's New
-          ${{ github.event.inputs.release_notes || 'Latest updates and improvements' }}
-          
-          Download from Firebase App Distribution or GitHub Releases.
-        files: build/app/outputs/flutter-apk/app-release.apk
+          ## 🎉 What's New
+          ${{ github.event.inputs.release_notes || 'Transparent overlay mode + Firebase logging!' }}
+        files: |
+          build/app/outputs/flutter-apk/kai-mobile.apk
+          build/app/outputs/flutter-apk/kai-overlay.apk
         draft: false
         prerelease: false
