@@ -25,11 +25,12 @@ const double kCanvasHeight = 600;
 const double kSpriteAlignY = 0.30;
 const double kUiLiftPx = 64;
 
-/// ===== Avatar GIF assets + timings =====
-const String kAvatarIdleGif = 'assets/avatar/idle.gif';
-const String kAvatarAttentionGif = 'assets/avatar/attention.gif';
-const String kAvatarThinkingGif = 'assets/avatar/thinking.gif';
-const String kAvatarSpeakingGif = 'assets/avatar/speaking.gif';
+/// ===== Avatar assets + timings =====
+// Using static image as fallback for missing GIF animations
+const String kAvatarIdleGif = 'assets/avatar/images/mage.png';
+const String kAvatarAttentionGif = 'assets/avatar/images/mage.png';
+const String kAvatarThinkingGif = 'assets/avatar/images/mage.png';
+const String kAvatarSpeakingGif = 'assets/avatar/images/mage.png';
 
 const Duration kIdleAfter = Duration(seconds: 15);
 const Duration kAttentionPulse = Duration(seconds: 2);
