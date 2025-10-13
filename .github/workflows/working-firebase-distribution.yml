@@ -76,6 +76,8 @@ jobs:
       run: |
         echo "🔍 Debug Info:"
         echo "App ID: ${{ secrets.FIREBASE_APP_ID }}"
+        echo "Expected App ID: 1:632366966739:android:351bee9e47901e29ac3126"
+        echo "App ID Match: $([ '${{ secrets.FIREBASE_APP_ID }}' = '1:632366966739:android:351bee9e47901e29ac3126' ] && echo 'YES' || echo 'NO')"
         echo "APK file size: $(stat -c%s build/app/outputs/flutter-apk/app-release.apk) bytes"
         token_length=$(echo -n "${{ steps.auth.outputs.token }}" | wc -c)
         echo "Access token length: $token_length characters"
