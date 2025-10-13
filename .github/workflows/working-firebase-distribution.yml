@@ -77,7 +77,8 @@ jobs:
         echo "🔍 Debug Info:"
         echo "App ID: ${{ secrets.FIREBASE_APP_ID }}"
         echo "APK file size: $(stat -c%s build/app/outputs/flutter-apk/app-release.apk) bytes"
-        echo "Access token length: ${#{{ steps.auth.outputs.token }}}"
+        token_length=$(echo -n "${{ steps.auth.outputs.token }}" | wc -c)
+        echo "Access token length: $token_length characters"
         
         echo "📤 Uploading APK to Firebase App Distribution..."
         response=$(curl -w "\n%{http_code}" -X POST \
