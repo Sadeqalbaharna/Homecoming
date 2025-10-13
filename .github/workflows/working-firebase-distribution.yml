@@ -82,69 +82,24 @@ jobs:
         token_length=$(echo -n "${{ steps.auth.outputs.token }}" | wc -c)
         echo "Access token length: $token_length characters"
         
-        echo "� Testing Firebase App ID validity..."
-        # First, test if the app exists
-        app_check=$(curl -w "\n%{http_code}" -X GET \
-          "https://firebaseappdistribution.googleapis.com/v1/projects/homecoming-74f73/apps/${{ secrets.FIREBASE_APP_ID }}" \
-          -H "Authorization: Bearer ${{ steps.auth.outputs.token }}")
+        echo "📤 Installing Firebase CLI and using service account authentication..."
+        npm install -g firebase-tools
         
-        echo "📋 App Check Response:"
-        echo "$app_check"
+        echo "🔑 Setting up Firebase authentication with service account..."
+        export GOOGLE_APPLICATION_CREDENTIALS=service-account.json
         
-        echo "�📤 Uploading APK to Firebase App Distribution..."
-        response=$(curl -w "\n%{http_code}" -X POST \
-          "https://firebaseappdistribution.googleapis.com/v1/projects/homecoming-74f73/apps/${{ secrets.FIREBASE_APP_ID }}/releases" \
-          -H "Authorization: Bearer ${{ steps.auth.outputs.token }}" \
-          -H "Content-Type: application/octet-stream" \
-          -H "X-Goog-Upload-File-Name: app-release.apk" \
-          -H "X-Goog-Upload-Protocol: raw" \
-          --data-binary @build/app/outputs/flutter-apk/app-release.apk)
+        echo "� Uploading APK using Firebase CLI..."
+        firebase appdistribution:distribute build/app/outputs/flutter-apk/app-release.apk \
+          --app ${{ secrets.FIREBASE_APP_ID }} \
+          --groups testers \
+          --release-notes "🤖 Homecoming AI Avatar - Build #${{ github.run_number }} - Latest updates with AI features" \
+          --debug
         
-        echo "📋 Firebase API Response:"
-        echo "$response"
-        
-        http_code=$(echo "$response" | tail -n1)
-        if [ "$http_code" -eq 200 ] || [ "$http_code" -eq 201 ]; then
-          echo "✅ Successfully uploaded to Firebase App Distribution!"
-          
-          # Extract release name from response
-          release_name=$(echo "$response" | head -n -1 | jq -r '.name // empty')
-          if [ -n "$release_name" ]; then
-            echo "📤 Distributing to testers group..."
-            
-            # Distribute to testers group
-            distribute_response=$(curl -w "\n%{http_code}" -X PATCH \
-              "https://firebaseappdistribution.googleapis.com/v1/$release_name" \
-              -H "Authorization: Bearer ${{ steps.auth.outputs.token }}" \
-              -H "Content-Type: application/json" \
-              -d '{
-                "displayVersion": "Build #${{ github.run_number }}",
-                "releaseNotes": {
-                  "text": "🤖 Homecoming AI Avatar - Build #${{ github.run_number }}\n\n📅 Built: ${{ github.event.head_commit.timestamp }}\n🔧 Latest updates with AI features"
-                }
-              }')
-            
-            echo "📋 Distribution Response:"
-            echo "$distribute_response"
-            
-            # Distribute to testers group
-            group_response=$(curl -w "\n%{http_code}" -X POST \
-              "https://firebaseappdistribution.googleapis.com/v1/$release_name:distribute" \
-              -H "Authorization: Bearer ${{ steps.auth.outputs.token }}" \
-              -H "Content-Type: application/json" \
-              -d '{
-                "testerEmails": [],
-                "groupAliases": ["testers"]
-              }')
-            
-            echo "📱 Testers Distribution Response:"
-            echo "$group_response"
-            echo "✅ APK distributed to testers group!"
-          else
-            echo "⚠️ Could not extract release name from response"
-          fi
+        if [ $? -eq 0 ]; then
+          echo "✅ Successfully distributed APK to Firebase App Distribution!"
+          echo "� Testers should receive notifications shortly!"
         else
-          echo "❌ Upload failed with HTTP code: $http_code"
+          echo "❌ Firebase CLI distribution failed"
           exit 1
         fi
           
