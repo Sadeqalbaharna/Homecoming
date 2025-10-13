@@ -75,13 +75,30 @@ jobs:
         
     - name: Upload to Firebase App Distribution
       run: |
-        curl -X POST \
+        echo "🔍 Debug Info:"
+        echo "App ID: ${{ secrets.FIREBASE_APP_ID }}"
+        echo "APK file size: $(stat -c%s build/app/outputs/flutter-apk/app-release.apk) bytes"
+        echo "Access token length: ${#{{ steps.auth.outputs.token }}}"
+        
+        echo "📤 Uploading APK to Firebase App Distribution..."
+        response=$(curl -w "\n%{http_code}" -X POST \
           "https://firebaseappdistribution.googleapis.com/v1/projects/homecoming-74f73/apps/${{ secrets.FIREBASE_APP_ID }}/releases" \
           -H "Authorization: Bearer ${{ steps.auth.outputs.token }}" \
           -H "Content-Type: application/octet-stream" \
           -H "X-Goog-Upload-File-Name: app-release.apk" \
           -H "X-Goog-Upload-Protocol: raw" \
-          --data-binary @build/app/outputs/flutter-apk/app-release.apk
+          --data-binary @build/app/outputs/flutter-apk/app-release.apk)
+        
+        echo "📋 Firebase API Response:"
+        echo "$response"
+        
+        http_code=$(echo "$response" | tail -n1)
+        if [ "$http_code" -eq 200 ] || [ "$http_code" -eq 201 ]; then
+          echo "✅ Successfully uploaded to Firebase App Distribution!"
+        else
+          echo "❌ Upload failed with HTTP code: $http_code"
+          exit 1
+        fi
           
     - name: Upload APK as artifact
       uses: actions/upload-artifact@v4
