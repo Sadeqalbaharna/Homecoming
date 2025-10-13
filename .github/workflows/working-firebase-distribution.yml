@@ -80,7 +80,16 @@ jobs:
         token_length=$(echo -n "${{ steps.auth.outputs.token }}" | wc -c)
         echo "Access token length: $token_length characters"
         
-        echo "📤 Uploading APK to Firebase App Distribution..."
+        echo "� Testing Firebase App ID validity..."
+        # First, test if the app exists
+        app_check=$(curl -w "\n%{http_code}" -X GET \
+          "https://firebaseappdistribution.googleapis.com/v1/projects/homecoming-74f73/apps/${{ secrets.FIREBASE_APP_ID }}" \
+          -H "Authorization: Bearer ${{ steps.auth.outputs.token }}")
+        
+        echo "📋 App Check Response:"
+        echo "$app_check"
+        
+        echo "�📤 Uploading APK to Firebase App Distribution..."
         response=$(curl -w "\n%{http_code}" -X POST \
           "https://firebaseappdistribution.googleapis.com/v1/projects/homecoming-74f73/apps/${{ secrets.FIREBASE_APP_ID }}/releases" \
           -H "Authorization: Bearer ${{ steps.auth.outputs.token }}" \
