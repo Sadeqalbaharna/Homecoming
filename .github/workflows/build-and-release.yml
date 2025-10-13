@@ -1,11 +1,15 @@
-name: Build and Release Homecoming App
+# DISABLED: Using working-firebase-distribution.yml instead
+# This workflow has been replaced by the Firebase App Distribution workflow
+
+name: Build and Release Homecoming App (DISABLED)
 
 on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
-  workflow_dispatch: # Allow manual trigger
+  workflow_dispatch: # Manual trigger only
+  # Disabled automatic triggers to prevent conflicts with Firebase workflow
+  # push:
+  #   branches: [ main ]
+  # pull_request:
+  #   branches: [ main ]
 
 jobs:
   build-android:
