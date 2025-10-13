@@ -40,11 +40,26 @@ jobs:
           --dart-define=OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" \
           --dart-define=ELEVENLABS_API_KEY="${{ secrets.ELEVENLABS_API_KEY }}"
       
-    - name: Setup Google Auth
+    - name: Debug and Setup Service Account
       run: |
+        echo "Creating service account file..."
         echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}' > service-account.json
         
-    - name: Get Access Token
+        echo "Checking service account JSON structure..."
+        python3 -c "
+        import json
+        with open('service-account.json') as f:
+            data = json.load(f)
+        required_fields = ['type', 'project_id', 'private_key_id', 'private_key', 'client_email', 'client_id', 'auth_uri', 'token_uri']
+        missing = [field for field in required_fields if field not in data]
+        if missing:
+            print(f'Missing required fields: {missing}')
+            print('Available fields:', list(data.keys()))
+        else:
+            print('Service account JSON has all required fields!')
+        "
+        
+    - name: Get Access Token  
       id: auth
       run: |
         pip install google-auth google-auth-oauthlib google-auth-httplib2
@@ -53,18 +68,26 @@ jobs:
         from google.oauth2 import service_account
         from google.auth.transport.requests import Request
         
-        # Load service account
-        with open('service-account.json') as f:
-            service_account_info = json.load(f)
-        
-        credentials = service_account.Credentials.from_service_account_info(
-            service_account_info,
-            scopes=['https://www.googleapis.com/auth/cloud-platform']
-        )
-        
-        # Get access token
-        credentials.refresh(Request())
-        print(f'::set-output name=token::{credentials.token}')
+        # Load and validate service account
+        try:
+            with open('service-account.json') as f:
+                service_account_info = json.load(f)
+            
+            print('Service account loaded successfully')
+            
+            credentials = service_account.Credentials.from_service_account_info(
+                service_account_info,
+                scopes=['https://www.googleapis.com/auth/cloud-platform']
+            )
+            
+            # Get access token
+            credentials.refresh(Request())
+            print(f'::set-output name=token::{credentials.token}')
+            print('Access token obtained successfully')
+            
+        except Exception as e:
+            print(f'Error: {e}')
+            exit(1)
         "
         
     - name: Upload to Firebase App Distribution
