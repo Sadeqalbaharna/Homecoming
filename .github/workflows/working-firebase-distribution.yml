@@ -37,20 +37,29 @@ jobs:
     - name: Get Flutter dependencies
       run: flutter pub get
     
-    - name: Debug API Keys (masked)
+    - name: Debug API Keys
       run: |
-        echo "OpenAI Key length: $(echo -n '${{ secrets.OPENAI_API_KEY }}' | wc -c)"
-        echo "ElevenLabs Key length: $(echo -n '${{ secrets.ELEVENLABS_API_KEY }}' | wc -c)"
+        echo "Checking secrets availability..."
+        if [ -z "${{ secrets.OPEN_API_KEY }}" ]; then
+          echo "❌ OPEN_API_KEY secret is EMPTY or NOT SET"
+        else
+          echo "✅ OPEN_API_KEY is set (length: $(echo -n '${{ secrets.OPEN_API_KEY }}' | wc -c) chars)"
+        fi
+        
+        if [ -z "${{ secrets.ELEVENLABS_API_KEY }}" ]; then
+          echo "❌ ELEVENLABS_API_KEY secret is EMPTY or NOT SET"
+        else
+          echo "✅ ELEVENLABS_API_KEY is set (length: $(echo -n '${{ secrets.ELEVENLABS_API_KEY }}' | wc -c) chars)"
+        fi
       
     - name: Build Android APK (Release)
-      env:
-        OPENAI_KEY: ${{ secrets.OPENAI_API_KEY }}
-        ELEVENLABS_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
       run: |
+        echo "Building with API keys..."
         flutter build apk --release \
           -t lib/main_mobile.dart \
-          --dart-define=OPENAI_API_KEY="$OPENAI_KEY" \
-          --dart-define=ELEVENLABS_API_KEY="$ELEVENLABS_KEY"
+          --dart-define=OPENAI_API_KEY='${{ secrets.OPEN_API_KEY }}' \
+          --dart-define=ELEVENLABS_API_KEY='${{ secrets.ELEVENLABS_API_KEY }}'
+        echo "Build complete!"
       
     - name: Setup Service Account
       run: |
