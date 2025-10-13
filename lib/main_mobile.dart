@@ -330,6 +330,20 @@ class _MobileKaiState extends State<_MobileKai>
         _reply = resp.reply.isEmpty ? "(no reply)" : resp.reply;
       });
       _spawnDeltas(resp.actualDeltas);
+      
+      // Save conversation to Firebase
+      try {
+        await FirebaseService.saveConversation(
+          personaId: _personaId,
+          userMessage: text,
+          aiResponse: resp.reply,
+          personalityDeltas: resp.actualDeltas,
+        );
+        print('✅ Conversation logged to Firebase');
+      } catch (e) {
+        print('⚠️ Failed to log conversation to Firebase: $e');
+      }
+      
       if (resp.ttsBase64 != null) {
         final mp3Path = await _writeTempMp3(base64Decode(resp.ttsBase64!));
         if (_autoPlayTts) {
