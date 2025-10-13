@@ -10,6 +10,10 @@ on:
         required: false
         default: 'New build with latest features'
 
+permissions:
+  contents: write
+  releases: write
+
 jobs:
   build-and-distribute:
     runs-on: ubuntu-latest
@@ -63,7 +67,9 @@ jobs:
         )
         
         credentials.refresh(Request())
-        print(f'::set-output name=token::{credentials.token}')
+        import os
+        with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+            f.write(f'token={credentials.token}\n')
         print('✅ Access token obtained successfully')
         "
         
