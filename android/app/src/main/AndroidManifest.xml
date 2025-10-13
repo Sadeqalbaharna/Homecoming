@@ -7,10 +7,8 @@
     <!-- Needed for microphone recording (long-press to talk) -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
-    <!-- If you later add true system overlay bubbles, you'll also need:
+    <!-- System overlay permission - allows app to draw over other apps -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-    and some extra native setup. Not required for the in-app overlay.
-    -->
 
     <application
         android:name="${applicationName}"
