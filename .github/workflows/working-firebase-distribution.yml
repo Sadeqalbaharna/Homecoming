@@ -40,6 +40,7 @@ jobs:
     - name: Build Android APK (Release)
       run: |
         flutter build apk --release \
+          -t lib/main_test.dart \
           --dart-define=OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" \
           --dart-define=ELEVENLABS_API_KEY="${{ secrets.ELEVENLABS_API_KEY }}"
       
