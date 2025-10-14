@@ -97,6 +97,13 @@ public class OverlayService extends Service implements View.OnTouchListener {
     @RequiresApi(api = Build.VERSION_CODES.JELLY_BEAN_MR1)
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        // Fix: Handle null intent on service restart
+        if (intent == null) {
+            Log.w("OverlayService", "Intent is null, service restarted by system - stopping service");
+            stopSelf();
+            return START_NOT_STICKY;
+        }
+        
         mResources = getApplicationContext().getResources();
         int startX = intent.getIntExtra("startX", OverlayConstants.DEFAULT_XY);
         int startY = intent.getIntExtra("startY", OverlayConstants.DEFAULT_XY);
