@@ -4,6 +4,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -177,6 +178,7 @@ class OverlayWidget extends StatefulWidget {
 
 class _OverlayWidgetState extends State<OverlayWidget> {
   bool _expanded = false;
+  bool _showMenu = false; // New: controls circular menu visibility
   final _controller = TextEditingController();
   final _player = AudioPlayer();
   
@@ -247,6 +249,64 @@ class _OverlayWidgetState extends State<OverlayWidget> {
     await file.writeAsBytes(bytes, flush: true);
     return file.path;
   }
+  
+  /// Helper to build circular menu buttons around Kai
+  Widget _buildCircularButton({
+    required double angle,
+    required double radius,
+    required IconData icon,
+    required VoidCallback onTap,
+  }) {
+    // Convert angle to radians
+    final radians = angle * pi / 180;
+    
+    // Calculate position
+    final x = 50 + radius * cos(radians); // 50 = half of avatar width
+    final y = 60 + radius * sin(radians); // 60 = half of avatar height
+    
+    return Positioned(
+      left: x - 26, // 26 = half of button size
+      top: y - 26,
+      child: TweenAnimationBuilder<double>(
+        tween: Tween(begin: 0.0, end: 1.0),
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.elasticOut,
+        builder: (context, value, child) {
+          return Transform.scale(
+            scale: value,
+            child: child,
+          );
+        },
+        child: GestureDetector(
+          onTap: onTap,
+          child: Container(
+            width: 52,
+            height: 52,
+            decoration: BoxDecoration(
+              color: Colors.black.withOpacity(0.7),
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: const Color(0xFFFFE7B0),
+                width: 2,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFFFFE7B0).withOpacity(0.3),
+                  blurRadius: 10,
+                  spreadRadius: 2,
+                ),
+              ],
+            ),
+            child: Icon(
+              icon,
+              color: const Color(0xFFFFE7B0),
+              size: 24,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -269,7 +329,7 @@ class _OverlayWidgetState extends State<OverlayWidget> {
             bottom: _positioned ? null : 80,
             right: _positioned ? null : 20,
             child: GestureDetector(
-              onTap: () => setState(() => _expanded = true),
+              onTap: () => setState(() => _showMenu = !_showMenu),
               onLongPress: () async {
                 // Close overlay on long press
                 await FlutterOverlayWindow.closeOverlay();
@@ -293,23 +353,125 @@ class _OverlayWidgetState extends State<OverlayWidget> {
                   if (_avatarY > screenHeight - 120) _avatarY = screenHeight - 120;
                 });
               },
-              child: Container(
-                width: 100,
-                height: 120,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(50),
-                  boxShadow: [
-                    BoxShadow(
-                      color: const Color(0xFFFFE7B0).withOpacity(0.5),
-                      blurRadius: 20,
-                      spreadRadius: 5,
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  // Kai avatar
+                  Container(
+                    width: 100,
+                    height: 120,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(50),
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFFFFE7B0).withOpacity(0.5),
+                          blurRadius: 20,
+                          spreadRadius: 5,
+                        ),
+                      ],
+                    ),
+                    child: Image.asset(
+                      kAvatarIdleGif,
+                      fit: BoxFit.contain,
+                    ),
+                  ),
+                  
+                  // Circular menu buttons
+                  if (_showMenu) ...[
+                    // Chat button (top)
+                    _buildCircularButton(
+                      angle: -90,
+                      radius: 80,
+                      icon: Icons.chat_bubble,
+                      onTap: () {
+                        setState(() {
+                          _showMenu = false;
+                          _expanded = true;
+                        });
+                      },
+                    ),
+                    
+                    // Voice/TTS button (top-right)
+                    _buildCircularButton(
+                      angle: -45,
+                      radius: 80,
+                      icon: _playerState == PlayerState.playing ? Icons.pause : Icons.play_arrow,
+                      onTap: () async {
+                        if (_ttsPath != null) {
+                          if (_playerState == PlayerState.playing) {
+                            await _player.pause();
+                          } else {
+                            await _player.play(DeviceFileSource(_ttsPath!));
+                          }
+                        }
+                      },
+                    ),
+                    
+                    // Settings button (right)
+                    _buildCircularButton(
+                      angle: 0,
+                      radius: 80,
+                      icon: Icons.settings,
+                      onTap: () {
+                        setState(() => _showMenu = false);
+                        // TODO: Open settings
+                      },
+                    ),
+                    
+                    // Microphone button (bottom-right)
+                    _buildCircularButton(
+                      angle: 45,
+                      radius: 80,
+                      icon: Icons.mic,
+                      onTap: () {
+                        setState(() => _showMenu = false);
+                        // TODO: Start voice recording
+                      },
+                    ),
+                    
+                    // Close button (bottom)
+                    _buildCircularButton(
+                      angle: 90,
+                      radius: 80,
+                      icon: Icons.close,
+                      onTap: () async {
+                        await FlutterOverlayWindow.closeOverlay();
+                      },
+                    ),
+                    
+                    // Info button (bottom-left)
+                    _buildCircularButton(
+                      angle: 135,
+                      radius: 80,
+                      icon: Icons.info_outline,
+                      onTap: () {
+                        setState(() => _showMenu = false);
+                        // TODO: Show info
+                      },
+                    ),
+                    
+                    // Minimize button (left)
+                    _buildCircularButton(
+                      angle: 180,
+                      radius: 80,
+                      icon: Icons.minimize,
+                      onTap: () {
+                        setState(() => _showMenu = false);
+                      },
+                    ),
+                    
+                    // Favorite/bookmark button (top-left)
+                    _buildCircularButton(
+                      angle: -135,
+                      radius: 80,
+                      icon: Icons.favorite_border,
+                      onTap: () {
+                        setState(() => _showMenu = false);
+                        // TODO: Toggle favorite
+                      },
                     ),
                   ],
-                ),
-                child: Image.asset(
-                  kAvatarIdleGif,
-                  fit: BoxFit.contain,
-                ),
+                ],
               ),
             ),
           ),
