@@ -28,7 +28,9 @@ dependencies:
   # Firebase Integration
   firebase_core: ^3.6.0
   firebase_database: ^11.1.4
-  flutter_overlay_window: ^0.5.0
+  # Use local modified flutter_overlay_window for click-through support
+  flutter_overlay_window:
+    path: packages/flutter_overlay_window
 
 dev_dependencies:
   flutter_test:

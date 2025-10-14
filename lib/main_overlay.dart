@@ -55,19 +55,8 @@ Future<void> main() async {
     // Wait for overlay to fully initialize
     await Future.delayed(const Duration(milliseconds: 2000));
     
-    // Call our native patcher to enable click-through
-    try {
-      await const MethodChannel('com.homecoming.app/overlay')
-          .invokeMethod('enableClickThrough');
-      print('✅ Click-through enabled!');
-    } catch (e) {
-      print('⚠️ Click-through patch failed: $e');
-    }
-    
-    // Small delay to ensure patcher completes
-    await Future.delayed(const Duration(milliseconds: 500));
-    
     // Exit the app after starting overlay (the overlay runs independently)
+    // Note: FLAG_NOT_TOUCH_MODAL is now built into our modified flutter_overlay_window!
     exit(0);
   }
 }
