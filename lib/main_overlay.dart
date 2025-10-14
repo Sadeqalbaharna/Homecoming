@@ -42,18 +42,8 @@ void overlayMain() {
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  // Check if we have overlay permission
-  final bool status = await FlutterOverlayWindow.isPermissionGranted();
-  
-  if (!status) {
-    // Need to request permission - show permission screen
-    runApp(const PermissionRequestApp());
-  } else {
-    // Permission granted, start overlay immediately
-    await startOverlay();
-    // Exit the app after starting overlay (the overlay runs independently)
-    exit(0);
-  }
+  // Always show the permission screen - it will handle checking permission
+  runApp(const PermissionRequestApp());
 }
 
 Future<void> startOverlay() async {
@@ -61,7 +51,7 @@ Future<void> startOverlay() async {
     enableDrag: true,
     overlayTitle: "Kai",
     overlayContent: "Tap to chat with Kai!",
-    flag: OverlayFlag.defaultFlag,
+    flag: OverlayFlag.clickThrough, // Make transparent areas clickable-through
     visibility: NotificationVisibility.visibilityPublic,
     positionGravity: PositionGravity.none,
     width: WindowSize.matchParent,
@@ -86,11 +76,89 @@ class PermissionRequestApp extends StatelessWidget {
   }
 }
 
-class PermissionScreen extends StatelessWidget {
+class PermissionScreen extends StatefulWidget {
   const PermissionScreen({super.key});
 
   @override
+  State<PermissionScreen> createState() => _PermissionScreenState();
+}
+
+class _PermissionScreenState extends State<PermissionScreen> with WidgetsBindingObserver {
+  bool _isChecking = true;
+  
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _checkPermission();
+  }
+  
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+  
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // When user returns from Settings, check permission again
+    if (state == AppLifecycleState.resumed) {
+      _checkPermission();
+    }
+  }
+  
+  Future<void> _checkPermission() async {
+    setState(() => _isChecking = true);
+    final granted = await FlutterOverlayWindow.isPermissionGranted();
+    setState(() => _isChecking = false);
+    
+    if (granted) {
+      // Permission granted, start overlay after a short delay
+      await Future.delayed(const Duration(milliseconds: 500));
+      await _startOverlayAndExit();
+    }
+  }
+  
+  Future<void> _startOverlayAndExit() async {
+    try {
+      await startOverlay();
+      // Give the overlay a moment to initialize
+      await Future.delayed(const Duration(milliseconds: 300));
+      exit(0);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to start overlay: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      setState(() => _isChecking = false);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    if (_isChecking) {
+      return const Scaffold(
+        backgroundColor: Color(0xFF0D0A07),
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircularProgressIndicator(color: Color(0xFFFFE7B0)),
+              SizedBox(height: 16),
+              Text(
+                'Checking permissions...',
+                style: TextStyle(color: Color(0xFFFFE7B0), fontSize: 16),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    
     return Scaffold(
       backgroundColor: const Color(0xFF0D0A07),
       body: Center(
@@ -129,21 +197,26 @@ class PermissionScreen extends StatelessWidget {
               const SizedBox(height: 48),
               ElevatedButton(
                 onPressed: () async {
+                  setState(() => _isChecking = true);
+                  
                   // Request permission
                   final granted = await FlutterOverlayWindow.requestPermission();
+                  
                   if (granted == true) {
-                    // Start overlay
-                    await startOverlay();
-                    // Exit the app - overlay runs independently
-                    exit(0);
+                    // Permission granted, check again (this will start overlay)
+                    await _checkPermission();
                   } else {
+                    setState(() => _isChecking = false);
+                    
                     // Permission denied, show error
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Permission denied. Kai needs overlay permission to work.'),
-                        backgroundColor: Colors.red,
-                      ),
-                    );
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Permission denied. Kai needs overlay permission to work.'),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                    }
                   }
                 },
                 style: ElevatedButton.styleFrom(
@@ -176,7 +249,7 @@ class OverlayWidget extends StatefulWidget {
   State<OverlayWidget> createState() => _OverlayWidgetState();
 }
 
-class _OverlayWidgetState extends State<OverlayWidget> {
+class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProviderStateMixin {
   bool _expanded = false;
   bool _showMenu = false; // New: controls circular menu visibility
   final _controller = TextEditingController();
@@ -192,6 +265,9 @@ class _OverlayWidgetState extends State<OverlayWidget> {
   double _avatarX = 0.0;
   double _avatarY = 0.0;
   bool _positioned = false;
+  
+  // Animation controller for staggered button appearance
+  late AnimationController _menuAnimController;
 
   @override
   void initState() {
@@ -199,12 +275,19 @@ class _OverlayWidgetState extends State<OverlayWidget> {
     _player.onPlayerStateChanged.listen((state) {
       if (mounted) setState(() => _playerState = state);
     });
+    
+    // Initialize menu animation controller
+    _menuAnimController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 600),
+    );
   }
 
   @override
   void dispose() {
     _controller.dispose();
     _player.dispose();
+    _menuAnimController.dispose();
     super.dispose();
   }
 
@@ -250,12 +333,14 @@ class _OverlayWidgetState extends State<OverlayWidget> {
     return file.path;
   }
   
-  /// Helper to build circular menu buttons around Kai
+  /// Helper to build circular menu buttons around Kai with staggered animation
   Widget _buildCircularButton({
     required double angle,
     required double radius,
     required IconData icon,
     required VoidCallback onTap,
+    required int index,
+    required int totalButtons,
   }) {
     // Convert angle to radians
     final radians = angle * pi / 180;
@@ -264,17 +349,31 @@ class _OverlayWidgetState extends State<OverlayWidget> {
     final x = 50 + radius * cos(radians); // 50 = half of avatar width
     final y = 60 + radius * sin(radians); // 60 = half of avatar height
     
+    // Calculate staggered delay for this button
+    // Each button appears slightly after the previous one
+    final double delayStart = (index / totalButtons) * 0.5;
+    
     return Positioned(
       left: x - 26, // 26 = half of button size
       top: y - 26,
-      child: TweenAnimationBuilder<double>(
-        tween: Tween(begin: 0.0, end: 1.0),
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.elasticOut,
-        builder: (context, value, child) {
+      child: AnimatedBuilder(
+        animation: _menuAnimController,
+        builder: (context, child) {
+          // Calculate this button's animation progress (0.0 to 1.0)
+          final double progress = (((_menuAnimController.value - delayStart) / 0.5).clamp(0.0, 1.0));
+          
+          // Scale from 0 to 1 with elastic effect
+          final double scale = progress * progress * (3.0 - 2.0 * progress); // Smooth step
+          
+          // Fade in
+          final double opacity = progress;
+          
           return Transform.scale(
-            scale: value,
-            child: child,
+            scale: scale,
+            child: Opacity(
+              opacity: opacity,
+              child: child,
+            ),
           );
         },
         child: GestureDetector(
@@ -312,15 +411,6 @@ class _OverlayWidgetState extends State<OverlayWidget> {
   Widget build(BuildContext context) {
     return Stack(
       children: [
-        // Transparent clickable background when minimized
-        if (!_expanded)
-          Positioned.fill(
-            child: GestureDetector(
-              onTap: () {}, // Captures taps but does nothing - makes area transparent
-              child: Container(color: Colors.transparent),
-            ),
-          ),
-        
         // Floating Kai (draggable when minimized)
         if (!_expanded)
           Positioned(
@@ -329,7 +419,16 @@ class _OverlayWidgetState extends State<OverlayWidget> {
             bottom: _positioned ? null : 80,
             right: _positioned ? null : 20,
             child: GestureDetector(
-              onTap: () => setState(() => _showMenu = !_showMenu),
+              onTap: () {
+                setState(() {
+                  _showMenu = !_showMenu;
+                  if (_showMenu) {
+                    _menuAnimController.forward(from: 0.0);
+                  } else {
+                    _menuAnimController.reverse();
+                  }
+                });
+              },
               onLongPress: () async {
                 // Close overlay on long press
                 await FlutterOverlayWindow.closeOverlay();
@@ -383,6 +482,8 @@ class _OverlayWidgetState extends State<OverlayWidget> {
                       angle: -90,
                       radius: 80,
                       icon: Icons.chat_bubble,
+                      index: 0,
+                      totalButtons: 8,
                       onTap: () {
                         setState(() {
                           _showMenu = false;
@@ -396,6 +497,8 @@ class _OverlayWidgetState extends State<OverlayWidget> {
                       angle: -45,
                       radius: 80,
                       icon: _playerState == PlayerState.playing ? Icons.pause : Icons.play_arrow,
+                      index: 1,
+                      totalButtons: 8,
                       onTap: () async {
                         if (_ttsPath != null) {
                           if (_playerState == PlayerState.playing) {
@@ -412,6 +515,8 @@ class _OverlayWidgetState extends State<OverlayWidget> {
                       angle: 0,
                       radius: 80,
                       icon: Icons.settings,
+                      index: 2,
+                      totalButtons: 8,
                       onTap: () {
                         setState(() => _showMenu = false);
                         // TODO: Open settings
@@ -423,6 +528,8 @@ class _OverlayWidgetState extends State<OverlayWidget> {
                       angle: 45,
                       radius: 80,
                       icon: Icons.mic,
+                      index: 3,
+                      totalButtons: 8,
                       onTap: () {
                         setState(() => _showMenu = false);
                         // TODO: Start voice recording
@@ -434,6 +541,8 @@ class _OverlayWidgetState extends State<OverlayWidget> {
                       angle: 90,
                       radius: 80,
                       icon: Icons.close,
+                      index: 4,
+                      totalButtons: 8,
                       onTap: () async {
                         await FlutterOverlayWindow.closeOverlay();
                       },
@@ -444,6 +553,8 @@ class _OverlayWidgetState extends State<OverlayWidget> {
                       angle: 135,
                       radius: 80,
                       icon: Icons.info_outline,
+                      index: 5,
+                      totalButtons: 8,
                       onTap: () {
                         setState(() => _showMenu = false);
                         // TODO: Show info
@@ -455,6 +566,8 @@ class _OverlayWidgetState extends State<OverlayWidget> {
                       angle: 180,
                       radius: 80,
                       icon: Icons.minimize,
+                      index: 6,
+                      totalButtons: 8,
                       onTap: () {
                         setState(() => _showMenu = false);
                       },
@@ -465,6 +578,8 @@ class _OverlayWidgetState extends State<OverlayWidget> {
                       angle: -135,
                       radius: 80,
                       icon: Icons.favorite_border,
+                      index: 7,
+                      totalButtons: 8,
                       onTap: () {
                         setState(() => _showMenu = false);
                         // TODO: Toggle favorite
