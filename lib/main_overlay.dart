@@ -47,16 +47,12 @@ Future<void> main() async {
 }
 
 Future<void> startOverlay() async {
-  await FlutterOverlayWindow.showOverlay(
-    enableDrag: true,
-    overlayTitle: "Kai",
-    overlayContent: "Tap to chat with Kai!",
-    flag: OverlayFlag.clickThrough, // Make transparent areas clickable-through
-    visibility: NotificationVisibility.visibilityPublic,
-    positionGravity: PositionGravity.none,
-    width: WindowSize.matchParent,
-    height: WindowSize.matchParent,
-  );
+  try {
+    await FlutterOverlayWindow.showOverlay();
+  } catch (e) {
+    debugPrint('Error starting overlay: $e');
+    rethrow;
+  }
 }
 
 // ============= PERMISSION REQUEST SCREEN =============
@@ -121,16 +117,21 @@ class _PermissionScreenState extends State<PermissionScreen> with WidgetsBinding
   
   Future<void> _startOverlayAndExit() async {
     try {
+      debugPrint('Starting overlay...');
       await startOverlay();
-      // Give the overlay a moment to initialize
-      await Future.delayed(const Duration(milliseconds: 300));
+      debugPrint('Overlay started, waiting before exit...');
+      // Give the overlay more time to fully initialize
+      await Future.delayed(const Duration(milliseconds: 1000));
+      debugPrint('Exiting main app...');
       exit(0);
     } catch (e) {
+      debugPrint('Error starting overlay: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Failed to start overlay: $e'),
             backgroundColor: Colors.red,
+            duration: const Duration(seconds: 5),
           ),
         );
       }
