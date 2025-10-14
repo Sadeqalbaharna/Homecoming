@@ -45,13 +45,13 @@ Future<void> main() async {
   final bool status = await FlutterOverlayWindow.isPermissionGranted();
   
   if (!status) {
-    // Need to request permission
+    // Need to request permission - show permission screen
     runApp(const PermissionRequestApp());
   } else {
     // Permission granted, start overlay immediately
     await startOverlay();
-    // Close the main app
-    SystemNavigator.pop();
+    // Exit the app after starting overlay (the overlay runs independently)
+    exit(0);
   }
 }
 
@@ -133,8 +133,16 @@ class PermissionScreen extends StatelessWidget {
                   if (granted == true) {
                     // Start overlay
                     await startOverlay();
-                    // Close permission screen
-                    SystemNavigator.pop();
+                    // Exit the app - overlay runs independently
+                    exit(0);
+                  } else {
+                    // Permission denied, show error
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Permission denied. Kai needs overlay permission to work.'),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
                   }
                 },
                 style: ElevatedButton.styleFrom(
