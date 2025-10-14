@@ -60,11 +60,11 @@ class KaiOverlayApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       title: 'Kai Overlay',
       theme: ThemeData(
-        scaffoldBackgroundColor: Colors.transparent,
-        canvasColor: Colors.transparent,
+        scaffoldBackgroundColor: const Color(0x05000000), // Very subtle dark tint (2% opacity)
+        canvasColor: const Color(0x05000000),
         brightness: Brightness.dark,
       ),
-      color: Colors.transparent,
+      color: const Color(0x05000000),
       home: OverlayHome(firebaseInitialized: firebaseInitialized),
     );
   }
@@ -165,19 +165,9 @@ class _OverlayHomeState extends State<OverlayHome> {
     final screenWidth = MediaQuery.of(context).size.width;
     
     return Scaffold(
-      backgroundColor: Colors.transparent,
-      body: Container(
-        color: Colors.transparent,
-        child: Stack(
-          children: [
-            // Make entire background click-through when not expanded
-            if (!_expanded)
-              Positioned.fill(
-                child: IgnorePointer(
-                  ignoring: true,
-                  child: Container(color: Colors.transparent),
-                ),
-              ),
+      backgroundColor: const Color(0x05000000), // Very subtle tint - you can see through!
+      body: Stack(
+        children: [
           
           // Floating Chibi Kai Avatar (minimized to bottom-right corner)
           if (!_expanded)
@@ -389,8 +379,7 @@ class _OverlayHomeState extends State<OverlayHome> {
                 ),
               ),
             ),
-          ],
-        ),
+        ],
       ),
     );
   }
