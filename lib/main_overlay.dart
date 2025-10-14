@@ -265,9 +265,9 @@ class _OverlayWidgetState extends State<OverlayWidget> {
     // Convert angle to radians
     final radians = angle * pi / 180;
     
-    // Calculate position relative to the center of the 280x280 container
-    final centerX = 140.0; // Center of 280px container
-    final centerY = 140.0; // Center of 280px container
+    // Calculate position relative to the center of the 240x240 container
+    final centerX = 120.0; // Center of 240px container
+    final centerY = 120.0; // Center of 240px container
     
     final x = centerX + radius * cos(radians);
     final y = centerY + radius * sin(radians);
@@ -331,8 +331,8 @@ class _OverlayWidgetState extends State<OverlayWidget> {
           // Floating Kai (draggable when minimized)
           if (!_expanded)
             Positioned(
-              left: _positioned ? _avatarX : (screenWidth / 2 - 140), // Center horizontally with menu space
-              top: _positioned ? _avatarY : (screenHeight / 2 - 140), // Center vertically with menu space
+              left: _positioned ? _avatarX : (screenWidth / 2 - 120), // Center horizontally with tighter container
+              top: _positioned ? _avatarY : (screenHeight / 2 - 120), // Center vertically with tighter container
               child: GestureDetector(
                 onTap: () => setState(() => _showMenu = !_showMenu),
                 onLongPress: () async {
@@ -348,24 +348,24 @@ class _OverlayWidgetState extends State<OverlayWidget> {
                     // Keep avatar within screen bounds (accounting for full widget size)
                     // Clamp X position
                     if (_avatarX < 0) _avatarX = 0;
-                    if (_avatarX > screenWidth - 280) _avatarX = screenWidth - 280;
+                    if (_avatarX > screenWidth - 240) _avatarX = screenWidth - 240;
                     
                     // Clamp Y position
                     if (_avatarY < 0) _avatarY = 0;
-                    if (_avatarY > screenHeight - 280) _avatarY = screenHeight - 280;
+                    if (_avatarY > screenHeight - 240) _avatarY = screenHeight - 240;
                   });
                 },
                 child: SizedBox(
-                  width: 280, // Container: 80px radius * 2 + 100px avatar + margin
-                  height: 280,
+                  width: 240, // Tighter container: 80px radius * 2 + 52px button + small margin
+                  height: 240,
                   child: Stack(
                     clipBehavior: Clip.none,
                     alignment: Alignment.center,
                     children: [
                       // Kai avatar - centered at original size
                       Positioned(
-                        left: 90, // Center: (280 - 100) / 2
-                        top: 80, // Center: (280 - 120) / 2
+                        left: 70, // Center: (240 - 100) / 2
+                        top: 60, // Center: (240 - 120) / 2
                         child: Container(
                           width: 100, // Original avatar size
                           height: 120,
