@@ -52,12 +52,12 @@ Future<void> main() async {
     // Permission granted, start overlay immediately
     await startOverlay();
     
-    // Wait for overlay to fully initialize
-    await Future.delayed(const Duration(milliseconds: 2000));
+    // Wait for overlay to fully initialize before closing main activity
+    await Future.delayed(const Duration(milliseconds: 3000));
     
-    // Exit the app after starting overlay (the overlay runs independently)
-    // Note: FLAG_NOT_TOUCH_MODAL is now built into our modified flutter_overlay_window!
-    exit(0);
+    // Close the main activity (but keep the service running)
+    // Don't use exit(0) as it kills the overlay service too!
+    SystemNavigator.pop();
   }
 }
 
