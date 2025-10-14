@@ -9,6 +9,10 @@
 
     <!-- System overlay permission - allows app to draw over other apps -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    
+    <!-- Foreground service permission for overlay service (Android 14+) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <application
         android:name="${applicationName}"
@@ -36,6 +40,16 @@
             </intent-filter>
 
         </activity>
+
+        <!-- Flutter Overlay Window Service - REQUIRED by flutter_overlay_window package -->
+        <service
+            android:name="flutter.overlay.window.flutter_overlay_window.OverlayService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="System overlay window for AI assistant" />
+        </service>
 
         <!-- This is required by Flutter to show a splash while launching -->
         <meta-data
