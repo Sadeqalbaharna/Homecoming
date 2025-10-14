@@ -265,12 +265,15 @@ class _OverlayWidgetState extends State<OverlayWidget> {
     // Convert angle to radians
     final radians = angle * pi / 180;
     
-    // Calculate position
-    final x = 50 + radius * cos(radians); // 50 = half of avatar width
-    final y = 60 + radius * sin(radians); // 60 = half of avatar height
+    // Calculate position relative to the center of the 280x280 container
+    final centerX = 140.0; // Center of 280px container
+    final centerY = 140.0; // Center of 280px container
+    
+    final x = centerX + radius * cos(radians);
+    final y = centerY + radius * sin(radians);
     
     return Positioned(
-      left: x - 26, // 26 = half of button size
+      left: x - 26, // 26 = half of button size (52/2)
       top: y - 26,
       child: TweenAnimationBuilder<double>(
         tween: Tween(begin: 0.0, end: 1.0),
@@ -328,8 +331,8 @@ class _OverlayWidgetState extends State<OverlayWidget> {
           // Floating Kai (draggable when minimized)
           if (!_expanded)
             Positioned(
-              left: _positioned ? _avatarX : (screenWidth / 2 - 50), // Center horizontally if not positioned
-              top: _positioned ? _avatarY : (screenHeight / 2 - 60), // Center vertically if not positioned
+              left: _positioned ? _avatarX : (screenWidth / 2 - 140), // Center horizontally with menu space
+              top: _positioned ? _avatarY : (screenHeight / 2 - 140), // Center vertically with menu space
               child: GestureDetector(
                 onTap: () => setState(() => _showMenu = !_showMenu),
                 onLongPress: () async {
@@ -342,38 +345,46 @@ class _OverlayWidgetState extends State<OverlayWidget> {
                     _avatarX += details.delta.dx;
                     _avatarY += details.delta.dy;
                     
-                    // Keep avatar within screen bounds
+                    // Keep avatar within screen bounds (accounting for full widget size)
                     // Clamp X position
                     if (_avatarX < 0) _avatarX = 0;
-                    if (_avatarX > screenWidth - 100) _avatarX = screenWidth - 100;
+                    if (_avatarX > screenWidth - 280) _avatarX = screenWidth - 280;
                     
                     // Clamp Y position
                     if (_avatarY < 0) _avatarY = 0;
-                    if (_avatarY > screenHeight - 120) _avatarY = screenHeight - 120;
+                    if (_avatarY > screenHeight - 280) _avatarY = screenHeight - 280;
                   });
                 },
-                child: Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    // Kai avatar
-                    Container(
-                      width: 100,
-                      height: 120,
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(50),
-                        boxShadow: [
-                          BoxShadow(
-                            color: const Color(0xFFFFE7B0).withOpacity(0.5),
-                            blurRadius: 20,
-                            spreadRadius: 5,
+                child: SizedBox(
+                  width: 280, // Size to accommodate avatar + circular menu (80px radius * 2 + avatar width)
+                  height: 280, // Same for height
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    alignment: Alignment.center,
+                    children: [
+                      // Kai avatar - centered in the container
+                      Positioned(
+                        left: 90, // Center: (280 - 100) / 2
+                        top: 80, // Center: (280 - 120) / 2
+                        child: Container(
+                          width: 100,
+                          height: 120,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(50),
+                            boxShadow: [
+                              BoxShadow(
+                                color: const Color(0xFFFFE7B0).withOpacity(0.5),
+                                blurRadius: 20,
+                                spreadRadius: 5,
+                              ),
+                            ],
                           ),
-                        ],
+                          child: Image.asset(
+                            kAvatarIdleGif,
+                            fit: BoxFit.contain,
+                          ),
+                        ),
                       ),
-                      child: Image.asset(
-                        kAvatarIdleGif,
-                        fit: BoxFit.contain,
-                      ),
-                    ),
                   
                   // Circular menu buttons
                   if (_showMenu) ...[
@@ -470,10 +481,11 @@ class _OverlayWidgetState extends State<OverlayWidget> {
                       },
                     ),
                   ],
-                ],
+                    ],
+                  ),
+                ),
               ),
             ),
-          ),
         
         // Expanded chat UI
         if (_expanded)
