@@ -5,6 +5,7 @@ import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
 import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.android.TransparencyMode
 
 class MainActivity : FlutterActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -22,5 +23,10 @@ class MainActivity : FlutterActivity() {
             window.statusBarColor = Color.TRANSPARENT
             window.navigationBarColor = Color.TRANSPARENT
         }
+    }
+    
+    // THIS IS THE KEY - Tell Flutter to use transparent rendering
+    override fun getTransparencyMode(): TransparencyMode {
+        return TransparencyMode.transparent
     }
 }
