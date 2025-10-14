@@ -312,14 +312,7 @@ class _OverlayWidgetState extends State<OverlayWidget> {
   Widget build(BuildContext context) {
     return Stack(
       children: [
-        // Transparent clickable background when minimized
-        if (!_expanded)
-          Positioned.fill(
-            child: GestureDetector(
-              onTap: () {}, // Captures taps but does nothing - makes area transparent
-              child: Container(color: Colors.transparent),
-            ),
-          ),
+        // No background widget - transparent areas will pass through!
         
         // Floating Kai (draggable when minimized)
         if (!_expanded)
