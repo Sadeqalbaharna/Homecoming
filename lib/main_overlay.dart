@@ -499,7 +499,7 @@ class _OverlayWidgetState extends State<OverlayWidget> {
                     onTap: () {}, // Prevents closing when tapping chat area
                     child: Container(
                       width: MediaQuery.of(context).size.width * 0.9,
-                      height: MediaQuery.of(context).size.height * 0.7,
+                      height: MediaQuery.of(context).size.height * 0.35, // Cut in half from 0.7 to 0.35
                       decoration: BoxDecoration(
                         color: const Color(0xFF0D0A07),
                         borderRadius: BorderRadius.circular(20),
