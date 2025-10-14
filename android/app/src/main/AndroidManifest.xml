@@ -27,8 +27,9 @@
             android:hardwareAccelerated="true"
             android:windowSoftInputMode="adjustResize"
             android:showWhenLocked="true"
-            android:turnScreenOn="true">
-            <!-- showWhenLocked and turnScreenOn help with overlay visibility -->
+            android:turnScreenOn="true"
+            android:enableOnBackInvokedCallback="true">
+            <!-- Transparency and overlay flags -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
