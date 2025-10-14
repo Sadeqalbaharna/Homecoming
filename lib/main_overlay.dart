@@ -315,64 +315,65 @@ class _OverlayWidgetState extends State<OverlayWidget> {
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        // No background widget - transparent areas will pass through!
-        
-        // Floating Kai (draggable when minimized)
-        if (!_expanded)
-          Positioned(
-            left: _positioned ? _avatarX : null,
-            top: _positioned ? _avatarY : null,
-            bottom: _positioned ? null : 80,
-            right: _positioned ? null : 20,
-            child: GestureDetector(
-              onTap: () => setState(() => _showMenu = !_showMenu),
-              onLongPress: () async {
-                // Close overlay on long press
-                await FlutterOverlayWindow.closeOverlay();
-              },
-              onPanUpdate: (details) {
-                setState(() {
-                  _positioned = true;
-                  _avatarX += details.delta.dx;
-                  _avatarY += details.delta.dy;
-                  
-                  // Keep avatar within screen bounds
-                  final screenWidth = MediaQuery.of(context).size.width;
-                  final screenHeight = MediaQuery.of(context).size.height;
-                  
-                  // Clamp X position
-                  if (_avatarX < 0) _avatarX = 0;
-                  if (_avatarX > screenWidth - 100) _avatarX = screenWidth - 100;
-                  
-                  // Clamp Y position
-                  if (_avatarY < 0) _avatarY = 0;
-                  if (_avatarY > screenHeight - 120) _avatarY = screenHeight - 120;
-                });
-              },
-              child: Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  // Kai avatar
-                  Container(
-                    width: 100,
-                    height: 120,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(50),
-                      boxShadow: [
-                        BoxShadow(
-                          color: const Color(0xFFFFE7B0).withOpacity(0.5),
-                          blurRadius: 20,
-                          spreadRadius: 5,
-                        ),
-                      ],
+    // Get screen size for proper positioning
+    final screenWidth = MediaQuery.of(context).size.width;
+    final screenHeight = MediaQuery.of(context).size.height;
+    
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      body: Stack(
+        children: [
+          // No background widget - transparent areas will pass through!
+          
+          // Floating Kai (draggable when minimized)
+          if (!_expanded)
+            Positioned(
+              left: _positioned ? _avatarX : (screenWidth / 2 - 50), // Center horizontally if not positioned
+              top: _positioned ? _avatarY : (screenHeight / 2 - 60), // Center vertically if not positioned
+              child: GestureDetector(
+                onTap: () => setState(() => _showMenu = !_showMenu),
+                onLongPress: () async {
+                  // Close overlay on long press
+                  await FlutterOverlayWindow.closeOverlay();
+                },
+                onPanUpdate: (details) {
+                  setState(() {
+                    _positioned = true;
+                    _avatarX += details.delta.dx;
+                    _avatarY += details.delta.dy;
+                    
+                    // Keep avatar within screen bounds
+                    // Clamp X position
+                    if (_avatarX < 0) _avatarX = 0;
+                    if (_avatarX > screenWidth - 100) _avatarX = screenWidth - 100;
+                    
+                    // Clamp Y position
+                    if (_avatarY < 0) _avatarY = 0;
+                    if (_avatarY > screenHeight - 120) _avatarY = screenHeight - 120;
+                  });
+                },
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    // Kai avatar
+                    Container(
+                      width: 100,
+                      height: 120,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(50),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFFFFE7B0).withOpacity(0.5),
+                            blurRadius: 20,
+                            spreadRadius: 5,
+                          ),
+                        ],
+                      ),
+                      child: Image.asset(
+                        kAvatarIdleGif,
+                        fit: BoxFit.contain,
+                      ),
                     ),
-                    child: Image.asset(
-                      kAvatarIdleGif,
-                      fit: BoxFit.contain,
-                    ),
-                  ),
                   
                   // Circular menu buttons
                   if (_showMenu) ...[
@@ -640,7 +641,8 @@ class _OverlayWidgetState extends State<OverlayWidget> {
               ),
             ),
           ),
-      ],
+        ],
+      ),
     );
   }
 }
