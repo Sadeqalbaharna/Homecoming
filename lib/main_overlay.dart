@@ -185,6 +185,11 @@ class _OverlayWidgetState extends State<OverlayWidget> {
   String? _error;
   String? _ttsPath;
   PlayerState? _playerState;
+  
+  // Position for draggable Kai avatar
+  double _avatarX = 0.0;
+  double _avatarY = 0.0;
+  bool _positioned = false;
 
   @override
   void initState() {
@@ -256,16 +261,37 @@ class _OverlayWidgetState extends State<OverlayWidget> {
             ),
           ),
         
-        // Floating Kai (bottom-right corner when minimized)
+        // Floating Kai (draggable when minimized)
         if (!_expanded)
           Positioned(
-            bottom: 80,
-            right: 20,
+            left: _positioned ? _avatarX : null,
+            top: _positioned ? _avatarY : null,
+            bottom: _positioned ? null : 80,
+            right: _positioned ? null : 20,
             child: GestureDetector(
               onTap: () => setState(() => _expanded = true),
               onLongPress: () async {
                 // Close overlay on long press
                 await FlutterOverlayWindow.closeOverlay();
+              },
+              onPanUpdate: (details) {
+                setState(() {
+                  _positioned = true;
+                  _avatarX += details.delta.dx;
+                  _avatarY += details.delta.dy;
+                  
+                  // Keep avatar within screen bounds
+                  final screenWidth = MediaQuery.of(context).size.width;
+                  final screenHeight = MediaQuery.of(context).size.height;
+                  
+                  // Clamp X position
+                  if (_avatarX < 0) _avatarX = 0;
+                  if (_avatarX > screenWidth - 100) _avatarX = screenWidth - 100;
+                  
+                  // Clamp Y position
+                  if (_avatarY < 0) _avatarY = 0;
+                  if (_avatarY > screenHeight - 120) _avatarY = screenHeight - 120;
+                });
               },
               child: Container(
                 width: 100,
