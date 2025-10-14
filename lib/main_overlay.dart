@@ -51,6 +51,22 @@ Future<void> main() async {
   } else {
     // Permission granted, start overlay immediately
     await startOverlay();
+    
+    // Wait for overlay to fully initialize
+    await Future.delayed(const Duration(milliseconds: 2000));
+    
+    // Call our native patcher to enable click-through
+    try {
+      await const MethodChannel('com.homecoming.app/overlay')
+          .invokeMethod('enableClickThrough');
+      print('✅ Click-through enabled!');
+    } catch (e) {
+      print('⚠️ Click-through patch failed: $e');
+    }
+    
+    // Small delay to ensure patcher completes
+    await Future.delayed(const Duration(milliseconds: 500));
+    
     // Exit the app after starting overlay (the overlay runs independently)
     exit(0);
   }
@@ -67,17 +83,6 @@ Future<void> startOverlay() async {
     width: WindowSize.matchParent,
     height: WindowSize.matchParent,
   );
-  
-  // Give overlay time to start, then patch it with click-through support
-  await Future.delayed(const Duration(milliseconds: 1500));
-  
-  // Call our native patcher through method channel
-  try {
-    await const MethodChannel('com.homecoming.app/overlay')
-        .invokeMethod('enableClickThrough');
-  } catch (e) {
-    print('⚠️ Click-through patch failed: $e');
-  }
 }
 
 // ============= PERMISSION REQUEST SCREEN =============
