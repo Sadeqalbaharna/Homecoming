@@ -61,8 +61,10 @@ class KaiOverlayApp extends StatelessWidget {
       title: 'Kai Overlay',
       theme: ThemeData(
         scaffoldBackgroundColor: Colors.transparent,
+        canvasColor: Colors.transparent,
         brightness: Brightness.dark,
       ),
+      color: Colors.transparent,
       home: OverlayHome(firebaseInitialized: firebaseInitialized),
     );
   }
@@ -164,16 +166,18 @@ class _OverlayHomeState extends State<OverlayHome> {
     
     return Scaffold(
       backgroundColor: Colors.transparent,
-      body: Stack(
-        children: [
-          // Make entire background click-through when not expanded
-          if (!_expanded)
-            Positioned.fill(
-              child: IgnorePointer(
-                ignoring: true,
-                child: Container(color: Colors.transparent),
+      body: Container(
+        color: Colors.transparent,
+        child: Stack(
+          children: [
+            // Make entire background click-through when not expanded
+            if (!_expanded)
+              Positioned.fill(
+                child: IgnorePointer(
+                  ignoring: true,
+                  child: Container(color: Colors.transparent),
+                ),
               ),
-            ),
           
           // Floating Chibi Kai Avatar (minimized to bottom-right corner)
           if (!_expanded)
@@ -385,7 +389,8 @@ class _OverlayHomeState extends State<OverlayHome> {
                 ),
               ),
             ),
-        ],
+          ],
+        ),
       ),
     );
   }
