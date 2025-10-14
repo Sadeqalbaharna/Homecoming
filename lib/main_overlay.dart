@@ -1,5 +1,5 @@
 // main_overlay.dart
-// True transparent overlay - see through to other apps, only Kai is visible
+// True system overlay using flutter_overlay_window - floats above ALL apps like Shimeji!
 
 import 'dart:async';
 import 'dart:convert';
@@ -8,13 +8,11 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:firebase_core/firebase_core.dart';
 
 import 'services/ai_service.dart';
-import 'services/firebase_service.dart';
-import 'firebase_options.dart';
 
 /// Kai avatar asset
 const String kAvatarIdleGif = 'assets/avatar/images/mage.png';
@@ -22,64 +20,154 @@ const String kAvatarIdleGif = 'assets/avatar/images/mage.png';
 /// Global AI service instance
 final aiService = AIService();
 
+// ============= OVERLAY ENTRY POINT =============
+// This function runs in a separate isolate for the overlay window
+@pragma("vm:entry-point")
+void overlayMain() {
+  WidgetsFlutterBinding.ensureInitialized();
+  runApp(
+    const MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: Material(
+        color: Colors.transparent,
+        child: OverlayWidget(),
+      ),
+    ),
+  );
+}
+
+// ============= MAIN APP ENTRY POINT =============
+// This starts the overlay service then closes
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  // Make status bar transparent
-  SystemChrome.setSystemUIOverlayStyle(
-    const SystemUiOverlayStyle(
-      statusBarColor: Colors.transparent,
-      statusBarIconBrightness: Brightness.light,
-    ),
-  );
+  // Check if we have overlay permission
+  final bool status = await FlutterOverlayWindow.isPermissionGranted();
   
-  // Initialize Firebase
-  bool firebaseInitialized = false;
-  try {
-    await Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
-    );
-    await FirebaseService.initialize();
-    firebaseInitialized = true;
-    print('✅ Firebase initialized');
-  } catch (e) {
-    print('⚠️ Firebase init failed: $e');
+  if (!status) {
+    // Need to request permission
+    runApp(const PermissionRequestApp());
+  } else {
+    // Permission granted, start overlay immediately
+    await startOverlay();
+    // Close the main app
+    SystemNavigator.pop();
   }
-  
-  runApp(KaiOverlayApp(firebaseInitialized: firebaseInitialized));
 }
 
-class KaiOverlayApp extends StatelessWidget {
-  final bool firebaseInitialized;
-  
-  const KaiOverlayApp({super.key, required this.firebaseInitialized});
-  
+Future<void> startOverlay() async {
+  await FlutterOverlayWindow.showOverlay(
+    enableDrag: true,
+    overlayTitle: "Kai",
+    overlayContent: "Tap to chat with Kai!",
+    flag: OverlayFlag.defaultFlag,
+    visibility: NotificationVisibility.visibilityPublic,
+    positionGravity: PositionGravity.none,
+    width: WindowSize.matchParent,
+    height: WindowSize.matchParent,
+  );
+}
+
+// ============= PERMISSION REQUEST SCREEN =============
+class PermissionRequestApp extends StatelessWidget {
+  const PermissionRequestApp({super.key});
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'Kai Overlay',
       theme: ThemeData(
-        scaffoldBackgroundColor: const Color(0x05000000), // Very subtle dark tint (2% opacity)
-        canvasColor: const Color(0x05000000),
+        primarySwatch: Colors.amber,
         brightness: Brightness.dark,
       ),
-      color: const Color(0x05000000),
-      home: OverlayHome(firebaseInitialized: firebaseInitialized),
+      home: const PermissionScreen(),
     );
   }
 }
 
-class OverlayHome extends StatefulWidget {
-  final bool firebaseInitialized;
-  
-  const OverlayHome({super.key, required this.firebaseInitialized});
+class PermissionScreen extends StatelessWidget {
+  const PermissionScreen({super.key});
 
   @override
-  State<OverlayHome> createState() => _OverlayHomeState();
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF0D0A07),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 120,
+                height: 120,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: const Color(0xFFFFE7B0), width: 3),
+                ),
+                child: ClipOval(
+                  child: Image.asset(kAvatarIdleGif, fit: BoxFit.cover),
+                ),
+              ),
+              const SizedBox(height: 32),
+              const Text(
+                'Kai needs permission to float',
+                style: TextStyle(
+                  color: Color(0xFFFFE7B0),
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Allow Kai to appear on top of other apps so you can chat anywhere!',
+                style: TextStyle(color: Colors.white70, fontSize: 16),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 48),
+              ElevatedButton(
+                onPressed: () async {
+                  // Request permission
+                  final granted = await FlutterOverlayWindow.requestPermission();
+                  if (granted == true) {
+                    // Start overlay
+                    await startOverlay();
+                    // Close permission screen
+                    SystemNavigator.pop();
+                  }
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFFFE7B0),
+                  foregroundColor: const Color(0xFF0D0A07),
+                  padding: const EdgeInsets.symmetric(horizontal: 48, vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(30),
+                  ),
+                ),
+                child: const Text(
+                  'Grant Permission',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
-class _OverlayHomeState extends State<OverlayHome> {
+// ============= OVERLAY WIDGET =============
+// This is the actual floating widget that appears over other apps
+class OverlayWidget extends StatefulWidget {
+  const OverlayWidget({super.key});
+
+  @override
+  State<OverlayWidget> createState() => _OverlayWidgetState();
+}
+
+class _OverlayWidgetState extends State<OverlayWidget> {
   bool _expanded = false;
   final _controller = TextEditingController();
   final _player = AudioPlayer();
@@ -127,18 +215,6 @@ class _OverlayHomeState extends State<OverlayHome> {
       
       setState(() => _reply = resp.reply.isEmpty ? "(no reply)" : resp.reply);
       
-      // Save to Firebase
-      try {
-        await FirebaseService.saveConversation(
-          personaId: 'truekai',
-          userMessage: text,
-          aiResponse: resp.reply,
-          personalityDeltas: resp.actualDeltas,
-        );
-      } catch (e) {
-        print('⚠️ Firebase save failed: $e');
-      }
-      
       // Handle TTS
       if (resp.ttsBase64 != null) {
         final mp3Path = await _writeTempMp3(base64Decode(resp.ttsBase64!));
@@ -161,226 +237,216 @@ class _OverlayHomeState extends State<OverlayHome> {
 
   @override
   Widget build(BuildContext context) {
-    final screenHeight = MediaQuery.of(context).size.height;
-    final screenWidth = MediaQuery.of(context).size.width;
-    
-    return Scaffold(
-      backgroundColor: const Color(0x05000000), // Very subtle tint - you can see through!
-      body: Stack(
-        children: [
-          
-          // Floating Chibi Kai Avatar (minimized to bottom-right corner)
-          if (!_expanded)
-            Positioned(
-              bottom: 20,
-              right: 20,
-              child: GestureDetector(
-                onTap: () => setState(() => _expanded = true),
-                child: Container(
-                  width: 120,
-                  height: 150,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(60),
-                    boxShadow: [
-                      BoxShadow(
-                        color: const Color(0xFFFFE7B0).withOpacity(0.4),
-                        blurRadius: 20,
-                        spreadRadius: 5,
-                      ),
-                    ],
-                  ),
-                  child: Image.asset(
-                    'assets/avatar/images/chibi_kai.png',
-                    fit: BoxFit.contain,
-                    errorBuilder: (context, error, stackTrace) {
-                      // Fallback to mage.png if chibi doesn't exist
-                      return Image.asset(
-                        kAvatarIdleGif,
-                        fit: BoxFit.contain,
-                      );
-                    },
-                  ),
+    return Stack(
+      children: [
+        // Transparent clickable background when minimized
+        if (!_expanded)
+          Positioned.fill(
+            child: GestureDetector(
+              onTap: () {}, // Captures taps but does nothing - makes area transparent
+              child: Container(color: Colors.transparent),
+            ),
+          ),
+        
+        // Floating Kai (bottom-right corner when minimized)
+        if (!_expanded)
+          Positioned(
+            bottom: 80,
+            right: 20,
+            child: GestureDetector(
+              onTap: () => setState(() => _expanded = true),
+              onLongPress: () async {
+                // Close overlay on long press
+                await FlutterOverlayWindow.closeOverlay();
+              },
+              child: Container(
+                width: 100,
+                height: 120,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(50),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFFFFE7B0).withOpacity(0.5),
+                      blurRadius: 20,
+                      spreadRadius: 5,
+                    ),
+                  ],
+                ),
+                child: Image.asset(
+                  kAvatarIdleGif,
+                  fit: BoxFit.contain,
                 ),
               ),
             ),
-          
-          // Full screen chat UI when expanded
-          if (_expanded)
-            Positioned.fill(
+          ),
+        
+        // Expanded chat UI
+        if (_expanded)
+          Positioned.fill(
+            child: GestureDetector(
+              onTap: () => setState(() => _expanded = false),
               child: Container(
-                color: const Color(0xFF0D0A07).withOpacity(0.95),
-                child: SafeArea(
-                  child: Column(
-                    children: [
-                      // Header with Kai avatar
-                      Padding(
-                        padding: const EdgeInsets.all(16.0),
-                        child: Row(
-                          children: [
-                            // Kai avatar (circular)
-                            Container(
-                              width: 60,
-                              height: 60,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                border: Border.all(color: const Color(0xFFFFE7B0), width: 2),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: const Color(0xFFFFE7B0).withOpacity(0.3),
-                                    blurRadius: 10,
-                                    spreadRadius: 2,
-                                  ),
-                                ],
-                              ),
-                              child: ClipOval(
-                                child: Image.asset(kAvatarIdleGif, fit: BoxFit.cover),
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            const Expanded(
-                              child: Text(
-                                'Chat with Kai',
-                                style: TextStyle(
-                                  color: Color(0xFFFFE7B0),
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.minimize, color: Colors.white),
-                              onPressed: () => setState(() => _expanded = false),
-                              tooltip: 'Minimize to corner',
-                            ),
-                          ],
-                        ),
+                color: Colors.black.withOpacity(0.8),
+                child: Center(
+                  child: GestureDetector(
+                    onTap: () {}, // Prevents closing when tapping chat area
+                    child: Container(
+                      width: MediaQuery.of(context).size.width * 0.9,
+                      height: MediaQuery.of(context).size.height * 0.7,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF0D0A07),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: const Color(0xFFFFE7B0), width: 2),
                       ),
-                      
-                      const Divider(color: Color(0xFFFFE7B0), height: 1),
-                      
-                      // Chat messages area
-                      Expanded(
-                        child: SingleChildScrollView(
-                          padding: const EdgeInsets.all(16),
-                          child: Column(
-                            children: [
-                              if (_reply != null)
+                      child: Column(
+                        children: [
+                          // Header
+                          Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              border: Border(
+                                bottom: BorderSide(color: const Color(0xFFFFE7B0).withOpacity(0.3)),
+                              ),
+                            ),
+                            child: Row(
+                              children: [
                                 Container(
-                                  padding: const EdgeInsets.all(16),
+                                  width: 40,
+                                  height: 40,
                                   decoration: BoxDecoration(
-                                    color: const Color(0xFF2A2119),
-                                    borderRadius: BorderRadius.circular(12),
+                                    shape: BoxShape.circle,
+                                    border: Border.all(color: const Color(0xFFFFE7B0), width: 2),
                                   ),
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        _reply!,
-                                        style: const TextStyle(color: Colors.white),
-                                      ),
-                                      if (_ttsPath != null) ...[
-                                        const SizedBox(height: 12),
-                                        ElevatedButton.icon(
-                                          onPressed: () async {
-                                            if (_playerState == PlayerState.playing) {
-                                              await _player.pause();
-                                            } else {
-                                              await _player.play(DeviceFileSource(_ttsPath!));
-                                            }
-                                          },
-                                          icon: Icon(
-                                            _playerState == PlayerState.playing
-                                                ? Icons.pause
-                                                : Icons.play_arrow,
-                                          ),
-                                          label: const Text('Voice'),
-                                          style: ElevatedButton.styleFrom(
-                                            backgroundColor: const Color(0xFFFFE7B0),
-                                            foregroundColor: const Color(0xFF0D0A07),
-                                          ),
-                                        ),
-                                      ],
-                                    ],
+                                  child: ClipOval(
+                                    child: Image.asset(kAvatarIdleGif, fit: BoxFit.cover),
                                   ),
                                 ),
-                              if (_error != null) ...[
-                                const SizedBox(height: 16),
-                                Container(
-                                  padding: const EdgeInsets.all(12),
-                                  decoration: BoxDecoration(
-                                    color: Colors.red.withOpacity(0.2),
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(color: Colors.red),
-                                  ),
+                                const SizedBox(width: 12),
+                                const Expanded(
                                   child: Text(
-                                    _error!,
-                                    style: const TextStyle(color: Colors.red, fontSize: 12),
+                                    'Chat with Kai',
+                                    style: TextStyle(
+                                      color: Color(0xFFFFE7B0),
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
+                                    ),
                                   ),
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.close, color: Colors.white),
+                                  onPressed: () => setState(() => _expanded = false),
                                 ),
                               ],
-                            ],
+                            ),
                           ),
-                        ),
-                      ),
-                      
-                      // Input area at bottom
-                      Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF2A2119),
-                          border: Border(
-                            top: BorderSide(color: const Color(0xFFFFE7B0).withOpacity(0.3)),
-                          ),
-                        ),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: TextField(
-                                controller: _controller,
-                                style: const TextStyle(color: Colors.white),
-                                decoration: InputDecoration(
-                                  hintText: 'Message Kai...',
-                                  hintStyle: TextStyle(color: Colors.white.withOpacity(0.5)),
-                                  filled: true,
-                                  fillColor: const Color(0xFF1A1410),
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(25),
-                                    borderSide: BorderSide.none,
-                                  ),
-                                  contentPadding: const EdgeInsets.symmetric(
-                                    horizontal: 20,
-                                    vertical: 12,
-                                  ),
-                                ),
-                                onSubmitted: (_) => _send(),
+                          
+                          // Messages area
+                          Expanded(
+                            child: SingleChildScrollView(
+                              padding: const EdgeInsets.all(16),
+                              child: Column(
+                                children: [
+                                  if (_reply != null)
+                                    Container(
+                                      padding: const EdgeInsets.all(16),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFF2A2119),
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(_reply!, style: const TextStyle(color: Colors.white)),
+                                          if (_ttsPath != null) ...[
+                                            const SizedBox(height: 12),
+                                            ElevatedButton.icon(
+                                              onPressed: () async {
+                                                if (_playerState == PlayerState.playing) {
+                                                  await _player.pause();
+                                                } else {
+                                                  await _player.play(DeviceFileSource(_ttsPath!));
+                                                }
+                                              },
+                                              icon: Icon(_playerState == PlayerState.playing ? Icons.pause : Icons.play_arrow),
+                                              label: const Text('Voice'),
+                                              style: ElevatedButton.styleFrom(
+                                                backgroundColor: const Color(0xFFFFE7B0),
+                                                foregroundColor: const Color(0xFF0D0A07),
+                                              ),
+                                            ),
+                                          ],
+                                        ],
+                                      ),
+                                    ),
+                                  if (_error != null)
+                                    Container(
+                                      padding: const EdgeInsets.all(12),
+                                      decoration: BoxDecoration(
+                                        color: Colors.red.withOpacity(0.2),
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                      child: Text(_error!, style: const TextStyle(color: Colors.red, fontSize: 12)),
+                                    ),
+                                ],
                               ),
                             ),
-                            const SizedBox(width: 8),
-                            FloatingActionButton(
-                              mini: true,
-                              backgroundColor: const Color(0xFFFFE7B0),
-                              onPressed: _sending ? null : _send,
-                              child: _sending
-                                  ? const SizedBox(
-                                      width: 20,
-                                      height: 20,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                        color: Color(0xFF0D0A07),
-                                      ),
-                                    )
-                                  : const Icon(Icons.send, color: Color(0xFF0D0A07)),
+                          ),
+                          
+                          // Input area
+                          Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              border: Border(
+                                top: BorderSide(color: const Color(0xFFFFE7B0).withOpacity(0.3)),
+                              ),
                             ),
-                          ],
-                        ),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: TextField(
+                                    controller: _controller,
+                                    style: const TextStyle(color: Colors.white),
+                                    decoration: InputDecoration(
+                                      hintText: 'Message Kai...',
+                                      hintStyle: TextStyle(color: Colors.white.withOpacity(0.5)),
+                                      filled: true,
+                                      fillColor: const Color(0xFF2A2119),
+                                      border: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(25),
+                                        borderSide: BorderSide.none,
+                                      ),
+                                    ),
+                                    onSubmitted: (_) => _send(),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                FloatingActionButton(
+                                  mini: true,
+                                  backgroundColor: const Color(0xFFFFE7B0),
+                                  onPressed: _sending ? null : _send,
+                                  child: _sending
+                                      ? const SizedBox(
+                                          width: 20,
+                                          height: 20,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                            color: Color(0xFF0D0A07),
+                                          ),
+                                        )
+                                      : const Icon(Icons.send, color: Color(0xFF0D0A07)),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
                 ),
               ),
             ),
-        ],
-      ),
+          ),
+      ],
     );
   }
 }
