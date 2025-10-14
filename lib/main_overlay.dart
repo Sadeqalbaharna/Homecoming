@@ -265,16 +265,16 @@ class _OverlayWidgetState extends State<OverlayWidget> {
     // Convert angle to radians
     final radians = angle * pi / 180;
     
-    // Calculate position relative to the center of the 280x280 container
-    final centerX = 140.0; // Center of 280px container
-    final centerY = 140.0; // Center of 280px container
+    // Calculate position relative to the center of the 180x180 container
+    final centerX = 90.0; // Center of 180px container
+    final centerY = 90.0; // Center of 180px container
     
     final x = centerX + radius * cos(radians);
     final y = centerY + radius * sin(radians);
     
     return Positioned(
-      left: x - 26, // 26 = half of button size (52/2)
-      top: y - 26,
+      left: x - 20, // 20 = half of button size (40/2)
+      top: y - 20,
       child: TweenAnimationBuilder<double>(
         tween: Tween(begin: 0.0, end: 1.0),
         duration: const Duration(milliseconds: 300),
@@ -288,8 +288,8 @@ class _OverlayWidgetState extends State<OverlayWidget> {
         child: GestureDetector(
           onTap: onTap,
           child: Container(
-            width: 52,
-            height: 52,
+            width: 40, // Smaller button size
+            height: 40,
             decoration: BoxDecoration(
               color: Colors.black.withOpacity(0.7),
               shape: BoxShape.circle,
@@ -308,7 +308,7 @@ class _OverlayWidgetState extends State<OverlayWidget> {
             child: Icon(
               icon,
               color: const Color(0xFFFFE7B0),
-              size: 24,
+              size: 20, // Smaller icon size
             ),
           ),
         ),
@@ -331,8 +331,8 @@ class _OverlayWidgetState extends State<OverlayWidget> {
           // Floating Kai (draggable when minimized)
           if (!_expanded)
             Positioned(
-              left: _positioned ? _avatarX : (screenWidth / 2 - 140), // Center horizontally with menu space
-              top: _positioned ? _avatarY : (screenHeight / 2 - 140), // Center vertically with menu space
+              left: _positioned ? _avatarX : (screenWidth / 2 - 90), // Center horizontally with smaller menu
+              top: _positioned ? _avatarY : (screenHeight / 2 - 90), // Center vertically with smaller menu
               child: GestureDetector(
                 onTap: () => setState(() => _showMenu = !_showMenu),
                 onLongPress: () async {
@@ -348,34 +348,34 @@ class _OverlayWidgetState extends State<OverlayWidget> {
                     // Keep avatar within screen bounds (accounting for full widget size)
                     // Clamp X position
                     if (_avatarX < 0) _avatarX = 0;
-                    if (_avatarX > screenWidth - 280) _avatarX = screenWidth - 280;
+                    if (_avatarX > screenWidth - 180) _avatarX = screenWidth - 180;
                     
                     // Clamp Y position
                     if (_avatarY < 0) _avatarY = 0;
-                    if (_avatarY > screenHeight - 280) _avatarY = screenHeight - 280;
+                    if (_avatarY > screenHeight - 180) _avatarY = screenHeight - 180;
                   });
                 },
                 child: SizedBox(
-                  width: 280, // Size to accommodate avatar + circular menu (80px radius * 2 + avatar width)
-                  height: 280, // Same for height
+                  width: 180, // Smaller container: 60px radius * 2 + 60px avatar
+                  height: 180,
                   child: Stack(
                     clipBehavior: Clip.none,
                     alignment: Alignment.center,
                     children: [
-                      // Kai avatar - centered in the container
+                      // Kai avatar - centered and smaller
                       Positioned(
-                        left: 90, // Center: (280 - 100) / 2
-                        top: 80, // Center: (280 - 120) / 2
+                        left: 60, // Center: (180 - 60) / 2
+                        top: 50, // Center: (180 - 80) / 2
                         child: Container(
-                          width: 100,
-                          height: 120,
+                          width: 60, // Smaller avatar
+                          height: 80,
                           decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(50),
+                            borderRadius: BorderRadius.circular(30),
                             boxShadow: [
                               BoxShadow(
                                 color: const Color(0xFFFFE7B0).withOpacity(0.5),
-                                blurRadius: 20,
-                                spreadRadius: 5,
+                                blurRadius: 15,
+                                spreadRadius: 3,
                               ),
                             ],
                           ),
@@ -391,7 +391,7 @@ class _OverlayWidgetState extends State<OverlayWidget> {
                     // Chat button (top)
                     _buildCircularButton(
                       angle: -90,
-                      radius: 80,
+                      radius: 60, // Smaller radius
                       icon: Icons.chat_bubble,
                       onTap: () {
                         setState(() {
@@ -404,7 +404,7 @@ class _OverlayWidgetState extends State<OverlayWidget> {
                     // Voice/TTS button (top-right)
                     _buildCircularButton(
                       angle: -45,
-                      radius: 80,
+                      radius: 60, // Smaller radius
                       icon: _playerState == PlayerState.playing ? Icons.pause : Icons.play_arrow,
                       onTap: () async {
                         if (_ttsPath != null) {
@@ -420,7 +420,7 @@ class _OverlayWidgetState extends State<OverlayWidget> {
                     // Settings button (right)
                     _buildCircularButton(
                       angle: 0,
-                      radius: 80,
+                      radius: 60, // Smaller radius
                       icon: Icons.settings,
                       onTap: () {
                         setState(() => _showMenu = false);
@@ -431,7 +431,7 @@ class _OverlayWidgetState extends State<OverlayWidget> {
                     // Microphone button (bottom-right)
                     _buildCircularButton(
                       angle: 45,
-                      radius: 80,
+                      radius: 60, // Smaller radius
                       icon: Icons.mic,
                       onTap: () {
                         setState(() => _showMenu = false);
@@ -442,7 +442,7 @@ class _OverlayWidgetState extends State<OverlayWidget> {
                     // Close button (bottom)
                     _buildCircularButton(
                       angle: 90,
-                      radius: 80,
+                      radius: 60, // Smaller radius
                       icon: Icons.close,
                       onTap: () async {
                         await FlutterOverlayWindow.closeOverlay();
@@ -452,7 +452,7 @@ class _OverlayWidgetState extends State<OverlayWidget> {
                     // Info button (bottom-left)
                     _buildCircularButton(
                       angle: 135,
-                      radius: 80,
+                      radius: 60, // Smaller radius
                       icon: Icons.info_outline,
                       onTap: () {
                         setState(() => _showMenu = false);
@@ -463,7 +463,7 @@ class _OverlayWidgetState extends State<OverlayWidget> {
                     // Minimize button (left)
                     _buildCircularButton(
                       angle: 180,
-                      radius: 80,
+                      radius: 60, // Smaller radius
                       icon: Icons.minimize,
                       onTap: () {
                         setState(() => _showMenu = false);
@@ -473,7 +473,7 @@ class _OverlayWidgetState extends State<OverlayWidget> {
                     // Favorite/bookmark button (top-left)
                     _buildCircularButton(
                       angle: -135,
-                      radius: 80,
+                      radius: 60, // Smaller radius
                       icon: Icons.favorite_border,
                       onTap: () {
                         setState(() => _showMenu = false);
