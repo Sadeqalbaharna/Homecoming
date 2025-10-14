@@ -67,6 +67,17 @@ Future<void> startOverlay() async {
     width: WindowSize.matchParent,
     height: WindowSize.matchParent,
   );
+  
+  // Give overlay time to start, then patch it with click-through support
+  await Future.delayed(const Duration(milliseconds: 1500));
+  
+  // Call our native patcher through method channel
+  try {
+    await const MethodChannel('com.homecoming.app/overlay')
+        .invokeMethod('enableClickThrough');
+  } catch (e) {
+    print('⚠️ Click-through patch failed: $e');
+  }
 }
 
 // ============= PERMISSION REQUEST SCREEN =============
