@@ -265,12 +265,17 @@ class _OverlayWidgetState extends State<OverlayWidget> {
     // Convert angle to radians
     final radians = angle * pi / 180;
     
-    // Calculate position relative to the center of the 220x220 container
-    final centerX = 110.0; // Center of 220px container
-    final centerY = 110.0; // Center of 220px container
+    // Calculate position relative to avatar's current position
+    // Avatar center is at: (_avatarX + 60 + 50, _avatarY + 50 + 60)
+    // which is avatar left + 60 (offset to container) + 50 (half of 100px avatar)
+    final screenWidth = MediaQuery.of(context).size.width;
+    final screenHeight = MediaQuery.of(context).size.height;
     
-    final x = centerX + radius * cos(radians);
-    final y = centerY + radius * sin(radians);
+    final avatarCenterX = _positioned ? _avatarX + 60 + 50 : screenWidth / 2;
+    final avatarCenterY = _positioned ? _avatarY + 50 + 60 : screenHeight / 2;
+    
+    final x = avatarCenterX + radius * cos(radians);
+    final y = avatarCenterY + radius * sin(radians);
     
     return Positioned(
       left: x - 26, // 26 = half of button size (52/2)
@@ -286,6 +291,7 @@ class _OverlayWidgetState extends State<OverlayWidget> {
           );
         },
         child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
           onTap: onTap,
           child: Container(
             width: 52, // Original button size
@@ -328,66 +334,55 @@ class _OverlayWidgetState extends State<OverlayWidget> {
         children: [
           // No background widget - transparent areas will pass through!
           
-          // Floating Kai (draggable when minimized)
-          if (!_expanded)
+          // Floating Kai (draggable when minimized) - NO CONTAINER, direct positioning
+          if (!_expanded) ...[
+            // Kai avatar - positioned absolutely
             Positioned(
-              left: _positioned ? _avatarX : (screenWidth / 2 - 110), // Center horizontally with tighter container
-              top: _positioned ? _avatarY : (screenHeight / 2 - 110), // Center vertically with tighter container
-              child: IgnorePointer(
-                ignoring: false, // The container ignores pointer events by default
-                child: SizedBox(
-                  width: 220, // Tighter container: 80px radius * 2 + 52px button + minimal margin
-                  height: 220,
-                  child: Stack(
-                    clipBehavior: Clip.none,
-                    alignment: Alignment.center,
-                    children: [
-                      // Kai avatar - centered at original size with its own gesture detection
-                      Positioned(
-                        left: 60, // Center: (220 - 100) / 2
-                        top: 50, // Center: (220 - 120) / 2
-                        child: GestureDetector(
-                          onTap: () => setState(() => _showMenu = !_showMenu),
-                          onLongPress: () async {
-                            // Close overlay on long press
-                            await FlutterOverlayWindow.closeOverlay();
-                          },
-                          onPanUpdate: (details) {
-                            setState(() {
-                              _positioned = true;
-                              _avatarX += details.delta.dx;
-                              _avatarY += details.delta.dy;
-                              
-                              // Keep avatar within screen bounds (accounting for full widget size)
-                              // Clamp X position
-                              if (_avatarX < 0) _avatarX = 0;
-                              if (_avatarX > screenWidth - 220) _avatarX = screenWidth - 220;
-                              
-                              // Clamp Y position
-                              if (_avatarY < 0) _avatarY = 0;
-                              if (_avatarY > screenHeight - 220) _avatarY = screenHeight - 220;
-                            });
-                          },
-                          child: Container(
-                            width: 100, // Original avatar size
-                            height: 120,
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(50),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: const Color(0xFFFFE7B0).withOpacity(0.5),
-                                  blurRadius: 20,
-                                  spreadRadius: 5,
-                                ),
-                              ],
-                            ),
-                            child: Image.asset(
-                              kAvatarIdleGif,
-                              fit: BoxFit.contain,
-                            ),
-                          ),
-                        ),
+              left: _positioned ? _avatarX + 60 : (screenWidth / 2 - 50), // Avatar center: container left + 60 (half of 220 = 110, avatar offset 60)
+              top: _positioned ? _avatarY + 50 : (screenHeight / 2 - 60), // Avatar center: container top + 50
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque, // Only capture touches on the avatar itself
+                onTap: () => setState(() => _showMenu = !_showMenu),
+                onLongPress: () async {
+                  // Close overlay on long press
+                  await FlutterOverlayWindow.closeOverlay();
+                },
+                onPanUpdate: (details) {
+                  setState(() {
+                    _positioned = true;
+                    _avatarX += details.delta.dx;
+                    _avatarY += details.delta.dy;
+                    
+                    // Keep avatar within screen bounds (accounting for menu space)
+                    // Clamp X position
+                    if (_avatarX < -60) _avatarX = -60;
+                    if (_avatarX > screenWidth - 160) _avatarX = screenWidth - 160;
+                    
+                    // Clamp Y position
+                    if (_avatarY < -50) _avatarY = -50;
+                    if (_avatarY > screenHeight - 170) _avatarY = screenHeight - 170;
+                  });
+                },
+                child: Container(
+                  width: 100, // Original avatar size
+                  height: 120,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(50),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFFFFE7B0).withOpacity(0.5),
+                        blurRadius: 20,
+                        spreadRadius: 5,
                       ),
+                    ],
+                  ),
+                  child: Image.asset(
+                    kAvatarIdleGif,
+                    fit: BoxFit.contain,
+                  ),
+                ),
+              ),
+            ),
                   
                   // Circular menu buttons
                   if (_showMenu) ...[
@@ -484,11 +479,8 @@ class _OverlayWidgetState extends State<OverlayWidget> {
                       },
                     ),
                   ],
-                    ],
-                  ),
-                ),
-              ),
-            ),
+          ],
+        
         // Expanded chat UI
         if (_expanded)
           Positioned.fill(
