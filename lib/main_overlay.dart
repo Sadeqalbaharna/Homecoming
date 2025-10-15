@@ -349,14 +349,25 @@ class _OverlayWidgetState extends State<OverlayWidget> {
                     _avatarX += details.delta.dx;
                     _avatarY += details.delta.dy;
                     
-                    // Keep avatar within full screen bounds
-                    // Clamp X position (0 to screenWidth - avatar width)
-                    if (_avatarX < 0) _avatarX = 0;
-                    if (_avatarX > screenWidth - 100) _avatarX = screenWidth - 100;
+                    // Keep avatar within full screen bounds, accounting for menu buttons
+                    // Menu extends 106px from avatar center (80px radius + 26px button half-width)
+                    // Avatar center is at (_avatarX + 50, _avatarY + 60)
                     
-                    // Clamp Y position (0 to screenHeight - avatar height)
-                    if (_avatarY < 0) _avatarY = 0;
-                    if (_avatarY > screenHeight - 120) _avatarY = screenHeight - 120;
+                    // Minimum X: avatar center must be at least 106px from left edge
+                    // So _avatarX + 50 >= 106, therefore _avatarX >= 56
+                    if (_avatarX < 56) _avatarX = 56;
+                    
+                    // Maximum X: avatar center must be at least 106px from right edge
+                    // So _avatarX + 50 <= screenWidth - 106, therefore _avatarX <= screenWidth - 156
+                    if (_avatarX > screenWidth - 156) _avatarX = screenWidth - 156;
+                    
+                    // Minimum Y: avatar center must be at least 106px from top edge
+                    // So _avatarY + 60 >= 106, therefore _avatarY >= 46
+                    if (_avatarY < 46) _avatarY = 46;
+                    
+                    // Maximum Y: avatar center must be at least 106px from bottom edge
+                    // So _avatarY + 60 <= screenHeight - 106, therefore _avatarY <= screenHeight - 166
+                    if (_avatarY > screenHeight - 166) _avatarY = screenHeight - 166;
                   });
                 },
                 child: ClipRRect(
