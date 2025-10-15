@@ -291,30 +291,26 @@ class _OverlayWidgetState extends State<OverlayWidget> {
           );
         },
         child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
+          behavior: HitTestBehavior.deferToChild, // ONLY respond to actual opaque pixels
           onTap: onTap,
-          child: Container(
-            width: 52, // Original button size
-            height: 52,
-            decoration: BoxDecoration(
-              color: Colors.black.withOpacity(0.7),
-              shape: BoxShape.circle,
-              border: Border.all(
-                color: const Color(0xFFFFE7B0),
-                width: 2,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: const Color(0xFFFFE7B0).withOpacity(0.3),
-                  blurRadius: 10,
-                  spreadRadius: 2,
+          child: ClipOval(
+            child: Container(
+              width: 52, // Original button size
+              height: 52,
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.7),
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: const Color(0xFFFFE7B0),
+                  width: 2,
                 ),
-              ],
-            ),
-            child: Icon(
-              icon,
-              color: const Color(0xFFFFE7B0),
-              size: 24, // Original icon size
+                // Removed boxShadow - it was expanding hit area!
+              ),
+              child: Icon(
+                icon,
+                color: const Color(0xFFFFE7B0),
+                size: 24, // Original icon size
+              ),
             ),
           ),
         ),
@@ -341,7 +337,7 @@ class _OverlayWidgetState extends State<OverlayWidget> {
               left: _positioned ? _avatarX + 60 : (screenWidth / 2 - 50), // Avatar center: container left + 60 (half of 220 = 110, avatar offset 60)
               top: _positioned ? _avatarY + 50 : (screenHeight / 2 - 60), // Avatar center: container top + 50
               child: GestureDetector(
-                behavior: HitTestBehavior.opaque, // Only capture touches on the avatar itself
+                behavior: HitTestBehavior.deferToChild, // ONLY respond to actual opaque pixels of child
                 onTap: () => setState(() => _showMenu = !_showMenu),
                 onLongPress: () async {
                   // Close overlay on long press
@@ -363,22 +359,19 @@ class _OverlayWidgetState extends State<OverlayWidget> {
                     if (_avatarY > screenHeight - 170) _avatarY = screenHeight - 170;
                   });
                 },
-                child: Container(
-                  width: 100, // Original avatar size
-                  height: 120,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(50),
-                    boxShadow: [
-                      BoxShadow(
-                        color: const Color(0xFFFFE7B0).withOpacity(0.5),
-                        blurRadius: 20,
-                        spreadRadius: 5,
-                      ),
-                    ],
-                  ),
-                  child: Image.asset(
-                    kAvatarIdleGif,
-                    fit: BoxFit.contain,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(50),
+                  child: Container(
+                    width: 100, // Original avatar size
+                    height: 120,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(50),
+                      // Removed boxShadow - it was expanding hit area!
+                    ),
+                    child: Image.asset(
+                      kAvatarIdleGif,
+                      fit: BoxFit.contain,
+                    ),
                   ),
                 ),
               ),
