@@ -163,13 +163,13 @@ public class OverlayService extends Service implements View.OnTouchListener {
             int h = displaymetrics.heightPixels;
             szWindow.set(w, h);
         }
-        int dx = startX == OverlayConstants.DEFAULT_XY ? 0 : startX;
-        int dy = startY == OverlayConstants.DEFAULT_XY ? -statusBarHeightPx() : startY;
+        int dx = 0; // Always anchor to left edge (X = 0)
+        int dy = 0; // Always anchor to top edge (Y = 0)
         WindowManager.LayoutParams params = new WindowManager.LayoutParams(
                 WindowSetup.width == -1999 ? -1 : WindowSetup.width,
                 WindowSetup.height != -1999 ? WindowSetup.height : screenHeight(),
-                0,
-                -statusBarHeightPx(),
+                0, // X position: LOCKED to 0 (left edge)
+                0, // Y position: LOCKED to 0 (top edge)
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY : WindowManager.LayoutParams.TYPE_PHONE,
                 WindowSetup.flag | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
                         | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
@@ -182,10 +182,12 @@ public class OverlayService extends Service implements View.OnTouchListener {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && WindowSetup.flag == clickableFlag) {
             params.alpha = MAXIMUM_OPACITY_ALLOWED_FOR_S_AND_HIGHER;
         }
-        params.gravity = WindowSetup.gravity;
-        flutterView.setOnTouchListener(this);
+        params.gravity = Gravity.TOP | Gravity.LEFT; // Force to top-left corner
+        // REMOVED touch listener - overlay is now completely fixed and non-draggable
+        // flutterView.setOnTouchListener(this);
         windowManager.addView(flutterView, params);
-        moveOverlay(dx, dy, null);
+        // Don't move overlay - keep it locked at (0, 0)
+        // moveOverlay(dx, dy, null); // REMOVED - overlay position is now fixed
         return START_STICKY;
     }
 

@@ -66,7 +66,7 @@ Future<void> startOverlay() async {
     enableDrag: true,
     overlayTitle: "Kai",
     overlayContent: "Tap to chat with Kai!",
-    flag: OverlayFlag.defaultFlag,
+    flag: OverlayFlag.focusPointer, // FLAG_NOT_TOUCH_MODAL - enables click-through on transparent areas!
     visibility: NotificationVisibility.visibilityPublic,
     positionGravity: PositionGravity.none,
     width: WindowSize.matchParent,
@@ -372,7 +372,13 @@ class _OverlayWidgetState extends State<OverlayWidget> {
                 },
                 onPanUpdate: (details) {
                   setState(() {
-                    _positioned = true;
+                    // Initialize position to current center if this is first drag
+                    if (!_positioned) {
+                      _avatarX = (screenWidth / 2 - 50).clamp(56.0, screenWidth - 156);
+                      _avatarY = (screenHeight / 2 - 60).clamp(46.0, screenHeight - 166);
+                      _positioned = true;
+                    }
+                    
                     _avatarX += details.delta.dx;
                     _avatarY += details.delta.dy;
                     
@@ -495,24 +501,25 @@ class _OverlayWidgetState extends State<OverlayWidget> {
                   ],
           ],
         
-        // Expanded chat UI
+        // Expanded chat UI - FIXED to screen edges, unmovable
         if (_expanded)
-          Positioned.fill(
+          Positioned(
+            left: 0,
+            right: 0,
+            top: 0,
+            bottom: 0,
             child: GestureDetector(
               onTap: () => setState(() => _expanded = false),
               child: Container(
                 color: Colors.black.withOpacity(0.8),
-                child: Center(
-                  child: GestureDetector(
-                    onTap: () {}, // Prevents closing when tapping chat area
-                    child: Container(
-                      width: MediaQuery.of(context).size.width * 0.9,
-                      height: MediaQuery.of(context).size.height * 0.35, // Cut in half from 0.7 to 0.35
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF0D0A07),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: const Color(0xFFFFE7B0), width: 2),
-                      ),
+                child: GestureDetector(
+                  onTap: () {}, // Prevents closing when tapping chat area
+                  child: Container(
+                    margin: EdgeInsets.zero, // NO margin - goes to screen edges
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0D0A07),
+                      border: Border.all(color: const Color(0xFFFFE7B0), width: 2),
+                    ),
                       child: Column(
                         children: [
                           // Header
@@ -660,7 +667,6 @@ class _OverlayWidgetState extends State<OverlayWidget> {
                 ),
               ),
             ),
-          ),
         ],
       ),
     );
