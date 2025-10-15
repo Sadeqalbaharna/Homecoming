@@ -266,13 +266,13 @@ class _OverlayWidgetState extends State<OverlayWidget> {
     final radians = angle * pi / 180;
     
     // Calculate position relative to avatar's current position
-    // Avatar center is at: (_avatarX + 60 + 50, _avatarY + 50 + 60)
-    // which is avatar left + 60 (offset to container) + 50 (half of 100px avatar)
+    // Avatar center is at: (_avatarX + 50, _avatarY + 60)
+    // which is avatar left + 50 (half of 100px avatar) and avatar top + 60 (half of 120px avatar)
     final screenWidth = MediaQuery.of(context).size.width;
     final screenHeight = MediaQuery.of(context).size.height;
     
-    final avatarCenterX = _positioned ? _avatarX + 60 + 50 : screenWidth / 2;
-    final avatarCenterY = _positioned ? _avatarY + 50 + 60 : screenHeight / 2;
+    final avatarCenterX = _positioned ? _avatarX + 50 : screenWidth / 2;
+    final avatarCenterY = _positioned ? _avatarY + 60 : screenHeight / 2;
     
     final x = avatarCenterX + radius * cos(radians);
     final y = avatarCenterY + radius * sin(radians);
@@ -332,10 +332,10 @@ class _OverlayWidgetState extends State<OverlayWidget> {
           
           // Floating Kai (draggable when minimized) - NO CONTAINER, direct positioning
           if (!_expanded) ...[
-            // Kai avatar - positioned absolutely
+            // Kai avatar - positioned absolutely within full-screen overlay
             Positioned(
-              left: _positioned ? _avatarX + 60 : (screenWidth / 2 - 50), // Avatar center: container left + 60 (half of 220 = 110, avatar offset 60)
-              top: _positioned ? _avatarY + 50 : (screenHeight / 2 - 60), // Avatar center: container top + 50
+              left: _positioned ? _avatarX : (screenWidth / 2 - 50), // Center on screen (50 = half of 100px avatar)
+              top: _positioned ? _avatarY : (screenHeight / 2 - 60), // Center on screen (60 = half of 120px avatar)
               child: GestureDetector(
                 behavior: HitTestBehavior.deferToChild, // ONLY respond to actual opaque pixels of child
                 onTap: () => setState(() => _showMenu = !_showMenu),
@@ -349,14 +349,14 @@ class _OverlayWidgetState extends State<OverlayWidget> {
                     _avatarX += details.delta.dx;
                     _avatarY += details.delta.dy;
                     
-                    // Keep avatar within screen bounds (accounting for menu space)
-                    // Clamp X position
-                    if (_avatarX < -60) _avatarX = -60;
-                    if (_avatarX > screenWidth - 160) _avatarX = screenWidth - 160;
+                    // Keep avatar within full screen bounds
+                    // Clamp X position (0 to screenWidth - avatar width)
+                    if (_avatarX < 0) _avatarX = 0;
+                    if (_avatarX > screenWidth - 100) _avatarX = screenWidth - 100;
                     
-                    // Clamp Y position
-                    if (_avatarY < -50) _avatarY = -50;
-                    if (_avatarY > screenHeight - 170) _avatarY = screenHeight - 170;
+                    // Clamp Y position (0 to screenHeight - avatar height)
+                    if (_avatarY < 0) _avatarY = 0;
+                    if (_avatarY > screenHeight - 120) _avatarY = screenHeight - 120;
                   });
                 },
                 child: ClipRRect(
