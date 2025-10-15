@@ -193,10 +193,29 @@ class _OverlayWidgetState extends State<OverlayWidget> {
   String? _ttsPath;
   PlayerState? _playerState;
   
-  // Position for draggable Kai avatar
+  // Position for draggable Kai avatar (initialized later with screen size)
   double _avatarX = 0.0;
   double _avatarY = 0.0;
   bool _positioned = false;
+
+  // Helper to ensure avatar stays within bounds
+  void _clampAvatarPosition(double screenWidth, double screenHeight) {
+    // Menu extends 106px from avatar center (80px radius + 26px button half-width)
+    // Avatar center is at (_avatarX + 50, _avatarY + 60)
+    const menuPadding = 106.0;
+    
+    // Clamp X: avatar center must be [106, screenWidth - 106]
+    // So _avatarX must be [56, screenWidth - 156]
+    final minX = menuPadding - 50; // 56
+    final maxX = screenWidth - menuPadding - 50; // screenWidth - 156
+    _avatarX = _avatarX.clamp(minX, maxX);
+    
+    // Clamp Y: avatar center must be [106, screenHeight - 106]
+    // So _avatarY must be [46, screenHeight - 166]
+    final minY = menuPadding - 60; // 46
+    final maxY = screenHeight - menuPadding - 60; // screenHeight - 166
+    _avatarY = _avatarY.clamp(minY, maxY);
+  }
 
   @override
   void initState() {
@@ -334,8 +353,16 @@ class _OverlayWidgetState extends State<OverlayWidget> {
           if (!_expanded) ...[
             // Kai avatar - positioned absolutely within full-screen overlay
             Positioned(
-              left: _positioned ? _avatarX : (screenWidth / 2 - 50), // Center on screen (50 = half of 100px avatar)
-              top: _positioned ? _avatarY : (screenHeight / 2 - 60), // Center on screen (60 = half of 120px avatar)
+              left: _positioned ? _avatarX : () {
+                // Calculate and clamp initial centered position
+                final centerX = (screenWidth / 2 - 50).clamp(56.0, screenWidth - 156);
+                return centerX;
+              }(),
+              top: _positioned ? _avatarY : () {
+                // Calculate and clamp initial centered position
+                final centerY = (screenHeight / 2 - 60).clamp(46.0, screenHeight - 166);
+                return centerY;
+              }(),
               child: GestureDetector(
                 behavior: HitTestBehavior.deferToChild, // ONLY respond to actual opaque pixels of child
                 onTap: () => setState(() => _showMenu = !_showMenu),
@@ -349,25 +376,8 @@ class _OverlayWidgetState extends State<OverlayWidget> {
                     _avatarX += details.delta.dx;
                     _avatarY += details.delta.dy;
                     
-                    // Keep avatar within full screen bounds, accounting for menu buttons
-                    // Menu extends 106px from avatar center (80px radius + 26px button half-width)
-                    // Avatar center is at (_avatarX + 50, _avatarY + 60)
-                    
-                    // Minimum X: avatar center must be at least 106px from left edge
-                    // So _avatarX + 50 >= 106, therefore _avatarX >= 56
-                    if (_avatarX < 56) _avatarX = 56;
-                    
-                    // Maximum X: avatar center must be at least 106px from right edge
-                    // So _avatarX + 50 <= screenWidth - 106, therefore _avatarX <= screenWidth - 156
-                    if (_avatarX > screenWidth - 156) _avatarX = screenWidth - 156;
-                    
-                    // Minimum Y: avatar center must be at least 106px from top edge
-                    // So _avatarY + 60 >= 106, therefore _avatarY >= 46
-                    if (_avatarY < 46) _avatarY = 46;
-                    
-                    // Maximum Y: avatar center must be at least 106px from bottom edge
-                    // So _avatarY + 60 <= screenHeight - 106, therefore _avatarY <= screenHeight - 166
-                    if (_avatarY > screenHeight - 166) _avatarY = screenHeight - 166;
+                    // Enforce bounds using helper method
+                    _clampAvatarPosition(screenWidth, screenHeight);
                   });
                 },
                 child: ClipRRect(
