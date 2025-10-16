@@ -66,7 +66,7 @@ Future<void> startOverlay() async {
     enableDrag: true, // Let Java handle drag natively for smooth performance!
     overlayTitle: "Kai",
     overlayContent: "Tap to chat with Kai!",
-    flag: OverlayFlag.focusPointer, // FLAG_NOT_TOUCH_MODAL - enables click-through on transparent areas!
+    flag: OverlayFlag.defaultFlag, // Start with defaultFlag - no keyboard focus for floating avatar
     visibility: NotificationVisibility.visibilityPublic,
     positionGravity: PositionGravity.none, // No snap-to-edge behavior
     width: 200, // Compact size for floating: Kai (100px) + minimal padding
@@ -282,7 +282,7 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
     Future.delayed(const Duration(milliseconds: 500), () {
       if (!mounted || !_isAutoMoving) return;
       
-      _positionMonitor = Timer.periodic(const Duration(milliseconds: 100), (timer) async {
+      _positionMonitor = Timer.periodic(const Duration(milliseconds: 50), (timer) async {
         if (!_isAutoMoving || !mounted) {
           timer.cancel();
           return;
@@ -294,8 +294,8 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
           final diffY = (pos.y - _currentY).abs();
           
           // If position changed significantly without us moving it, user is dragging
-          // Increased threshold to 20dp to avoid false positives
-          if (diffX > 20 || diffY > 20) {
+          // Lower threshold for quicker response - 5dp is enough to detect intentional drag
+          if (diffX > 5 || diffY > 5) {
             if (!_userIsDragging) {
               print('👆 User drag detected! Pausing auto-movement...');
             }
@@ -407,6 +407,14 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
       // Menu/avatar only: compact square window (200x200)
       await FlutterOverlayWindow.resizeOverlay(200, 200, true);
     }
+  }
+  
+  // Helper to close chat and reset flags
+  Future<void> _closeChat() async {
+    setState(() => _expanded = false);
+    await _resizeOverlay(false);
+    // Reset flag to defaultFlag when closing chat (no keyboard needed)
+    await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
   }
 
   @override
@@ -703,10 +711,7 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
             top: 0,
             bottom: 0,
             child: GestureDetector(
-              onTap: () {
-                setState(() => _expanded = false);
-                _resizeOverlay(false); // Resize back to avatar dimensions
-              },
+              onTap: () => _closeChat(),
               child: Container(
                 color: Colors.black.withOpacity(0.8),
                 child: GestureDetector(
@@ -753,10 +758,7 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
                                 ),
                                 IconButton(
                                   icon: const Icon(Icons.close, color: Colors.white),
-                                  onPressed: () {
-                                    setState(() => _expanded = false);
-                                    _resizeOverlay(false); // Resize back to avatar dimensions
-                                  },
+                                  onPressed: () => _closeChat(),
                                 ),
                               ],
                             ),
@@ -825,20 +827,30 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
                             child: Row(
                               children: [
                                 Expanded(
-                                  child: TextField(
-                                    controller: _controller,
-                                    style: const TextStyle(color: Colors.white),
-                                    decoration: InputDecoration(
-                                      hintText: 'Message Kai...',
-                                      hintStyle: TextStyle(color: Colors.white.withOpacity(0.5)),
-                                      filled: true,
-                                      fillColor: const Color(0xFF2A2119),
-                                      border: OutlineInputBorder(
-                                        borderRadius: BorderRadius.circular(25),
-                                        borderSide: BorderSide.none,
+                                  child: Focus(
+                                    onFocusChange: (hasFocus) async {
+                                      // Update flag to allow keyboard when TextField is focused
+                                      if (hasFocus) {
+                                        await FlutterOverlayWindow.updateFlag(OverlayFlag.focusPointer);
+                                      } else {
+                                        await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
+                                      }
+                                    },
+                                    child: TextField(
+                                      controller: _controller,
+                                      style: const TextStyle(color: Colors.white),
+                                      decoration: InputDecoration(
+                                        hintText: 'Message Kai...',
+                                        hintStyle: TextStyle(color: Colors.white.withOpacity(0.5)),
+                                        filled: true,
+                                        fillColor: const Color(0xFF2A2119),
+                                        border: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(25),
+                                          borderSide: BorderSide.none,
+                                        ),
                                       ),
+                                      onSubmitted: (_) => _send(),
                                     ),
-                                    onSubmitted: (_) => _send(),
                                   ),
                                 ),
                                 const SizedBox(width: 8),
