@@ -163,31 +163,42 @@ public class OverlayService extends Service implements View.OnTouchListener {
             int h = displaymetrics.heightPixels;
             szWindow.set(w, h);
         }
-        int dx = 0; // Always anchor to left edge (X = 0)
-        int dy = 0; // Always anchor to top edge (Y = 0)
+        
+        // Center the 400x400 overlay window on screen
+        // Calculate position to center the overlay
+        DisplayMetrics metrics = new DisplayMetrics();
+        windowManager.getDefaultDisplay().getMetrics(metrics);
+        int screenWidth = metrics.widthPixels;
+        int screenHeight = metrics.heightPixels;
+        
+        // For a 400dp window, convert to pixels
+        int overlayWidthPx = WindowSetup.width == -1999 ? -1 : dpToPx(WindowSetup.width);
+        int overlayHeightPx = WindowSetup.height != -1999 ? dpToPx(WindowSetup.height) : screenHeight();
+        
+        // Center the overlay window on screen
+        int dx = overlayWidthPx > 0 ? (screenWidth - overlayWidthPx) / 2 : 0;
+        int dy = overlayHeightPx > 0 ? (screenHeight - overlayHeightPx) / 2 : 0;
+        
         WindowManager.LayoutParams params = new WindowManager.LayoutParams(
-                WindowSetup.width == -1999 ? -1 : WindowSetup.width,
-                WindowSetup.height != -1999 ? WindowSetup.height : screenHeight(),
-                0, // X position: LOCKED to 0 (left edge)
-                0, // Y position: LOCKED to 0 (top edge)
+                overlayWidthPx,
+                overlayHeightPx,
+                dx, // X position: Centered
+                dy, // Y position: Centered
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY : WindowManager.LayoutParams.TYPE_PHONE,
                 WindowSetup.flag | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
                         | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
                         | WindowManager.LayoutParams.FLAG_LAYOUT_INSET_DECOR
                         | WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
-                        | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
-                        | WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                        | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
                 PixelFormat.TRANSLUCENT
         );
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && WindowSetup.flag == clickableFlag) {
             params.alpha = MAXIMUM_OPACITY_ALLOWED_FOR_S_AND_HIGHER;
         }
-        params.gravity = Gravity.TOP | Gravity.LEFT; // Force to top-left corner
+        params.gravity = Gravity.TOP | Gravity.LEFT; // Position relative to top-left for centering calculation
         // REMOVED touch listener - overlay is now completely fixed and non-draggable
-        // flutterView.setOnTouchListener(this);
+            flutterView.setOnTouchListener(this);
         windowManager.addView(flutterView, params);
-        // Don't move overlay - keep it locked at (0, 0)
-        // moveOverlay(dx, dy, null); // REMOVED - overlay position is now fixed
         return START_STICKY;
     }
 
@@ -239,8 +250,7 @@ public class OverlayService extends Service implements View.OnTouchListener {
             params.flags = WindowSetup.flag | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS |
                     WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN |
                     WindowManager.LayoutParams.FLAG_LAYOUT_INSET_DECOR | WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED |
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL |
-                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL;
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && WindowSetup.flag == clickableFlag) {
                 params.alpha = MAXIMUM_OPACITY_ALLOWED_FOR_S_AND_HIGHER;
             } else {

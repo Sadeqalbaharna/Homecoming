@@ -29,10 +29,7 @@ void overlayMain() {
   runApp(
     const MaterialApp(
       debugShowCheckedModeBanner: false,
-      home: Material(
-        color: Colors.transparent,
-        child: OverlayWidget(),
-      ),
+      home: OverlayWidget(),
     ),
   );
 }
@@ -52,25 +49,28 @@ Future<void> main() async {
     // Permission granted, start overlay immediately
     await startOverlay();
     
-    // Wait for overlay to fully initialize before closing main activity
-    await Future.delayed(const Duration(milliseconds: 3000));
-    
-    // Close the main activity (but keep the service running)
-    // Don't use exit(0) as it kills the overlay service too!
-    SystemNavigator.pop();
+    // Finish MainActivity immediately - no delay needed
+    // The overlay service is already started and runs independently
+    const platform = MethodChannel('com.homecoming.app/activity');
+    try {
+      await platform.invokeMethod('finishActivity');
+    } catch (e) {
+      // If method channel fails, fall back to SystemNavigator
+      SystemNavigator.pop();
+    }
   }
 }
 
 Future<void> startOverlay() async {
   await FlutterOverlayWindow.showOverlay(
-    enableDrag: true,
+    enableDrag: false, // Disable Java's drag handling - we'll handle it in Flutter with moveOverlay
     overlayTitle: "Kai",
     overlayContent: "Tap to chat with Kai!",
     flag: OverlayFlag.focusPointer, // FLAG_NOT_TOUCH_MODAL - enables click-through on transparent areas!
     visibility: NotificationVisibility.visibilityPublic,
     positionGravity: PositionGravity.none,
-    width: WindowSize.matchParent,
-    height: WindowSize.matchParent,
+    width: 200, // Compact size for floating: Kai (100px) + minimal padding
+    height: 200, // Compact size for floating
   );
 }
 
@@ -91,8 +91,50 @@ class PermissionRequestApp extends StatelessWidget {
   }
 }
 
-class PermissionScreen extends StatelessWidget {
+class PermissionScreen extends StatefulWidget {
   const PermissionScreen({super.key});
+
+  @override
+  State<PermissionScreen> createState() => _PermissionScreenState();
+}
+
+class _PermissionScreenState extends State<PermissionScreen> with WidgetsBindingObserver {
+  
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // When user returns from settings
+    if (state == AppLifecycleState.resumed) {
+      _checkPermissionAndStart();
+    }
+  }
+
+  Future<void> _checkPermissionAndStart() async {
+    final granted = await FlutterOverlayWindow.isPermissionGranted();
+    if (granted) {
+      // Permission granted! Start overlay
+      await startOverlay();
+      
+      // Finish MainActivity
+      const platform = MethodChannel('com.homecoming.app/activity');
+      try {
+        await platform.invokeMethod('finishActivity');
+      } catch (e) {
+        SystemNavigator.pop();
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -134,22 +176,9 @@ class PermissionScreen extends StatelessWidget {
               const SizedBox(height: 48),
               ElevatedButton(
                 onPressed: () async {
-                  // Request permission
-                  final granted = await FlutterOverlayWindow.requestPermission();
-                  if (granted == true) {
-                    // Start overlay
-                    await startOverlay();
-                    // Exit the app - overlay runs independently
-                    exit(0);
-                  } else {
-                    // Permission denied, show error
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Permission denied. Kai needs overlay permission to work.'),
-                        backgroundColor: Colors.red,
-                      ),
-                    );
-                  }
+                  // Request permission - this will open settings
+                  await FlutterOverlayWindow.requestPermission();
+                  // When user returns, didChangeAppLifecycleState will handle it
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFFFFE7B0),
@@ -181,7 +210,7 @@ class OverlayWidget extends StatefulWidget {
   State<OverlayWidget> createState() => _OverlayWidgetState();
 }
 
-class _OverlayWidgetState extends State<OverlayWidget> {
+class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProviderStateMixin {
   bool _expanded = false;
   bool _showMenu = false; // New: controls circular menu visibility
   final _controller = TextEditingController();
@@ -193,28 +222,105 @@ class _OverlayWidgetState extends State<OverlayWidget> {
   String? _ttsPath;
   PlayerState? _playerState;
   
-  // Position for draggable Kai avatar (initialized later with screen size)
-  double _avatarX = 0.0;
-  double _avatarY = 0.0;
+  // Window position on screen (in dp)
+  double _windowX = 0.0;
+  double _windowY = 0.0;
   bool _positioned = false;
+  
+  // Auto-movement variables - now moves the window, not the avatar
+  Timer? _moveTimer;
+  bool _isAutoMoving = false;
+  double _targetX = 0.0;
+  double _targetY = 0.0;
+  final Random _random = Random();
 
-  // Helper to ensure avatar stays within bounds
-  void _clampAvatarPosition(double screenWidth, double screenHeight) {
-    // Menu extends 106px from avatar center (80px radius + 26px button half-width)
-    // Avatar center is at (_avatarX + 50, _avatarY + 60)
-    const menuPadding = 106.0;
+  // Helper to ensure window stays within screen bounds
+  void _clampWindowPosition(double screenWidth, double screenHeight) {
+    const windowSize = 200.0; // Our overlay window is 200x200
     
-    // Clamp X: avatar center must be [106, screenWidth - 106]
-    // So _avatarX must be [56, screenWidth - 156]
-    final minX = menuPadding - 50; // 56
-    final maxX = screenWidth - menuPadding - 50; // screenWidth - 156
-    _avatarX = _avatarX.clamp(minX, maxX);
+    // Keep window fully on screen
+    _windowX = _windowX.clamp(0.0, screenWidth - windowSize);
+    _windowY = _windowY.clamp(0.0, screenHeight - windowSize);
+  }
+  
+  // Start auto-movement - moves the entire window
+  void _startAutoMovement() {
+    if (_isAutoMoving || _expanded || _showMenu) return;
     
-    // Clamp Y: avatar center must be [106, screenHeight - 106]
-    // So _avatarY must be [46, screenHeight - 166]
-    final minY = menuPadding - 60; // 46
-    final maxY = screenHeight - menuPadding - 60; // screenHeight - 166
-    _avatarY = _avatarY.clamp(minY, maxY);
+    print('🚀 Starting auto-movement');
+    _isAutoMoving = true;
+    _moveTimer = Timer.periodic(const Duration(milliseconds: 50), (timer) {
+      if (_expanded || _showMenu) {
+        timer.cancel();
+        _isAutoMoving = false;
+        return;
+      }
+      
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      
+      final screenWidth = MediaQuery.of(context).size.width;
+      final screenHeight = MediaQuery.of(context).size.height;
+      
+      // Initialize window position if needed - center on screen
+      if (!_positioned) {
+        const windowSize = 200.0;
+        _windowX = (screenWidth - windowSize) / 2;
+        _windowY = (screenHeight - windowSize) / 2;
+        _positioned = true;
+        
+        // Don't move window here - it's already centered by Java side on creation
+        // We just need to track its position in our variables
+        
+        // Set first random target - anywhere on screen within bounds
+        _targetX = _random.nextDouble() * (screenWidth - windowSize);
+        _targetY = _random.nextDouble() * (screenHeight - windowSize);
+      }
+      
+      // Move window towards target
+      const moveSpeed = 2.0;
+      final dx = _targetX - _windowX;
+      final dy = _targetY - _windowY;
+      final distance = sqrt(dx * dx + dy * dy);
+      
+      if (distance < moveSpeed) {
+        // Reached target, pick new one anywhere on screen
+        const windowSize = 200.0;
+        _targetX = _random.nextDouble() * (screenWidth - windowSize);
+        _targetY = _random.nextDouble() * (screenHeight - windowSize);
+      } else {
+        // Move window towards target
+        setState(() {
+          _windowX += (dx / distance) * moveSpeed;
+          _windowY += (dy / distance) * moveSpeed;
+          _clampWindowPosition(screenWidth, screenHeight);
+        });
+        
+        print('🚀 Auto-moving window to ($_windowX, $_windowY)');
+        // Actually move the overlay window on screen
+        FlutterOverlayWindow.moveOverlay(OverlayPosition(_windowX, _windowY));
+      }
+    });
+  }
+  
+  // Stop auto-movement
+  void _stopAutoMovement() {
+    _moveTimer?.cancel();
+    _moveTimer = null;
+    _isAutoMoving = false;
+  }
+
+  // Resize overlay window based on UI state
+  Future<void> _resizeOverlay(bool chatExpanded) async {
+    if (chatExpanded) {
+      // Chat expanded: make window taller for chat (300x600)
+      await FlutterOverlayWindow.resizeOverlay(300, 600, true);
+    } else {
+      // Menu/avatar only: compact square window (200x200)
+      await FlutterOverlayWindow.resizeOverlay(200, 200, true);
+    }
   }
 
   @override
@@ -223,10 +329,42 @@ class _OverlayWidgetState extends State<OverlayWidget> {
     _player.onPlayerStateChanged.listen((state) {
       if (mounted) setState(() => _playerState = state);
     });
+    
+    // Initialize window position by getting actual position from platform
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!_positioned && mounted) {
+        try {
+          // Get the ACTUAL current window position from Java
+          final currentPos = await FlutterOverlayWindow.getOverlayPosition();
+          if (mounted) {
+            _windowX = currentPos.x;
+            _windowY = currentPos.y;
+            _positioned = true;
+            print('🎯 Got actual window position from platform: ($_windowX, $_windowY)');
+          }
+        } catch (e) {
+          print('❌ Error getting position: $e');
+          // Fallback if position not available
+          final screenWidth = 1080.0;
+          final screenHeight = 2340.0;
+          const windowSize = 200.0;
+          _windowX = screenWidth - windowSize - 20.0;
+          _windowY = screenHeight - windowSize - 20.0;
+          _positioned = true;
+          print('🎯 Using fallback position: ($_windowX, $_windowY)');
+        }
+      }
+    });
+    
+    // Start auto-movement after a short delay
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted) _startAutoMovement();
+    });
   }
 
   @override
   void dispose() {
+    _stopAutoMovement();
     _controller.dispose();
     _player.dispose();
     super.dispose();
@@ -284,14 +422,10 @@ class _OverlayWidgetState extends State<OverlayWidget> {
     // Convert angle to radians
     final radians = angle * pi / 180;
     
-    // Calculate position relative to avatar's current position
-    // Avatar center is at: (_avatarX + 50, _avatarY + 60)
-    // which is avatar left + 50 (half of 100px avatar) and avatar top + 60 (half of 120px avatar)
-    final screenWidth = MediaQuery.of(context).size.width;
-    final screenHeight = MediaQuery.of(context).size.height;
-    
-    final avatarCenterX = _positioned ? _avatarX + 50 : screenWidth / 2;
-    final avatarCenterY = _positioned ? _avatarY + 60 : screenHeight / 2;
+    // Calculate position relative to avatar's FIXED center position in the 200x200 window
+    // Avatar is fixed at (50, 40), so center is at (50 + 50, 40 + 60) = (100, 100)
+    const avatarCenterX = 100.0;
+    const avatarCenterY = 100.0;
     
     final x = avatarCenterX + radius * cos(radians);
     final y = avatarCenterY + radius * sin(radians);
@@ -310,7 +444,7 @@ class _OverlayWidgetState extends State<OverlayWidget> {
           );
         },
         child: GestureDetector(
-          behavior: HitTestBehavior.deferToChild, // ONLY respond to actual opaque pixels
+          behavior: HitTestBehavior.deferToChild, // Only respond to actual pixels
           onTap: onTap,
           child: ClipOval(
             child: Container(
@@ -343,47 +477,80 @@ class _OverlayWidgetState extends State<OverlayWidget> {
     final screenWidth = MediaQuery.of(context).size.width;
     final screenHeight = MediaQuery.of(context).size.height;
     
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      body: Stack(
-        children: [
-          // No background widget - transparent areas will pass through!
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+          // Debug: Window border indicator (only in avatar mode)
+          if (!_expanded)
+            Positioned.fill(
+              child: Container(
+                decoration: BoxDecoration(
+                  border: Border.all(
+                    color: const Color(0xFFFFE7B0).withOpacity(0.15), // Faint golden border
+                    width: 1,
+                  ),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
           
           // Floating Kai (draggable when minimized) - NO CONTAINER, direct positioning
           if (!_expanded) ...[
-            // Kai avatar - positioned absolutely within full-screen overlay
+            // Kai avatar - FIXED at center of 400x400 window
             Positioned(
-              left: _positioned ? _avatarX : () {
-                // Calculate and clamp initial centered position
-                final centerX = (screenWidth / 2 - 50).clamp(56.0, screenWidth - 156);
-                return centerX;
-              }(),
-              top: _positioned ? _avatarY : () {
-                // Calculate and clamp initial centered position
-                final centerY = (screenHeight / 2 - 60).clamp(46.0, screenHeight - 166);
-                return centerY;
-              }(),
+              left: 50.0, // Fixed center: (200/2 - 50)
+              top: 40.0,  // Fixed center: (200/2 - 60)
               child: GestureDetector(
-                behavior: HitTestBehavior.deferToChild, // ONLY respond to actual opaque pixels of child
-                onTap: () => setState(() => _showMenu = !_showMenu),
+                behavior: HitTestBehavior.deferToChild, // Only respond to actual pixels
+                onTap: () {
+                  setState(() {
+                    _showMenu = !_showMenu;
+                    if (_showMenu) {
+                      _stopAutoMovement(); // Stop when menu opens
+                    } else {
+                      // Resume after menu closes
+                      Future.delayed(const Duration(seconds: 2), () {
+                        if (mounted && !_showMenu && !_expanded) {
+                          _startAutoMovement();
+                        }
+                      });
+                    }
+                  });
+                },
                 onLongPress: () async {
                   // Close overlay on long press
                   await FlutterOverlayWindow.closeOverlay();
                 },
+                onPanStart: (details) {
+                  print('🎯 Pan started at ${details.localPosition}');
+                  // Stop auto-movement when user starts dragging
+                  _stopAutoMovement();
+                  // Just log current position - it was already initialized in initState
+                  print('🎯 Window position at drag start: (${_windowX}, ${_windowY}), _positioned: $_positioned');
+                },
                 onPanUpdate: (details) {
+                  // Use hardcoded screen size since MediaQuery returns overlay size
+                  const screenWidth = 1080.0;
+                  const screenHeight = 2340.0;
+                  
+                  print('🎯 Pan update delta: ${details.delta}');
                   setState(() {
-                    // Initialize position to current center if this is first drag
-                    if (!_positioned) {
-                      _avatarX = (screenWidth / 2 - 50).clamp(56.0, screenWidth - 156);
-                      _avatarY = (screenHeight / 2 - 60).clamp(46.0, screenHeight - 166);
-                      _positioned = true;
+                    // Move the window by the drag delta
+                    _windowX += details.delta.dx;
+                    _windowY += details.delta.dy;
+                    _clampWindowPosition(screenWidth, screenHeight);
+                  });
+                  
+                  print('🎯 Moving window to (${_windowX}, ${_windowY})');
+                  // Actually move the overlay window
+                  FlutterOverlayWindow.moveOverlay(OverlayPosition(_windowX, _windowY));
+                },
+                onPanEnd: (details) {
+                  // Resume auto-movement after a delay when user releases
+                  Future.delayed(const Duration(seconds: 3), () {
+                    if (mounted && !_showMenu && !_expanded) {
+                      _startAutoMovement();
                     }
-                    
-                    _avatarX += details.delta.dx;
-                    _avatarY += details.delta.dy;
-                    
-                    // Enforce bounds using helper method
-                    _clampAvatarPosition(screenWidth, screenHeight);
                   });
                 },
                 child: ClipRRect(
@@ -409,20 +576,21 @@ class _OverlayWidgetState extends State<OverlayWidget> {
                     // Chat button (top)
                     _buildCircularButton(
                       angle: -90,
-                      radius: 80, // Original radius
+                      radius: 68, // Wrapped tightly around avatar
                       icon: Icons.chat_bubble,
                       onTap: () {
                         setState(() {
                           _showMenu = false;
                           _expanded = true;
                         });
+                        _resizeOverlay(true); // Resize to chat dimensions
                       },
                     ),
                     
                     // Voice/TTS button (top-right)
                     _buildCircularButton(
                       angle: -45,
-                      radius: 80, // Original radius
+                      radius: 68, // Wrapped tightly around avatar
                       icon: _playerState == PlayerState.playing ? Icons.pause : Icons.play_arrow,
                       onTap: () async {
                         if (_ttsPath != null) {
@@ -438,7 +606,7 @@ class _OverlayWidgetState extends State<OverlayWidget> {
                     // Settings button (right)
                     _buildCircularButton(
                       angle: 0,
-                      radius: 80, // Original radius
+                      radius: 68, // Wrapped tightly around avatar
                       icon: Icons.settings,
                       onTap: () {
                         setState(() => _showMenu = false);
@@ -449,7 +617,7 @@ class _OverlayWidgetState extends State<OverlayWidget> {
                     // Microphone button (bottom-right)
                     _buildCircularButton(
                       angle: 45,
-                      radius: 80, // Original radius
+                      radius: 68, // Wrapped tightly around avatar
                       icon: Icons.mic,
                       onTap: () {
                         setState(() => _showMenu = false);
@@ -460,7 +628,7 @@ class _OverlayWidgetState extends State<OverlayWidget> {
                     // Close button (bottom)
                     _buildCircularButton(
                       angle: 90,
-                      radius: 80, // Original radius
+                      radius: 68, // Wrapped tightly around avatar
                       icon: Icons.close,
                       onTap: () async {
                         await FlutterOverlayWindow.closeOverlay();
@@ -470,7 +638,7 @@ class _OverlayWidgetState extends State<OverlayWidget> {
                     // Info button (bottom-left)
                     _buildCircularButton(
                       angle: 135,
-                      radius: 80, // Original radius
+                      radius: 68, // Wrapped tightly around avatar
                       icon: Icons.info_outline,
                       onTap: () {
                         setState(() => _showMenu = false);
@@ -481,7 +649,7 @@ class _OverlayWidgetState extends State<OverlayWidget> {
                     // Minimize button (left)
                     _buildCircularButton(
                       angle: 180,
-                      radius: 80, // Original radius
+                      radius: 68, // Wrapped tightly around avatar
                       icon: Icons.minimize,
                       onTap: () {
                         setState(() => _showMenu = false);
@@ -491,7 +659,7 @@ class _OverlayWidgetState extends State<OverlayWidget> {
                     // Favorite/bookmark button (top-left)
                     _buildCircularButton(
                       angle: -135,
-                      radius: 80, // Original radius
+                      radius: 68, // Wrapped tightly around avatar
                       icon: Icons.favorite_border,
                       onTap: () {
                         setState(() => _showMenu = false);
@@ -509,7 +677,10 @@ class _OverlayWidgetState extends State<OverlayWidget> {
             top: 0,
             bottom: 0,
             child: GestureDetector(
-              onTap: () => setState(() => _expanded = false),
+              onTap: () {
+                setState(() => _expanded = false);
+                _resizeOverlay(false); // Resize back to avatar dimensions
+              },
               child: Container(
                 color: Colors.black.withOpacity(0.8),
                 child: GestureDetector(
@@ -530,7 +701,7 @@ class _OverlayWidgetState extends State<OverlayWidget> {
                                 bottom: BorderSide(color: const Color(0xFFFFE7B0).withOpacity(0.3)),
                               ),
                             ),
-                            child: Row(
+                              child: Row(
                               children: [
                                 Container(
                                   width: 40,
@@ -556,7 +727,10 @@ class _OverlayWidgetState extends State<OverlayWidget> {
                                 ),
                                 IconButton(
                                   icon: const Icon(Icons.close, color: Colors.white),
-                                  onPressed: () => setState(() => _expanded = false),
+                                  onPressed: () {
+                                    setState(() => _expanded = false);
+                                    _resizeOverlay(false); // Resize back to avatar dimensions
+                                  },
                                 ),
                               ],
                             ),
@@ -668,7 +842,6 @@ class _OverlayWidgetState extends State<OverlayWidget> {
               ),
             ),
         ],
-      ),
     );
   }
 }
