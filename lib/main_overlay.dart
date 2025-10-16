@@ -221,8 +221,182 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
   String? _error;
   String? _ttsPath;
   PlayerState? _playerState;
+  
+  // Auto-movement variables
+  Timer? _moveTimer;
+  bool _isAutoMoving = false;
+  double _currentX = 0.0;
+  double _currentY = 0.0;
+  double _velocityX = 0.0; // For bounce physics
+  double _velocityY = 0.0;
+  final Random _random = Random();
+  bool _positionInitialized = false;
+  Timer? _positionMonitor;
+  bool _userIsDragging = false;
+  Timer? _dragResumeTimer;
 
-  // Auto-movement and position tracking removed - Java handles all positioning natively
+  // Start auto-movement - moves the entire window programmatically
+  void _startAutoMovement() async {
+    if (_isAutoMoving || _expanded || _showMenu) return;
+    
+    // Get current position from Java first
+    if (!_positionInitialized) {
+      try {
+        final pos = await FlutterOverlayWindow.getOverlayPosition();
+        _currentX = pos.x;
+        _currentY = pos.y;
+        _positionInitialized = true;
+        print('📍 Initialized position: ($_currentX, $_currentY)');
+      } catch (e) {
+        print('❌ Failed to get position: $e');
+        // Default to center
+        _currentX = 440.0; // (1080 - 200) / 2
+        _currentY = 1070.0; // (2340 - 200) / 2
+        _positionInitialized = true;
+      }
+    }
+    
+    // Use actual screen dimensions (measured: 1080x2400px at 420dpi = 411x914dp)
+    const screenWidth = 411.0;  // dp
+    const screenHeight = 914.0; // dp
+    const windowSize = 200.0;
+    
+    // Avatar positioning within window (from UI layout):
+    // Avatar is 100x120dp at position (50, 40) within 200x200 window
+    // So avatar occupies: left=50dp, right=150dp, top=40dp, bottom=160dp
+    const avatarLeft = 50.0;   // Left margin in window
+    const avatarRight = 50.0;  // Right margin in window (200 - 150)
+    const avatarTop = 40.0;    // Top margin in window
+    const avatarBottom = 40.0; // Bottom margin in window (200 - 160)
+    
+    print('📱 Screen dimensions: ${screenWidth}dp x ${screenHeight}dp');
+    
+    // Initialize random velocity (bouncing ball physics)
+    _velocityX = (_random.nextDouble() * 4.0 - 2.0); // -2 to 2 dp per frame
+    _velocityY = (_random.nextDouble() * 4.0 - 2.0);
+    
+    print('🎾 Bounce physics starting: position=($_currentX, $_currentY) velocity=($_velocityX, $_velocityY)');
+    _isAutoMoving = true;
+    
+    // Monitor position for user drag detection (start after a short delay)
+    Future.delayed(const Duration(milliseconds: 500), () {
+      if (!mounted || !_isAutoMoving) return;
+      
+      _positionMonitor = Timer.periodic(const Duration(milliseconds: 100), (timer) async {
+        if (!_isAutoMoving || !mounted) {
+          timer.cancel();
+          return;
+        }
+        
+        try {
+          final pos = await FlutterOverlayWindow.getOverlayPosition();
+          final diffX = (pos.x - _currentX).abs();
+          final diffY = (pos.y - _currentY).abs();
+          
+          // If position changed significantly without us moving it, user is dragging
+          // Increased threshold to 20dp to avoid false positives
+          if (diffX > 20 || diffY > 20) {
+            if (!_userIsDragging) {
+              print('👆 User drag detected! Pausing auto-movement...');
+            }
+            _userIsDragging = true;
+            
+            // Update tracked position but clamp it within bounds
+            // Account for avatar position within window so avatar stays fully visible
+            final minX = -avatarLeft;  // Allow window to go left until avatar's left edge hits screen left
+            final maxX = screenWidth - windowSize + avatarRight;  // Allow window to go right until avatar's right edge hits screen right
+            final minY = -avatarTop;   // Allow window to go up until avatar's top edge hits screen top
+            final maxY = screenHeight - windowSize + avatarBottom; // Allow window to go down until avatar's bottom edge hits screen bottom
+            _currentX = pos.x.clamp(minX, maxX);
+            _currentY = pos.y.clamp(minY, maxY);
+            
+            // Cancel previous resume timer and create a new one
+            _dragResumeTimer?.cancel();
+            _dragResumeTimer = Timer(const Duration(seconds: 2), () {
+              if (mounted && _userIsDragging) {
+                _userIsDragging = false;
+                print('✅ Resuming auto-movement from ($_currentX, $_currentY)');
+              }
+            });
+          }
+        } catch (e) {
+          // Ignore position check errors
+        }
+      });
+    });
+    
+    _moveTimer = Timer.periodic(const Duration(milliseconds: 50), (timer) {
+      if (_expanded || _showMenu || !mounted) {
+        timer.cancel();
+        _isAutoMoving = false;
+        return;
+      }
+      
+      // Skip movement if user is dragging
+      if (_userIsDragging) return;
+      
+      // Calculate boundaries accounting for avatar position within window
+      final minX = -avatarLeft;
+      final maxX = screenWidth - windowSize + avatarRight;
+      final minY = -avatarTop;
+      final maxY = screenHeight - windowSize + avatarBottom;
+      
+      // Apply velocity (bouncing ball physics)
+      _currentX += _velocityX;
+      _currentY += _velocityY;
+      
+      // Bounce off left/right edges
+      if (_currentX <= minX) {
+        _currentX = minX;
+        _velocityX = _velocityX.abs(); // Bounce right
+        print('⬅️ Bounced off left edge, velocity now: $_velocityX');
+      } else if (_currentX >= maxX) {
+        _currentX = maxX;
+        _velocityX = -_velocityX.abs(); // Bounce left
+        print('➡️ Bounced off right edge, velocity now: $_velocityX');
+      }
+      
+      // Bounce off top/bottom edges
+      if (_currentY <= minY) {
+        _currentY = minY;
+        _velocityY = _velocityY.abs(); // Bounce down
+        print('⬆️ Bounced off top edge, velocity now: $_velocityY');
+      } else if (_currentY >= maxY) {
+        _currentY = maxY;
+        _velocityY = -_velocityY.abs(); // Bounce up
+        print('⬇️ Bounced off bottom edge, velocity now: $_velocityY');
+      }
+      
+      // Force clamp to be absolutely sure (safety net)
+      _currentX = _currentX.clamp(minX, maxX);
+      _currentY = _currentY.clamp(minY, maxY);
+      
+      // Move the overlay window
+      FlutterOverlayWindow.moveOverlay(OverlayPosition(_currentX, _currentY));
+    });
+  }
+  
+  // Stop auto-movement
+  void _stopAutoMovement() async {
+    _moveTimer?.cancel();
+    _moveTimer = null;
+    _positionMonitor?.cancel();
+    _positionMonitor = null;
+    _dragResumeTimer?.cancel();
+    _dragResumeTimer = null;
+    _isAutoMoving = false;
+    _userIsDragging = false;
+    
+    // Update current position from Java when stopping
+    try {
+      final pos = await FlutterOverlayWindow.getOverlayPosition();
+      _currentX = pos.x;
+      _currentY = pos.y;
+      print('📍 Updated position after stop: ($_currentX, $_currentY)');
+    } catch (e) {
+      print('❌ Failed to update position: $e');
+    }
+  }
 
   // Resize overlay window based on UI state
   Future<void> _resizeOverlay(bool chatExpanded) async {
@@ -242,12 +416,15 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
       if (mounted) setState(() => _playerState = state);
     });
     
-    // Auto-movement disabled - Java handles all positioning natively now
-    // This eliminates the (0,0) anchoring issue completely
+    // Start auto-movement after a delay (gives time for window to be created)
+    Future.delayed(const Duration(seconds: 3), () {
+      if (mounted) _startAutoMovement();
+    });
   }
 
   @override
   void dispose() {
+    _stopAutoMovement();
     _controller.dispose();
     _player.dispose();
     super.dispose();
@@ -384,6 +561,16 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
                 onTap: () {
                   setState(() {
                     _showMenu = !_showMenu;
+                    if (_showMenu) {
+                      _stopAutoMovement(); // Stop when menu opens
+                    } else {
+                      // Resume after menu closes
+                      Future.delayed(const Duration(seconds: 2), () {
+                        if (mounted && !_showMenu && !_expanded) {
+                          _startAutoMovement();
+                        }
+                      });
+                    }
                   });
                 },
                 onLongPress: () async {
