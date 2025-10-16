@@ -278,10 +278,27 @@ public class OverlayService extends Service implements View.OnTouchListener {
 
     private void moveOverlay(int x, int y, MethodChannel.Result result) {
         if (windowManager != null) {
+            // Cancel any running snap animation that might interfere
+            if (mTrayAnimationTimer != null) {
+                mTrayAnimationTimer.cancel();
+                mTrayAnimationTimer = null;
+            }
+            if (mTrayTimerTask != null) {
+                mTrayTimerTask.cancel();
+                mTrayTimerTask = null;
+            }
+            
             WindowManager.LayoutParams params = (WindowManager.LayoutParams) flutterView.getLayoutParams();
-            params.x = (x == -1999 || x == -1) ? -1 : dpToPx(x);
-            params.y = dpToPx(y);
+            int newX = (x == -1999 || x == -1) ? -1 : dpToPx(x);
+            int newY = dpToPx(y);
+            
+            // Log position updates for debugging
+            android.util.Log.d("OverlayService", String.format("moveOverlay: Setting position to (%d, %d) px [from (%d, %d) dp]", newX, newY, x, y));
+            
+            params.x = newX;
+            params.y = newY;
             windowManager.updateViewLayout(flutterView, params);
+            
             if (result != null)
                 result.success(true);
         } else {
@@ -295,8 +312,13 @@ public class OverlayService extends Service implements View.OnTouchListener {
         if (instance != null && instance.flutterView != null) {
             WindowManager.LayoutParams params = (WindowManager.LayoutParams) instance.flutterView.getLayoutParams();
             Map<String, Double> position = new HashMap<>();
-            position.put("x", instance.pxToDp(params.x));
-            position.put("y", instance.pxToDp(params.y));
+            double xDp = instance.pxToDp(params.x);
+            double yDp = instance.pxToDp(params.y);
+            
+            android.util.Log.d("OverlayService", String.format("getCurrentPosition: (%d, %d) px = (%.1f, %.1f) dp", params.x, params.y, xDp, yDp));
+            
+            position.put("x", xDp);
+            position.put("y", yDp);
             return position;
         }
         return null;
@@ -433,13 +455,14 @@ public class OverlayService extends Service implements View.OnTouchListener {
                 case MotionEvent.ACTION_UP:
                 case MotionEvent.ACTION_CANCEL:
                     lastYPosition = params.y;
-                    if (!WindowSetup.positionGravity.equals("none")) {
-                        if (windowManager == null) return false;
-                        windowManager.updateViewLayout(flutterView, params);
-                        mTrayTimerTask = new TrayAnimationTimerTask();
-                        mTrayAnimationTimer = new Timer();
-                        mTrayAnimationTimer.schedule(mTrayTimerTask, 0, 25);
-                    }
+                    // Disabled snap-to-edge animation - Flutter handles all positioning
+                    // if (!WindowSetup.positionGravity.equals("none")) {
+                    //     if (windowManager == null) return false;
+                    //     windowManager.updateViewLayout(flutterView, params);
+                    //     mTrayTimerTask = new TrayAnimationTimerTask();
+                    //     mTrayAnimationTimer = new Timer();
+                    //     mTrayAnimationTimer.schedule(mTrayTimerTask, 0, 25);
+                    // }
                     return false;
                 default:
                     return false;

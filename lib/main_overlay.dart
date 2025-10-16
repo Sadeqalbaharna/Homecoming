@@ -63,12 +63,12 @@ Future<void> main() async {
 
 Future<void> startOverlay() async {
   await FlutterOverlayWindow.showOverlay(
-    enableDrag: false, // Disable Java's drag handling - we'll handle it in Flutter with moveOverlay
+    enableDrag: true, // Let Java handle drag natively for smooth performance!
     overlayTitle: "Kai",
     overlayContent: "Tap to chat with Kai!",
     flag: OverlayFlag.focusPointer, // FLAG_NOT_TOUCH_MODAL - enables click-through on transparent areas!
     visibility: NotificationVisibility.visibilityPublic,
-    positionGravity: PositionGravity.none,
+    positionGravity: PositionGravity.none, // No snap-to-edge behavior
     width: 200, // Compact size for floating: Kai (100px) + minimal padding
     height: 200, // Compact size for floating
   );
@@ -221,96 +221,8 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
   String? _error;
   String? _ttsPath;
   PlayerState? _playerState;
-  
-  // Window position on screen (in dp)
-  double _windowX = 0.0;
-  double _windowY = 0.0;
-  bool _positioned = false;
-  
-  // Auto-movement variables - now moves the window, not the avatar
-  Timer? _moveTimer;
-  bool _isAutoMoving = false;
-  double _targetX = 0.0;
-  double _targetY = 0.0;
-  final Random _random = Random();
 
-  // Helper to ensure window stays within screen bounds
-  void _clampWindowPosition(double screenWidth, double screenHeight) {
-    const windowSize = 200.0; // Our overlay window is 200x200
-    
-    // Keep window fully on screen
-    _windowX = _windowX.clamp(0.0, screenWidth - windowSize);
-    _windowY = _windowY.clamp(0.0, screenHeight - windowSize);
-  }
-  
-  // Start auto-movement - moves the entire window
-  void _startAutoMovement() {
-    if (_isAutoMoving || _expanded || _showMenu) return;
-    
-    print('🚀 Starting auto-movement');
-    _isAutoMoving = true;
-    _moveTimer = Timer.periodic(const Duration(milliseconds: 50), (timer) {
-      if (_expanded || _showMenu) {
-        timer.cancel();
-        _isAutoMoving = false;
-        return;
-      }
-      
-      if (!mounted) {
-        timer.cancel();
-        return;
-      }
-      
-      final screenWidth = MediaQuery.of(context).size.width;
-      final screenHeight = MediaQuery.of(context).size.height;
-      
-      // Initialize window position if needed - center on screen
-      if (!_positioned) {
-        const windowSize = 200.0;
-        _windowX = (screenWidth - windowSize) / 2;
-        _windowY = (screenHeight - windowSize) / 2;
-        _positioned = true;
-        
-        // Don't move window here - it's already centered by Java side on creation
-        // We just need to track its position in our variables
-        
-        // Set first random target - anywhere on screen within bounds
-        _targetX = _random.nextDouble() * (screenWidth - windowSize);
-        _targetY = _random.nextDouble() * (screenHeight - windowSize);
-      }
-      
-      // Move window towards target
-      const moveSpeed = 2.0;
-      final dx = _targetX - _windowX;
-      final dy = _targetY - _windowY;
-      final distance = sqrt(dx * dx + dy * dy);
-      
-      if (distance < moveSpeed) {
-        // Reached target, pick new one anywhere on screen
-        const windowSize = 200.0;
-        _targetX = _random.nextDouble() * (screenWidth - windowSize);
-        _targetY = _random.nextDouble() * (screenHeight - windowSize);
-      } else {
-        // Move window towards target
-        setState(() {
-          _windowX += (dx / distance) * moveSpeed;
-          _windowY += (dy / distance) * moveSpeed;
-          _clampWindowPosition(screenWidth, screenHeight);
-        });
-        
-        print('🚀 Auto-moving window to ($_windowX, $_windowY)');
-        // Actually move the overlay window on screen
-        FlutterOverlayWindow.moveOverlay(OverlayPosition(_windowX, _windowY));
-      }
-    });
-  }
-  
-  // Stop auto-movement
-  void _stopAutoMovement() {
-    _moveTimer?.cancel();
-    _moveTimer = null;
-    _isAutoMoving = false;
-  }
+  // Auto-movement and position tracking removed - Java handles all positioning natively
 
   // Resize overlay window based on UI state
   Future<void> _resizeOverlay(bool chatExpanded) async {
@@ -330,41 +242,12 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
       if (mounted) setState(() => _playerState = state);
     });
     
-    // Initialize window position by getting actual position from platform
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      if (!_positioned && mounted) {
-        try {
-          // Get the ACTUAL current window position from Java
-          final currentPos = await FlutterOverlayWindow.getOverlayPosition();
-          if (mounted) {
-            _windowX = currentPos.x;
-            _windowY = currentPos.y;
-            _positioned = true;
-            print('🎯 Got actual window position from platform: ($_windowX, $_windowY)');
-          }
-        } catch (e) {
-          print('❌ Error getting position: $e');
-          // Fallback if position not available
-          final screenWidth = 1080.0;
-          final screenHeight = 2340.0;
-          const windowSize = 200.0;
-          _windowX = screenWidth - windowSize - 20.0;
-          _windowY = screenHeight - windowSize - 20.0;
-          _positioned = true;
-          print('🎯 Using fallback position: ($_windowX, $_windowY)');
-        }
-      }
-    });
-    
-    // Start auto-movement after a short delay
-    Future.delayed(const Duration(seconds: 2), () {
-      if (mounted) _startAutoMovement();
-    });
+    // Auto-movement disabled - Java handles all positioning natively now
+    // This eliminates the (0,0) anchoring issue completely
   }
 
   @override
   void dispose() {
-    _stopAutoMovement();
     _controller.dispose();
     _player.dispose();
     super.dispose();
@@ -473,10 +356,6 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
 
   @override
   Widget build(BuildContext context) {
-    // Get screen size for proper positioning
-    final screenWidth = MediaQuery.of(context).size.width;
-    final screenHeight = MediaQuery.of(context).size.height;
-    
     return Stack(
       fit: StackFit.expand,
       children: [
@@ -505,54 +384,14 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
                 onTap: () {
                   setState(() {
                     _showMenu = !_showMenu;
-                    if (_showMenu) {
-                      _stopAutoMovement(); // Stop when menu opens
-                    } else {
-                      // Resume after menu closes
-                      Future.delayed(const Duration(seconds: 2), () {
-                        if (mounted && !_showMenu && !_expanded) {
-                          _startAutoMovement();
-                        }
-                      });
-                    }
                   });
                 },
                 onLongPress: () async {
                   // Close overlay on long press
                   await FlutterOverlayWindow.closeOverlay();
                 },
-                onPanStart: (details) {
-                  print('🎯 Pan started at ${details.localPosition}');
-                  // Stop auto-movement when user starts dragging
-                  _stopAutoMovement();
-                  // Just log current position - it was already initialized in initState
-                  print('🎯 Window position at drag start: (${_windowX}, ${_windowY}), _positioned: $_positioned');
-                },
-                onPanUpdate: (details) {
-                  // Use hardcoded screen size since MediaQuery returns overlay size
-                  const screenWidth = 1080.0;
-                  const screenHeight = 2340.0;
-                  
-                  print('🎯 Pan update delta: ${details.delta}');
-                  setState(() {
-                    // Move the window by the drag delta
-                    _windowX += details.delta.dx;
-                    _windowY += details.delta.dy;
-                    _clampWindowPosition(screenWidth, screenHeight);
-                  });
-                  
-                  print('🎯 Moving window to (${_windowX}, ${_windowY})');
-                  // Actually move the overlay window
-                  FlutterOverlayWindow.moveOverlay(OverlayPosition(_windowX, _windowY));
-                },
-                onPanEnd: (details) {
-                  // Resume auto-movement after a delay when user releases
-                  Future.delayed(const Duration(seconds: 3), () {
-                    if (mounted && !_showMenu && !_expanded) {
-                      _startAutoMovement();
-                    }
-                  });
-                },
+                // Drag handling removed - Java handles it natively now (enableDrag=true)
+                // This gives buttery smooth dragging without Flutter->Java bridge overhead
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(50),
                   child: Container(
