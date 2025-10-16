@@ -2,7 +2,7 @@
 
 import 'dart:io';
 import 'package:dio/dio.dart';
-import 'package:record/record.dart';
+import 'package:flutter_sound/flutter_sound.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
 import 'secure_storage_service.dart';
@@ -22,8 +22,9 @@ class VoiceConfig {
 
 /// Voice service for speech-to-text using OpenAI Whisper
 class VoiceService {
-  final AudioRecorder _recorder = AudioRecorder();
+  final FlutterSoundRecorder _recorder = FlutterSoundRecorder();
   late final Dio _dio;
+  bool _isInitialized = false;
   
   bool _isRecording = false;
   String? _currentRecordingPath;
@@ -33,6 +34,19 @@ class VoiceService {
       connectTimeout: const Duration(seconds: 30),
       receiveTimeout: const Duration(seconds: 60),
     ));
+    _initRecorder();
+  }
+  
+  /// Initialize the recorder
+  Future<void> _initRecorder() async {
+    try {
+      await _recorder.openRecorder();
+      _isInitialized = true;
+      print('🎤 Recorder initialized');
+    } catch (e) {
+      print('❌ Failed to initialize recorder: $e');
+      _isInitialized = false;
+    }
   }
   
   /// Check if microphone permission is granted
@@ -50,6 +64,14 @@ class VoiceService {
   /// Start recording audio
   Future<bool> startRecording() async {
     try {
+      if (!_isInitialized) {
+        await _initRecorder();
+        if (!_isInitialized) {
+          print('❌ Recorder not initialized');
+          return false;
+        }
+      }
+      
       // Check permission first
       if (!await hasPermission()) {
         final granted = await requestPermission();
@@ -59,25 +81,17 @@ class VoiceService {
         }
       }
       
-      // Check if device can record
-      if (!await _recorder.hasPermission()) {
-        print('❌ No recording permission');
-        return false;
-      }
-      
       // Get temporary directory for recording
       final tempDir = await getTemporaryDirectory();
       final timestamp = DateTime.now().millisecondsSinceEpoch;
-      _currentRecordingPath = '${tempDir.path}/recording_$timestamp.m4a';
+      _currentRecordingPath = '${tempDir.path}/recording_$timestamp.aac';
       
-      // Start recording
-      await _recorder.start(
-        const RecordConfig(
-          encoder: AudioEncoder.aacLc, // AAC format compatible with Whisper
-          bitRate: 128000,
-          sampleRate: 44100,
-        ),
-        path: _currentRecordingPath!,
+      // Start recording with flutter_sound
+      await _recorder.startRecorder(
+        toFile: _currentRecordingPath!,
+        codec: Codec.aacADTS, // AAC format compatible with Whisper
+        bitRate: 128000,
+        sampleRate: 44100,
       );
       
       _isRecording = true;
@@ -99,15 +113,15 @@ class VoiceService {
         return null;
       }
       
-      final path = await _recorder.stop();
+      await _recorder.stopRecorder();
       _isRecording = false;
       
-      if (path != null) {
-        print('✅ Recording stopped: $path');
-        return path;
-      } else {
-        print('⚠️ Recording stopped but no file path returned');
+      if (_currentRecordingPath != null) {
+        print('✅ Recording stopped: $_currentRecordingPath');
         return _currentRecordingPath;
+      } else {
+        print('⚠️ Recording stopped but no file path');
+        return null;
       }
       
     } catch (e) {
@@ -121,7 +135,7 @@ class VoiceService {
   Future<void> cancelRecording() async {
     try {
       if (_isRecording) {
-        await _recorder.stop();
+        await _recorder.stopRecorder();
         _isRecording = false;
         
         // Delete the recording file
@@ -158,7 +172,7 @@ class VoiceService {
       final formData = FormData.fromMap({
         'file': await MultipartFile.fromFile(
           audioPath,
-          filename: 'audio.m4a',
+          filename: 'audio.aac',
         ),
         'model': VoiceConfig.whisperModel,
         if (VoiceConfig.whisperLanguage.isNotEmpty) 
@@ -248,6 +262,8 @@ class VoiceService {
     if (_isRecording) {
       await cancelRecording();
     }
-    _recorder.dispose();
+    if (_isInitialized) {
+      await _recorder.closeRecorder();
+    }
   }
 }

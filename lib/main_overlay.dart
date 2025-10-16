@@ -14,8 +14,7 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'services/ai_service.dart';
-// TODO: Re-enable voice service after fixing record package compatibility
-// import 'services/voice_service.dart';
+import 'services/voice_service.dart';
 import 'services/secure_storage_service.dart';
 import 'api_key_setup_screen.dart';
 
@@ -24,6 +23,9 @@ const String kAvatarIdleGif = 'assets/avatar/images/mage.png';
 
 /// Global AI service instance
 final aiService = AIService();
+
+/// Global voice service instance
+final voiceService = VoiceService();
 
 // ============= OVERLAY ENTRY POINT =============
 // This function runs in a separate isolate for the overlay window
@@ -478,8 +480,7 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
     _stopAutoMovement();
     _controller.dispose();
     _player.dispose();
-    // TODO: Re-enable voice service
-    // _voiceService.dispose();
+    voiceService.dispose();
     super.dispose();
   }
 
@@ -490,19 +491,14 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
     return file.path;
   }
   
-  /// Start voice recording - TODO: Re-enable after fixing record package
+  /// Start voice recording
   Future<void> _startVoiceRecording() async {
-    setState(() {
-      _error = 'Voice input temporarily disabled - coming soon!';
-      _isRecording = false;
-    });
-    /* TODO: Re-enable
     setState(() {
       _error = null;
       _isRecording = true;
     });
     
-    final started = await _voiceService.startRecording();
+    final started = await voiceService.startRecording();
     if (!started) {
       setState(() {
         _error = 'Failed to start recording. Please check microphone permission.';
@@ -511,17 +507,10 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
     } else {
       print('🎤 Voice recording started');
     }
-    */
   }
   
-  /// Stop voice recording and transcribe - TODO: Re-enable after fixing record package
+  /// Stop voice recording and transcribe
   Future<void> _stopVoiceRecording() async {
-    if (!_isRecording) return;
-    setState(() {
-      _error = 'Voice input temporarily disabled - coming soon!';
-      _isRecording = false;
-    });
-    /* TODO: Re-enable
     if (!_isRecording) return;
     
     setState(() {
@@ -533,34 +522,32 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
     
     try {
       // Stop recording
-      final audioPath = await _voiceService.stopRecording();
+      final audioPath = await voiceService.stopRecording();
       if (audioPath == null) {
         throw Exception('Failed to save recording');
       }
       
       print('🎯 Transcribing audio...');
       
-      // Transcribe with Whisper
-      final transcription = await _voiceService.transcribeAudio(audioPath);
+      // Transcribe audio
+      final transcription = await voiceService.transcribeAudio(audioPath);
       if (transcription == null || transcription.isEmpty) {
         throw Exception('Failed to transcribe audio');
       }
       
-      print('✅ Transcribed: $transcription');
+      print('✅ Transcription: $transcription');
       
-      // Set the transcription in the text field
+      // Set transcription as input and send
       _controller.text = transcription;
-      
-      // Automatically send the message
-      await _sendMessage(transcription);
+      await _send();
       
     } catch (e) {
-      setState(() => _error = 'Voice error: $e');
+      setState(() {
+        _error = 'Voice input failed: $e';
+        _sending = false;
+      });
       print('❌ Voice recording error: $e');
-    } finally {
-      setState(() => _sending = false);
     }
-    */
   }
   
   /// Send message with text (extracted from _send for reuse)
@@ -845,13 +832,15 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
                 color: Colors.black.withOpacity(0.8),
                 child: GestureDetector(
                   onTap: () {}, // Prevents closing when tapping chat area
-                  child: Container(
-                    margin: EdgeInsets.zero, // NO margin - goes to screen edges
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF0D0A07),
-                      border: Border.all(color: const Color(0xFFFFE7B0), width: 2),
-                    ),
-                      child: Column(
+                  child: Material(
+                    color: Colors.transparent,
+                    child: Container(
+                      margin: EdgeInsets.zero, // NO margin - goes to screen edges
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF0D0A07),
+                        border: Border.all(color: const Color(0xFFFFE7B0), width: 2),
+                      ),
+                        child: Column(
                         children: [
                           // Header
                           Container(
@@ -1028,6 +1017,7 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
                 ),
               ),
             ),
+          ),
         ],
     );
   }
