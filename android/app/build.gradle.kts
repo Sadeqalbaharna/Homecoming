@@ -8,8 +8,8 @@ plugins {
 
 android {
     namespace = "com.homecoming.homecoming_app"
-    compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    compileSdk = 35  // Updated for flutter_sound and audioplayers_android
+    ndkVersion = "27.0.12077973"  // Updated for plugin compatibility
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
@@ -25,8 +25,8 @@ android {
         applicationId = "com.homecoming.app"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
-        targetSdk = flutter.targetSdkVersion
+        minSdk = 24  // Updated for flutter_sound requirement
+        targetSdk = 35  // Match compileSdk
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
