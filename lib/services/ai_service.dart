@@ -7,15 +7,54 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'firebase_service.dart';
+import 'secure_storage_service.dart';
 
 /// Configuration class to hold all API keys
-/// Uses environment variables for secure secret management
+/// Uses secure storage for encrypted key management
 class AIConfig {
-  // API keys loaded from environment variables (never commit real keys to git!)
-  static const String openaiApiKey = String.fromEnvironment('OPENAI_API_KEY', defaultValue: '');
-  static const String elevenlabsApiKey = String.fromEnvironment('ELEVENLABS_API_KEY', defaultValue: '');
-  static const String googleApiKey = String.fromEnvironment('GOOGLE_API_KEY', defaultValue: '');
-  static const String googleCseId = String.fromEnvironment('GOOGLE_CSE_ID', defaultValue: '');
+  static final _secureStorage = SecureStorageService();
+  
+  // Cached keys for performance
+  static String? _cachedOpenAIKey;
+  static String? _cachedElevenLabsKey;
+  static String? _cachedGoogleKey;
+  static String? _cachedGoogleCseId;
+  
+  /// Get OpenAI API Key from secure storage
+  static Future<String> getOpenAIKey() async {
+    if (_cachedOpenAIKey != null) return _cachedOpenAIKey!;
+    _cachedOpenAIKey = await _secureStorage.getOpenAIKey() ?? '';
+    return _cachedOpenAIKey!;
+  }
+  
+  /// Get ElevenLabs API Key from secure storage
+  static Future<String> getElevenLabsKey() async {
+    if (_cachedElevenLabsKey != null) return _cachedElevenLabsKey!;
+    _cachedElevenLabsKey = await _secureStorage.getElevenLabsKey() ?? '';
+    return _cachedElevenLabsKey!;
+  }
+  
+  /// Get Google API Key from secure storage
+  static Future<String> getGoogleKey() async {
+    if (_cachedGoogleKey != null) return _cachedGoogleKey!;
+    _cachedGoogleKey = await _secureStorage.getGoogleKey() ?? '';
+    return _cachedGoogleKey!;
+  }
+  
+  /// Get Google CSE ID from secure storage
+  static Future<String> getGoogleCseId() async {
+    if (_cachedGoogleCseId != null) return _cachedGoogleCseId!;
+    _cachedGoogleCseId = await _secureStorage.getGoogleCseId() ?? '';
+    return _cachedGoogleCseId!;
+  }
+  
+  /// Clear cached keys (useful after key updates)
+  static void clearCache() {
+    _cachedOpenAIKey = null;
+    _cachedElevenLabsKey = null;
+    _cachedGoogleKey = null;
+    _cachedGoogleCseId = null;
+  }
   
   // ElevenLabs settings
   static const String elevenlabsVoiceId = String.fromEnvironment('ELEVENLABS_VOICE_ID', 
@@ -263,7 +302,8 @@ class AIService {
 
   /// Call OpenAI API for chat completion
   Future<String> _callOpenAI(List<Map<String, String>> messages, String model) async {
-    if (AIConfig.openaiApiKey.isEmpty) {
+    final openaiKey = await AIConfig.getOpenAIKey();
+    if (openaiKey.isEmpty) {
       throw Exception('OpenAI API key not configured');
     }
 
@@ -272,7 +312,7 @@ class AIService {
         'https://api.openai.com/v1/chat/completions',
         options: Options(
           headers: {
-            'Authorization': 'Bearer ${AIConfig.openaiApiKey}',
+            'Authorization': 'Bearer $openaiKey',
             'Content-Type': 'application/json',
           },
         ),
@@ -297,7 +337,8 @@ class AIService {
 
   /// Get personality and mood deltas from text using OpenAI
   Future<Map<String, dynamic>> _getTagsAndDeltas(String text) async {
-    if (AIConfig.openaiApiKey.isEmpty) {
+    final openaiKey = await AIConfig.getOpenAIKey();
+    if (openaiKey.isEmpty) {
       return {
         "tags": <String>[],
         "persona_delta": <String, int>{},
@@ -341,7 +382,8 @@ Text:
 
   /// Text-to-speech using ElevenLabs
   Future<Uint8List?> synthesizeTTS(String text) async {
-    if (AIConfig.elevenlabsApiKey.isEmpty) {
+    final elevenlabsKey = await AIConfig.getElevenLabsKey();
+    if (elevenlabsKey.isEmpty) {
       print('ElevenLabs API key not configured');
       return null;
     }
@@ -351,7 +393,7 @@ Text:
         'https://api.elevenlabs.io/v1/text-to-speech/${AIConfig.elevenlabsVoiceId}',
         options: Options(
           headers: {
-            'xi-api-key': AIConfig.elevenlabsApiKey,
+            'xi-api-key': elevenlabsKey,
             'Content-Type': 'application/json',
           },
           responseType: ResponseType.bytes,
@@ -554,13 +596,18 @@ ${history.join('\n')}''';
 
   /// Diagnostic information
   Future<Map<String, dynamic>> getDiagnostics() async {
+    final openaiKey = await AIConfig.getOpenAIKey();
+    final elevenlabsKey = await AIConfig.getElevenLabsKey();
+    final googleKey = await AIConfig.getGoogleKey();
+    final googleCseId = await AIConfig.getGoogleCseId();
+    
     return {
       'status': 'ok',
       'env': {
-        'OPENAI_API_KEY_set': AIConfig.openaiApiKey.isNotEmpty,
-        'ELEVENLABS_API_KEY_set': AIConfig.elevenlabsApiKey.isNotEmpty,
-        'GOOGLE_API_KEY_set': AIConfig.googleApiKey.isNotEmpty,
-        'GOOGLE_CSE_ID_set': AIConfig.googleCseId.isNotEmpty,
+        'OPENAI_API_KEY_set': openaiKey.isNotEmpty,
+        'ELEVENLABS_API_KEY_set': elevenlabsKey.isNotEmpty,
+        'GOOGLE_API_KEY_set': googleKey.isNotEmpty,
+        'GOOGLE_CSE_ID_set': googleCseId.isNotEmpty,
       }
     };
   }

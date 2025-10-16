@@ -6,6 +6,7 @@ list(APPEND FLUTTER_PLUGIN_LIST
   audioplayers_windows
   firebase_core
   flutter_acrylic
+  flutter_secure_storage_windows
   screen_retriever
   window_manager
 )

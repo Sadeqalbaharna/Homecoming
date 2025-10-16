@@ -14,6 +14,10 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'services/ai_service.dart';
+// TODO: Re-enable voice service after fixing record package compatibility
+// import 'services/voice_service.dart';
+import 'services/secure_storage_service.dart';
+import 'api_key_setup_screen.dart';
 
 /// Kai avatar asset
 const String kAvatarIdleGif = 'assets/avatar/images/mage.png';
@@ -39,7 +43,42 @@ void overlayMain() {
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  // Check if we have overlay permission
+  // Check for API keys first
+  final secureStorage = SecureStorageService();
+  final hasKeys = await secureStorage.hasKeys();
+  
+  if (!hasKeys) {
+    // No API keys - show setup screen first
+    runApp(MaterialApp(
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        primarySwatch: Colors.amber,
+        brightness: Brightness.dark,
+      ),
+      home: ApiKeySetupScreen(
+        onComplete: () async {
+          // Keys configured, now check overlay permission
+          final status = await FlutterOverlayWindow.isPermissionGranted();
+          if (!status) {
+            // Need overlay permission
+            runApp(const PermissionRequestApp());
+          } else {
+            // Start overlay
+            await startOverlay();
+            const platform = MethodChannel('com.homecoming.app/activity');
+            try {
+              await platform.invokeMethod('finishActivity');
+            } catch (e) {
+              SystemNavigator.pop();
+            }
+          }
+        },
+      ),
+    ));
+    return;
+  }
+  
+  // API keys exist, check overlay permission
   final bool status = await FlutterOverlayWindow.isPermissionGranted();
   
   if (!status) {
@@ -221,6 +260,10 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
   String? _error;
   String? _ttsPath;
   PlayerState? _playerState;
+  
+  // Voice recording - TODO: Re-enable after fixing record package
+  // final _voiceService = VoiceService();
+  bool _isRecording = false;
   
   // Auto-movement variables
   Timer? _moveTimer;
@@ -435,12 +478,94 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
     _stopAutoMovement();
     _controller.dispose();
     _player.dispose();
+    // TODO: Re-enable voice service
+    // _voiceService.dispose();
     super.dispose();
   }
 
-  Future<void> _send() async {
-    final text = _controller.text.trim();
-    if (text.isEmpty || _sending) return;
+  Future<String> _writeTempMp3(Uint8List bytes) async {
+    final dir = await getTemporaryDirectory();
+    final file = File('${dir.path}/kai_${DateTime.now().millisecondsSinceEpoch}.mp3');
+    await file.writeAsBytes(bytes, flush: true);
+    return file.path;
+  }
+  
+  /// Start voice recording - TODO: Re-enable after fixing record package
+  Future<void> _startVoiceRecording() async {
+    setState(() {
+      _error = 'Voice input temporarily disabled - coming soon!';
+      _isRecording = false;
+    });
+    /* TODO: Re-enable
+    setState(() {
+      _error = null;
+      _isRecording = true;
+    });
+    
+    final started = await _voiceService.startRecording();
+    if (!started) {
+      setState(() {
+        _error = 'Failed to start recording. Please check microphone permission.';
+        _isRecording = false;
+      });
+    } else {
+      print('🎤 Voice recording started');
+    }
+    */
+  }
+  
+  /// Stop voice recording and transcribe - TODO: Re-enable after fixing record package
+  Future<void> _stopVoiceRecording() async {
+    if (!_isRecording) return;
+    setState(() {
+      _error = 'Voice input temporarily disabled - coming soon!';
+      _isRecording = false;
+    });
+    /* TODO: Re-enable
+    if (!_isRecording) return;
+    
+    setState(() {
+      _isRecording = false;
+      _sending = true;
+      _reply = null;
+      _error = null;
+    });
+    
+    try {
+      // Stop recording
+      final audioPath = await _voiceService.stopRecording();
+      if (audioPath == null) {
+        throw Exception('Failed to save recording');
+      }
+      
+      print('🎯 Transcribing audio...');
+      
+      // Transcribe with Whisper
+      final transcription = await _voiceService.transcribeAudio(audioPath);
+      if (transcription == null || transcription.isEmpty) {
+        throw Exception('Failed to transcribe audio');
+      }
+      
+      print('✅ Transcribed: $transcription');
+      
+      // Set the transcription in the text field
+      _controller.text = transcription;
+      
+      // Automatically send the message
+      await _sendMessage(transcription);
+      
+    } catch (e) {
+      setState(() => _error = 'Voice error: $e');
+      print('❌ Voice recording error: $e');
+    } finally {
+      setState(() => _sending = false);
+    }
+    */
+  }
+  
+  /// Send message with text (extracted from _send for reuse)
+  Future<void> _sendMessage(String text) async {
+    if (text.isEmpty) return;
     
     setState(() {
       _sending = true;
@@ -472,12 +597,12 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
       setState(() => _sending = false);
     }
   }
-
-  Future<String> _writeTempMp3(Uint8List bytes) async {
-    final dir = await getTemporaryDirectory();
-    final file = File('${dir.path}/kai_${DateTime.now().millisecondsSinceEpoch}.mp3');
-    await file.writeAsBytes(bytes, flush: true);
-    return file.path;
+  
+  /// Original send method (now calls _sendMessage)
+  Future<void> _send() async {
+    final text = _controller.text.trim();
+    if (text.isEmpty || _sending) return;
+    await _sendMessage(text);
   }
   
   /// Helper to build circular menu buttons around Kai
@@ -652,10 +777,14 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
                     _buildCircularButton(
                       angle: 45,
                       radius: 68, // Wrapped tightly around avatar
-                      icon: Icons.mic,
-                      onTap: () {
+                      icon: _isRecording ? Icons.mic_off : Icons.mic,
+                      onTap: () async {
                         setState(() => _showMenu = false);
-                        // TODO: Start voice recording
+                        if (_isRecording) {
+                          await _stopVoiceRecording();
+                        } else {
+                          await _startVoiceRecording();
+                        }
                       },
                     ),
                     
@@ -854,6 +983,26 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
                                   ),
                                 ),
                                 const SizedBox(width: 8),
+                                // Microphone button for voice input in chat
+                                FloatingActionButton(
+                                  mini: true,
+                                  backgroundColor: _isRecording 
+                                      ? Colors.red.withOpacity(0.8)
+                                      : const Color(0xFFFFE7B0).withOpacity(0.8),
+                                  onPressed: _sending ? null : () async {
+                                    if (_isRecording) {
+                                      await _stopVoiceRecording();
+                                    } else {
+                                      await _startVoiceRecording();
+                                    }
+                                  },
+                                  child: Icon(
+                                    _isRecording ? Icons.stop : Icons.mic,
+                                    color: const Color(0xFF0D0A07),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                // Send button
                                 FloatingActionButton(
                                   mini: true,
                                   backgroundColor: const Color(0xFFFFE7B0),

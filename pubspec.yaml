@@ -19,6 +19,11 @@ dependencies:
   dio: ^5.5.0
   # Audio (choose ONE lib → audioplayers)
   audioplayers: ^6.0.0
+  # TODO: Add voice input later - record package has Linux compatibility issues
+  # record: 5.0.4
+  # permission_handler: ^11.0.0
+  # Secure storage for API keys
+  flutter_secure_storage: ^9.0.0
   # State management
   hooks_riverpod: ^2.5.1
   flutter_hooks: ^0.20.5
