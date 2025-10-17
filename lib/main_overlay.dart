@@ -505,8 +505,11 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
   
   /// Start voice recording
   Future<void> _startVoiceRecording() async {
+    print('🎤 [UI] Start voice recording requested');
+    
     // Check permission first
     final hasPermission = await voiceService.hasPermission();
+    print('🎤 [UI] Has permission: $hasPermission');
     
     if (!hasPermission) {
       setState(() {
@@ -515,10 +518,11 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
       
       // Request permission
       final granted = await voiceService.requestPermission();
+      print('🎤 [UI] Permission granted: $granted');
       
       if (!granted) {
         setState(() {
-          _error = 'Microphone permission denied. Please enable it in Settings → Apps → Homecoming → Permissions.';
+          _error = 'Microphone permission denied.\n\nPlease enable manually:\n1. Open Settings\n2. Apps → Homecoming\n3. Permissions → Microphone → Allow';
           _isRecording = false;
         });
         return;
@@ -534,14 +538,17 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
       _isRecording = true;
     });
     
+    print('🎤 [UI] Starting recording...');
     final started = await voiceService.startRecording();
+    print('🎤 [UI] Recording started: $started');
+    
     if (!started) {
       setState(() {
-        _error = 'Failed to start recording. Please check microphone permission in device settings.';
+        _error = 'Failed to start recording.\n\nTroubleshooting:\n1. Check Settings → Apps → Homecoming → Permissions\n2. Ensure Microphone is allowed\n3. Try restarting the app';
         _isRecording = false;
       });
     } else {
-      print('🎤 Voice recording started');
+      print('✅ [UI] Voice recording started successfully');
     }
   }
   

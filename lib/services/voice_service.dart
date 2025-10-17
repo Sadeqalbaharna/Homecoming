@@ -64,19 +64,27 @@ class VoiceService {
   /// Start recording audio
   Future<bool> startRecording() async {
     try {
+      print('🎤 [VoiceService] Starting recording...');
+      
       if (!_isInitialized) {
+        print('🎤 [VoiceService] Initializing recorder...');
         await _initRecorder();
         if (!_isInitialized) {
-          print('❌ Recorder not initialized');
+          print('❌ [VoiceService] Recorder not initialized');
           return false;
         }
       }
       
-      // Check permission first
-      if (!await hasPermission()) {
+      // Check permission status
+      final permStatus = await Permission.microphone.status;
+      print('🎤 [VoiceService] Microphone permission status: $permStatus');
+      
+      if (!permStatus.isGranted) {
+        print('🎤 [VoiceService] Requesting microphone permission...');
         final granted = await requestPermission();
+        print('🎤 [VoiceService] Permission request result: $granted');
         if (!granted) {
-          print('❌ Microphone permission denied');
+          print('❌ [VoiceService] Microphone permission denied');
           return false;
         }
       }
@@ -85,6 +93,8 @@ class VoiceService {
       final tempDir = await getTemporaryDirectory();
       final timestamp = DateTime.now().millisecondsSinceEpoch;
       _currentRecordingPath = '${tempDir.path}/recording_$timestamp.aac';
+      
+      print('🎤 [VoiceService] Starting recorder to: $_currentRecordingPath');
       
       // Start recording with flutter_sound
       await _recorder.startRecorder(
@@ -95,11 +105,12 @@ class VoiceService {
       );
       
       _isRecording = true;
-      print('🎤 Recording started: $_currentRecordingPath');
+      print('✅ [VoiceService] Recording started successfully');
       return true;
       
-    } catch (e) {
-      print('❌ Failed to start recording: $e');
+    } catch (e, stackTrace) {
+      print('❌ [VoiceService] Failed to start recording: $e');
+      print('Stack trace: $stackTrace');
       _isRecording = false;
       return false;
     }
