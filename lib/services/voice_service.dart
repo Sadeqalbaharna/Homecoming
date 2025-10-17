@@ -2,10 +2,9 @@
 
 import 'dart:io';
 import 'package:dio/dio.dart';
-import 'package:flutter_sound/flutter_sound.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:path_provider/path_provider.dart';
 import 'secure_storage_service.dart';
+import 'native_audio_recorder.dart';
 
 /// Configuration for voice/speech services
 class VoiceConfig {
@@ -22,31 +21,19 @@ class VoiceConfig {
 
 /// Voice service for speech-to-text using OpenAI Whisper
 class VoiceService {
-  final FlutterSoundRecorder _recorder = FlutterSoundRecorder();
+  static final VoiceService _instance = VoiceService._internal();
+  factory VoiceService() => _instance;
+  
+  final NativeAudioRecorder _recorder = NativeAudioRecorder();
   late final Dio _dio;
-  bool _isInitialized = false;
   
   bool _isRecording = false;
-  String? _currentRecordingPath;
   
-  VoiceService() {
+  VoiceService._internal() {
     _dio = Dio(BaseOptions(
       connectTimeout: const Duration(seconds: 30),
       receiveTimeout: const Duration(seconds: 60),
     ));
-    _initRecorder();
-  }
-  
-  /// Initialize the recorder
-  Future<void> _initRecorder() async {
-    try {
-      await _recorder.openRecorder();
-      _isInitialized = true;
-      print('🎤 Recorder initialized');
-    } catch (e) {
-      print('❌ Failed to initialize recorder: $e');
-      _isInitialized = false;
-    }
   }
   
   /// Check if microphone permission is granted
@@ -66,15 +53,6 @@ class VoiceService {
     try {
       print('🎤 [VoiceService] Starting recording...');
       
-      if (!_isInitialized) {
-        print('🎤 [VoiceService] Initializing recorder...');
-        await _initRecorder();
-        if (!_isInitialized) {
-          print('❌ [VoiceService] Recorder not initialized');
-          return false;
-        }
-      }
-      
       // Check permission status
       final permStatus = await Permission.microphone.status;
       print('🎤 [VoiceService] Microphone permission status: $permStatus');
@@ -89,22 +67,10 @@ class VoiceService {
         }
       }
       
-      // Get temporary directory for recording
-      final tempDir = await getTemporaryDirectory();
-      final timestamp = DateTime.now().millisecondsSinceEpoch;
-      _currentRecordingPath = '${tempDir.path}/recording_$timestamp.aac';
-      
-      print('🎤 [VoiceService] Starting recorder to: $_currentRecordingPath');
-      
-      // Start recording with flutter_sound
-      await _recorder.startRecorder(
-        toFile: _currentRecordingPath!,
-        codec: Codec.aacADTS, // AAC format compatible with Whisper
-        bitRate: 128000,
-        sampleRate: 44100,
-      );
-      
+      // Start recording with native recorder
+      await _recorder.startRecording();
       _isRecording = true;
+      
       print('✅ [VoiceService] Recording started successfully');
       return true;
       
@@ -124,14 +90,15 @@ class VoiceService {
         return null;
       }
       
-      await _recorder.stopRecorder();
+      final recordingFile = await _recorder.stopRecording();
       _isRecording = false;
       
-      if (_currentRecordingPath != null) {
-        print('✅ Recording stopped: $_currentRecordingPath');
-        return _currentRecordingPath;
+      if (recordingFile != null && await recordingFile.exists()) {
+        final filePath = recordingFile.path;
+        print('✅ Recording stopped: $filePath');
+        return filePath;
       } else {
-        print('⚠️ Recording stopped but no file path');
+        print('⚠️ Recording stopped but no file');
         return null;
       }
       
@@ -146,16 +113,13 @@ class VoiceService {
   Future<void> cancelRecording() async {
     try {
       if (_isRecording) {
-        await _recorder.stopRecorder();
+        final recordingFile = await _recorder.stopRecording();
         _isRecording = false;
         
         // Delete the recording file
-        if (_currentRecordingPath != null) {
-          final file = File(_currentRecordingPath!);
-          if (await file.exists()) {
-            await file.delete();
-            print('🗑️ Recording cancelled and deleted');
-          }
+        if (recordingFile != null && await recordingFile.exists()) {
+          await recordingFile.delete();
+          print('🗑️ Recording cancelled and deleted');
         }
       }
     } catch (e) {
@@ -273,8 +237,6 @@ class VoiceService {
     if (_isRecording) {
       await cancelRecording();
     }
-    if (_isInitialized) {
-      await _recorder.closeRecorder();
-    }
+    // Native recorder doesn't need cleanup
   }
 }

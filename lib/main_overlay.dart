@@ -18,6 +18,7 @@ import 'services/voice_service.dart';
 import 'services/secure_storage_service.dart';
 import 'api_key_setup_screen.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'dev_config.dart';
 
 /// Kai avatar asset
 const String kAvatarIdleGif = 'assets/avatar/images/mage.png';
@@ -48,6 +49,14 @@ Future<void> main() async {
   
   // Check for API keys first
   final secureStorage = SecureStorageService();
+  
+  // DEV MODE: Auto-populate keys if configured
+  if (USE_DEV_MODE && DevConfig.hasDevKeys) {
+    print('🔧 DEV MODE: Using hardcoded API keys');
+    await secureStorage.setOpenAIKey(DevConfig.DEV_OPENAI_KEY);
+    await secureStorage.setElevenLabsKey(DevConfig.DEV_ELEVENLABS_KEY);
+  }
+  
   final hasKeys = await secureStorage.hasKeys();
   
   if (!hasKeys) {

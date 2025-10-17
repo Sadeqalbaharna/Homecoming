@@ -1,7 +1,7 @@
 name: homecoming_app
 description: Overlay avatar app (mobile + desktop)
 publish_to: "none"
-version: 1.0.0+1
+version: 0.6.0+6
 
 environment:
   sdk: ">=3.0.0 <4.0.0"
@@ -19,8 +19,7 @@ dependencies:
   dio: ^5.5.0
   # Audio (choose ONE lib → audioplayers)
   audioplayers: ^6.0.0
-  # Voice input with flutter_sound (replaces problematic record package)
-  flutter_sound: ^9.2.13
+  # Voice input - using native Android MediaRecorder via MethodChannel
   permission_handler: ^11.0.0
   # Secure storage for API keys
   flutter_secure_storage: ^9.0.0

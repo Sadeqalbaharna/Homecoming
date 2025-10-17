@@ -60,6 +60,7 @@ public class OverlayService extends Service implements View.OnTouchListener {
     private FlutterView flutterView;
     private MethodChannel flutterChannel;
     private BasicMessageChannel<Object> overlayMessageChannel;
+    private AudioRecorderPlugin audioRecorderPlugin; // Add audio recorder plugin
     private int clickableFlag = WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE | WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE |
             WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN;
 
@@ -82,6 +83,13 @@ public class OverlayService extends Service implements View.OnTouchListener {
     @Override
     public void onDestroy() {
         Log.d("OverLay", "Destroying the overlay window service");
+        
+        // Clean up audio recorder
+        if (audioRecorderPlugin != null) {
+            audioRecorderPlugin.cleanup();
+            audioRecorderPlugin = null;
+        }
+        
         if (windowManager != null) {
             windowManager.removeView(flutterView);
             windowManager = null;
@@ -365,6 +373,16 @@ public class OverlayService extends Service implements View.OnTouchListener {
         if (flutterEngine != null) {
             flutterChannel = new MethodChannel(flutterEngine.getDartExecutor(), OverlayConstants.OVERLAY_TAG);
             overlayMessageChannel = new BasicMessageChannel(flutterEngine.getDartExecutor(), OverlayConstants.MESSENGER_TAG, JSONMessageCodec.INSTANCE);
+            
+            // Register AudioRecorderPlugin for the overlay
+            audioRecorderPlugin = new AudioRecorderPlugin(this);
+            new MethodChannel(flutterEngine.getDartExecutor(), AudioRecorderPlugin.CHANNEL_NAME)
+                .setMethodCallHandler((call, result) -> {
+                    if (audioRecorderPlugin != null) {
+                        audioRecorderPlugin.handleMethodCall(call, result);
+                    }
+                });
+            Log.d("OverlayService", "AudioRecorderPlugin registered for overlay");
         }
 
         createNotificationChannel();
