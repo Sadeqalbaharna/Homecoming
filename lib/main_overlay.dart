@@ -18,7 +18,15 @@ import 'services/voice_service.dart';
 import 'services/secure_storage_service.dart';
 import 'api_key_setup_screen.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'dev_config.dart';
+
+// DEV CONFIG - Only available in local development (not in CI/CD)
+// To enable: Create lib/dev_config.dart with your API keys
+const bool USE_DEV_MODE = false; // Set to true locally, false in repo
+class DevConfig {
+  static const String DEV_OPENAI_KEY = '';
+  static const String DEV_ELEVENLABS_KEY = '';
+  static bool get hasDevKeys => DEV_OPENAI_KEY.isNotEmpty && DEV_ELEVENLABS_KEY.isNotEmpty;
+}
 
 /// Kai avatar asset
 const String kAvatarIdleGif = 'assets/avatar/images/mage.png';
