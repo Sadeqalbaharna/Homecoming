@@ -493,6 +493,30 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
   
   /// Start voice recording
   Future<void> _startVoiceRecording() async {
+    // Check permission first
+    final hasPermission = await voiceService.hasPermission();
+    
+    if (!hasPermission) {
+      setState(() {
+        _error = 'Requesting microphone permission...';
+      });
+      
+      // Request permission
+      final granted = await voiceService.requestPermission();
+      
+      if (!granted) {
+        setState(() {
+          _error = 'Microphone permission denied. Please enable it in Settings → Apps → Homecoming → Permissions.';
+          _isRecording = false;
+        });
+        return;
+      }
+      
+      setState(() {
+        _error = null;
+      });
+    }
+    
     setState(() {
       _error = null;
       _isRecording = true;
@@ -501,7 +525,7 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
     final started = await voiceService.startRecording();
     if (!started) {
       setState(() {
-        _error = 'Failed to start recording. Please check microphone permission.';
+        _error = 'Failed to start recording. Please check microphone permission in device settings.';
         _isRecording = false;
       });
     } else {
