@@ -17,6 +17,7 @@ import 'services/ai_service.dart';
 import 'services/voice_service.dart';
 import 'services/secure_storage_service.dart';
 import 'api_key_setup_screen.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 /// Kai avatar asset
 const String kAvatarIdleGif = 'assets/avatar/images/mage.png';
@@ -59,7 +60,11 @@ Future<void> main() async {
       ),
       home: ApiKeySetupScreen(
         onComplete: () async {
-          // Keys configured, now check overlay permission
+          // Keys configured, now request microphone permission
+          final micStatus = await Permission.microphone.request();
+          print('🎤 Microphone permission: $micStatus');
+          
+          // Check overlay permission
           final status = await FlutterOverlayWindow.isPermissionGranted();
           if (!status) {
             // Need overlay permission
@@ -78,6 +83,13 @@ Future<void> main() async {
       ),
     ));
     return;
+  }
+  
+  // API keys exist, request microphone permission if needed
+  final micStatus = await Permission.microphone.status;
+  if (!micStatus.isGranted) {
+    await Permission.microphone.request();
+    print('🎤 Microphone permission requested: ${await Permission.microphone.status}');
   }
   
   // API keys exist, check overlay permission
@@ -348,10 +360,10 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
             
             // Update tracked position but clamp it within bounds
             // Account for avatar position within window so avatar stays fully visible
-            final minX = -avatarLeft;  // Allow window to go left until avatar's left edge hits screen left
-            final maxX = screenWidth - windowSize + avatarRight;  // Allow window to go right until avatar's right edge hits screen right
-            final minY = -avatarTop;   // Allow window to go up until avatar's top edge hits screen top
-            final maxY = screenHeight - windowSize + avatarBottom; // Allow window to go down until avatar's bottom edge hits screen bottom
+            const minX = -avatarLeft;  // Allow window to go left until avatar's left edge hits screen left
+            const maxX = screenWidth - windowSize + avatarRight;  // Allow window to go right until avatar's right edge hits screen right
+            const minY = -avatarTop;   // Allow window to go up until avatar's top edge hits screen top
+            const maxY = screenHeight - windowSize + avatarBottom; // Allow window to go down until avatar's bottom edge hits screen bottom
             _currentX = pos.x.clamp(minX, maxX);
             _currentY = pos.y.clamp(minY, maxY);
             
@@ -381,10 +393,10 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
       if (_userIsDragging) return;
       
       // Calculate boundaries accounting for avatar position within window
-      final minX = -avatarLeft;
-      final maxX = screenWidth - windowSize + avatarRight;
-      final minY = -avatarTop;
-      final maxY = screenHeight - windowSize + avatarBottom;
+      const minX = -avatarLeft;
+      const maxX = screenWidth - windowSize + avatarRight;
+      const minY = -avatarTop;
+      const maxY = screenHeight - windowSize + avatarBottom;
       
       // Apply velocity (bouncing ball physics)
       _currentX += _velocityX;
