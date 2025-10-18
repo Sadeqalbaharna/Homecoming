@@ -1,192 +1,112 @@
 package flutter.overlay.window.flutter_overlay_window;
 
+import android.content.ComponentName;
 import android.content.Context;
-import android.media.MediaRecorder;
-import android.os.Build;
+import android.content.Intent;
+import android.content.ServiceConnection;
+import android.os.IBinder;
 import android.util.Log;
 import io.flutter.plugin.common.MethodChannel;
-import java.io.File;
-import java.io.IOException;
 
 /**
- * Native audio recorder using Android MediaRecorder API.
- * Works in overlay isolates since it uses MethodChannel directly.
+ * Native audio recorder that delegates to AudioRecordingService.
+ * The service runs as a foreground service with microphone access.
  */
 public class AudioRecorderPlugin {
     private Context context;
-    private MediaRecorder mediaRecorder;
-    private File recordingFile;
+    private Object audioService;  // Will hold AudioRecordingService instance via reflection
     private final String TAG = "AudioRecorderPlugin";
+    private boolean isServiceBound = false;
 
     public static final String CHANNEL_NAME = "com.homecoming.app/audio_recorder";
 
+    private ServiceConnection serviceConnection = new ServiceConnection() {
+        @Override
+        public void onServiceConnected(ComponentName name, IBinder service) {
+            Log.d(TAG, "✅ AudioRecordingService connected");
+            try {
+                // Use reflection to get the service instance
+                Class<?> binderClass = service.getClass();
+                java.lang.reflect.Method getServiceMethod = binderClass.getMethod("getService");
+                audioService = getServiceMethod.invoke(service);
+                isServiceBound = true;
+                Log.d(TAG, "✅ AudioRecordingService bound successfully");
+            } catch (Exception e) {
+                Log.e(TAG, "❌ Failed to bind AudioRecordingService", e);
+            }
+        }
+
+        @Override
+        public void onServiceDisconnected(ComponentName name) {
+            Log.w(TAG, "⚠️ AudioRecordingService disconnected");
+            audioService = null;
+            isServiceBound = false;
+        }
+    };
+
     public AudioRecorderPlugin(Context context) {
         this.context = context;
+        bindAudioService();
+    }
+
+    private void bindAudioService() {
+        try {
+            Log.d(TAG, "🔗 Binding to AudioRecordingService...");
+            Intent intent = new Intent();
+            intent.setClassName("com.homecoming.homecoming_app", "com.homecoming.homecoming_app.AudioRecordingService");
+            
+            // Start the service first
+            context.startForegroundService(intent);
+            
+            // Then bind to it
+            boolean bound = context.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE);
+            Log.d(TAG, bound ? "✅ Service binding initiated" : "❌ Service binding failed");
+        } catch (Exception e) {
+            Log.e(TAG, "❌ Error binding to AudioRecordingService", e);
+        }
     }
 
     public void handleMethodCall(io.flutter.plugin.common.MethodCall call, MethodChannel.Result result) {
-        switch (call.method) {
-            case "startRecording":
-                try {
-                    String filePath = startRecording();
-                    result.success(filePath);
-                } catch (Exception e) {
-                    Log.e(TAG, "Failed to start recording", e);
-                    result.error("RECORDING_ERROR", e.getMessage(), null);
-                }
-                break;
-            case "stopRecording":
-                try {
-                    String filePath = stopRecording();
-                    result.success(filePath);
-                } catch (Exception e) {
-                    Log.e(TAG, "Failed to stop recording", e);
-                    result.error("RECORDING_ERROR", e.getMessage(), null);
-                }
-                break;
-            case "isRecording":
-                result.success(mediaRecorder != null);
-                break;
-            default:
-                result.notImplemented();
-                break;
-        }
-    }
-
-    private String startRecording() throws IOException {
-        // Stop any existing recording first
-        if (mediaRecorder != null) {
-            Log.w(TAG, "⚠️ MediaRecorder already exists, stopping previous recording");
-            stopRecording();
-        }
-
-        // Create output file
-        File outputDir = context.getCacheDir();
-        recordingFile = File.createTempFile("voice_", ".m4a", outputDir);
-        
-        Log.d(TAG, "📁 Output directory: " + outputDir.getAbsolutePath());
-        Log.d(TAG, "📄 Recording file: " + recordingFile.getAbsolutePath());
-        Log.d(TAG, "🎤 Starting recording...");
-
-        // Create and configure MediaRecorder
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            mediaRecorder = new MediaRecorder(context);
-            Log.d(TAG, "✅ MediaRecorder created (Android S+)");
-        } else {
-            mediaRecorder = new MediaRecorder();
-            Log.d(TAG, "✅ MediaRecorder created (Legacy)");
+        if (!isServiceBound || audioService == null) {
+            Log.w(TAG, "⚠️ AudioRecordingService not bound yet");
+            result.error("SERVICE_NOT_BOUND", "Audio recording service not ready", null);
+            return;
         }
 
         try {
-            Log.d(TAG, "🔧 Setting audio source: MIC");
-            mediaRecorder.setAudioSource(MediaRecorder.AudioSource.MIC);
-            
-            Log.d(TAG, "🔧 Setting output format: MPEG_4");
-            mediaRecorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
-            
-            Log.d(TAG, "🔧 Setting audio encoder: AAC");
-            mediaRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
-            
-            Log.d(TAG, "🔧 Setting bitrate: 128000");
-            mediaRecorder.setAudioEncodingBitRate(128000);
-            
-            Log.d(TAG, "🔧 Setting sample rate: 44100");
-            mediaRecorder.setAudioSamplingRate(44100);
-            
-            Log.d(TAG, "🔧 Setting output file: " + recordingFile.getAbsolutePath());
-            mediaRecorder.setOutputFile(recordingFile.getAbsolutePath());
-
-            Log.d(TAG, "🔄 Preparing MediaRecorder...");
-            mediaRecorder.prepare();
-            Log.d(TAG, "✅ MediaRecorder prepared");
-            
-            Log.d(TAG, "▶️ Starting recording...");
-            mediaRecorder.start();
-            Log.d(TAG, "✅ Recording started successfully!");
-            
-        } catch (IOException e) {
-            Log.e(TAG, "❌ MediaRecorder prepare/start failed", e);
-            if (mediaRecorder != null) {
-                mediaRecorder.release();
-                mediaRecorder = null;
+            switch (call.method) {
+                case "startRecording":
+                    String startPath = (String) audioService.getClass().getMethod("startRecording").invoke(audioService);
+                    result.success(startPath);
+                    break;
+                case "stopRecording":
+                    String stopPath = (String) audioService.getClass().getMethod("stopRecording").invoke(audioService);
+                    result.success(stopPath);
+                    break;
+                case "isRecording":
+                    Boolean isRec = (Boolean) audioService.getClass().getMethod("isRecording").invoke(audioService);
+                    result.success(isRec);
+                    break;
+                default:
+                    result.notImplemented();
+                    break;
             }
-            throw e;
-        } catch (IllegalStateException e) {
-            Log.e(TAG, "❌ MediaRecorder in illegal state", e);
-            if (mediaRecorder != null) {
-                mediaRecorder.release();
-                mediaRecorder = null;
-            }
-            throw new IOException("MediaRecorder illegal state: " + e.getMessage());
-        } catch (RuntimeException e) {
-            Log.e(TAG, "❌ MediaRecorder runtime error", e);
-            if (mediaRecorder != null) {
-                mediaRecorder.release();
-                mediaRecorder = null;
-            }
-            throw new IOException("MediaRecorder runtime error: " + e.getMessage());
+        } catch (Exception e) {
+            Log.e(TAG, "❌ Error calling AudioRecordingService method", e);
+            result.error("SERVICE_ERROR", e.getMessage(), null);
         }
-
-        return recordingFile.getAbsolutePath();
-    }
-
-    private String stopRecording() {
-        String filePath = recordingFile != null ? recordingFile.getAbsolutePath() : null;
-        
-        Log.d(TAG, "⏹️ Stopping recording...");
-        
-        if (mediaRecorder != null) {
-            try {
-                mediaRecorder.stop();
-                Log.d(TAG, "✅ Recording stopped successfully");
-                
-                if (filePath != null) {
-                    File file = new File(filePath);
-                    if (file.exists()) {
-                        long fileSize = file.length();
-                        Log.d(TAG, "📊 Recording file size: " + fileSize + " bytes");
-                        if (fileSize == 0) {
-                            Log.e(TAG, "❌ WARNING: Recording file is EMPTY (0 bytes)!");
-                        } else if (fileSize < 1000) {
-                            Log.w(TAG, "⚠️ WARNING: Recording file is very small (" + fileSize + " bytes)");
-                        } else {
-                            Log.d(TAG, "✅ Recording file size looks good");
-                        }
-                    } else {
-                        Log.e(TAG, "❌ Recording file does not exist: " + filePath);
-                    }
-                }
-                
-            } catch (IllegalStateException e) {
-                Log.e(TAG, "❌ Error stopping MediaRecorder (illegal state)", e);
-            } catch (RuntimeException e) {
-                Log.e(TAG, "❌ Error stopping MediaRecorder (runtime error)", e);
-            } finally {
-                try {
-                    mediaRecorder.release();
-                    Log.d(TAG, "✅ MediaRecorder released");
-                } catch (Exception e) {
-                    Log.e(TAG, "❌ Error releasing MediaRecorder", e);
-                }
-                mediaRecorder = null;
-            }
-        } else {
-            Log.w(TAG, "⚠️ MediaRecorder is null, nothing to stop");
-        }
-
-        return filePath;
     }
 
     public void cleanup() {
-        if (mediaRecorder != null) {
-            try {
-                mediaRecorder.stop();
-            } catch (Exception e) {
-                // Ignore
+        try {
+            if (isServiceBound) {
+                context.unbindService(serviceConnection);
+                isServiceBound = false;
+                Log.d(TAG, "✅ AudioRecordingService unbound");
             }
-            mediaRecorder.release();
-            mediaRecorder = null;
+        } catch (Exception e) {
+            Log.e(TAG, "❌ Error unbinding AudioRecordingService", e);
         }
-        recordingFile = null;
+        audioService = null;
     }
 }
