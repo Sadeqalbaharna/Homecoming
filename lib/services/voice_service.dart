@@ -2,6 +2,7 @@
 
 import 'dart:io';
 import 'package:dio/dio.dart';
+import 'package:http_parser/http_parser.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'secure_storage_service.dart';
 import 'native_audio_recorder.dart';
@@ -158,11 +159,12 @@ class VoiceService {
         throw Exception('No internet connection. Please connect to WiFi or mobile data.');
       }
       
-      // Create multipart form data
+      // Create multipart form data with correct MIME type for m4a
       final formData = FormData.fromMap({
         'file': await MultipartFile.fromFile(
           audioPath,
-          filename: 'audio.aac',
+          filename: 'audio.m4a',
+          contentType: MediaType('audio', 'mp4'),
         ),
         'model': VoiceConfig.whisperModel,
         if (VoiceConfig.whisperLanguage.isNotEmpty) 
