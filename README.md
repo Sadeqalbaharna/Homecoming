@@ -1,6 +1,6 @@
 # Homecoming AI Avatar App 🤖
 
-A cross-platform Flutter application featuring Kai, an AI avatar with personality and mood dynamics, now with Firebase cloud persistence!
+A cross-platform Flutter application featuring Kai, an AI avatar with personality and mood dynamics, now with Firebase cloud persistence and voice input!
 
 ## ✨ Features
 
