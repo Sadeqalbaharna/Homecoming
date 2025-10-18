@@ -122,7 +122,7 @@ jobs:
         echo "📤 Uploading Overlay APK using Firebase CLI..."
         firebase appdistribution:distribute build/app/outputs/flutter-apk/kai-overlay.apk \
           --app ${{ secrets.FIREBASE_APP_ID }} \
-          --groups testers \
+          --testers sadeq.albaharna@gmail.com \
           --release-notes "✨ Kai Overlay v${{ github.run_number }} - Transparent floating overlay with Firebase logging! Tap Kai to expand chat." \
           --debug
         
