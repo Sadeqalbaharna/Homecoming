@@ -1,10 +1,9 @@
 name: Build and Deploy to Firebase App Distribution (DISABLED)
 
 # Temporarily disabled due to authentication issues
-# on:
-#   push:
-#     branches: [ main ]
-#   workflow_dispatch:
+# This workflow is disabled - using working-firebase-distribution.yml instead
+on:
+  workflow_dispatch:
     inputs:
       release_notes:
         description: 'Release Notes'
