@@ -37,6 +37,13 @@ jobs:
     - name: Get Flutter dependencies
       run: flutter pub get
     
+    - name: Get version from pubspec
+      id: version
+      run: |
+        VERSION=$(grep '^version:' pubspec.yaml | cut -d' ' -f2)
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "📦 Building version: $VERSION"
+    
     - name: Debug API Keys
       run: |
         echo "Checking secrets availability..."
@@ -123,7 +130,7 @@ jobs:
         firebase appdistribution:distribute build/app/outputs/flutter-apk/kai-overlay.apk \
           --app ${{ secrets.FIREBASE_APP_ID }} \
           --testers sadeq.albaharna@gmail.com \
-          --release-notes "✨ Kai Overlay v${{ github.run_number }} - Transparent floating overlay with Firebase logging! Tap Kai to expand chat." \
+          --release-notes "🚀 Kai Overlay v${{ steps.version.outputs.version }} (Build #${{ github.run_number }}) - Audio playback feature added! Record voice, play it back to verify quality, then send for transcription." \
           --debug
         
         if [ $? -eq 0 ]; then
