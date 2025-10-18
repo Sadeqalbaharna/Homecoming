@@ -604,6 +604,22 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
       });
       
       print('✅ Recording saved: $audioPath');
+      
+      // Also save to Downloads for debugging
+      try {
+        final file = File(audioPath);
+        if (await file.exists()) {
+          final bytes = await file.readAsBytes();
+          final downloadsDir = Directory('/storage/emulated/0/Download');
+          final timestamp = DateTime.now().millisecondsSinceEpoch;
+          final debugFile = File('${downloadsDir.path}/kai_debug_$timestamp.m4a');
+          await debugFile.writeAsBytes(bytes);
+          print('📥 Debug copy saved to Downloads: ${debugFile.path}');
+        }
+      } catch (e) {
+        print('⚠️ Could not save debug copy: $e');
+      }
+      
       print('🎧 Ready for playback or transcription');
       
     } catch (e) {
