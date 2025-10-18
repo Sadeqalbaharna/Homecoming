@@ -5,7 +5,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -15,6 +14,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'services/ai_service.dart';
 import 'services/voice_service.dart';
+import 'services/audio_player_service.dart';
 import 'services/secure_storage_service.dart';
 import 'api_key_setup_screen.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -305,6 +305,9 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
   // Voice recording - TODO: Re-enable after fixing record package
   // final _voiceService = VoiceService();
   bool _isRecording = false;
+  String? _recordedAudioPath; // Store the recorded audio path for playback
+  final _audioPlayer = AudioPlayerService();
+  bool _isPlayingRecording = false;
   
   // Auto-movement variables
   Timer? _moveTimer;
@@ -579,13 +582,12 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
     }
   }
   
-  /// Stop voice recording and transcribe
+  /// Stop voice recording and save for playback/sending
   Future<void> _stopVoiceRecording() async {
     if (!_isRecording) return;
     
     setState(() {
       _isRecording = false;
-      // Don't set _sending here - let _send() handle it
       _reply = null;
       _error = null;
     });
@@ -597,15 +599,73 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
         throw Exception('Failed to save recording');
       }
       
+      setState(() {
+        _recordedAudioPath = audioPath;
+      });
+      
+      print('✅ Recording saved: $audioPath');
+      print('🎧 Ready for playback or transcription');
+      
+    } catch (e) {
+      setState(() {
+        _error = 'Voice recording failed: $e';
+      });
+      print('❌ Voice recording error: $e');
+    }
+  }
+  
+  /// Play back the recorded audio
+  Future<void> _playRecording() async {
+    if (_recordedAudioPath == null) return;
+    
+    try {
+      if (_isPlayingRecording) {
+        await _audioPlayer.stop();
+        setState(() => _isPlayingRecording = false);
+        print('⏹️ Stopped playback');
+      } else {
+        final success = await _audioPlayer.play(_recordedAudioPath!);
+        if (success) {
+          setState(() => _isPlayingRecording = true);
+          print('▶️ Playing recording');
+          
+          // Auto-stop after playback completes (estimate ~5 seconds)
+          Future.delayed(const Duration(seconds: 6), () {
+            if (mounted && _isPlayingRecording) {
+              setState(() => _isPlayingRecording = false);
+            }
+          });
+        }
+      }
+    } catch (e) {
+      print('❌ Playback error: $e');
+      setState(() => _isPlayingRecording = false);
+    }
+  }
+  
+  /// Transcribe and send the recorded audio
+  Future<void> _transcribeAndSend() async {
+    if (_recordedAudioPath == null) return;
+    
+    setState(() {
+      _sending = true;
+      _reply = null;
+      _error = null;
+    });
+    
+    try {
       print('🎯 Transcribing audio...');
       
       // Transcribe audio
-      final transcription = await voiceService.transcribeAudio(audioPath);
+      final transcription = await voiceService.transcribeAudio(_recordedAudioPath!);
       if (transcription == null || transcription.isEmpty) {
         throw Exception('Failed to transcribe audio');
       }
       
       print('✅ Transcription: $transcription');
+      
+      // Clear the recorded audio path
+      setState(() => _recordedAudioPath = null);
       
       // Set transcription as input and send
       _controller.text = transcription;
@@ -619,8 +679,29 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
         _error = 'Voice input failed: $e';
         _sending = false;
       });
-      print('❌ Voice recording error: $e');
+      print('❌ Voice transcription error: $e');
     }
+  }
+  
+  /// Cancel the recorded audio
+  void _cancelRecording() {
+    if (_recordedAudioPath != null) {
+      // Delete the file
+      try {
+        final file = File(_recordedAudioPath!);
+        if (file.existsSync()) {
+          file.deleteSync();
+          print('🗑️ Deleted recorded audio');
+        }
+      } catch (e) {
+        print('⚠️ Failed to delete recording: $e');
+      }
+    }
+    
+    setState(() {
+      _recordedAudioPath = null;
+      _isPlayingRecording = false;
+    });
   }
   
   /// Send message with text (extracted from _send for reuse)
@@ -1058,41 +1139,82 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
                                   ),
                                 ),
                                 const SizedBox(width: 8),
-                                // Microphone button for voice input in chat
-                                FloatingActionButton(
-                                  mini: true,
-                                  backgroundColor: _isRecording 
-                                      ? Colors.red.withOpacity(0.8)
-                                      : const Color(0xFFFFE7B0).withOpacity(0.8),
-                                  onPressed: _sending ? null : () async {
-                                    if (_isRecording) {
-                                      await _stopVoiceRecording();
-                                    } else {
-                                      await _startVoiceRecording();
-                                    }
-                                  },
-                                  child: Icon(
-                                    _isRecording ? Icons.stop : Icons.mic,
-                                    color: const Color(0xFF0D0A07),
+                                // Show playback controls if audio is recorded
+                                if (_recordedAudioPath != null) ...[
+                                  // Play button
+                                  FloatingActionButton(
+                                    mini: true,
+                                    backgroundColor: _isPlayingRecording
+                                        ? Colors.orange.withOpacity(0.8)
+                                        : const Color(0xFFFFE7B0).withOpacity(0.8),
+                                    onPressed: _playRecording,
+                                    child: Icon(
+                                      _isPlayingRecording ? Icons.stop : Icons.play_arrow,
+                                      color: const Color(0xFF0D0A07),
+                                    ),
                                   ),
-                                ),
-                                const SizedBox(width: 8),
-                                // Send button
-                                FloatingActionButton(
-                                  mini: true,
-                                  backgroundColor: const Color(0xFFFFE7B0),
-                                  onPressed: _sending ? null : _send,
-                                  child: _sending
-                                      ? const SizedBox(
-                                          width: 20,
-                                          height: 20,
-                                          child: CircularProgressIndicator(
-                                            strokeWidth: 2,
-                                            color: Color(0xFF0D0A07),
-                                          ),
-                                        )
-                                      : const Icon(Icons.send, color: Color(0xFF0D0A07)),
-                                ),
+                                  const SizedBox(width: 8),
+                                  // Send (transcribe) button
+                                  FloatingActionButton(
+                                    mini: true,
+                                    backgroundColor: Colors.green.withOpacity(0.8),
+                                    onPressed: _sending ? null : _transcribeAndSend,
+                                    child: _sending
+                                        ? const SizedBox(
+                                            width: 20,
+                                            height: 20,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                              color: Colors.white,
+                                            ),
+                                          )
+                                        : const Icon(Icons.send, color: Colors.white),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  // Cancel button
+                                  FloatingActionButton(
+                                    mini: true,
+                                    backgroundColor: Colors.red.withOpacity(0.8),
+                                    onPressed: _cancelRecording,
+                                    child: const Icon(Icons.cancel, color: Colors.white),
+                                  ),
+                                ] else ...[
+                                  // Microphone button for voice input in chat
+                                  FloatingActionButton(
+                                    mini: true,
+                                    backgroundColor: _isRecording 
+                                        ? Colors.red.withOpacity(0.8)
+                                        : const Color(0xFFFFE7B0).withOpacity(0.8),
+                                    onPressed: _sending ? null : () async {
+                                      if (_isRecording) {
+                                        await _stopVoiceRecording();
+                                      } else {
+                                        await _startVoiceRecording();
+                                      }
+                                    },
+                                    child: Icon(
+                                      _isRecording ? Icons.stop : Icons.mic,
+                                      color: const Color(0xFF0D0A07),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  // Send button
+                                  FloatingActionButton(
+                                    mini: true,
+                                    backgroundColor: const Color(0xFFFFE7B0),
+                                    onPressed: _sending ? null : _send,
+                                    child: _sending
+                                        ? const SizedBox(
+                                            width: 20,
+                                            height: 20,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                              color: Color(0xFF0D0A07),
+                                            ),
+                                          )
+                                        : const Icon(Icons.send, color: Color(0xFF0D0A07)),
+                                  ),
+                                ],
                               ],
                             ),
                           ),
