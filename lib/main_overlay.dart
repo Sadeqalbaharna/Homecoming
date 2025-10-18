@@ -19,8 +19,12 @@ import 'services/secure_storage_service.dart';
 import 'api_key_setup_screen.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-// DEV CONFIG - Only available in local development (not in CI/CD)
-// To enable: Create lib/dev_config.dart with your API keys
+// API KEYS - Read from build-time environment (--dart-define)
+// These are injected by GitHub Actions from secrets during CI/CD build
+const String OPENAI_API_KEY = String.fromEnvironment('OPENAI_API_KEY', defaultValue: '');
+const String ELEVENLABS_API_KEY = String.fromEnvironment('ELEVENLABS_API_KEY', defaultValue: '');
+
+// DEV CONFIG - Only for local development without rebuild
 const bool USE_DEV_MODE = false; // Set to true locally, false in repo
 class DevConfig {
   static const String DEV_OPENAI_KEY = '';
@@ -58,8 +62,14 @@ Future<void> main() async {
   // Check for API keys first
   final secureStorage = SecureStorageService();
   
-  // DEV MODE: Auto-populate keys if configured
-  if (USE_DEV_MODE && DevConfig.hasDevKeys) {
+  // Priority 1: Use build-time keys from --dart-define (GitHub Actions)
+  if (OPENAI_API_KEY.isNotEmpty && ELEVENLABS_API_KEY.isNotEmpty) {
+    print('🔑 Using API keys from build-time environment (--dart-define)');
+    await secureStorage.setOpenAIKey(OPENAI_API_KEY);
+    await secureStorage.setElevenLabsKey(ELEVENLABS_API_KEY);
+  }
+  // Priority 2: DEV MODE (local development)
+  else if (USE_DEV_MODE && DevConfig.hasDevKeys) {
     print('🔧 DEV MODE: Using hardcoded API keys');
     await secureStorage.setOpenAIKey(DevConfig.DEV_OPENAI_KEY);
     await secureStorage.setElevenLabsKey(DevConfig.DEV_ELEVENLABS_KEY);
