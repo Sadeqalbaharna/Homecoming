@@ -131,6 +131,8 @@ class VoiceService {
   Future<String?> transcribeAudio(String audioPath) async {
     try {
       final openaiKey = await VoiceConfig.getOpenAIKey();
+      print('🔑 API Key retrieved: ${openaiKey.isEmpty ? "EMPTY" : "Present (${openaiKey.length} chars)"}');
+      
       if (openaiKey.isEmpty) {
         throw Exception('OpenAI API key not configured');
       }
@@ -142,6 +144,19 @@ class VoiceService {
       
       print('🎯 Transcribing audio: $audioPath');
       print('📊 File size: ${await file.length()} bytes');
+      print('🌐 Testing internet connectivity...');
+      
+      // Test internet connectivity first
+      try {
+        await _dio.get('https://www.google.com', options: Options(
+          receiveTimeout: const Duration(seconds: 5),
+          sendTimeout: const Duration(seconds: 5),
+        ));
+        print('✅ Internet connection OK');
+      } catch (e) {
+        print('❌ No internet connection: $e');
+        throw Exception('No internet connection. Please connect to WiFi or mobile data.');
+      }
       
       // Create multipart form data
       final formData = FormData.fromMap({
@@ -154,6 +169,7 @@ class VoiceService {
           'language': VoiceConfig.whisperLanguage,
       });
       
+      print('📤 Sending request to Whisper API...');
       // Call Whisper API
       final response = await _dio.post(
         'https://api.openai.com/v1/audio/transcriptions',
