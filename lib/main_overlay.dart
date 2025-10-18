@@ -609,7 +609,10 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
       
       // Set transcription as input and send
       _controller.text = transcription;
+      print('📝 Set controller text to: "$transcription"');
+      print('📤 Calling _send()...');
       await _send();
+      print('✅ _send() completed');
       
     } catch (e) {
       setState(() {
@@ -622,7 +625,11 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
   
   /// Send message with text (extracted from _send for reuse)
   Future<void> _sendMessage(String text) async {
-    if (text.isEmpty) return;
+    print('🟢 _sendMessage called with: "$text"');
+    if (text.isEmpty) {
+      print('⚠️ Text is empty, returning');
+      return;
+    }
     
     setState(() {
       _sending = true;
@@ -630,8 +637,10 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
       _error = null;
       _ttsPath = null;
     });
+    print('🟢 State set: sending=true');
     
     try {
+      print('🟢 Calling aiService.sendMessage...');
       final resp = await aiService.sendMessage(
         text: text,
         personaId: 'truekai',
@@ -657,9 +666,16 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
   
   /// Original send method (now calls _sendMessage)
   Future<void> _send() async {
+    print('🔵 _send() called');
     final text = _controller.text.trim();
-    if (text.isEmpty || _sending) return;
+    print('🔵 Text from controller: "$text"');
+    if (text.isEmpty || _sending) {
+      print('⚠️ Returning early - empty: ${text.isEmpty}, sending: $_sending');
+      return;
+    }
+    print('🔵 Calling _sendMessage("$text")');
     await _sendMessage(text);
+    print('🔵 _sendMessage completed');
   }
   
   /// Helper to build circular menu buttons around Kai
