@@ -375,14 +375,15 @@ public class OverlayService extends Service implements View.OnTouchListener {
             overlayMessageChannel = new BasicMessageChannel(flutterEngine.getDartExecutor(), OverlayConstants.MESSENGER_TAG, JSONMessageCodec.INSTANCE);
             
             // Register AudioRecorderPlugin for the overlay
-            audioRecorderPlugin = new AudioRecorderPlugin(this);
+            // Use application context for proper permissions
+            audioRecorderPlugin = new AudioRecorderPlugin(getApplicationContext());
             new MethodChannel(flutterEngine.getDartExecutor(), AudioRecorderPlugin.CHANNEL_NAME)
                 .setMethodCallHandler((call, result) -> {
                     if (audioRecorderPlugin != null) {
                         audioRecorderPlugin.handleMethodCall(call, result);
                     }
                 });
-            Log.d("OverlayService", "AudioRecorderPlugin registered for overlay");
+            Log.d("OverlayService", "AudioRecorderPlugin registered with application context");
         }
 
         createNotificationChannel();
