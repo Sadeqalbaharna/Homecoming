@@ -585,7 +585,7 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
     
     setState(() {
       _isRecording = false;
-      _sending = true;
+      // Don't set _sending here - let _send() handle it
       _reply = null;
       _error = null;
     });
