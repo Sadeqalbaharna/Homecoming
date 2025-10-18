@@ -56,6 +56,7 @@ public class AudioRecorderPlugin {
     private String startRecording() throws IOException {
         // Stop any existing recording first
         if (mediaRecorder != null) {
+            Log.w(TAG, "⚠️ MediaRecorder already exists, stopping previous recording");
             stopRecording();
         }
 
@@ -63,33 +64,67 @@ public class AudioRecorderPlugin {
         File outputDir = context.getCacheDir();
         recordingFile = File.createTempFile("voice_", ".m4a", outputDir);
         
-        Log.d(TAG, "Starting recording to: " + recordingFile.getAbsolutePath());
+        Log.d(TAG, "📁 Output directory: " + outputDir.getAbsolutePath());
+        Log.d(TAG, "📄 Recording file: " + recordingFile.getAbsolutePath());
+        Log.d(TAG, "🎤 Starting recording...");
 
         // Create and configure MediaRecorder
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             mediaRecorder = new MediaRecorder(context);
+            Log.d(TAG, "✅ MediaRecorder created (Android S+)");
         } else {
             mediaRecorder = new MediaRecorder();
+            Log.d(TAG, "✅ MediaRecorder created (Legacy)");
         }
 
-        mediaRecorder.setAudioSource(MediaRecorder.AudioSource.MIC);
-        mediaRecorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
-        mediaRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
-        mediaRecorder.setAudioEncodingBitRate(128000);
-        mediaRecorder.setAudioSamplingRate(44100);
-        mediaRecorder.setOutputFile(recordingFile.getAbsolutePath());
-
         try {
+            Log.d(TAG, "🔧 Setting audio source: MIC");
+            mediaRecorder.setAudioSource(MediaRecorder.AudioSource.MIC);
+            
+            Log.d(TAG, "🔧 Setting output format: MPEG_4");
+            mediaRecorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
+            
+            Log.d(TAG, "🔧 Setting audio encoder: AAC");
+            mediaRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
+            
+            Log.d(TAG, "🔧 Setting bitrate: 128000");
+            mediaRecorder.setAudioEncodingBitRate(128000);
+            
+            Log.d(TAG, "🔧 Setting sample rate: 44100");
+            mediaRecorder.setAudioSamplingRate(44100);
+            
+            Log.d(TAG, "🔧 Setting output file: " + recordingFile.getAbsolutePath());
+            mediaRecorder.setOutputFile(recordingFile.getAbsolutePath());
+
+            Log.d(TAG, "🔄 Preparing MediaRecorder...");
             mediaRecorder.prepare();
+            Log.d(TAG, "✅ MediaRecorder prepared");
+            
+            Log.d(TAG, "▶️ Starting recording...");
             mediaRecorder.start();
-            Log.d(TAG, "Recording started successfully");
+            Log.d(TAG, "✅ Recording started successfully!");
+            
         } catch (IOException e) {
-            Log.e(TAG, "MediaRecorder prepare/start failed", e);
+            Log.e(TAG, "❌ MediaRecorder prepare/start failed", e);
             if (mediaRecorder != null) {
                 mediaRecorder.release();
                 mediaRecorder = null;
             }
             throw e;
+        } catch (IllegalStateException e) {
+            Log.e(TAG, "❌ MediaRecorder in illegal state", e);
+            if (mediaRecorder != null) {
+                mediaRecorder.release();
+                mediaRecorder = null;
+            }
+            throw new IOException("MediaRecorder illegal state: " + e.getMessage());
+        } catch (RuntimeException e) {
+            Log.e(TAG, "❌ MediaRecorder runtime error", e);
+            if (mediaRecorder != null) {
+                mediaRecorder.release();
+                mediaRecorder = null;
+            }
+            throw new IOException("MediaRecorder runtime error: " + e.getMessage());
         }
 
         return recordingFile.getAbsolutePath();
@@ -98,16 +133,45 @@ public class AudioRecorderPlugin {
     private String stopRecording() {
         String filePath = recordingFile != null ? recordingFile.getAbsolutePath() : null;
         
+        Log.d(TAG, "⏹️ Stopping recording...");
+        
         if (mediaRecorder != null) {
             try {
                 mediaRecorder.stop();
-                Log.d(TAG, "Recording stopped successfully");
-            } catch (Exception e) {
-                Log.e(TAG, "Error stopping MediaRecorder", e);
+                Log.d(TAG, "✅ Recording stopped successfully");
+                
+                if (filePath != null) {
+                    File file = new File(filePath);
+                    if (file.exists()) {
+                        long fileSize = file.length();
+                        Log.d(TAG, "📊 Recording file size: " + fileSize + " bytes");
+                        if (fileSize == 0) {
+                            Log.e(TAG, "❌ WARNING: Recording file is EMPTY (0 bytes)!");
+                        } else if (fileSize < 1000) {
+                            Log.w(TAG, "⚠️ WARNING: Recording file is very small (" + fileSize + " bytes)");
+                        } else {
+                            Log.d(TAG, "✅ Recording file size looks good");
+                        }
+                    } else {
+                        Log.e(TAG, "❌ Recording file does not exist: " + filePath);
+                    }
+                }
+                
+            } catch (IllegalStateException e) {
+                Log.e(TAG, "❌ Error stopping MediaRecorder (illegal state)", e);
+            } catch (RuntimeException e) {
+                Log.e(TAG, "❌ Error stopping MediaRecorder (runtime error)", e);
             } finally {
-                mediaRecorder.release();
+                try {
+                    mediaRecorder.release();
+                    Log.d(TAG, "✅ MediaRecorder released");
+                } catch (Exception e) {
+                    Log.e(TAG, "❌ Error releasing MediaRecorder", e);
+                }
                 mediaRecorder = null;
             }
+        } else {
+            Log.w(TAG, "⚠️ MediaRecorder is null, nothing to stop");
         }
 
         return filePath;
