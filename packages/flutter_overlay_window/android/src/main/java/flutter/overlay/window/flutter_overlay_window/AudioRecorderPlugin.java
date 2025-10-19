@@ -126,7 +126,10 @@ public class AudioRecorderPlugin {
         
         if (attemptCount >= 30) {  // 30 attempts * 100ms = 3 seconds max
             Log.e(TAG, "❌ Service binding timeout after 3 seconds");
-            result.error("SERVICE_TIMEOUT", "Audio recording service failed to start. Please restart the app.", null);
+            // Reset the flag so user can retry
+            isBindingInProgress = false;
+            Log.d(TAG, ">>> Reset isBindingInProgress=false after timeout");
+            result.error("SERVICE_TIMEOUT", "Audio recording service failed to start. Please try again or restart the app.", null);
             return;
         }
         
