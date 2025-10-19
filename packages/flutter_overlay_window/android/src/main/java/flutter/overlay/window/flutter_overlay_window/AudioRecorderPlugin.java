@@ -53,7 +53,7 @@ public class AudioRecorderPlugin {
         try {
             Log.d(TAG, "🔗 Binding to AudioRecordingService...");
             Intent intent = new Intent();
-            intent.setClassName("com.homecoming.homecoming_app", "com.homecoming.homecoming_app.AudioRecordingService");
+            intent.setClassName("com.homecoming.app", "com.homecoming.app.AudioRecordingService");
             
             // Start the service first
             context.startForegroundService(intent);
