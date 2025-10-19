@@ -71,8 +71,10 @@ public class AudioRecorderPlugin {
         try {
             Log.d(TAG, ">>> Creating Intent...");
             Intent intent = new Intent();
-            // Use the actual applicationId from build.gradle, not the namespace
-            intent.setClassName("com.homecoming.app", 
+            // Use the manifest package where the service is actually registered
+            // The service is in com.homecoming.homecoming_app (manifest package)
+            // NOT com.homecoming.app (applicationId)
+            intent.setClassName("com.homecoming.homecoming_app", 
                               "com.homecoming.homecoming_app.AudioRecordingService");
             Log.d(TAG, ">>> Intent created: " + intent.toString());
             
