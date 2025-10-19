@@ -82,9 +82,24 @@ public class AudioRecorderPlugin {
         try {
             mediaRecorder.prepare();
             mediaRecorder.start();
-            Log.d(TAG, "Recording started successfully");
+            Log.d(TAG, "✅ Recording started successfully");
+            
+            // Check if microphone is actually being accessed
+            // by checking max amplitude after a brief delay
+            new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+                if (mediaRecorder != null) {
+                    try {
+                        int maxAmplitude = mediaRecorder.getMaxAmplitude();
+                        Log.d(TAG, "🎤 Microphone amplitude check: " + maxAmplitude + 
+                              (maxAmplitude == 0 ? " ⚠️ WARNING: No audio detected!" : " ✅ Audio detected"));
+                    } catch (Exception e) {
+                        Log.e(TAG, "❌ Could not check amplitude", e);
+                    }
+                }
+            }, 500); // Check after 500ms
+            
         } catch (IOException e) {
-            Log.e(TAG, "MediaRecorder prepare/start failed", e);
+            Log.e(TAG, "❌ MediaRecorder prepare/start failed", e);
             if (mediaRecorder != null) {
                 mediaRecorder.release();
                 mediaRecorder = null;
@@ -101,9 +116,18 @@ public class AudioRecorderPlugin {
         if (mediaRecorder != null) {
             try {
                 mediaRecorder.stop();
-                Log.d(TAG, "Recording stopped successfully");
+                Log.d(TAG, "✅ Recording stopped successfully");
+                
+                // Check file size
+                if (recordingFile != null && recordingFile.exists()) {
+                    long fileSize = recordingFile.length();
+                    Log.d(TAG, "📊 Recording file size: " + fileSize + " bytes");
+                    if (fileSize < 1000) {
+                        Log.w(TAG, "⚠️ WARNING: File is suspiciously small! Likely blank audio.");
+                    }
+                }
             } catch (Exception e) {
-                Log.e(TAG, "Error stopping MediaRecorder", e);
+                Log.e(TAG, "❌ Error stopping MediaRecorder", e);
             } finally {
                 mediaRecorder.release();
                 mediaRecorder = null;

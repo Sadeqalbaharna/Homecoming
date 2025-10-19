@@ -599,6 +599,22 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
         throw Exception('Failed to save recording');
       }
       
+      // Check file size and copy for debugging
+      final file = File(audioPath);
+      final fileSize = await file.length();
+      print('📊 Audio file size: $fileSize bytes');
+      
+      // Copy to Downloads for debugging
+      try {
+        final timestamp = DateTime.now().millisecondsSinceEpoch;
+        final downloadsDir = Directory('/storage/emulated/0/Download');
+        final debugFile = File('${downloadsDir.path}/kai_debug_$timestamp.m4a');
+        await file.copy(debugFile.path);
+        print('🐛 Debug copy saved: ${debugFile.path}');
+      } catch (e) {
+        print('⚠️ Could not save debug copy: $e');
+      }
+      
       setState(() {
         _recordedAudioPath = audioPath;
       });
