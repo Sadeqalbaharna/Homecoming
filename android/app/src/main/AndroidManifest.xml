@@ -13,6 +13,7 @@
     <!-- Foreground service permission for overlay service (Android 14+) -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
 
     <application
         android:name="${applicationName}"
@@ -50,6 +51,12 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="System overlay window for AI assistant" />
         </service>
+
+        <!-- Audio Recording Service - Foreground service for microphone access -->
+        <service
+            android:name=".AudioRecordingService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
 
         <!-- This is required by Flutter to show a splash while launching -->
         <meta-data

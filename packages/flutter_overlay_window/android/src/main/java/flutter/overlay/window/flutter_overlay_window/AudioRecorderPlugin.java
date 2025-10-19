@@ -1,152 +1,115 @@
 package flutter.overlay.window.flutter_overlay_window;
 
+import android.content.ComponentName;
 import android.content.Context;
-import android.media.MediaRecorder;
-import android.os.Build;
+import android.content.Intent;
+import android.content.ServiceConnection;
+import android.os.IBinder;
 import android.util.Log;
 import io.flutter.plugin.common.MethodChannel;
-import java.io.File;
-import java.io.IOException;
 
 /**
- * Native audio recorder using Android MediaRecorder API.
- * Works in overlay isolates since it uses MethodChannel directly.
+ * Native audio recorder that delegates to AudioRecordingService.
+ * The service runs as a foreground service with microphone access.
+ * This works around Android's restriction on mic access from overlay windows.
  */
 public class AudioRecorderPlugin {
     private Context context;
-    private MediaRecorder mediaRecorder;
-    private File recordingFile;
+    private Object audioService;  // Will hold AudioRecordingService instance via reflection
     private final String TAG = "AudioRecorderPlugin";
+    private boolean isServiceBound = false;
 
     public static final String CHANNEL_NAME = "com.homecoming.app/audio_recorder";
 
+    private ServiceConnection serviceConnection = new ServiceConnection() {
+        @Override
+        public void onServiceConnected(ComponentName name, IBinder service) {
+            Log.d(TAG, "✅ AudioRecordingService connected");
+            try {
+                // Use reflection to get the service instance
+                Class<?> binderClass = service.getClass();
+                java.lang.reflect.Method getServiceMethod = binderClass.getMethod("getService");
+                audioService = getServiceMethod.invoke(service);
+                isServiceBound = true;
+                Log.d(TAG, "✅ AudioRecordingService bound successfully");
+            } catch (Exception e) {
+                Log.e(TAG, "❌ Failed to bind AudioRecordingService", e);
+            }
+        }
+
+        @Override
+        public void onServiceDisconnected(ComponentName name) {
+            Log.w(TAG, "⚠️ AudioRecordingService disconnected");
+            audioService = null;
+            isServiceBound = false;
+        }
+    };
+
     public AudioRecorderPlugin(Context context) {
         this.context = context;
+        bindAudioService();
+    }
+
+    private void bindAudioService() {
+        try {
+            Log.d(TAG, "🔗 Binding to AudioRecordingService...");
+            Intent intent = new Intent();
+            intent.setClassName("com.homecoming.homecoming_app", 
+                              "com.homecoming.homecoming_app.AudioRecordingService");
+            
+            // Start the service first (as foreground service)
+            context.startForegroundService(intent);
+            Log.d(TAG, "🚀 Foreground service start requested");
+            
+            // Then bind to it
+            boolean bound = context.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE);
+            Log.d(TAG, bound ? "✅ Service binding initiated" : "❌ Service binding failed");
+        } catch (Exception e) {
+            Log.e(TAG, "❌ Error binding to AudioRecordingService", e);
+        }
     }
 
     public void handleMethodCall(io.flutter.plugin.common.MethodCall call, MethodChannel.Result result) {
-        switch (call.method) {
-            case "startRecording":
-                try {
-                    String filePath = startRecording();
-                    result.success(filePath);
-                } catch (Exception e) {
-                    Log.e(TAG, "Failed to start recording", e);
-                    result.error("RECORDING_ERROR", e.getMessage(), null);
-                }
-                break;
-            case "stopRecording":
-                try {
-                    String filePath = stopRecording();
-                    result.success(filePath);
-                } catch (Exception e) {
-                    Log.e(TAG, "Failed to stop recording", e);
-                    result.error("RECORDING_ERROR", e.getMessage(), null);
-                }
-                break;
-            case "isRecording":
-                result.success(mediaRecorder != null);
-                break;
-            default:
-                result.notImplemented();
-                break;
+        if (!isServiceBound || audioService == null) {
+            Log.w(TAG, "⚠️ AudioRecordingService not bound yet");
+            result.error("SERVICE_NOT_BOUND", "Audio recording service not ready", null);
+            return;
         }
-    }
-
-    private String startRecording() throws IOException {
-        // Stop any existing recording first
-        if (mediaRecorder != null) {
-            stopRecording();
-        }
-
-        // Create output file
-        File outputDir = context.getCacheDir();
-        recordingFile = File.createTempFile("voice_", ".m4a", outputDir);
-        
-        Log.d(TAG, "Starting recording to: " + recordingFile.getAbsolutePath());
-
-        // Create and configure MediaRecorder
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            mediaRecorder = new MediaRecorder(context);
-        } else {
-            mediaRecorder = new MediaRecorder();
-        }
-
-        mediaRecorder.setAudioSource(MediaRecorder.AudioSource.MIC);
-        mediaRecorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
-        mediaRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
-        mediaRecorder.setAudioEncodingBitRate(128000);
-        mediaRecorder.setAudioSamplingRate(44100);
-        mediaRecorder.setOutputFile(recordingFile.getAbsolutePath());
 
         try {
-            mediaRecorder.prepare();
-            mediaRecorder.start();
-            Log.d(TAG, "✅ Recording started successfully");
-            
-            // Check if microphone is actually being accessed
-            // by checking max amplitude after a brief delay
-            new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
-                if (mediaRecorder != null) {
-                    try {
-                        int maxAmplitude = mediaRecorder.getMaxAmplitude();
-                        Log.d(TAG, "🎤 Microphone amplitude check: " + maxAmplitude + 
-                              (maxAmplitude == 0 ? " ⚠️ WARNING: No audio detected!" : " ✅ Audio detected"));
-                    } catch (Exception e) {
-                        Log.e(TAG, "❌ Could not check amplitude", e);
-                    }
-                }
-            }, 500); // Check after 500ms
-            
-        } catch (IOException e) {
-            Log.e(TAG, "❌ MediaRecorder prepare/start failed", e);
-            if (mediaRecorder != null) {
-                mediaRecorder.release();
-                mediaRecorder = null;
+            switch (call.method) {
+                case "startRecording":
+                    String startPath = (String) audioService.getClass().getMethod("startRecording").invoke(audioService);
+                    result.success(startPath);
+                    break;
+                case "stopRecording":
+                    String stopPath = (String) audioService.getClass().getMethod("stopRecording").invoke(audioService);
+                    result.success(stopPath);
+                    break;
+                case "isRecording":
+                    Boolean isRec = (Boolean) audioService.getClass().getMethod("isRecording").invoke(audioService);
+                    result.success(isRec);
+                    break;
+                default:
+                    result.notImplemented();
+                    break;
             }
-            throw e;
+        } catch (Exception e) {
+            Log.e(TAG, "❌ Error calling AudioRecordingService method", e);
+            result.error("SERVICE_ERROR", e.getMessage(), null);
         }
-
-        return recordingFile.getAbsolutePath();
-    }
-
-    private String stopRecording() {
-        String filePath = recordingFile != null ? recordingFile.getAbsolutePath() : null;
-        
-        if (mediaRecorder != null) {
-            try {
-                mediaRecorder.stop();
-                Log.d(TAG, "✅ Recording stopped successfully");
-                
-                // Check file size
-                if (recordingFile != null && recordingFile.exists()) {
-                    long fileSize = recordingFile.length();
-                    Log.d(TAG, "📊 Recording file size: " + fileSize + " bytes");
-                    if (fileSize < 1000) {
-                        Log.w(TAG, "⚠️ WARNING: File is suspiciously small! Likely blank audio.");
-                    }
-                }
-            } catch (Exception e) {
-                Log.e(TAG, "❌ Error stopping MediaRecorder", e);
-            } finally {
-                mediaRecorder.release();
-                mediaRecorder = null;
-            }
-        }
-
-        return filePath;
     }
 
     public void cleanup() {
-        if (mediaRecorder != null) {
-            try {
-                mediaRecorder.stop();
-            } catch (Exception e) {
-                // Ignore
+        try {
+            if (isServiceBound) {
+                context.unbindService(serviceConnection);
+                isServiceBound = false;
+                Log.d(TAG, "✅ AudioRecordingService unbound");
             }
-            mediaRecorder.release();
-            mediaRecorder = null;
+        } catch (Exception e) {
+            Log.e(TAG, "❌ Error unbinding AudioRecordingService", e);
         }
-        recordingFile = null;
+        audioService = null;
     }
 }
