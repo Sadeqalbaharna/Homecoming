@@ -648,7 +648,6 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
     if (_recordedAudioPath == null) return;
     
     setState(() {
-      _sending = true;
       _reply = null;
       _error = null;
     });
