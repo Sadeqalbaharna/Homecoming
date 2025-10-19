@@ -54,7 +54,8 @@ public class AudioRecorderPlugin {
         try {
             Log.d(TAG, "🔗 Binding to AudioRecordingService...");
             Intent intent = new Intent();
-            intent.setClassName("com.homecoming.homecoming_app", 
+            // Use the actual applicationId from build.gradle, not the namespace
+            intent.setClassName("com.homecoming.app", 
                               "com.homecoming.homecoming_app.AudioRecordingService");
             
             // Start the service first (as foreground service)
