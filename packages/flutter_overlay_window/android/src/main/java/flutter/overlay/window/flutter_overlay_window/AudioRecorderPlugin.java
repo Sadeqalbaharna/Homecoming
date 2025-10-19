@@ -58,41 +58,54 @@ public class AudioRecorderPlugin {
     }
 
     private void bindAudioService() {
+        Log.d(TAG, ">>> bindAudioService called | isServiceBound=" + isServiceBound + " | isBindingInProgress=" + isBindingInProgress);
+        
         if (isServiceBound || isBindingInProgress) {
+            Log.d(TAG, ">>> Already bound or binding in progress, returning");
             return;  // Already bound or binding in progress
         }
         
         isBindingInProgress = true;
+        Log.d(TAG, ">>> Set isBindingInProgress=true");
+        
         try {
-            Log.d(TAG, "🔗 Binding to AudioRecordingService...");
+            Log.d(TAG, ">>> Creating Intent...");
             Intent intent = new Intent();
             // Use the actual applicationId from build.gradle, not the namespace
             intent.setClassName("com.homecoming.app", 
                               "com.homecoming.homecoming_app.AudioRecordingService");
+            Log.d(TAG, ">>> Intent created: " + intent.toString());
             
             // Start the service first (as foreground service)
+            Log.d(TAG, ">>> Calling startForegroundService...");
             context.startForegroundService(intent);
-            Log.d(TAG, "🚀 Foreground service start requested");
+            Log.d(TAG, ">>> startForegroundService returned successfully");
             
             // Then bind to it
+            Log.d(TAG, ">>> Calling bindService...");
             boolean bound = context.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE);
-            Log.d(TAG, bound ? "✅ Service binding initiated" : "❌ Service binding failed");
+            Log.d(TAG, ">>> bindService returned: " + bound);
             
             if (!bound) {
+                Log.e(TAG, ">>> bindService returned false, setting isBindingInProgress=false");
                 isBindingInProgress = false;
             }
         } catch (Exception e) {
-            Log.e(TAG, "❌ Error binding to AudioRecordingService", e);
+            Log.e(TAG, ">>> Exception in bindAudioService", e);
             isBindingInProgress = false;
         }
     }
 
     public void handleMethodCall(io.flutter.plugin.common.MethodCall call, MethodChannel.Result result) {
+        Log.d(TAG, ">>> handleMethodCall: " + call.method + " | isServiceBound=" + isServiceBound + " | isBindingInProgress=" + isBindingInProgress);
+        
         // Bind service on first method call (after permissions are granted)
         if (!isServiceBound) {
             if (!isBindingInProgress) {
-                Log.d(TAG, "🔗 Service not bound yet, binding now...");
+                Log.d(TAG, ">>> Service not bound yet, binding now...");
                 bindAudioService();
+            } else {
+                Log.d(TAG, ">>> Binding already in progress, waiting...");
             }
             
             // Wait for service to bind (up to 3 seconds)
@@ -100,6 +113,7 @@ public class AudioRecorderPlugin {
             return;
         }
 
+        Log.d(TAG, ">>> Service already bound, executing directly");
         executeMethodCall(call, result);
     }
     
