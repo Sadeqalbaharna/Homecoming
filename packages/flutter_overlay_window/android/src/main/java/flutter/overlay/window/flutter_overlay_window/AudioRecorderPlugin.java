@@ -47,10 +47,15 @@ public class AudioRecorderPlugin {
 
     public AudioRecorderPlugin(Context context) {
         this.context = context;
-        bindAudioService();
+        // DON'T bind service on startup - wait for first recording request
+        // This allows app to request permissions first
     }
 
     private void bindAudioService() {
+        if (isServiceBound) {
+            return;  // Already bound
+        }
+        
         try {
             Log.d(TAG, "🔗 Binding to AudioRecordingService...");
             Intent intent = new Intent();
@@ -71,9 +76,14 @@ public class AudioRecorderPlugin {
     }
 
     public void handleMethodCall(io.flutter.plugin.common.MethodCall call, MethodChannel.Result result) {
+        // Bind service on first method call (after permissions are granted)
         if (!isServiceBound || audioService == null) {
-            Log.w(TAG, "⚠️ AudioRecordingService not bound yet");
-            result.error("SERVICE_NOT_BOUND", "Audio recording service not ready", null);
+            Log.d(TAG, "🔗 Service not bound yet, binding now...");
+            bindAudioService();
+            
+            // Service binding is async, so return error for now
+            // User will retry recording after a moment
+            result.error("SERVICE_NOT_BOUND", "Audio recording service starting, please try again in a moment", null);
             return;
         }
 
