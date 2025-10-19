@@ -70,13 +70,15 @@ public class AudioRecorderPlugin {
         
         try {
             Log.d(TAG, ">>> Creating Intent...");
+            // Use ComponentName to specify the exact service class
+            // The service class is com.homecoming.homecoming_app.AudioRecordingService
+            ComponentName componentName = new ComponentName(
+                "com.homecoming.homecoming_app",
+                "com.homecoming.homecoming_app.AudioRecordingService"
+            );
             Intent intent = new Intent();
-            // Use the manifest package where the service is actually registered
-            // The service is in com.homecoming.homecoming_app (manifest package)
-            // NOT com.homecoming.app (applicationId)
-            intent.setClassName("com.homecoming.homecoming_app", 
-                              "com.homecoming.homecoming_app.AudioRecordingService");
-            Log.d(TAG, ">>> Intent created: " + intent.toString());
+            intent.setComponent(componentName);
+            Log.d(TAG, ">>> Intent created: " + intent.toString() + " component=" + componentName);
             
             // Start the service first (as foreground service)
             Log.d(TAG, ">>> Calling startForegroundService...");
