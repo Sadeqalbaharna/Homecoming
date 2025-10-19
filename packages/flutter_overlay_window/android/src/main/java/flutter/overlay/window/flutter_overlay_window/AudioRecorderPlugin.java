@@ -4,7 +4,9 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
 import android.util.Log;
 import io.flutter.plugin.common.MethodChannel;
 
@@ -18,6 +20,7 @@ public class AudioRecorderPlugin {
     private Object audioService;  // Will hold AudioRecordingService instance via reflection
     private final String TAG = "AudioRecorderPlugin";
     private boolean isServiceBound = false;
+    private boolean isBindingInProgress = false;
 
     public static final String CHANNEL_NAME = "com.homecoming.app/audio_recorder";
 
@@ -31,9 +34,11 @@ public class AudioRecorderPlugin {
                 java.lang.reflect.Method getServiceMethod = binderClass.getMethod("getService");
                 audioService = getServiceMethod.invoke(service);
                 isServiceBound = true;
+                isBindingInProgress = false;
                 Log.d(TAG, "✅ AudioRecordingService bound successfully");
             } catch (Exception e) {
                 Log.e(TAG, "❌ Failed to bind AudioRecordingService", e);
+                isBindingInProgress = false;
             }
         }
 
@@ -42,6 +47,7 @@ public class AudioRecorderPlugin {
             Log.w(TAG, "⚠️ AudioRecordingService disconnected");
             audioService = null;
             isServiceBound = false;
+            isBindingInProgress = false;
         }
     };
 
@@ -52,10 +58,11 @@ public class AudioRecorderPlugin {
     }
 
     private void bindAudioService() {
-        if (isServiceBound) {
-            return;  // Already bound
+        if (isServiceBound || isBindingInProgress) {
+            return;  // Already bound or binding in progress
         }
         
+        isBindingInProgress = true;
         try {
             Log.d(TAG, "🔗 Binding to AudioRecordingService...");
             Intent intent = new Intent();
@@ -70,20 +77,54 @@ public class AudioRecorderPlugin {
             // Then bind to it
             boolean bound = context.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE);
             Log.d(TAG, bound ? "✅ Service binding initiated" : "❌ Service binding failed");
+            
+            if (!bound) {
+                isBindingInProgress = false;
+            }
         } catch (Exception e) {
             Log.e(TAG, "❌ Error binding to AudioRecordingService", e);
+            isBindingInProgress = false;
         }
     }
 
     public void handleMethodCall(io.flutter.plugin.common.MethodCall call, MethodChannel.Result result) {
         // Bind service on first method call (after permissions are granted)
-        if (!isServiceBound || audioService == null) {
-            Log.d(TAG, "🔗 Service not bound yet, binding now...");
-            bindAudioService();
+        if (!isServiceBound) {
+            if (!isBindingInProgress) {
+                Log.d(TAG, "🔗 Service not bound yet, binding now...");
+                bindAudioService();
+            }
             
-            // Service binding is async, so return error for now
-            // User will retry recording after a moment
-            result.error("SERVICE_NOT_BOUND", "Audio recording service starting, please try again in a moment", null);
+            // Wait for service to bind (up to 3 seconds)
+            waitForServiceAndExecute(call, result, 0);
+            return;
+        }
+
+        executeMethodCall(call, result);
+    }
+    
+    private void waitForServiceAndExecute(io.flutter.plugin.common.MethodCall call, MethodChannel.Result result, int attemptCount) {
+        if (isServiceBound && audioService != null) {
+            // Service is ready!
+            executeMethodCall(call, result);
+            return;
+        }
+        
+        if (attemptCount >= 30) {  // 30 attempts * 100ms = 3 seconds max
+            Log.e(TAG, "❌ Service binding timeout after 3 seconds");
+            result.error("SERVICE_TIMEOUT", "Audio recording service failed to start. Please restart the app.", null);
+            return;
+        }
+        
+        // Wait 100ms and try again
+        new Handler(Looper.getMainLooper()).postDelayed(() -> {
+            waitForServiceAndExecute(call, result, attemptCount + 1);
+        }, 100);
+    }
+    
+    private void executeMethodCall(io.flutter.plugin.common.MethodCall call, MethodChannel.Result result) {
+        if (audioService == null) {
+            result.error("SERVICE_NOT_BOUND", "Audio recording service not available", null);
             return;
         }
 
