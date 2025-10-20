@@ -297,6 +297,20 @@ class ChatMessage {
   }) : timestamp = timestamp ?? DateTime.now();
 }
 
+// ============= DELTA FLOATER MODEL =============
+class _Floater {
+  final String text;
+  final Color color;
+  final double angle;
+  final AnimationController ctrl;
+  _Floater({
+    required this.text,
+    required this.color,
+    required this.angle,
+    required this.ctrl,
+  });
+}
+
 // ============= OVERLAY WIDGET =============
 // This is the actual floating widget that appears over other apps
 class OverlayWidget extends StatefulWidget {
@@ -306,7 +320,7 @@ class OverlayWidget extends StatefulWidget {
   State<OverlayWidget> createState() => _OverlayWidgetState();
 }
 
-class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProviderStateMixin {
+class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateMixin {
   bool _expanded = false;
   bool _showMenu = false; // New: controls circular menu visibility
   final _controller = TextEditingController();
@@ -328,6 +342,10 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
   String? _recordedAudioPath; // Store the recorded audio path for playback
   final _audioPlayer = AudioPlayerService();
   bool _isPlayingRecording = false;
+  
+  // Delta popups
+  final List<_Floater> _floaters = [];
+  final Random _rng = Random();
   
   // Sound indicators for recording
   final _beepPlayer = AudioPlayer();
@@ -604,7 +622,65 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
     _player.dispose();
     _beepPlayer.dispose();
     voiceService.dispose();
+    // Dispose all delta animation controllers
+    for (final f in _floaters) {
+      f.ctrl.dispose();
+    }
     super.dispose();
+  }
+
+  // Spawn delta popup bubbles
+  void _spawnDeltas(Map<String, int> deltas) {
+    final items = deltas.entries.where((e) => e.value.abs() > 0).toList();
+    final capped = items.take(6).toList();
+
+    for (final e in capped) {
+      final val = e.value;
+      final isPos = val >= 0;
+      final color = isPos ? Colors.lightGreenAccent : Colors.redAccent;
+      final sign = isPos ? '+' : '';
+      final text = '$sign$val ${_prettyName(e.key)}';
+      final angle = _rng.nextDouble() * 2 * pi;
+
+      final ctrl = AnimationController(
+          vsync: this, duration: const Duration(milliseconds: 1800));
+      final f = _Floater(text: text, color: color, angle: angle, ctrl: ctrl);
+      setState(() => _floaters.add(f));
+      ctrl.forward();
+      ctrl.addStatusListener((st) {
+        if (st == AnimationStatus.completed) {
+          ctrl.dispose();
+          if (mounted) setState(() => _floaters.remove(f));
+        }
+      });
+    }
+  }
+
+  String _prettyName(String k) {
+    switch (k) {
+      case 'extraversion':
+        return 'Extraversion';
+      case 'intuition':
+        return 'Intuition';
+      case 'feeling':
+        return 'Feeling';
+      case 'perceiving':
+        return 'Perceiving';
+      case 'valence':
+        return 'Valence';
+      case 'energy':
+        return 'Energy';
+      case 'warmth':
+        return 'Warmth';
+      case 'confidence':
+        return 'Confidence';
+      case 'playfulness':
+        return 'Playfulness';
+      case 'focus':
+        return 'Focus';
+      default:
+        return k;
+    }
   }
 
   Future<String> _writeTempMp3(Uint8List bytes) async {
@@ -1069,6 +1145,16 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
       
       final replyText = resp.reply.isEmpty ? "(no reply)" : resp.reply;
       
+      // Extract personality/mood deltas
+      print('🧠 Personality deltas: ${resp.personalityDelta}');
+      print('🧠 Mood deltas: ${resp.moodDelta}');
+      print('🧠 Actual deltas: ${resp.actualDeltas}');
+      
+      // Spawn delta popup bubbles
+      if (resp.actualDeltas.isNotEmpty) {
+        _spawnDeltas(resp.actualDeltas);
+      }
+      
       // Handle TTS
       String? audioPath;
       if (resp.ttsBase64 != null) {
@@ -1091,15 +1177,15 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
       // Auto-scroll to bottom
       _scrollToBottom();
       
-      // Log conversation to Firebase
+      // Log conversation to Firebase with REAL deltas
       if (FirebaseService.isAvailable) {
         await FirebaseService.saveConversation(
           personaId: 'truekai',
           userMessage: text,
           aiResponse: replyText,
-          personalityDeltas: {}, // Add personality tracking if available
+          personalityDeltas: resp.actualDeltas, // Use actual deltas from AI response
         );
-        print('✅ [FIREBASE] Conversation logged');
+        print('✅ [FIREBASE] Conversation logged with deltas: ${resp.actualDeltas}');
       }
       
     } catch (e) {
@@ -1346,6 +1432,36 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
                       },
                     ),
                   ],
+                  
+                  // Delta popup floaters (personality/mood changes)
+                  ..._floaters.map((f) {
+                    final anim = CurvedAnimation(
+                        parent: f.ctrl, curve: Curves.easeOutCubic);
+                    // Position relative to avatar center (100, 100)
+                    final avatarCenterX = 50.0 + 50.0; // left + width/2
+                    final avatarCenterY = 40.0 + 60.0; // top + height/2
+                    return Positioned(
+                      left: avatarCenterX + cos(f.angle) * 70 * (1 + anim.value * 0.3),
+                      top: avatarCenterY + sin(f.angle) * 70 * (1 + anim.value * 0.3) - anim.value * 20,
+                      child: Opacity(
+                        opacity: (1.0 - anim.value).clamp(0.0, 1.0),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withOpacity(0.6),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: f.color),
+                          ),
+                          child: Text(
+                            f.text,
+                            style: TextStyle(
+                                color: f.color, fontSize: 12),
+                          ),
+                        ),
+                      ),
+                    );
+                  }),
           ],
         
         // Expanded chat UI - TRULY FULL SCREEN, unmovable
