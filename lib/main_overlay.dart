@@ -534,7 +534,7 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
   // Resize overlay window based on UI state
   Future<void> _resizeOverlay(bool chatExpanded) async {
     if (chatExpanded) {
-      // Chat expanded: LOCK to full screen dimensions (device width x height)
+      // Chat expanded: Create a FULL SCREEN overlay window
       // Get ACTUAL physical screen size
       final view = WidgetsBinding.instance.platformDispatcher.views.first;
       final physicalSize = view.physicalSize;
@@ -547,17 +547,21 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
       print('📱 [SCREEN] Physical size: ${physicalSize.width}x${physicalSize.height}');
       print('📱 [SCREEN] Device pixel ratio: $devicePixelRatio');
       print('📱 [SCREEN] Logical size: ${screenWidth}x${screenHeight}');
-      print('📱 [SCREEN] Locking chat to full screen: ${screenWidth}x${screenHeight}');
+      print('📱 [SCREEN] Expanding to FULL SCREEN chat: ${screenWidth}x${screenHeight}');
       
-      // CRITICAL: Move overlay to (0,0) AND resize to full screen
-      // This anchors the top-left corner to the device screen origin
-      await FlutterOverlayWindow.moveOverlay(const OverlayPosition(0, 0)); // Move to top-left corner
-      await FlutterOverlayWindow.resizeOverlay(screenWidth, screenHeight, false); // Resize to full screen, not draggable
+      // CRITICAL: Move overlay to (0,0) AND resize to FULL device screen
+      // This creates a separate full-screen chat window
+      await FlutterOverlayWindow.moveOverlay(const OverlayPosition(0, 0)); // Anchor to top-left
+      await FlutterOverlayWindow.resizeOverlay(screenWidth, screenHeight, false); // Full screen, not draggable
+      await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag); // Non-focusable until TextField focused
       
-      print('📱 [SCREEN] Chat overlay moved to (0,0) and resized to ${screenWidth}x${screenHeight}');
+      print('📱 [SCREEN] ✅ Chat window: ${screenWidth}x${screenHeight} at (0,0) - FULL SCREEN MODE');
     } else {
-      // Menu/avatar only: compact square window (200x200)
-      await FlutterOverlayWindow.resizeOverlay(200, 200, true);
+      // Avatar mode: Small draggable window (200x200)
+      print('📱 [SCREEN] Shrinking to avatar mode: 200x200');
+      await FlutterOverlayWindow.resizeOverlay(200, 200, true); // Small, draggable
+      await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
+      print('📱 [SCREEN] ✅ Avatar window: 200x200 - DRAGGABLE MODE');
     }
   }
   
