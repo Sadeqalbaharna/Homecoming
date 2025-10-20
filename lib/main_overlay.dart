@@ -815,12 +815,29 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
     
     try {
       // Stop if already playing
-      if (_playerState == PlayerState.playing) {
+      if (_isPlayingTest) {
         await _audioPlayer.stop();
+        setState(() => _isPlayingTest = false);
+        print('🧪 [TEST] Stopped playback');
+        return;
       }
       
-      await _audioPlayer.play(DeviceFileSource(_testAudioPath!));
-      print('🧪 [TEST] Playback started');
+      final success = await _audioPlayer.play(_testAudioPath!);
+      if (success) {
+        print('🧪 [TEST] Playback started');
+        
+        // Auto-stop after playback completes (estimate)
+        Future.delayed(const Duration(seconds: 6), () {
+          if (mounted && _isPlayingTest) {
+            setState(() => _isPlayingTest = false);
+          }
+        });
+      } else {
+        setState(() {
+          _isPlayingTest = false;
+          _error = 'TEST: Failed to start playback';
+        });
+      }
     } catch (e) {
       print('🧪 [TEST] Playback error: $e');
       setState(() {
