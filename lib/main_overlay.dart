@@ -1293,7 +1293,7 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
                   ],
           ],
         
-        // Expanded chat UI - FIXED to screen edges, unmovable
+        // Expanded chat UI - TRULY FULL SCREEN, unmovable
         if (_expanded)
           Positioned(
             left: 0,
@@ -1308,107 +1308,22 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
                   onTap: () {}, // Prevents closing when tapping chat area
                   child: Material(
                     color: Colors.transparent,
-                    child: Container(
-                      margin: EdgeInsets.zero, // Full screen - no margins
-                      decoration: const BoxDecoration(
-                        color: Colors.transparent, // Transparent - only bubbles visible
-                      ),
-                        child: Column(
-                        children: [
-                          // Header - minimal, just close button
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                            decoration: BoxDecoration(
-                              color: Colors.black.withOpacity(0.3), // Semi-transparent header
-                            ),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Row(
+                    child: Stack(
+                      children: [
+                        // Main content - full screen
+                        Column(
+                          children: [
+                            // Input area at TOP - semi-transparent background
+                            Container(
+                              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withOpacity(0.5), // Semi-transparent background
+                              ),
+                              child: SafeArea(
+                                bottom: false,
+                                child: Row(
                                   children: [
-                                    Container(
-                                      width: 32,
-                                      height: 32,
-                                      decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        border: Border.all(color: const Color(0xFFFFE7B0), width: 1.5),
-                                      ),
-                                      child: ClipOval(
-                                        child: Image.asset(kAvatarIdleGif, fit: BoxFit.cover),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 10),
-                                    const Text(
-                                      'Chat with Kai',
-                                      style: TextStyle(
-                                        color: Color(0xFFFFE7B0),
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                IconButton(
-                                  icon: const Icon(Icons.close, color: Color(0xFFFFE7B0), size: 20),
-                                  onPressed: () => _closeChat(),
-                                  padding: EdgeInsets.zero,
-                                  constraints: const BoxConstraints(),
-                                ),
-                              ],
-                            ),
-                          ),
-                          
-                          // Messages area - Scrollable bubble chat
-                          Expanded(
-                            child: _chatHistory.isEmpty
-                                ? Center(
-                                    child: Column(
-                                      mainAxisAlignment: MainAxisAlignment.center,
-                                      children: [
-                                        Icon(
-                                          Icons.chat_bubble_outline,
-                                          size: 64,
-                                          color: const Color(0xFFFFE7B0).withOpacity(0.3),
-                                        ),
-                                        const SizedBox(height: 16),
-                                        Text(
-                                          'Start a conversation with Kai!',
-                                          style: TextStyle(
-                                            color: Colors.white.withOpacity(0.5),
-                                            fontSize: 16,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 8),
-                                        Text(
-                                          'Hold the avatar to record voice',
-                                          style: TextStyle(
-                                            color: Colors.white.withOpacity(0.3),
-                                            fontSize: 12,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  )
-                                : ListView.builder(
-                                    controller: _chatScrollController,
-                                    padding: const EdgeInsets.all(16),
-                                    itemCount: _chatHistory.length,
-                                    itemBuilder: (context, index) {
-                                      final message = _chatHistory[index];
-                                      return _buildMessageBubble(message);
-                                    },
-                                  ),
-                          ),
-                          
-                          // Input area - semi-transparent background
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                            decoration: BoxDecoration(
-                              color: Colors.black.withOpacity(0.5), // Semi-transparent background
-                            ),
-                            child: Row(
-                              children: [
-                                Expanded(
+                                    Expanded(
                                   child: Focus(
                                     onFocusChange: (hasFocus) async {
                                       // Update flag to allow keyboard when TextField is focused
@@ -1515,13 +1430,71 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
                               ],
                             ),
                           ),
+                        ),
+                            
+                            // Messages area - FULL SCREEN scrollable below input
+                            Expanded(
+                              child: _chatHistory.isEmpty
+                                  ? Center(
+                                      child: Column(
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        children: [
+                                          Icon(
+                                            Icons.chat_bubble_outline,
+                                            size: 64,
+                                            color: const Color(0xFFFFE7B0).withOpacity(0.3),
+                                          ),
+                                          const SizedBox(height: 16),
+                                          Text(
+                                            'Start a conversation with Kai!',
+                                            style: TextStyle(
+                                              color: Colors.white.withOpacity(0.5),
+                                              fontSize: 16,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 8),
+                                          Text(
+                                            'Hold the avatar to record voice',
+                                            style: TextStyle(
+                                              color: Colors.white.withOpacity(0.3),
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    )
+                                  : ListView.builder(
+                                      controller: _chatScrollController,
+                                      padding: const EdgeInsets.all(16),
+                                      itemCount: _chatHistory.length,
+                                      itemBuilder: (context, index) {
+                                        final message = _chatHistory[index];
+                                        return _buildMessageBubble(message);
+                                      },
+                                    ),
+                            ),
                         ],
                       ),
-                    ),
+                      
+                      // Floating close button - top right corner
+                      Positioned(
+                        top: 40,
+                        right: 16,
+                        child: SafeArea(
+                          child: FloatingActionButton(
+                            mini: true,
+                            backgroundColor: Colors.black.withOpacity(0.5),
+                            onPressed: () => _closeChat(),
+                            child: const Icon(Icons.close, color: Color(0xFFFFE7B0), size: 20),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
             ),
+          ),
           ),
         ],
     );
