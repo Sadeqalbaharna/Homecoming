@@ -281,6 +281,21 @@ class _PermissionScreenState extends State<PermissionScreen> with WidgetsBinding
   }
 }
 
+// ============= CHAT MESSAGE MODEL =============
+class ChatMessage {
+  final String text;
+  final bool isUser; // true = user, false = Kai
+  final DateTime timestamp;
+  final String? audioPath; // Optional: path to audio file for this message
+
+  ChatMessage({
+    required this.text,
+    required this.isUser,
+    DateTime? timestamp,
+    this.audioPath,
+  }) : timestamp = timestamp ?? DateTime.now();
+}
+
 // ============= OVERLAY WIDGET =============
 // This is the actual floating widget that appears over other apps
 class OverlayWidget extends StatefulWidget {
@@ -296,6 +311,10 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
   final _controller = TextEditingController();
   final _player = AudioPlayer();
   
+  // Chat history
+  final List<ChatMessage> _chatHistory = [];
+  final ScrollController _chatScrollController = ScrollController();
+  
   bool _sending = false;
   String? _reply;
   String? _error;
@@ -308,6 +327,9 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
   String? _recordedAudioPath; // Store the recorded audio path for playback
   final _audioPlayer = AudioPlayerService();
   bool _isPlayingRecording = false;
+  
+  // Sound indicators for recording
+  final _beepPlayer = AudioPlayer();
   
   // TEST: Simple audio recording/playback test (will use service when fixed)
   bool _isTestRecording = false;
@@ -534,7 +556,9 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
   void dispose() {
     _stopAutoMovement();
     _controller.dispose();
+    _chatScrollController.dispose();
     _player.dispose();
+    _beepPlayer.dispose();
     voiceService.dispose();
     super.dispose();
   }
@@ -633,7 +657,10 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
       });
       
       print('✅ Recording saved: $audioPath');
-      print('🎧 Ready for playback or transcription');
+      print('🎧 Auto-transcribing and sending to chat...');
+      
+      // Automatically transcribe and send to chat (for PTT on avatar)
+      await _transcribeAndSend();
       
     } catch (e) {
       setState(() {
@@ -861,6 +888,106 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
     });
   }
   
+  /// Auto-scroll chat to bottom
+  void _scrollToBottom() {
+    if (_chatScrollController.hasClients) {
+      Future.delayed(const Duration(milliseconds: 100), () {
+        if (_chatScrollController.hasClients) {
+          _chatScrollController.animateTo(
+            _chatScrollController.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOut,
+          );
+        }
+      });
+    }
+  }
+  
+  /// Play beep sound when recording starts
+  Future<void> _playRecordingStartBeep() async {
+    try {
+      await _beepPlayer.play(AssetSource('audio/record_start.wav'));
+      print('🔊 BEEP: Recording started');
+    } catch (e) {
+      print('⚠️ Failed to play start beep: $e');
+    }
+  }
+  
+  /// Play beep sound when recording stops
+  Future<void> _playRecordingStopBeep() async {
+    try {
+      await _beepPlayer.play(AssetSource('audio/record_stop.wav'));
+      print('🔊 BEEP: Recording stopped');
+    } catch (e) {
+      print('⚠️ Failed to play stop beep: $e');
+    }
+  }
+  
+  /// Build a message bubble widget
+  Widget _buildMessageBubble(ChatMessage message) {
+    return Align(
+      alignment: message.isUser ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.of(context).size.width * 0.75,
+        ),
+        decoration: BoxDecoration(
+          color: message.isUser 
+              ? Colors.blue.withOpacity(0.7) 
+              : const Color(0xFF2A2119),
+          borderRadius: BorderRadius.circular(18),
+          border: message.isUser
+              ? null
+              : Border.all(color: const Color(0xFFFFE7B0).withOpacity(0.3)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              message.text,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 14,
+              ),
+            ),
+            if (message.audioPath != null) ...[
+              const SizedBox(height: 8),
+              InkWell(
+                onTap: () async {
+                  if (_playerState == PlayerState.playing) {
+                    await _player.pause();
+                  } else {
+                    await _player.play(DeviceFileSource(message.audioPath!));
+                  }
+                },
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      _playerState == PlayerState.playing ? Icons.pause_circle : Icons.play_circle,
+                      color: const Color(0xFFFFE7B0),
+                      size: 20,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      'Play voice',
+                      style: TextStyle(
+                        color: const Color(0xFFFFE7B0),
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+  
   /// Send message with text (extracted from _send for reuse)
   Future<void> _sendMessage(String text) async {
     print('🟢 _sendMessage called with: "$text"');
@@ -869,12 +996,21 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
       return;
     }
     
+    // Add user message to chat history
     setState(() {
+      _chatHistory.add(ChatMessage(text: text, isUser: true));
       _sending = true;
       _reply = null;
       _error = null;
       _ttsPath = null;
     });
+    
+    // Clear the text field
+    _controller.clear();
+    
+    // Auto-scroll to bottom
+    _scrollToBottom();
+    
     print('🟢 State set: sending=true');
     
     try {
@@ -887,14 +1023,30 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
         ctxTurns: 5,
       );
       
-      setState(() => _reply = resp.reply.isEmpty ? "(no reply)" : resp.reply);
+      final replyText = resp.reply.isEmpty ? "(no reply)" : resp.reply;
       
       // Handle TTS
+      String? audioPath;
       if (resp.ttsBase64 != null) {
         final mp3Path = await _writeTempMp3(base64Decode(resp.ttsBase64!));
         await _player.play(DeviceFileSource(mp3Path));
-        setState(() => _ttsPath = mp3Path);
+        audioPath = mp3Path;
       }
+      
+      // Add Kai's reply to chat history
+      setState(() {
+        _chatHistory.add(ChatMessage(
+          text: replyText,
+          isUser: false,
+          audioPath: audioPath,
+        ));
+        _reply = replyText;
+        _ttsPath = audioPath;
+      });
+      
+      // Auto-scroll to bottom
+      _scrollToBottom();
+      
     } catch (e) {
       setState(() => _error = e.toString());
     } finally {
@@ -1017,9 +1169,15 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
                     }
                   });
                 },
-                onLongPress: () async {
-                  // Close overlay on long press
-                  await FlutterOverlayWindow.closeOverlay();
+                onLongPressStart: (_) async {
+                  // Start voice recording when holding Kai avatar
+                  await _playRecordingStartBeep();
+                  await _startVoiceRecording();
+                },
+                onLongPressEnd: (_) async {
+                  // Stop voice recording when releasing Kai avatar
+                  await _stopVoiceRecording();
+                  await _playRecordingStopBeep();
                 },
                 // Drag handling removed - Java handles it natively now (enableDrag=true)
                 // This gives buttery smooth dragging without Flutter->Java bridge overhead
@@ -1081,21 +1239,6 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
                       onTap: () {
                         setState(() => _showMenu = false);
                         // TODO: Open settings
-                      },
-                    ),
-                    
-                    // Microphone button (bottom-right)
-                    _buildCircularButton(
-                      angle: 45,
-                      radius: 68, // Wrapped tightly around avatar
-                      icon: _isRecording ? Icons.mic_off : Icons.mic,
-                      onTap: () async {
-                        setState(() => _showMenu = false);
-                        if (_isRecording) {
-                          await _stopVoiceRecording();
-                        } else {
-                          await _startVoiceRecording();
-                        }
                       },
                     ),
                     
@@ -1212,108 +1355,47 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
                             ),
                           ),
                           
-                          // Messages area
+                          // Messages area - Scrollable bubble chat
                           Expanded(
-                            child: SingleChildScrollView(
-                              padding: const EdgeInsets.all(16),
-                              child: Column(
-                                children: [
-                                  if (_reply != null)
-                                    Container(
-                                      padding: const EdgeInsets.all(16),
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xFF2A2119),
-                                        borderRadius: BorderRadius.circular(12),
-                                      ),
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Text(_reply!, style: const TextStyle(color: Colors.white)),
-                                          if (_ttsPath != null) ...[
-                                            const SizedBox(height: 12),
-                                            ElevatedButton.icon(
-                                              onPressed: () async {
-                                                if (_playerState == PlayerState.playing) {
-                                                  await _player.pause();
-                                                } else {
-                                                  await _player.play(DeviceFileSource(_ttsPath!));
-                                                }
-                                              },
-                                              icon: Icon(_playerState == PlayerState.playing ? Icons.pause : Icons.play_arrow),
-                                              label: const Text('Voice'),
-                                              style: ElevatedButton.styleFrom(
-                                                backgroundColor: const Color(0xFFFFE7B0),
-                                                foregroundColor: const Color(0xFF0D0A07),
-                                              ),
-                                            ),
-                                          ],
-                                        ],
-                                      ),
+                            child: _chatHistory.isEmpty
+                                ? Center(
+                                    child: Column(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        Icon(
+                                          Icons.chat_bubble_outline,
+                                          size: 64,
+                                          color: const Color(0xFFFFE7B0).withOpacity(0.3),
+                                        ),
+                                        const SizedBox(height: 16),
+                                        Text(
+                                          'Start a conversation with Kai!',
+                                          style: TextStyle(
+                                            color: Colors.white.withOpacity(0.5),
+                                            fontSize: 16,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 8),
+                                        Text(
+                                          'Hold the avatar to record voice',
+                                          style: TextStyle(
+                                            color: Colors.white.withOpacity(0.3),
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                      ],
                                     ),
-                                  if (_error != null)
-                                    Container(
-                                      padding: const EdgeInsets.all(12),
-                                      decoration: BoxDecoration(
-                                        color: Colors.red.withOpacity(0.2),
-                                        borderRadius: BorderRadius.circular(8),
-                                      ),
-                                      child: Text(_error!, style: const TextStyle(color: Colors.red, fontSize: 12)),
-                                    ),
-                                ],
-                              ),
-                            ),
+                                  )
+                                : ListView.builder(
+                                    controller: _chatScrollController,
+                                    padding: const EdgeInsets.all(16),
+                                    itemCount: _chatHistory.length,
+                                    itemBuilder: (context, index) {
+                                      final message = _chatHistory[index];
+                                      return _buildMessageBubble(message);
+                                    },
+                                  ),
                           ),
-                          
-                          // TEST: Recording status area
-                          if (_testAudioPath != null || _isTestRecording)
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                              decoration: BoxDecoration(
-                                color: Colors.blue.withOpacity(0.2),
-                                border: Border(
-                                  top: BorderSide(color: Colors.blue.withOpacity(0.3)),
-                                ),
-                              ),
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    _isTestRecording ? Icons.fiber_manual_record : Icons.check_circle,
-                                    color: _isTestRecording ? Colors.red : Colors.green,
-                                    size: 16,
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      _isTestRecording ? 'TEST: Recording...' : 'TEST: Audio recorded',
-                                      style: const TextStyle(color: Colors.white, fontSize: 12),
-                                    ),
-                                  ),
-                                  if (_testAudioPath != null && !_isTestRecording) ...[
-                                    IconButton(
-                                      icon: Icon(
-                                        _isPlayingTest ? Icons.stop : Icons.play_arrow,
-                                        color: const Color(0xFFFFE7B0),
-                                        size: 20,
-                                      ),
-                                      padding: EdgeInsets.zero,
-                                      constraints: const BoxConstraints(),
-                                      onPressed: _playTestAudio,
-                                    ),
-                                    const SizedBox(width: 8),
-                                    IconButton(
-                                      icon: const Icon(
-                                        Icons.delete,
-                                        color: Colors.red,
-                                        size: 20,
-                                      ),
-                                      padding: EdgeInsets.zero,
-                                      constraints: const BoxConstraints(),
-                                      onPressed: _deleteTestAudio,
-                                    ),
-                                  ],
-                                ],
-                              ),
-                            ),
                           
                           // Input area
                           Container(
