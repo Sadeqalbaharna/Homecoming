@@ -535,12 +535,20 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
   Future<void> _resizeOverlay(bool chatExpanded) async {
     if (chatExpanded) {
       // Chat expanded: LOCK to full screen dimensions (device width x height)
-      // Get screen size from context
-      final size = MediaQuery.of(context).size;
-      final screenWidth = size.width.toInt();
-      final screenHeight = size.height.toInt();
+      // Get ACTUAL physical screen size
+      final view = WidgetsBinding.instance.platformDispatcher.views.first;
+      final physicalSize = view.physicalSize;
+      final devicePixelRatio = view.devicePixelRatio;
       
+      // Convert physical pixels to logical pixels
+      final screenWidth = (physicalSize.width / devicePixelRatio).toInt();
+      final screenHeight = (physicalSize.height / devicePixelRatio).toInt();
+      
+      print('📱 [SCREEN] Physical size: ${physicalSize.width}x${physicalSize.height}');
+      print('📱 [SCREEN] Device pixel ratio: $devicePixelRatio');
+      print('📱 [SCREEN] Logical size: ${screenWidth}x${screenHeight}');
       print('📱 [SCREEN] Locking chat to full screen: ${screenWidth}x${screenHeight}');
+      
       await FlutterOverlayWindow.resizeOverlay(screenWidth, screenHeight, false); // false = not draggable when full screen
     } else {
       // Menu/avatar only: compact square window (200x200)
