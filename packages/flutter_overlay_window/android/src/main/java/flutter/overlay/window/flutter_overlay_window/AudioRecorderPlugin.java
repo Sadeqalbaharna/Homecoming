@@ -71,10 +71,10 @@ public class AudioRecorderPlugin {
         try {
             Log.d(TAG, ">>> Creating Intent...");
             // Use ComponentName to specify the exact service class
-            // The service class is com.homecoming.homecoming_app.AudioRecordingService
+            // The service class is com.homecoming.app.AudioRecordingService
             ComponentName componentName = new ComponentName(
-                "com.homecoming.homecoming_app",
-                "com.homecoming.homecoming_app.AudioRecordingService"
+                "com.homecoming.app",
+                "com.homecoming.app.AudioRecordingService"
             );
             Intent intent = new Intent();
             intent.setComponent(componentName);

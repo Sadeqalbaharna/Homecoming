@@ -1,5 +1,5 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.homecoming.homecoming_app">
+    package="com.homecoming.app">
 
     <!-- Needed for Flask calls + ElevenLabs playback -->
     <uses-permission android:name="android.permission.INTERNET" />

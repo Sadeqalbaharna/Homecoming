@@ -309,7 +309,7 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
   final _audioPlayer = AudioPlayerService();
   bool _isPlayingRecording = false;
   
-  // TEST: Simple audio recording/playback test
+  // TEST: Simple audio recording/playback test (will use service when fixed)
   bool _isTestRecording = false;
   String? _testAudioPath;
   bool _isPlayingTest = false;
@@ -745,17 +745,7 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
   }
   
   Future<void> _startTestRecording() async {
-    print('🧪 [TEST] Start test recording');
-    
-    // Check permission
-    final hasPermission = await voiceService.hasPermission();
-    if (!hasPermission) {
-      final granted = await voiceService.requestPermission();
-      if (!granted) {
-        print('❌ [TEST] Permission denied');
-        return;
-      }
-    }
+    print('🧪 [TEST] Start test recording (using VoiceService)');
     
     setState(() {
       _isTestRecording = true;
@@ -766,7 +756,7 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
     final started = await voiceService.startRecording();
     if (!started) {
       setState(() {
-        _error = 'TEST: Failed to start recording';
+        _error = 'TEST: Failed to start recording - check service binding';
         _isTestRecording = false;
       });
     }
@@ -781,11 +771,16 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
     
     try {
       final audioPath = await voiceService.stopRecording();
+      
       if (audioPath == null) {
         throw Exception('No audio path returned');
       }
       
       final file = File(audioPath);
+      if (!await file.exists()) {
+        throw Exception('Audio file not found at: $audioPath');
+      }
+      
       final fileSize = await file.length();
       print('🧪 [TEST] Recorded audio: $fileSize bytes at $audioPath');
       
@@ -794,6 +789,7 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
         _error = 'TEST: Recorded ${fileSize} bytes';
       });
     } catch (e) {
+      print('❌ [TEST] Failed to stop: $e');
       setState(() {
         _error = 'TEST: Failed to stop: $e';
       });

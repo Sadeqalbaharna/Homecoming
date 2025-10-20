@@ -7,7 +7,7 @@ plugins {
 }
 
 android {
-    namespace = "com.homecoming.homecoming_app"
+    namespace = "com.homecoming.app"
     compileSdk = 35  // Updated for flutter_sound and audioplayers_android
     ndkVersion = "27.0.12077973"  // Updated for plugin compatibility
 
@@ -36,6 +36,11 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+            isMinifyEnabled = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
     }
 }
