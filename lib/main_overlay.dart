@@ -16,6 +16,7 @@ import 'services/ai_service.dart';
 import 'services/voice_service.dart';
 import 'services/audio_player_service.dart';
 import 'services/secure_storage_service.dart';
+import 'services/firebase_service.dart';
 import 'api_key_setup_screen.dart';
 import 'package:permission_handler/permission_handler.dart';
 
@@ -515,8 +516,14 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
   // Resize overlay window based on UI state
   Future<void> _resizeOverlay(bool chatExpanded) async {
     if (chatExpanded) {
-      // Chat expanded: make window taller for chat (300x600)
-      await FlutterOverlayWindow.resizeOverlay(300, 600, true);
+      // Chat expanded: LOCK to full screen dimensions (device width x height)
+      // Get screen size from context
+      final size = MediaQuery.of(context).size;
+      final screenWidth = size.width.toInt();
+      final screenHeight = size.height.toInt();
+      
+      print('📱 [SCREEN] Locking chat to full screen: ${screenWidth}x${screenHeight}');
+      await FlutterOverlayWindow.resizeOverlay(screenWidth, screenHeight, false); // false = not draggable when full screen
     } else {
       // Menu/avatar only: compact square window (200x200)
       await FlutterOverlayWindow.resizeOverlay(200, 200, true);
@@ -531,9 +538,46 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
     await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
   }
 
+  // Initialize Firebase and test connection
+  Future<void> _initializeFirebase() async {
+    try {
+      print('🔵 [FIREBASE] Initializing Firebase in overlay...');
+      await FirebaseService.initialize();
+      
+      if (FirebaseService.isAvailable) {
+        print('✅ [FIREBASE] Firebase connected successfully!');
+        print('🔗 [FIREBASE] Database URL: https://homecoming-74f73-default-rtdb.europe-west1.firebasedatabase.app');
+        
+        // Test logging to Firebase
+        await FirebaseService.logAppUsage(
+          action: 'overlay_opened',
+          additionalData: {
+            'timestamp': DateTime.now().toIso8601String(),
+            'platform': Platform.operatingSystem,
+          },
+        );
+        print('✅ [FIREBASE] Test log sent successfully');
+        
+        // Try to get usage stats
+        final stats = await FirebaseService.getUsageStats();
+        if (stats.isNotEmpty) {
+          print('📊 [FIREBASE] Usage stats retrieved: ${stats['totalEvents']} events');
+        }
+      } else {
+        print('⚠️ [FIREBASE] Firebase not available - working offline');
+      }
+    } catch (e) {
+      print('❌ [FIREBASE] Initialization error: $e');
+    }
+  }
+
   @override
   void initState() {
     super.initState();
+    
+    // Initialize Firebase and test connection
+    _initializeFirebase();
+    
     _player.onPlayerStateChanged.listen((state) {
       if (mounted) {
         setState(() {
@@ -1046,6 +1090,17 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
       
       // Auto-scroll to bottom
       _scrollToBottom();
+      
+      // Log conversation to Firebase
+      if (FirebaseService.isAvailable) {
+        await FirebaseService.saveConversation(
+          personaId: 'truekai',
+          userMessage: text,
+          aiResponse: replyText,
+          personalityDeltas: {}, // Add personality tracking if available
+        );
+        print('✅ [FIREBASE] Conversation logged');
+      }
       
     } catch (e) {
       setState(() => _error = e.toString());
