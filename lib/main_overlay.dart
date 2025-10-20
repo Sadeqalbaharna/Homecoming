@@ -549,7 +549,12 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
       print('📱 [SCREEN] Logical size: ${screenWidth}x${screenHeight}');
       print('📱 [SCREEN] Locking chat to full screen: ${screenWidth}x${screenHeight}');
       
-      await FlutterOverlayWindow.resizeOverlay(screenWidth, screenHeight, false); // false = not draggable when full screen
+      // CRITICAL: Move overlay to (0,0) AND resize to full screen
+      // This anchors the top-left corner to the device screen origin
+      await FlutterOverlayWindow.moveOverlay(const OverlayPosition(0, 0)); // Move to top-left corner
+      await FlutterOverlayWindow.resizeOverlay(screenWidth, screenHeight, false); // Resize to full screen, not draggable
+      
+      print('📱 [SCREEN] Chat overlay moved to (0,0) and resized to ${screenWidth}x${screenHeight}');
     } else {
       // Menu/avatar only: compact square window (200x200)
       await FlutterOverlayWindow.resizeOverlay(200, 200, true);
