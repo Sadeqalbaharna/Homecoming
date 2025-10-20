@@ -1175,9 +1175,10 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
                   await _startVoiceRecording();
                 },
                 onLongPressEnd: (_) async {
+                  // Play stop beep IMMEDIATELY when releasing (before transcription)
+                  await _playRecordingStopBeep();
                   // Stop voice recording when releasing Kai avatar
                   await _stopVoiceRecording();
-                  await _playRecordingStopBeep();
                 },
                 // Drag handling removed - Java handles it natively now (enableDrag=true)
                 // This gives buttery smooth dragging without Flutter->Java bridge overhead
@@ -1302,54 +1303,56 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
             child: GestureDetector(
               onTap: () => _closeChat(),
               child: Container(
-                color: Colors.black.withOpacity(0.8),
+                color: Colors.transparent, // Fully transparent background
                 child: GestureDetector(
                   onTap: () {}, // Prevents closing when tapping chat area
                   child: Material(
                     color: Colors.transparent,
                     child: Container(
-                      margin: EdgeInsets.zero, // NO margin - goes to screen edges
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF0D0A07),
-                        border: Border.all(color: const Color(0xFFFFE7B0), width: 2),
+                      margin: EdgeInsets.zero, // Full screen - no margins
+                      decoration: const BoxDecoration(
+                        color: Colors.transparent, // Transparent - only bubbles visible
                       ),
                         child: Column(
                         children: [
-                          // Header
+                          // Header - minimal, just close button
                           Container(
-                            padding: const EdgeInsets.all(16),
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                             decoration: BoxDecoration(
-                              border: Border(
-                                bottom: BorderSide(color: const Color(0xFFFFE7B0).withOpacity(0.3)),
-                              ),
+                              color: Colors.black.withOpacity(0.3), // Semi-transparent header
                             ),
-                              child: Row(
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                Container(
-                                  width: 40,
-                                  height: 40,
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    border: Border.all(color: const Color(0xFFFFE7B0), width: 2),
-                                  ),
-                                  child: ClipOval(
-                                    child: Image.asset(kAvatarIdleGif, fit: BoxFit.cover),
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                const Expanded(
-                                  child: Text(
-                                    'Chat with Kai',
-                                    style: TextStyle(
-                                      color: Color(0xFFFFE7B0),
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.bold,
+                                Row(
+                                  children: [
+                                    Container(
+                                      width: 32,
+                                      height: 32,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        border: Border.all(color: const Color(0xFFFFE7B0), width: 1.5),
+                                      ),
+                                      child: ClipOval(
+                                        child: Image.asset(kAvatarIdleGif, fit: BoxFit.cover),
+                                      ),
                                     ),
-                                  ),
+                                    const SizedBox(width: 10),
+                                    const Text(
+                                      'Chat with Kai',
+                                      style: TextStyle(
+                                        color: Color(0xFFFFE7B0),
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                                 IconButton(
-                                  icon: const Icon(Icons.close, color: Colors.white),
+                                  icon: const Icon(Icons.close, color: Color(0xFFFFE7B0), size: 20),
                                   onPressed: () => _closeChat(),
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(),
                                 ),
                               ],
                             ),
@@ -1397,13 +1400,11 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
                                   ),
                           ),
                           
-                          // Input area
+                          // Input area - semi-transparent background
                           Container(
-                            padding: const EdgeInsets.all(16),
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                             decoration: BoxDecoration(
-                              border: Border(
-                                top: BorderSide(color: const Color(0xFFFFE7B0).withOpacity(0.3)),
-                              ),
+                              color: Colors.black.withOpacity(0.5), // Semi-transparent background
                             ),
                             child: Row(
                               children: [
