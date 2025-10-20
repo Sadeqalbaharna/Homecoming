@@ -1,0 +1,49 @@
+{
+  "rules": {
+    "conversations": {
+      "$personaId": {
+        ".read": true,
+        ".write": true,
+        "$conversationId": {
+          ".validate": "newData.hasChildren(['userMessage', 'aiResponse', 'timestamp'])"
+        }
+      }
+    },
+    "memory": {
+      "buffers": {
+        "$personaId": {
+          ".read": true,
+          ".write": true
+        }
+      },
+      "shards": {
+        "$personaId": {
+          ".read": true,
+          ".write": true
+        }
+      },
+      "embeddings": {
+        "$personaId": {
+          ".read": true,
+          ".write": true
+        }
+      },
+      "facts": {
+        "$personaId": {
+          ".read": true,
+          ".write": true
+        }
+      },
+      "daily": {
+        "$personaId": {
+          ".read": true,
+          ".write": true
+        }
+      }
+    },
+    "analytics": {
+      ".read": true,
+      ".write": true
+    }
+  }
+}
