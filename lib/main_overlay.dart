@@ -309,6 +309,11 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
   final _audioPlayer = AudioPlayerService();
   bool _isPlayingRecording = false;
   
+  // TEST: Simple audio recording/playback test
+  bool _isTestRecording = false;
+  String? _testAudioPath;
+  bool _isPlayingTest = false;
+  
   // Auto-movement variables
   Timer? _moveTimer;
   bool _isAutoMoving = false;
@@ -508,7 +513,15 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
   void initState() {
     super.initState();
     _player.onPlayerStateChanged.listen((state) {
-      if (mounted) setState(() => _playerState = state);
+      if (mounted) {
+        setState(() {
+          _playerState = state;
+          // Clear test playing state when playback stops
+          if (state == PlayerState.stopped || state == PlayerState.completed) {
+            _isPlayingTest = false;
+          }
+        });
+      }
     });
     
     // Start auto-movement after a delay (gives time for window to be created)
@@ -716,6 +729,122 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
     setState(() {
       _recordedAudioPath = null;
       _isPlayingRecording = false;
+    });
+  }
+  
+  // ============= TEST AUDIO FUNCTIONS =============
+  /// TEST: Simple record/playback test - no transcription
+  Future<void> _toggleTestRecording() async {
+    if (_isTestRecording) {
+      // Stop recording
+      await _stopTestRecording();
+    } else {
+      // Start recording
+      await _startTestRecording();
+    }
+  }
+  
+  Future<void> _startTestRecording() async {
+    print('🧪 [TEST] Start test recording');
+    
+    // Check permission
+    final hasPermission = await voiceService.hasPermission();
+    if (!hasPermission) {
+      final granted = await voiceService.requestPermission();
+      if (!granted) {
+        print('❌ [TEST] Permission denied');
+        return;
+      }
+    }
+    
+    setState(() {
+      _isTestRecording = true;
+      _testAudioPath = null;
+      _error = null;
+    });
+    
+    final started = await voiceService.startRecording();
+    if (!started) {
+      setState(() {
+        _error = 'TEST: Failed to start recording';
+        _isTestRecording = false;
+      });
+    }
+  }
+  
+  Future<void> _stopTestRecording() async {
+    print('🧪 [TEST] Stop test recording');
+    
+    setState(() {
+      _isTestRecording = false;
+    });
+    
+    try {
+      final audioPath = await voiceService.stopRecording();
+      if (audioPath == null) {
+        throw Exception('No audio path returned');
+      }
+      
+      final file = File(audioPath);
+      final fileSize = await file.length();
+      print('🧪 [TEST] Recorded audio: $fileSize bytes at $audioPath');
+      
+      setState(() {
+        _testAudioPath = audioPath;
+        _error = 'TEST: Recorded ${fileSize} bytes';
+      });
+    } catch (e) {
+      setState(() {
+        _error = 'TEST: Failed to stop: $e';
+      });
+    }
+  }
+  
+  Future<void> _playTestAudio() async {
+    if (_testAudioPath == null) {
+      print('🧪 [TEST] No test audio to play');
+      return;
+    }
+    
+    print('🧪 [TEST] Playing test audio: $_testAudioPath');
+    
+    setState(() {
+      _isPlayingTest = true;
+      _error = null;
+    });
+    
+    try {
+      // Stop if already playing
+      if (_playerState == PlayerState.playing) {
+        await _audioPlayer.stop();
+      }
+      
+      await _audioPlayer.play(DeviceFileSource(_testAudioPath!));
+      print('🧪 [TEST] Playback started');
+    } catch (e) {
+      print('🧪 [TEST] Playback error: $e');
+      setState(() {
+        _error = 'TEST: Playback failed: $e';
+        _isPlayingTest = false;
+      });
+    }
+  }
+  
+  void _deleteTestAudio() {
+    if (_testAudioPath != null) {
+      try {
+        final file = File(_testAudioPath!);
+        if (file.existsSync()) {
+          file.deleteSync();
+        }
+      } catch (e) {
+        print('🧪 [TEST] Failed to delete: $e');
+      }
+    }
+    
+    setState(() {
+      _testAudioPath = null;
+      _error = null;
     });
   }
   
@@ -988,14 +1117,20 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
                       },
                     ),
                     
-                    // Favorite/bookmark button (top-left)
+                    // TEST: Record/Play button (top-left)
                     _buildCircularButton(
                       angle: -135,
                       radius: 68, // Wrapped tightly around avatar
-                      icon: Icons.favorite_border,
-                      onTap: () {
+                      icon: _isTestRecording 
+                        ? Icons.stop_circle 
+                        : (_testAudioPath != null ? Icons.play_circle : Icons.fiber_manual_record),
+                      onTap: () async {
                         setState(() => _showMenu = false);
-                        // TODO: Toggle favorite
+                        if (_testAudioPath != null && !_isTestRecording) {
+                          await _playTestAudio();
+                        } else {
+                          await _toggleTestRecording();
+                        }
                       },
                     ),
                   ],
@@ -1115,6 +1250,57 @@ class _OverlayWidgetState extends State<OverlayWidget> with SingleTickerProvider
                               ),
                             ),
                           ),
+                          
+                          // TEST: Recording status area
+                          if (_testAudioPath != null || _isTestRecording)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                              decoration: BoxDecoration(
+                                color: Colors.blue.withOpacity(0.2),
+                                border: Border(
+                                  top: BorderSide(color: Colors.blue.withOpacity(0.3)),
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    _isTestRecording ? Icons.fiber_manual_record : Icons.check_circle,
+                                    color: _isTestRecording ? Colors.red : Colors.green,
+                                    size: 16,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      _isTestRecording ? 'TEST: Recording...' : 'TEST: Audio recorded',
+                                      style: const TextStyle(color: Colors.white, fontSize: 12),
+                                    ),
+                                  ),
+                                  if (_testAudioPath != null && !_isTestRecording) ...[
+                                    IconButton(
+                                      icon: Icon(
+                                        _isPlayingTest ? Icons.stop : Icons.play_arrow,
+                                        color: const Color(0xFFFFE7B0),
+                                        size: 20,
+                                      ),
+                                      padding: EdgeInsets.zero,
+                                      constraints: const BoxConstraints(),
+                                      onPressed: _playTestAudio,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    IconButton(
+                                      icon: const Icon(
+                                        Icons.delete,
+                                        color: Colors.red,
+                                        size: 20,
+                                      ),
+                                      padding: EdgeInsets.zero,
+                                      constraints: const BoxConstraints(),
+                                      onPressed: _deleteTestAudio,
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
                           
                           // Input area
                           Container(
