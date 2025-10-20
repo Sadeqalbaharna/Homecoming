@@ -534,48 +534,19 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
   // Resize overlay window based on UI state
   Future<void> _resizeOverlay(bool chatExpanded) async {
     if (chatExpanded) {
-      // Chat expanded: Create a FULL SCREEN overlay window
-      // Get ACTUAL physical screen size
-      final view = WidgetsBinding.instance.platformDispatcher.views.first;
-      final physicalSize = view.physicalSize;
-      final devicePixelRatio = view.devicePixelRatio;
+      // Chat expanded: LOCK to full screen dimensions (device width x height)
+      // Get screen size from context (this returns the overlay's current dimensions)
+      final size = MediaQuery.of(context).size;
+      final screenWidth = size.width.toInt();
+      final screenHeight = size.height.toInt();
       
-      // Convert physical pixels to logical pixels
-      final screenWidth = (physicalSize.width / devicePixelRatio).round();
-      final screenHeight = (physicalSize.height / devicePixelRatio).round();
+      print('📱 [SCREEN] MediaQuery size: ${screenWidth}x${screenHeight}');
+      print('📱 [SCREEN] Locking chat to full screen');
       
-      print('📱 [SCREEN] Physical size: ${physicalSize.width}x${physicalSize.height}');
-      print('📱 [SCREEN] Device pixel ratio: $devicePixelRatio');
-      print('📱 [SCREEN] Logical size: ${screenWidth}x${screenHeight}');
-      
-      // Use generous dimensions to ensure full coverage
-      // Most phones are max 1440 x 3200, so use large safe values
-      final safeWidth = screenWidth > 0 ? screenWidth : 1440;
-      final safeHeight = screenHeight > 0 ? screenHeight : 3200;
-      
-      print('📱 [SCREEN] Using dimensions: ${safeWidth}x${safeHeight}');
-      print('📱 [SCREEN] Expanding to FULL SCREEN chat');
-      
-      // CRITICAL: First resize, THEN move to ensure proper positioning
-      // Resize to full screen first
-      final resized = await FlutterOverlayWindow.resizeOverlay(safeWidth, safeHeight, false);
-      print('📱 [SCREEN] Resize result: $resized');
-      
-      // Then move to origin
-      await Future.delayed(const Duration(milliseconds: 100)); // Small delay for resize to take effect
-      final moved = await FlutterOverlayWindow.moveOverlay(const OverlayPosition(0, 0));
-      print('📱 [SCREEN] Move result: $moved');
-      
-      // Update flag
-      await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
-      
-      print('📱 [SCREEN] ✅ Chat window: ${safeWidth}x${safeHeight} at (0,0) - FULL SCREEN MODE');
+      await FlutterOverlayWindow.resizeOverlay(screenWidth, screenHeight, false); // false = not draggable when full screen
     } else {
-      // Avatar mode: Small draggable window (200x200)
-      print('📱 [SCREEN] Shrinking to avatar mode: 200x200');
-      await FlutterOverlayWindow.resizeOverlay(200, 200, true); // Small, draggable
-      await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
-      print('📱 [SCREEN] ✅ Avatar window: 200x200 - DRAGGABLE MODE');
+      // Menu/avatar only: compact square window (200x200)
+      await FlutterOverlayWindow.resizeOverlay(200, 200, true);
     }
   }
   
