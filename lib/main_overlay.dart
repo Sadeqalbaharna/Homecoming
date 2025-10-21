@@ -1563,6 +1563,53 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
                         // Main content - full screen
                         Column(
                           children: [
+                            // DRAG HANDLE - At the very top (NEW!)
+                            GestureDetector(
+                              onPanUpdate: (details) async {
+                                // Enable dragging temporarily
+                                await FlutterOverlayWindow.resizeOverlay(-1, -1, true);
+                              },
+                              onPanEnd: (details) async {
+                                // Disable dragging after drag (for scrolling)
+                                await FlutterOverlayWindow.resizeOverlay(-1, -1, false);
+                              },
+                              child: Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.only(top: 40, bottom: 12),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF0D0A07).withOpacity(0.95),
+                                  border: Border(
+                                    bottom: BorderSide(
+                                      color: const Color(0xFFFFE7B0).withOpacity(0.2),
+                                      width: 1,
+                                    ),
+                                  ),
+                                ),
+                                child: Center(
+                                  child: Column(
+                                    children: [
+                                      Container(
+                                        width: 40,
+                                        height: 4,
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFFFFE7B0).withOpacity(0.5),
+                                          borderRadius: BorderRadius.circular(2),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 6),
+                                      Text(
+                                        'Drag to move window',
+                                        style: TextStyle(
+                                          color: const Color(0xFFFFE7B0).withOpacity(0.6),
+                                          fontSize: 10,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                            
                             // Input area at TOP - semi-transparent background
                             Container(
                               padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
@@ -1758,8 +1805,56 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
               color: Colors.white,
               child: Stack(
                 children: [
-                  // Personality screen content
-                  const PersonalityScreen(personaId: 'truekai'),
+                  Column(
+                    children: [
+                      // DRAG HANDLE (NEW!)
+                      GestureDetector(
+                        onPanUpdate: (details) async {
+                          await FlutterOverlayWindow.resizeOverlay(-1, -1, true);
+                        },
+                        onPanEnd: (details) async {
+                          await FlutterOverlayWindow.resizeOverlay(-1, -1, false);
+                        },
+                        child: Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.only(top: 40, bottom: 12),
+                          decoration: BoxDecoration(
+                            color: Colors.purple.withOpacity(0.1),
+                            border: Border(
+                              bottom: BorderSide(
+                                color: Colors.purple.withOpacity(0.3),
+                                width: 1,
+                              ),
+                            ),
+                          ),
+                          child: Center(
+                            child: Column(
+                              children: [
+                                Container(
+                                  width: 40,
+                                  height: 4,
+                                  decoration: BoxDecoration(
+                                    color: Colors.purple.withOpacity(0.5),
+                                    borderRadius: BorderRadius.circular(2),
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  'Drag to move window',
+                                  style: TextStyle(
+                                    color: Colors.purple.withOpacity(0.6),
+                                    fontSize: 10,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      // Personality screen content
+                      const Expanded(child: PersonalityScreen(personaId: 'truekai')),
+                    ],
+                  ),
                   
                   // Floating close button
                   Positioned(
@@ -1790,8 +1885,56 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
               color: Colors.white,
               child: Stack(
                 children: [
-                  // Usage stats screen content
-                  const UsageStatsScreen(),
+                  Column(
+                    children: [
+                      // DRAG HANDLE (NEW!)
+                      GestureDetector(
+                        onPanUpdate: (details) async {
+                          await FlutterOverlayWindow.resizeOverlay(-1, -1, true);
+                        },
+                        onPanEnd: (details) async {
+                          await FlutterOverlayWindow.resizeOverlay(-1, -1, false);
+                        },
+                        child: Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.only(top: 40, bottom: 12),
+                          decoration: BoxDecoration(
+                            color: Colors.green.withOpacity(0.1),
+                            border: Border(
+                              bottom: BorderSide(
+                                color: Colors.green.withOpacity(0.3),
+                                width: 1,
+                              ),
+                            ),
+                          ),
+                          child: Center(
+                            child: Column(
+                              children: [
+                                Container(
+                                  width: 40,
+                                  height: 4,
+                                  decoration: BoxDecoration(
+                                    color: Colors.green.withOpacity(0.5),
+                                    borderRadius: BorderRadius.circular(2),
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  'Drag to move window',
+                                  style: TextStyle(
+                                    color: Colors.green.withOpacity(0.6),
+                                    fontSize: 10,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      // Usage stats screen content
+                      const Expanded(child: UsageStatsScreen()),
+                    ],
+                  ),
                   
                   // Floating close button
                   Positioned(
