@@ -544,10 +544,10 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
       const expandedHeight = -1; // WindowSize.matchParent
       
       print('📱 [SCREEN] Expanding overlay to FULL SCREEN using WindowSize.matchParent');
-      print('📱 [SCREEN] Window will be DRAGGABLE and FLOATING above other apps');
+      print('📱 [SCREEN] Window will be FIXED (not draggable) to allow scrolling');
       
       try {
-        await FlutterOverlayWindow.resizeOverlay(expandedWidth, expandedHeight, true); // true = still draggable
+        await FlutterOverlayWindow.resizeOverlay(expandedWidth, expandedHeight, false); // false = NOT draggable when expanded
         print('✅ [SCREEN] Resize successful to full screen!');
       } catch (e) {
         print('❌ [SCREEN] Resize failed: $e');
@@ -556,7 +556,7 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
       // Menu/avatar only: compact square window (200x200)
       print('📱 [SCREEN] Shrinking overlay back to compact: 200x200');
       try {
-        await FlutterOverlayWindow.resizeOverlay(200, 200, true);
+        await FlutterOverlayWindow.resizeOverlay(200, 200, true); // true = draggable when compact
         print('✅ [SCREEN] Shrink successful!');
       } catch (e) {
         print('❌ [SCREEN] Shrink failed: $e');

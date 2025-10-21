@@ -610,25 +610,186 @@ class _PersonalityScreenState extends State<PersonalityScreen> with SingleTicker
   }
 
   String _getPersonalityLabel(String trait, int value) {
-    final percent = value / 1000 * 100;
-    if (percent < 25) return 'Low';
-    if (percent < 50) return 'Moderate';
-    if (percent < 75) return 'High';
-    return 'Very High';
+    final percent = (value / 1000 * 100).round();
+    
+    switch (trait) {
+      case 'extraversion':
+        if (percent <= 10) return 'Extremely Introverted';
+        if (percent <= 20) return 'Very Introverted';
+        if (percent <= 30) return 'Quite Introverted';
+        if (percent <= 40) return 'Moderately Introverted';
+        if (percent <= 45) return 'Slightly Introverted';
+        if (percent <= 55) return 'Ambivert';
+        if (percent <= 60) return 'Slightly Extraverted';
+        if (percent <= 70) return 'Moderately Extraverted';
+        if (percent <= 80) return 'Quite Extraverted';
+        if (percent <= 90) return 'Very Extraverted';
+        return 'Extremely Extraverted';
+        
+      case 'intuition':
+        if (percent <= 10) return 'Extremely Sensing';
+        if (percent <= 20) return 'Very Sensing';
+        if (percent <= 30) return 'Quite Sensing';
+        if (percent <= 40) return 'Moderately Sensing';
+        if (percent <= 45) return 'Slightly Sensing';
+        if (percent <= 55) return 'Balanced';
+        if (percent <= 60) return 'Slightly Intuitive';
+        if (percent <= 70) return 'Moderately Intuitive';
+        if (percent <= 80) return 'Quite Intuitive';
+        if (percent <= 90) return 'Very Intuitive';
+        return 'Extremely Intuitive';
+        
+      case 'feeling':
+        if (percent <= 10) return 'Extremely Thinking';
+        if (percent <= 20) return 'Very Thinking';
+        if (percent <= 30) return 'Quite Thinking';
+        if (percent <= 40) return 'Moderately Thinking';
+        if (percent <= 45) return 'Slightly Thinking';
+        if (percent <= 55) return 'Balanced';
+        if (percent <= 60) return 'Slightly Feeling';
+        if (percent <= 70) return 'Moderately Feeling';
+        if (percent <= 80) return 'Quite Feeling';
+        if (percent <= 90) return 'Very Feeling';
+        return 'Extremely Feeling';
+        
+      case 'perceiving':
+        if (percent <= 10) return 'Extremely Judging';
+        if (percent <= 20) return 'Very Judging';
+        if (percent <= 30) return 'Quite Judging';
+        if (percent <= 40) return 'Moderately Judging';
+        if (percent <= 45) return 'Slightly Judging';
+        if (percent <= 55) return 'Balanced';
+        if (percent <= 60) return 'Slightly Perceiving';
+        if (percent <= 70) return 'Moderately Perceiving';
+        if (percent <= 80) return 'Quite Perceiving';
+        if (percent <= 90) return 'Very Perceiving';
+        return 'Extremely Perceiving';
+        
+      default:
+        return 'Unknown';
+    }
   }
 
   String _getMoodLabel(String trait, int value) {
-    if (value < 25) return 'Low';
-    if (value < 50) return 'Moderate';
-    if (value < 75) return 'High';
-    return 'Very High';
+    final percent = value;
+    
+    switch (trait) {
+      case 'valence':
+        if (percent <= 10) return 'Extremely Negative';
+        if (percent <= 20) return 'Very Negative';
+        if (percent <= 30) return 'Quite Negative';
+        if (percent <= 40) return 'Somewhat Negative';
+        if (percent <= 45) return 'Slightly Negative';
+        if (percent <= 55) return 'Neutral';
+        if (percent <= 60) return 'Slightly Positive';
+        if (percent <= 70) return 'Somewhat Positive';
+        if (percent <= 80) return 'Quite Positive';
+        if (percent <= 90) return 'Very Positive';
+        return 'Extremely Positive';
+        
+      case 'energy':
+        if (percent <= 10) return 'Exhausted';
+        if (percent <= 20) return 'Drained';
+        if (percent <= 30) return 'Tired';
+        if (percent <= 40) return 'Low Energy';
+        if (percent <= 45) return 'Sluggish';
+        if (percent <= 55) return 'Calm';
+        if (percent <= 60) return 'Alert';
+        if (percent <= 70) return 'Energetic';
+        if (percent <= 80) return 'Very Energetic';
+        if (percent <= 90) return 'Highly Energized';
+        return 'Hyperactive';
+        
+      case 'warmth':
+        if (percent <= 10) return 'Ice Cold';
+        if (percent <= 20) return 'Very Cold';
+        if (percent <= 30) return 'Cold';
+        if (percent <= 40) return 'Cool';
+        if (percent <= 45) return 'Slightly Aloof';
+        if (percent <= 55) return 'Neutral';
+        if (percent <= 60) return 'Slightly Warm';
+        if (percent <= 70) return 'Warm';
+        if (percent <= 80) return 'Very Warm';
+        if (percent <= 90) return 'Radiantly Warm';
+        return 'Glowing';
+        
+      case 'confidence':
+        if (percent <= 10) return 'Terrified';
+        if (percent <= 20) return 'Very Insecure';
+        if (percent <= 30) return 'Insecure';
+        if (percent <= 40) return 'Uncertain';
+        if (percent <= 45) return 'Slightly Doubtful';
+        if (percent <= 55) return 'Stable';
+        if (percent <= 60) return 'Slightly Confident';
+        if (percent <= 70) return 'Confident';
+        if (percent <= 80) return 'Very Confident';
+        if (percent <= 90) return 'Highly Confident';
+        return 'Unshakeable';
+        
+      case 'playfulness':
+        if (percent <= 10) return 'Stone Serious';
+        if (percent <= 20) return 'Very Serious';
+        if (percent <= 30) return 'Serious';
+        if (percent <= 40) return 'Somewhat Serious';
+        if (percent <= 45) return 'Slightly Reserved';
+        if (percent <= 55) return 'Balanced';
+        if (percent <= 60) return 'Slightly Playful';
+        if (percent <= 70) return 'Playful';
+        if (percent <= 80) return 'Very Playful';
+        if (percent <= 90) return 'Highly Playful';
+        return 'Wildly Playful';
+        
+      case 'focus':
+        if (percent <= 10) return 'Completely Scattered';
+        if (percent <= 20) return 'Very Distracted';
+        if (percent <= 30) return 'Distracted';
+        if (percent <= 40) return 'Somewhat Unfocused';
+        if (percent <= 45) return 'Slightly Unfocused';
+        if (percent <= 55) return 'Neutral';
+        if (percent <= 60) return 'Attentive';
+        if (percent <= 70) return 'Focused';
+        if (percent <= 80) return 'Very Focused';
+        if (percent <= 90) return 'Highly Focused';
+        return 'Laser Focused';
+        
+      default:
+        return 'Unknown';
+    }
   }
 
   String _getAffinityLabel(String trait, int value) {
-    if (value < 25) return 'Distant';
-    if (value < 50) return 'Friendly';
-    if (value < 75) return 'Close';
-    return 'Intimate';
+    final percent = value;
+    
+    switch (trait) {
+      case 'intimacy':
+        if (percent <= 10) return 'Strangers';
+        if (percent <= 20) return 'Acquaintances';
+        if (percent <= 30) return 'Casual Friends';
+        if (percent <= 40) return 'Friends';
+        if (percent <= 45) return 'Good Friends';
+        if (percent <= 55) return 'Close Friends';
+        if (percent <= 60) return 'Very Close';
+        if (percent <= 70) return 'Intimate';
+        if (percent <= 80) return 'Deeply Intimate';
+        if (percent <= 90) return 'Soulmates';
+        return 'One Soul';
+        
+      case 'physicality':
+        if (percent <= 10) return 'No Touch';
+        if (percent <= 20) return 'Minimal Touch';
+        if (percent <= 30) return 'Occasional Touch';
+        if (percent <= 40) return 'Comfortable Touch';
+        if (percent <= 45) return 'Friendly Touch';
+        if (percent <= 55) return 'Casual Affection';
+        if (percent <= 60) return 'Affectionate';
+        if (percent <= 70) return 'Very Affectionate';
+        if (percent <= 80) return 'Highly Physical';
+        if (percent <= 90) return 'Intensely Physical';
+        return 'Completely Physical';
+        
+      default:
+        return 'Unknown';
+    }
   }
 }
 
