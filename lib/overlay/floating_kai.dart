@@ -17,10 +17,10 @@ class FloatingKai extends _FloatingKai {
 enum _KaiMood { idle, attention, thinking, speaking }
 
 class _FloatingKaiState extends State<_FloatingKai> with TickerProviderStateMixin {
-  String _personaId = kPersonaKai;
+  final String _personaId = kPersonaKai;
   bool get _isClone => _personaId == kPersonaClone;
 
-  _KaiMood _mood = _KaiMood.idle;
+  final _KaiMood _mood = _KaiMood.idle;
   late final AnimationController _pulseCtrl;
 
   @override

@@ -23,7 +23,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       return;
     }
     final overlay = Overlay.of(context);
-    if (overlay == null) return;
 
     _menuEntry = OverlayEntry(
       builder: (_) => GestureDetector(
@@ -90,8 +89,8 @@ class _AvatarMenu extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final voice = ref.read(voiceServiceProvider);
-    final baseUrl = const String.fromEnvironment('API_BASE_URL');
-    final apiKey = const String.fromEnvironment('API_KEY');
+    const baseUrl = String.fromEnvironment('API_BASE_URL');
+    const apiKey = String.fromEnvironment('API_KEY');
 
     return Column(
       mainAxisSize: MainAxisSize.min,

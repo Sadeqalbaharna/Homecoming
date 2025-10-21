@@ -176,7 +176,7 @@ class ChatService {
     }
     if (lastResponse != null) return lastResponse;
     if (lastError is DioException) {
-      final de = lastError as DioException;
+      final de = lastError;
       throw Exception(
           'Network error after retries: ${de.type} ${de.message ?? ''}');
     }
@@ -550,7 +550,7 @@ class _FloatingKaiState extends State<_FloatingKai>
   bool _autoPlayTts = true;
   bool _adaptToUser = false;
   String _modelId = 'gpt-4o';
-  int _ctxTurns = 20;
+  final int _ctxTurns = 20;
 
   // delta bubbles
   final List<_Floater> _floaters = [];
@@ -832,9 +832,9 @@ class _FloatingKaiState extends State<_FloatingKai>
             pg13: _isClone,
             onSave: (pc, mc, ac) async {
               await chatService.setStateRemote(
-                personality: pc.map((k, v) => MapEntry(k, (v as num))),
-                mood: mc.map((k, v) => MapEntry(k, (v as num))),
-                affinity: ac.map((k, v) => MapEntry(k, (v as num))),
+                personality: pc.map((k, v) => MapEntry(k, v)),
+                mood: mc.map((k, v) => MapEntry(k, v)),
+                affinity: ac.map((k, v) => MapEntry(k, v)),
                 actorType: 'agent',
                 personaId: _personaId,
               );
@@ -853,9 +853,9 @@ class _FloatingKaiState extends State<_FloatingKai>
   }
 
   Offset _fallbackCenter() {
-    final cx = kCanvasWidth / 2;
-    final cy = kCanvasHeight * 0.44; // slightly above mid due to lifted UI
-    return Offset(cx, cy);
+    const cx = kCanvasWidth / 2;
+    const cy = kCanvasHeight * 0.44; // slightly above mid due to lifted UI
+    return const Offset(cx, cy);
   }
 
   Offset _placePolar(Offset center, double radius, double deg) {
@@ -865,7 +865,7 @@ class _FloatingKaiState extends State<_FloatingKai>
 
   bool _isPointInsideAvatar(Offset global) {
     final center = _avatarCenterPx ?? _fallbackCenter();
-    final r = kSpriteSize / 2;
+    const r = kSpriteSize / 2;
     final box = _stackKey.currentContext?.findRenderObject() as RenderBox?;
     if (box == null) return false;
     final local = box.globalToLocal(global);
@@ -886,7 +886,7 @@ class _FloatingKaiState extends State<_FloatingKai>
     );
     final maxAllowed =
         (minEdgeDist - ringItemHalf - ringSafety).clamp(80.0, 999.0);
-    final target = (kSpriteSize * 0.90) + (kRingPadding * 0.45);
+    const target = (kSpriteSize * 0.90) + (kRingPadding * 0.45);
     final ringRadius = min(maxAllowed.toDouble(), target);
 
     // Top half arc: ~200°..340°
@@ -898,7 +898,7 @@ class _FloatingKaiState extends State<_FloatingKai>
 
     final avatarState = _resolveAvatarState();
     final avatarAsset = _avatarAssetFor(avatarState);
-    final stroke = const Color(0xFFFFE7B0);
+    const stroke = Color(0xFFFFE7B0);
 
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -933,7 +933,7 @@ class _FloatingKaiState extends State<_FloatingKai>
                     children: [
                       // avatar + glow
                       Align(
-                        alignment: Alignment(0, kSpriteAlignY),
+                        alignment: const Alignment(0, kSpriteAlignY),
                         child: Stack(
                           key: _avatarKey,
                           alignment: Alignment.center,
@@ -991,8 +991,8 @@ class _FloatingKaiState extends State<_FloatingKai>
                       ..._floaters.map((f) {
                         final anim = CurvedAnimation(
                             parent: f.ctrl, curve: Curves.easeOutCubic);
-                        final baseR = kSpriteSize * 0.72;
-                        final travel = 24.0;
+                        const baseR = kSpriteSize * 0.72;
+                        const travel = 24.0;
                         final r = baseR + anim.value * travel;
 
                         final x = center.dx + r * cos(f.angle);
@@ -1239,8 +1239,8 @@ class _ComicBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bg = const Color(0xFF1F1A15);
-    final stroke = const Color(0xFFFFE7B0);
+    const bg = Color(0xFF1F1A15);
+    const stroke = Color(0xFFFFE7B0);
 
     return Material(
       color: Colors.transparent,
@@ -1386,30 +1386,30 @@ class _ComicBubble extends StatelessWidget {
                     const SizedBox(height: 8),
                     Row(
                       children: [
-                        Text('Voice:', style: TextStyle(color: stroke)),
+                        const Text('Voice:', style: TextStyle(color: stroke)),
                         const SizedBox(width: 8),
                         ElevatedButton.icon(
                           style: ButtonStyle(
                             backgroundColor:
-                                const MaterialStatePropertyAll<Color>(
+                                const WidgetStatePropertyAll<Color>(
                                     Colors.transparent),
                             foregroundColor:
-                                MaterialStatePropertyAll<Color>(stroke),
-                            side: MaterialStatePropertyAll<BorderSide>(
+                                const WidgetStatePropertyAll<Color>(stroke),
+                            side: const WidgetStatePropertyAll<BorderSide>(
                               BorderSide(color: stroke, width: 1.2),
                             ),
                             padding:
-                                const MaterialStatePropertyAll<EdgeInsets>(
+                                const WidgetStatePropertyAll<EdgeInsets>(
                               EdgeInsets.symmetric(
                                   horizontal: 10, vertical: 8),
                             ),
                             shape:
-                                MaterialStatePropertyAll<RoundedRectangleBorder>(
+                                WidgetStatePropertyAll<RoundedRectangleBorder>(
                               RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(10)),
                             ),
                             elevation:
-                                const MaterialStatePropertyAll<double>(0),
+                                const WidgetStatePropertyAll<double>(0),
                           ),
                           onPressed: voiceLoading ? null : onVoiceTap,
                           icon: voiceLoading
@@ -1504,9 +1504,9 @@ class _ModelChip extends StatelessWidget {
           borderRadius: BorderRadius.circular(999),
           border: Border.all(color: color.withOpacity(0.6), width: 1),
         ),
-        child: Row(
+        child: const Row(
           mainAxisSize: MainAxisSize.min,
-          children: const [
+          children: [
             Icon(Icons.memory, size: 16, color: Colors.amber),
             SizedBox(width: 6),
             Text('Model', style: TextStyle(color: Colors.white)),
@@ -1552,8 +1552,8 @@ class _PersonaDialogState extends State<PersonaDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final bg = const Color(0xFF1F1A15);
-    final stroke = const Color(0xFFFFE7B0);
+    const bg = Color(0xFF1F1A15);
+    const stroke = Color(0xFFFFE7B0);
     final faint = const Color(0xFFFFE7B0).withOpacity(0.12);
 
     Widget sliderRow({
@@ -1607,7 +1607,7 @@ class _PersonaDialogState extends State<PersonaDialog> {
       insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(18),
-        side: BorderSide(color: stroke, width: 2),
+        side: const BorderSide(color: stroke, width: 2),
       ),
       child: Container(
         width: 500,
@@ -1845,7 +1845,7 @@ class _CardBox extends StatelessWidget {
   const _CardBox({required this.title, required this.child});
   @override
   Widget build(BuildContext context) {
-    final stroke = const Color(0xFFFFE7B0);
+    const stroke = Color(0xFFFFE7B0);
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(

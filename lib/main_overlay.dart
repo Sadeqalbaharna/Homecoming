@@ -1384,14 +1384,14 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
                       },
                     ),
                     
-                    // Settings button (right)
+                    // Personality button (right)
                     _buildCircularButton(
                       angle: 0,
                       radius: 68, // Wrapped tightly around avatar
-                      icon: Icons.settings,
+                      icon: Icons.psychology,
                       onTap: () {
                         setState(() => _showMenu = false);
-                        // TODO: Open settings
+                        _openPersonalityScreen();
                       },
                     ),
                     
@@ -1405,14 +1405,14 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
                       },
                     ),
                     
-                    // Info button (bottom-left)
+                    // Analytics/Usage Stats button (bottom-left)
                     _buildCircularButton(
                       angle: 135,
                       radius: 68, // Wrapped tightly around avatar
-                      icon: Icons.info_outline,
+                      icon: Icons.analytics,
                       onTap: () {
                         setState(() => _showMenu = false);
-                        // TODO: Show info
+                        _openUsageStatsScreen();
                       },
                     ),
                     
@@ -1663,31 +1663,11 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
                         top: 40,
                         right: 16,
                         child: SafeArea(
-                          child: Column(
-                            children: [
-                              FloatingActionButton(
-                                mini: true,
-                                backgroundColor: Colors.black.withOpacity(0.5),
-                                onPressed: () => _closeChat(),
-                                child: const Icon(Icons.close, color: Color(0xFFFFE7B0), size: 20),
-                              ),
-                              const SizedBox(height: 8),
-                              FloatingActionButton(
-                                mini: true,
-                                backgroundColor: Colors.purple.withOpacity(0.7),
-                                onPressed: () => _openPersonalityScreen(),
-                                child: const Icon(Icons.psychology, color: Colors.white, size: 20),
-                                heroTag: 'personality_fab',
-                              ),
-                              const SizedBox(height: 8),
-                              FloatingActionButton(
-                                mini: true,
-                                backgroundColor: Colors.green.withOpacity(0.7),
-                                onPressed: () => _openUsageStatsScreen(),
-                                child: const Icon(Icons.analytics, color: Colors.white, size: 20),
-                                heroTag: 'usage_stats_fab',
-                              ),
-                            ],
+                          child: FloatingActionButton(
+                            mini: true,
+                            backgroundColor: Colors.black.withOpacity(0.5),
+                            onPressed: () => _closeChat(),
+                            child: const Icon(Icons.close, color: Color(0xFFFFE7B0), size: 20),
                           ),
                         ),
                       ),

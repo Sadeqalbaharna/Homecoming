@@ -134,7 +134,7 @@ class ChatService {
     }
     if (lastResponse != null) return lastResponse;
     if (lastError is DioException) {
-      final de = lastError as DioException;
+      final de = lastError;
       throw Exception(
           'Network error after retries: ${de.type} ${de.message ?? ''}');
     }

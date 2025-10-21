@@ -9,13 +9,11 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter_acrylic/flutter_acrylic.dart' as acrylic;
 import 'package:window_manager/window_manager.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 
 import 'services/ai_service.dart';
 import 'services/firebase_service.dart';
@@ -64,39 +62,6 @@ Future<void> main() async {
     print('📱 App will continue with local storage only');
   }
   
-  // On Android, start the overlay service instead of desktop window
-  if (defaultTargetPlatform == TargetPlatform.android) {
-    // Check overlay permission
-    final hasPermission = await FlutterOverlayWindow.isPermissionGranted();
-    
-    if (!hasPermission) {
-      // Show permission request UI
-      runApp(const MaterialApp(
-        home: OverlayPermissionScreen(),
-      ));
-      return;
-    }
-    
-    // Start the overlay
-    await FlutterOverlayWindow.showOverlay(
-      enableDrag: true,
-      overlayTitle: "Kai",
-      overlayContent: 'Kai is active',
-      flag: OverlayFlag.defaultFlag,
-      visibility: NotificationVisibility.visibilityPublic,
-      positionGravity: PositionGravity.none,
-      width: 250,
-      height: 250,
-    );
-    
-    // Show a simple UI to control the overlay
-    runApp(const MaterialApp(
-      home: OverlayControlScreen(),
-    ));
-    return;
-  }
-  
-  // Desktop initialization (Windows, macOS, Linux)
   await acrylic.Window.initialize();
   await windowManager.ensureInitialized();
   await acrylic.Window.setEffect(
@@ -116,151 +81,6 @@ Future<void> main() async {
   });
 
   runApp(const KaiOverlay());
-}
-
-// Permission request screen for Android
-class OverlayPermissionScreen extends StatelessWidget {
-  const OverlayPermissionScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF0D0A07),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(
-                Icons.security,
-                size: 80,
-                color: Color(0xFFFFE7B0),
-              ),
-              const SizedBox(height: 24),
-              const Text(
-                'Overlay Permission Required',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                'Kai needs permission to display over other apps. This allows the AI assistant to float on your screen.',
-                style: TextStyle(
-                  color: Colors.white70,
-                  fontSize: 16,
-                ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 32),
-              ElevatedButton(
-                onPressed: () async {
-                  final granted = await FlutterOverlayWindow.requestPermission();
-                  if (granted == true) {
-                    // Restart the app to reinitialize with permission
-                    // ignore: use_build_context_synchronously
-                    Navigator.of(context).pushReplacement(
-                      MaterialPageRoute(
-                        builder: (_) => const CircularProgressIndicator(),
-                      ),
-                    );
-                    // Trigger a restart by calling main again would require platform channels
-                    // For now, user needs to close and reopen
-                  }
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFFFE7B0),
-                  foregroundColor: Colors.black,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 32,
-                    vertical: 16,
-                  ),
-                ),
-                child: const Text(
-                  'Grant Permission',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// Control screen for the overlay (shown in the main app)
-class OverlayControlScreen extends StatelessWidget {
-  const OverlayControlScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF0D0A07),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(
-                Icons.check_circle,
-                size: 80,
-                color: Colors.green,
-              ),
-              const SizedBox(height: 24),
-              const Text(
-                'Kai Overlay is Active',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                'Look for the floating Kai window on your screen. You can minimize this app.',
-                style: TextStyle(
-                  color: Colors.white70,
-                  fontSize: 16,
-                ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 32),
-              ElevatedButton(
-                onPressed: () async {
-                  await FlutterOverlayWindow.closeOverlay();
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.redAccent,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 32,
-                    vertical: 16,
-                  ),
-                ),
-                child: const Text(
-                  'Close Overlay',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
 }
 
 class KaiOverlay extends StatelessWidget {
@@ -362,7 +182,7 @@ class _FloatingKaiState extends State<_FloatingKai>
   bool _autoPlayTts = true;
   bool _adaptToUser = false;
   String _modelId = 'gpt-4o';
-  int _ctxTurns = 20;
+  final int _ctxTurns = 20;
 
   // delta bubbles
   final List<_Floater> _floaters = [];
@@ -660,9 +480,9 @@ class _FloatingKaiState extends State<_FloatingKai>
   }
 
   Offset _fallbackCenter() {
-    final cx = kCanvasWidth / 2;
-    final cy = kCanvasHeight * 0.44;
-    return Offset(cx, cy);
+    const cx = kCanvasWidth / 2;
+    const cy = kCanvasHeight * 0.44;
+    return const Offset(cx, cy);
   }
 
   Offset _placePolar(Offset center, double radius, double deg) {
@@ -672,7 +492,7 @@ class _FloatingKaiState extends State<_FloatingKai>
 
   bool _isPointInsideAvatar(Offset global) {
     final center = _avatarCenterPx ?? _fallbackCenter();
-    final r = kSpriteSize / 2;
+    const r = kSpriteSize / 2;
     final box = _stackKey.currentContext?.findRenderObject() as RenderBox?;
     if (box == null) return false;
     final local = box.globalToLocal(global);
@@ -691,7 +511,7 @@ class _FloatingKaiState extends State<_FloatingKai>
       min(center.dy, kCanvasHeight - center.dy),
     );
     final maxAllowed = (minEdgeDist - ringItemHalf - ringSafety).clamp(80.0, 999.0);
-    final target = (kSpriteSize * 0.90) + (kRingPadding * 0.45);
+    const target = (kSpriteSize * 0.90) + (kRingPadding * 0.45);
     final ringRadius = min(maxAllowed.toDouble(), target);
 
     final posSpeaker = _placePolar(center, ringRadius, 340);
@@ -702,7 +522,7 @@ class _FloatingKaiState extends State<_FloatingKai>
 
     final avatarState = _resolveAvatarState();
     final avatarAsset = _avatarAssetFor(avatarState);
-    final stroke = const Color(0xFFFFE7B0);
+    const stroke = Color(0xFFFFE7B0);
 
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -737,7 +557,7 @@ class _FloatingKaiState extends State<_FloatingKai>
                     children: [
                       // avatar + glow
                       Align(
-                        alignment: Alignment(0, kSpriteAlignY),
+                        alignment: const Alignment(0, kSpriteAlignY),
                         child: Stack(
                           key: _avatarKey,
                           alignment: Alignment.center,
@@ -794,8 +614,8 @@ class _FloatingKaiState extends State<_FloatingKai>
                       ..._floaters.map((f) {
                         final anim = CurvedAnimation(
                             parent: f.ctrl, curve: Curves.easeOutCubic);
-                        final baseR = kSpriteSize * 0.72;
-                        final travel = 24.0;
+                        const baseR = kSpriteSize * 0.72;
+                        const travel = 24.0;
                         final r = baseR + anim.value * travel;
 
                         final x = center.dx + r * cos(f.angle);
@@ -1028,8 +848,8 @@ class _ComicBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bg = const Color(0xFF1F1A15);
-    final stroke = const Color(0xFFFFE7B0);
+    const bg = Color(0xFF1F1A15);
+    const stroke = Color(0xFFFFE7B0);
 
     return Material(
       color: Colors.transparent,
@@ -1175,30 +995,30 @@ class _ComicBubble extends StatelessWidget {
                     const SizedBox(height: 8),
                     Row(
                       children: [
-                        Text('Voice:', style: TextStyle(color: stroke)),
+                        const Text('Voice:', style: TextStyle(color: stroke)),
                         const SizedBox(width: 8),
                         ElevatedButton.icon(
                           style: ButtonStyle(
                             backgroundColor:
-                                const MaterialStatePropertyAll<Color>(
+                                const WidgetStatePropertyAll<Color>(
                                     Colors.transparent),
                             foregroundColor:
-                                MaterialStatePropertyAll<Color>(stroke),
-                            side: MaterialStatePropertyAll<BorderSide>(
+                                const WidgetStatePropertyAll<Color>(stroke),
+                            side: const WidgetStatePropertyAll<BorderSide>(
                               BorderSide(color: stroke, width: 1.2),
                             ),
                             padding:
-                                const MaterialStatePropertyAll<EdgeInsets>(
+                                const WidgetStatePropertyAll<EdgeInsets>(
                               EdgeInsets.symmetric(
                                   horizontal: 10, vertical: 8),
                             ),
                             shape:
-                                MaterialStatePropertyAll<RoundedRectangleBorder>(
+                                WidgetStatePropertyAll<RoundedRectangleBorder>(
                               RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(10)),
                             ),
                             elevation:
-                                const MaterialStatePropertyAll<double>(0),
+                                const WidgetStatePropertyAll<double>(0),
                           ),
                           onPressed: voiceLoading ? null : onVoiceTap,
                           icon: voiceLoading
@@ -1304,8 +1124,8 @@ class _PersonaDialogState extends State<PersonaDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final bg = const Color(0xFF1F1A15);
-    final stroke = const Color(0xFFFFE7B0);
+    const bg = Color(0xFF1F1A15);
+    const stroke = Color(0xFFFFE7B0);
     final faint = const Color(0xFFFFE7B0).withOpacity(0.12);
 
     Widget sliderRow({
@@ -1359,7 +1179,7 @@ class _PersonaDialogState extends State<PersonaDialog> {
       insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(18),
-        side: BorderSide(color: stroke, width: 2),
+        side: const BorderSide(color: stroke, width: 2),
       ),
       child: Container(
         width: 500,
@@ -1564,7 +1384,7 @@ class _CardBox extends StatelessWidget {
   const _CardBox({required this.title, required this.child});
   @override
   Widget build(BuildContext context) {
-    final stroke = const Color(0xFFFFE7B0);
+    const stroke = Color(0xFFFFE7B0);
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(

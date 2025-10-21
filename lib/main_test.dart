@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 
 void main() {
   runApp(const TestApp());
@@ -34,23 +33,8 @@ class TestApp extends StatelessWidget {
                 ),
                 const SizedBox(height: 20),
                 ElevatedButton(
-                  onPressed: () async {
-                    // Request overlay permission if needed
-                    final hasPermission = await FlutterOverlayWindow.isPermissionGranted();
-                    if (!hasPermission) {
-                      await FlutterOverlayWindow.requestPermission();
-                    }
-                    
-                    // Show overlay
-                    await FlutterOverlayWindow.showOverlay(
-                      height: 200,
-                      width: 200,
-                      alignment: OverlayAlignment.center,
-                      overlayTitle: "Kai",
-                      overlayContent: '',
-                    );
-                  },
-                  child: const Text('Show Overlay'),
+                  onPressed: () {},
+                  child: const Text('Tap Me!'),
                 ),
                 const SizedBox(height: 20),
                 const Text(

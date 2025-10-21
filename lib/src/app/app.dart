@@ -117,7 +117,7 @@ class _OverlayRootState extends State<_OverlayRoot> {
 class _Item extends StatelessWidget {
   final String label;
   final VoidCallback onTap;
-  const _Item(this.label, this.onTap, {super.key});
+  const _Item(this.label, this.onTap);
   @override
   Widget build(BuildContext context) {
     return InkWell(

@@ -5,8 +5,8 @@ import 'package:hooks_riverpod/hooks_riverpod.dart';
 /// Provider you already had — keep using it.
 /// Configure API_BASE_URL and API_KEY via --dart-define or .env loader.
 final chatServiceProvider = Provider<ChatService>((ref) {
-  final baseUrl = const String.fromEnvironment('API_BASE_URL'); // e.g. http://10.0.2.2:5000
-  final apiKey  = const String.fromEnvironment('API_KEY');      // your x-api-key
+  const baseUrl = String.fromEnvironment('API_BASE_URL'); // e.g. http://10.0.2.2:5000
+  const apiKey  = String.fromEnvironment('API_KEY');      // your x-api-key
   return ChatService(baseUrl, apiKey);
 });
 

@@ -1,7 +1,7 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
-import 'package:lottie/lottie.dart'; // if you use Lottie
+// if you use Lottie
 
 class KaiOverlay extends StatelessWidget {
   const KaiOverlay({super.key});
