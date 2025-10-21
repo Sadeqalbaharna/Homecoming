@@ -325,6 +325,8 @@ class OverlayWidget extends StatefulWidget {
 class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateMixin {
   bool _expanded = false;
   bool _showMenu = false; // New: controls circular menu visibility
+  bool _showPersonality = false; // Controls personality screen fullscreen
+  bool _showAnalytics = false; // Controls analytics screen fullscreen
   final _controller = TextEditingController();
   final _player = AudioPlayer();
   
@@ -536,14 +538,19 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
   // Resize overlay window based on UI state
   Future<void> _resizeOverlay(bool chatExpanded) async {
     if (chatExpanded) {
-      // Chat expanded: LOCK to full screen dimensions (device width x height)
-      // Get screen size from context
+      // Chat/Personality/Analytics expanded: Large floating window (still draggable)
+      // Get screen size to calculate reasonable expanded size
       final size = MediaQuery.of(context).size;
-      final screenWidth = size.width.toInt();
-      final screenHeight = size.height.toInt();
+      final screenWidth = size.width;
+      final screenHeight = size.height;
       
-      print('📱 [SCREEN] Locking chat to full screen: ${screenWidth}x$screenHeight');
-      await FlutterOverlayWindow.resizeOverlay(screenWidth, screenHeight, false); // false = not draggable when full screen
+      // Expanded window: 90% of screen width, 85% of screen height
+      // This makes it 4-5x bigger than 200x200 avatar while leaving room for system UI
+      final expandedWidth = (screenWidth * 0.9).toInt();
+      final expandedHeight = (screenHeight * 0.85).toInt();
+      
+      print('📱 [SCREEN] Expanding overlay to: ${expandedWidth}x$expandedHeight (from 200x200)');
+      await FlutterOverlayWindow.resizeOverlay(expandedWidth, expandedHeight, true); // true = still draggable
     } else {
       // Menu/avatar only: compact square window (200x200)
       await FlutterOverlayWindow.resizeOverlay(200, 200, true);
@@ -559,21 +566,33 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
   }
 
   Future<void> _openPersonalityScreen() async {
-    // Navigate to personality screen in a new route
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => const PersonalityScreen(personaId: 'truekai'),
-      ),
-    );
+    setState(() {
+      _showPersonality = true;
+      _expanded = false;
+      _showAnalytics = false;
+    });
+    await _resizeOverlay(true); // Resize to fullscreen
+  }
+
+  Future<void> _closePersonalityScreen() async {
+    setState(() => _showPersonality = false);
+    await _resizeOverlay(false);
+    await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
   }
 
   Future<void> _openUsageStatsScreen() async {
-    // Navigate to usage stats screen in a new route
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => const UsageStatsScreen(),
-      ),
-    );
+    setState(() {
+      _showAnalytics = true;
+      _expanded = false;
+      _showPersonality = false;
+    });
+    await _resizeOverlay(true); // Resize to fullscreen
+  }
+
+  Future<void> _closeUsageStatsScreen() async {
+    setState(() => _showAnalytics = false);
+    await _resizeOverlay(false);
+    await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
   }
 
   // Initialize Firebase and test connection
@@ -1363,6 +1382,8 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
                         setState(() {
                           _showMenu = false;
                           _expanded = true;
+                          _showPersonality = false;
+                          _showAnalytics = false;
                         });
                         _resizeOverlay(true); // Resize to chat dimensions
                       },
@@ -1475,7 +1496,7 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
                   }),
           ],
         
-        // Expanded chat UI - TRULY FULL SCREEN, unmovable
+        // Expanded chat UI - Fills expanded overlay window (90% x 85% of screen)
         if (_expanded)
           Positioned(
             left: 0,
@@ -1677,6 +1698,70 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
               ),
             ),
           ),
+          ),
+        
+        // Personality Screen - Fills expanded overlay window (90% x 85% of screen)
+        if (_showPersonality)
+          Positioned(
+            left: 0,
+            right: 0,
+            top: 0,
+            bottom: 0,
+            child: Material(
+              color: Colors.white,
+              child: Stack(
+                children: [
+                  // Personality screen content
+                  const PersonalityScreen(personaId: 'truekai'),
+                  
+                  // Floating close button
+                  Positioned(
+                    top: 40,
+                    right: 16,
+                    child: SafeArea(
+                      child: FloatingActionButton(
+                        mini: true,
+                        backgroundColor: Colors.purple.withOpacity(0.9),
+                        onPressed: () => _closePersonalityScreen(),
+                        child: const Icon(Icons.close, color: Colors.white, size: 20),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        
+        // Analytics/Usage Stats Screen - Fills expanded overlay window (90% x 85% of screen)
+        if (_showAnalytics)
+          Positioned(
+            left: 0,
+            right: 0,
+            top: 0,
+            bottom: 0,
+            child: Material(
+              color: Colors.white,
+              child: Stack(
+                children: [
+                  // Usage stats screen content
+                  const UsageStatsScreen(),
+                  
+                  // Floating close button
+                  Positioned(
+                    top: 40,
+                    right: 16,
+                    child: SafeArea(
+                      child: FloatingActionButton(
+                        mini: true,
+                        backgroundColor: Colors.green.withOpacity(0.9),
+                        onPressed: () => _closeUsageStatsScreen(),
+                        child: const Icon(Icons.close, color: Colors.white, size: 20),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ],
     );
