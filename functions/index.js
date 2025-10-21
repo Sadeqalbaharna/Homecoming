@@ -64,6 +64,11 @@ exports.onTurnWrite = functions.database
         turnCount: 0,
       };
       
+      // Ensure turns array exists (in case of corrupted data)
+      if (!buffer.turns || !Array.isArray(buffer.turns)) {
+        buffer.turns = [];
+      }
+      
       // Append new turn to buffer
       buffer.turns.push({
         id: conversationId,
