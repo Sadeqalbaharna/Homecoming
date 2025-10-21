@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import '../services/usage_tracking_service.dart';
 
 class CostIndicatorWidget extends StatefulWidget {
-  const CostIndicatorWidget({Key? key}) : super(key: key);
+  const CostIndicatorWidget({super.key});
 
   @override
   State<CostIndicatorWidget> createState() => _CostIndicatorWidgetState();
@@ -168,7 +168,7 @@ class _CostIndicatorWidgetState extends State<CostIndicatorWidget> {
 class FloatingCostIndicator extends StatefulWidget {
   final VoidCallback? onTap;
   
-  const FloatingCostIndicator({Key? key, this.onTap}) : super(key: key);
+  const FloatingCostIndicator({super.key, this.onTap});
 
   @override
   State<FloatingCostIndicator> createState() => _FloatingCostIndicatorState();

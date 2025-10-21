@@ -290,12 +290,14 @@ class ChatMessage {
   final bool isUser; // true = user, false = Kai
   final DateTime timestamp;
   final String? audioPath; // Optional: path to audio file for this message
+  final List<String> memoriesUsed; // NEW: Memories referenced in this response
 
   ChatMessage({
     required this.text,
     required this.isUser,
     DateTime? timestamp,
     this.audioPath,
+    this.memoriesUsed = const [], // NEW: Default to empty list
   }) : timestamp = timestamp ?? DateTime.now();
 }
 
@@ -1117,6 +1119,37 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Memory indicator (NEW!)
+            if (!message.isUser && message.memoriesUsed.isNotEmpty) ...[
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                margin: const EdgeInsets.only(bottom: 8),
+                decoration: BoxDecoration(
+                  color: Colors.purple.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.purple.withOpacity(0.5), width: 1),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.psychology,
+                      color: Colors.purple,
+                      size: 14,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      '${message.memoriesUsed.length} ${message.memoriesUsed.length == 1 ? "memory" : "memories"} recalled',
+                      style: TextStyle(
+                        color: Colors.purple.shade300,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             Text(
               message.text,
               style: const TextStyle(
@@ -1221,6 +1254,7 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
           text: replyText,
           isUser: false,
           audioPath: audioPath,
+          memoriesUsed: resp.memoriesUsed, // NEW: Include memory info
         ));
         _reply = replyText;
         _ttsPath = audioPath;

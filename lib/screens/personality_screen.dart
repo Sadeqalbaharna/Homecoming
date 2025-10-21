@@ -10,9 +10,9 @@ class PersonalityScreen extends StatefulWidget {
   final String personaId;
 
   const PersonalityScreen({
-    Key? key,
+    super.key,
     this.personaId = 'truekai',
-  }) : super(key: key);
+  });
 
   @override
   State<PersonalityScreen> createState() => _PersonalityScreenState();
@@ -149,8 +149,8 @@ class _PersonalityScreenState extends State<PersonalityScreen> with SingleTicker
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: const [
+            const Row(
+              children: [
                 Icon(Icons.psychology, size: 24, color: Colors.purple),
                 SizedBox(width: 8),
                 Text(
@@ -173,7 +173,7 @@ class _PersonalityScreenState extends State<PersonalityScreen> with SingleTicker
                 _getPersonalityColor(entry.key),
                 _getPersonalityLabel(entry.key, entry.value),
               );
-            }).toList(),
+            }),
           ],
         ),
       ),
@@ -187,8 +187,8 @@ class _PersonalityScreenState extends State<PersonalityScreen> with SingleTicker
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: const [
+            const Row(
+              children: [
                 Icon(Icons.mood, size: 24, color: Colors.orange),
                 SizedBox(width: 8),
                 Text(
@@ -211,7 +211,7 @@ class _PersonalityScreenState extends State<PersonalityScreen> with SingleTicker
                 _getMoodColor(entry.key),
                 _getMoodLabel(entry.key, entry.value),
               );
-            }).toList(),
+            }),
           ],
         ),
       ),
@@ -225,8 +225,8 @@ class _PersonalityScreenState extends State<PersonalityScreen> with SingleTicker
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: const [
+            const Row(
+              children: [
                 Icon(Icons.favorite, size: 24, color: Colors.pink),
                 SizedBox(width: 8),
                 Text(
@@ -249,7 +249,7 @@ class _PersonalityScreenState extends State<PersonalityScreen> with SingleTicker
                 _getAffinityColor(entry.key),
                 _getAffinityLabel(entry.key, entry.value),
               );
-            }).toList(),
+            }),
           ],
         ),
       ),
@@ -446,8 +446,8 @@ class _PersonalityScreenState extends State<PersonalityScreen> with SingleTicker
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: const [
+            const Row(
+              children: [
                 Icon(Icons.radar, size: 24, color: Colors.blue),
                 SizedBox(width: 8),
                 Text(
@@ -479,8 +479,8 @@ class _PersonalityScreenState extends State<PersonalityScreen> with SingleTicker
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: const [
+            const Row(
+              children: [
                 Icon(Icons.info_outline, size: 24, color: Colors.blue),
                 SizedBox(width: 8),
                 Text(
@@ -555,7 +555,7 @@ class _PersonalityScreenState extends State<PersonalityScreen> with SingleTicker
               ),
             ],
           ),
-        )).toList(),
+        )),
       ],
     );
   }
@@ -928,7 +928,7 @@ class RadarChartPainter extends CustomPainter {
 
   String _formatLabel(String text) {
     if (text.length > 8) {
-      return text.substring(0, 7) + '...';
+      return '${text.substring(0, 7)}...';
     }
     return text[0].toUpperCase() + text.substring(1);
   }

@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'firebase_service.dart';
 import 'secure_storage_service.dart';
 import 'usage_tracking_service.dart';
+import 'memory_service.dart';
 
 /// Configuration class to hold all API keys
 /// Uses secure storage for encrypted key management
@@ -83,6 +84,7 @@ class ChatResponse {
   final String mbti;
   final bool webUsed;
   final String? liveUsed;
+  final List<String> memoriesUsed; // NEW: Track which memories were referenced
 
   ChatResponse({
     required this.reply,
@@ -96,6 +98,7 @@ class ChatResponse {
     required this.mbti,
     required this.webUsed,
     this.liveUsed,
+    this.memoriesUsed = const [], // NEW: Default to empty list
   });
 }
 
@@ -440,6 +443,7 @@ Text:
     String model = 'gpt-4o',
     bool adaptUser = false,
     int ctxTurns = 20,
+    bool useMemory = true, // NEW: Enable memory integration
   }) async {
     // Get current state
     final personality = await getPersonality(personaId);
@@ -448,6 +452,26 @@ Text:
 
     // Build conversation history (simplified for now)
     final history = await _getConversationHistory(personaId, ctxTurns);
+    
+    // Query long-term memory (NEW!)
+    String memoryContext = '';
+    List<String> memoriesUsed = [];
+    if (useMemory) {
+      final memoryResult = await MemoryService.queryMemory(
+        personaId: personaId,
+        query: text,
+        limit: 5,
+      );
+      
+      if (memoryResult != null && memoryResult.results.isNotEmpty) {
+        memoryContext = memoryResult.toContextString();
+        memoriesUsed = memoryResult.results
+            .where((r) => r.similarity > 0.7) // Only track relevant ones
+            .map((r) => r.summary)
+            .toList();
+        print('💭 Using ${memoriesUsed.length} memory contexts');
+      }
+    }
     
     // Build system prompt
     final mbti = calculateMBTI(personality);
@@ -462,7 +486,7 @@ Mood: $mood
 ${adaptUser ? 'Affinity: $affinity' : ''}
 
 Recent conversation:
-${history.join('\n')}''';
+${history.join('\n')}$memoryContext''';
 
     // Get AI response
     final reply = await _callOpenAI([
@@ -519,6 +543,7 @@ ${history.join('\n')}''';
         'mood_delta': moodDelta,
         'actual_deltas': actualDeltas,
         'tags': tags,
+        'memories_used': memoriesUsed, // NEW: Include in raw data
       },
       personalityDelta: personalityDelta,
       moodDelta: moodDelta,
@@ -527,6 +552,7 @@ ${history.join('\n')}''';
       mbti: calculateMBTI(newPersonality),
       webUsed: false,
       liveUsed: null,
+      memoriesUsed: memoriesUsed, // NEW: Pass memories used
     );
   }
 

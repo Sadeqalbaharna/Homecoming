@@ -3,7 +3,7 @@ import 'package:flutter/services.dart';
 import '../services/usage_tracking_service.dart';
 
 class UsageStatsScreen extends StatefulWidget {
-  const UsageStatsScreen({Key? key}) : super(key: key);
+  const UsageStatsScreen({super.key});
 
   @override
   State<UsageStatsScreen> createState() => _UsageStatsScreenState();
@@ -246,8 +246,8 @@ class _UsageStatsScreenState extends State<UsageStatsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: const [
+            const Row(
+              children: [
                 Icon(Icons.pie_chart, size: 20),
                 SizedBox(width: 8),
                 Text(
@@ -349,8 +349,8 @@ class _UsageStatsScreenState extends State<UsageStatsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: const [
+            const Row(
+              children: [
                 Icon(Icons.cloud, size: 20, color: Colors.orange),
                 SizedBox(width: 8),
                 Text(
@@ -391,8 +391,8 @@ class _UsageStatsScreenState extends State<UsageStatsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: const [
+            const Row(
+              children: [
                 Icon(Icons.functions, size: 20, color: Colors.blue),
                 SizedBox(width: 8),
                 Text(
@@ -443,7 +443,7 @@ class _UsageStatsScreenState extends State<UsageStatsScreen> {
                     ],
                   ),
                 );
-              }).toList(),
+              }),
             ],
             const SizedBox(height: 8),
             Text(
@@ -469,8 +469,8 @@ class _UsageStatsScreenState extends State<UsageStatsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: const [
+            const Row(
+              children: [
                 Icon(Icons.psychology, size: 20),
                 SizedBox(width: 8),
                 Text(
@@ -524,7 +524,7 @@ class _UsageStatsScreenState extends State<UsageStatsScreen> {
                   ],
                 ),
               );
-            }).toList(),
+            }),
           ],
         ),
       ),
@@ -544,8 +544,8 @@ class _UsageStatsScreenState extends State<UsageStatsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: const [
+            const Row(
+              children: [
                 Icon(Icons.category, size: 20),
                 SizedBox(width: 8),
                 Text(
@@ -596,7 +596,7 @@ class _UsageStatsScreenState extends State<UsageStatsScreen> {
                   ],
                 ),
               );
-            }).toList(),
+            }),
           ],
         ),
       ),
@@ -617,8 +617,8 @@ class _UsageStatsScreenState extends State<UsageStatsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: const [
+            const Row(
+              children: [
                 Icon(Icons.lightbulb, size: 20),
                 SizedBox(width: 8),
                 Text(
