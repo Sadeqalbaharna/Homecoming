@@ -8,6 +8,7 @@ import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'firebase_service.dart';
 import 'secure_storage_service.dart';
+import 'usage_tracking_service.dart';
 
 /// Configuration class to hold all API keys
 /// Uses secure storage for encrypted key management
@@ -301,7 +302,7 @@ class AIService {
   }
 
   /// Call OpenAI API for chat completion
-  Future<String> _callOpenAI(List<Map<String, String>> messages, String model) async {
+  Future<String> _callOpenAI(List<Map<String, String>> messages, String model, {String operation = 'chat'}) async {
     final openaiKey = await AIConfig.getOpenAIKey();
     if (openaiKey.isEmpty) {
       throw Exception('OpenAI API key not configured');
@@ -325,6 +326,18 @@ class AIService {
       );
 
       final choices = response.data['choices'] as List;
+      
+      // Track token usage
+      final usage = response.data['usage'];
+      if (usage != null) {
+        await UsageTrackingService.trackOpenAI(
+          model: model,
+          inputTokens: usage['prompt_tokens'] as int,
+          outputTokens: usage['completion_tokens'] as int,
+          operation: operation,
+        );
+      }
+      
       if (choices.isNotEmpty) {
         return choices[0]['message']['content'] as String? ?? '';
       }
@@ -361,7 +374,7 @@ Text:
       final response = await _callOpenAI([
         {"role": "system", "content": "Respond only with strict JSON."},
         {"role": "user", "content": prompt}
-      ], "gpt-4o-mini");
+      ], "gpt-4o-mini", operation: 'tags');
 
       var content = response.trim();
       if (content.startsWith("```")) {
@@ -406,6 +419,11 @@ Text:
             'similarity_boost': 0.75,
           },
         },
+      );
+
+      // Track ElevenLabs usage
+      await UsageTrackingService.trackElevenLabs(
+        characterCount: text.length,
       );
 
       return Uint8List.fromList(response.data);
