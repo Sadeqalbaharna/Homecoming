@@ -544,16 +544,29 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
       final screenWidth = size.width;
       final screenHeight = size.height;
       
-      // Expanded window: 90% of screen width, 85% of screen height
-      // This makes it 4-5x bigger than 200x200 avatar while leaving room for system UI
-      final expandedWidth = (screenWidth * 0.9).toInt();
-      final expandedHeight = (screenHeight * 0.85).toInt();
+      // Expanded window: Use full screen dimensions for maximum space
+      // The overlay will be draggable and float above other apps
+      final expandedWidth = screenWidth.toInt();
+      final expandedHeight = screenHeight.toInt();
       
-      print('📱 [SCREEN] Expanding overlay to: ${expandedWidth}x$expandedHeight (from 200x200)');
-      await FlutterOverlayWindow.resizeOverlay(expandedWidth, expandedHeight, true); // true = still draggable
+      print('📱 [SCREEN] Expanding overlay to FULL screen: ${expandedWidth}x$expandedHeight (from 200x200)');
+      print('📱 [SCREEN] Window is still DRAGGABLE and FLOATING above other apps');
+      
+      try {
+        await FlutterOverlayWindow.resizeOverlay(expandedWidth, expandedHeight, true); // true = still draggable
+        print('✅ [SCREEN] Resize successful!');
+      } catch (e) {
+        print('❌ [SCREEN] Resize failed: $e');
+      }
     } else {
       // Menu/avatar only: compact square window (200x200)
-      await FlutterOverlayWindow.resizeOverlay(200, 200, true);
+      print('📱 [SCREEN] Shrinking overlay back to compact: 200x200');
+      try {
+        await FlutterOverlayWindow.resizeOverlay(200, 200, true);
+        print('✅ [SCREEN] Shrink successful!');
+      } catch (e) {
+        print('❌ [SCREEN] Shrink failed: $e');
+      }
     }
   }
   
@@ -566,12 +579,15 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
   }
 
   Future<void> _openPersonalityScreen() async {
+    print('🧠 [PERSONALITY] Opening personality screen...');
     setState(() {
       _showPersonality = true;
       _expanded = false;
       _showAnalytics = false;
     });
+    print('🧠 [PERSONALITY] State updated, calling resize...');
     await _resizeOverlay(true); // Resize to fullscreen
+    print('🧠 [PERSONALITY] Personality screen opened!');
   }
 
   Future<void> _closePersonalityScreen() async {
@@ -581,12 +597,15 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
   }
 
   Future<void> _openUsageStatsScreen() async {
+    print('📊 [ANALYTICS] Opening analytics screen...');
     setState(() {
       _showAnalytics = true;
       _expanded = false;
       _showPersonality = false;
     });
+    print('📊 [ANALYTICS] State updated, calling resize...');
     await _resizeOverlay(true); // Resize to fullscreen
+    print('📊 [ANALYTICS] Analytics screen opened!');
   }
 
   Future<void> _closeUsageStatsScreen() async {
