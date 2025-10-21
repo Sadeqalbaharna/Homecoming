@@ -1,0 +1,51 @@
+name: Deploy Cloud Functions
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'functions/**'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        
+    - name: Install Firebase CLI
+      run: npm install -g firebase-tools
+      
+    - name: Setup Service Account
+      run: |
+        echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}' > service-account.json
+        export GOOGLE_APPLICATION_CREDENTIALS=service-account.json
+        
+    - name: Install Functions Dependencies
+      run: |
+        cd functions
+        npm install
+        
+    - name: Set OpenAI API Key as Environment Variable
+      run: |
+        # Create .env file for Cloud Functions
+        cd functions
+        echo "OPENAI_API_KEY=${{ secrets.OPEN_API_KEY }}" > .env
+        
+    - name: Deploy Cloud Functions
+      run: |
+        export GOOGLE_APPLICATION_CREDENTIALS=service-account.json
+        firebase deploy --only functions --project homecoming-74f73 --force
+        
+    - name: Cleanup
+      if: always()
+      run: |
+        rm -f service-account.json
+        rm -f functions/.env

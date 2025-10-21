@@ -535,14 +535,12 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
   Future<void> _resizeOverlay(bool chatExpanded) async {
     if (chatExpanded) {
       // Chat expanded: LOCK to full screen dimensions (device width x height)
-      // Get screen size from context (this returns the overlay's current dimensions)
+      // Get screen size from context
       final size = MediaQuery.of(context).size;
       final screenWidth = size.width.toInt();
       final screenHeight = size.height.toInt();
       
-      print('📱 [SCREEN] MediaQuery size: ${screenWidth}x${screenHeight}');
-      print('📱 [SCREEN] Locking chat to full screen');
-      
+      print('📱 [SCREEN] Locking chat to full screen: ${screenWidth}x$screenHeight');
       await FlutterOverlayWindow.resizeOverlay(screenWidth, screenHeight, false); // false = not draggable when full screen
     } else {
       // Menu/avatar only: compact square window (200x200)
@@ -935,7 +933,7 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
       
       setState(() {
         _testAudioPath = audioPath;
-        _error = 'TEST: Recorded ${fileSize} bytes';
+        _error = 'TEST: Recorded $fileSize bytes';
       });
     } catch (e) {
       print('❌ [TEST] Failed to stop: $e');
@@ -1093,10 +1091,10 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
                       size: 20,
                     ),
                     const SizedBox(width: 4),
-                    Text(
+                    const Text(
                       'Play voice',
                       style: TextStyle(
-                        color: const Color(0xFFFFE7B0),
+                        color: Color(0xFFFFE7B0),
                         fontSize: 12,
                       ),
                     ),
@@ -1440,8 +1438,8 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
                     final anim = CurvedAnimation(
                         parent: f.ctrl, curve: Curves.easeOutCubic);
                     // Position relative to avatar center (100, 100)
-                    final avatarCenterX = 50.0 + 50.0; // left + width/2
-                    final avatarCenterY = 40.0 + 60.0; // top + height/2
+                    const avatarCenterX = 50.0 + 50.0; // left + width/2
+                    const avatarCenterY = 40.0 + 60.0; // top + height/2
                     return Positioned(
                       left: avatarCenterX + cos(f.angle) * 70 * (1 + anim.value * 0.3),
                       top: avatarCenterY + sin(f.angle) * 70 * (1 + anim.value * 0.3) - anim.value * 20,

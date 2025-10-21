@@ -9,6 +9,9 @@
  * 4. Daily Compactor (CRON) → Daily Summaries
  */
 
+// Load environment variables from .env file
+require('dotenv').config();
+
 const functions = require('firebase-functions');
 const admin = require('firebase-admin');
 const { OpenAI } = require('openai');
@@ -17,9 +20,10 @@ const { OpenAI } = require('openai');
 admin.initializeApp();
 const db = admin.database();
 
-// Initialize OpenAI (key from environment config)
+// Initialize OpenAI (using environment variable set during deployment)
+// Priority: 1) .env file (process.env), 2) functions.config() (deprecated)
 const openai = new OpenAI({
-  apiKey: functions.config().openai?.key || process.env.OPENAI_API_KEY,
+  apiKey: process.env.OPENAI_API_KEY || functions.config().openai?.key,
 });
 
 // ============= CONFIGURATION =============
@@ -32,6 +36,7 @@ const CONFIG = {
   SUMMARY_MODEL: 'gpt-4o-mini',
 };
 
+// Config updated: 2025-01-21 11:20 UTC
 // ============= SYSTEM 1: ON TURN WRITE → SUMMARIZER =============
 /**
  * Triggers when a new conversation turn is written
