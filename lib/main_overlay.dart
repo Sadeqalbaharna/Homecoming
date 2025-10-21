@@ -538,23 +538,17 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
   // Resize overlay window based on UI state
   Future<void> _resizeOverlay(bool chatExpanded) async {
     if (chatExpanded) {
-      // Chat/Personality/Analytics expanded: Large floating window (still draggable)
-      // Get screen size to calculate reasonable expanded size
-      final size = MediaQuery.of(context).size;
-      final screenWidth = size.width;
-      final screenHeight = size.height;
+      // Chat/Personality/Analytics expanded: Use WindowSize.matchParent for full screen
+      // WindowSize.matchParent = -1, which tells Android to match parent dimensions
+      const expandedWidth = -1; // WindowSize.matchParent
+      const expandedHeight = -1; // WindowSize.matchParent
       
-      // Expanded window: Use full screen dimensions for maximum space
-      // The overlay will be draggable and float above other apps
-      final expandedWidth = screenWidth.toInt();
-      final expandedHeight = screenHeight.toInt();
-      
-      print('📱 [SCREEN] Expanding overlay to FULL screen: ${expandedWidth}x$expandedHeight (from 200x200)');
-      print('📱 [SCREEN] Window is still DRAGGABLE and FLOATING above other apps');
+      print('📱 [SCREEN] Expanding overlay to FULL SCREEN using WindowSize.matchParent');
+      print('📱 [SCREEN] Window will be DRAGGABLE and FLOATING above other apps');
       
       try {
         await FlutterOverlayWindow.resizeOverlay(expandedWidth, expandedHeight, true); // true = still draggable
-        print('✅ [SCREEN] Resize successful!');
+        print('✅ [SCREEN] Resize successful to full screen!');
       } catch (e) {
         print('❌ [SCREEN] Resize failed: $e');
       }
