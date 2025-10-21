@@ -91,17 +91,26 @@ class MemoryService {
     int limit = 5,
   }) async {
     try {
-      print('🔍 Querying memory for: "$query"');
+      print('🔍 [MEMORY] Starting query...');
+      print('🔍 [MEMORY] PersonaId: $personaId');
+      print('🔍 [MEMORY] Query: "$query"');
+      print('🔍 [MEMORY] Limit: $limit');
       
       final callable = _functions.httpsCallable('queryMemory');
+      print('🔍 [MEMORY] Calling Cloud Function "queryMemory"...');
+      
       final result = await callable.call({
         'personaId': personaId,
         'query': query,
         'limit': limit,
       });
 
+      print('🔍 [MEMORY] Cloud Function response received');
+      print('🔍 [MEMORY] Data type: ${result.data?.runtimeType}');
+      print('🔍 [MEMORY] Data: ${result.data}');
+
       if (result.data == null) {
-        print('⚠️ Memory query returned no data');
+        print('⚠️ [MEMORY] Query returned no data (null)');
         return null;
       }
 
@@ -109,14 +118,24 @@ class MemoryService {
         result.data as Map<String, dynamic>
       );
 
-      print('✅ Found ${response.results.length} relevant memories');
+      print('✅ [MEMORY] Found ${response.results.length} memories');
       if (response.results.isNotEmpty) {
-        print('   Top match: ${response.results.first.summary} (${(response.results.first.similarity * 100).toStringAsFixed(0)}%)');
+        print('✅ [MEMORY] Top match: ${response.results.first.summary}');
+        print('✅ [MEMORY] Similarity: ${(response.results.first.similarity * 100).toStringAsFixed(1)}%');
+        
+        // Log all results
+        for (var i = 0; i < response.results.length; i++) {
+          final r = response.results[i];
+          print('   ${i + 1}. ${r.summary} (${(r.similarity * 100).toStringAsFixed(1)}%)');
+        }
+      } else {
+        print('⚠️ [MEMORY] No relevant memories found (empty results)');
       }
 
       return response;
-    } catch (e) {
-      print('❌ Memory query error: $e');
+    } catch (e, stackTrace) {
+      print('❌ [MEMORY] Query error: $e');
+      print('❌ [MEMORY] Stack trace: $stackTrace');
       // Don't throw - gracefully degrade to no memory context
       return null;
     }
