@@ -1177,16 +1177,7 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
       // Auto-scroll to bottom
       _scrollToBottom();
       
-      // Log conversation to Firebase with REAL deltas
-      if (FirebaseService.isAvailable) {
-        await FirebaseService.saveConversation(
-          personaId: 'truekai',
-          userMessage: text,
-          aiResponse: replyText,
-          personalityDeltas: resp.actualDeltas, // Use actual deltas from AI response
-        );
-        print('✅ [FIREBASE] Conversation logged with deltas: ${resp.actualDeltas}');
-      }
+      // Note: Conversation already saved to Firebase in ai_service.sendMessage()
       
     } catch (e) {
       setState(() => _error = e.toString());

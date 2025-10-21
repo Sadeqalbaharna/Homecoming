@@ -9,8 +9,12 @@
  * 4. Daily Compactor (CRON) → Daily Summaries
  */
 
-// Load environment variables from .env file
-require('dotenv').config();
+// Load environment variables from .env file (if exists)
+try {
+  require('dotenv').config();
+} catch (e) {
+  // dotenv not available or .env doesn't exist - use functions.config() instead
+}
 
 const functions = require('firebase-functions');
 const admin = require('firebase-admin');

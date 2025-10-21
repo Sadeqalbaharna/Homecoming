@@ -156,7 +156,7 @@ class _MobileKaiState extends State<_MobileKai>
   bool _autoPlayTts = true;
   bool _adaptToUser = false;
   String _modelId = 'gpt-4o';
-  int _ctxTurns = 20;
+  final int _ctxTurns = 20;
 
   // delta bubbles
   final List<_Floater> _floaters = [];
@@ -331,18 +331,7 @@ class _MobileKaiState extends State<_MobileKai>
       });
       _spawnDeltas(resp.actualDeltas);
       
-      // Save conversation to Firebase
-      try {
-        await FirebaseService.saveConversation(
-          personaId: _personaId,
-          userMessage: text,
-          aiResponse: resp.reply,
-          personalityDeltas: resp.actualDeltas,
-        );
-        print('✅ Conversation logged to Firebase');
-      } catch (e) {
-        print('⚠️ Failed to log conversation to Firebase: $e');
-      }
+      // Note: Conversation already saved to Firebase in ai_service.sendMessage()
       
       if (resp.ttsBase64 != null) {
         final mp3Path = await _writeTempMp3(base64Decode(resp.ttsBase64!));
@@ -462,7 +451,7 @@ class _MobileKaiState extends State<_MobileKai>
   Widget build(BuildContext context) {
     final avatarState = _resolveAvatarState();
     final avatarAsset = _avatarAssetFor(avatarState);
-    final stroke = const Color(0xFFFFE7B0);
+    const stroke = Color(0xFFFFE7B0);
 
     return Scaffold(
       backgroundColor: const Color(0xFF0D0A07),
@@ -475,7 +464,7 @@ class _MobileKaiState extends State<_MobileKai>
               style: TextStyle(color: _isClone ? Colors.redAccent : Colors.white, fontSize: 16),
             ),
             if (!widget.firebaseInitialized)
-              Text(
+              const Text(
                 'Local Mode',
                 style: TextStyle(color: Colors.orange, fontSize: 10),
               ),
@@ -676,8 +665,8 @@ class _MobileKaiState extends State<_MobileKai>
 
               // Tap to chat message
               if (!_showBubble)
-                Padding(
-                  padding: const EdgeInsets.all(16),
+                const Padding(
+                  padding: EdgeInsets.all(16),
                   child: Text(
                     'Tap Kai to start chatting!',
                     style: TextStyle(
@@ -785,8 +774,8 @@ class _MobileChatBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bg = const Color(0xFF1F1A15);
-    final stroke = const Color(0xFFFFE7B0);
+    const bg = Color(0xFF1F1A15);
+    const stroke = Color(0xFFFFE7B0);
 
     return Container(
       width: double.infinity,
@@ -822,7 +811,7 @@ class _MobileChatBubble extends StatelessWidget {
                 onPressed: onToggleDev,
                 child: Text(
                   devOpen ? 'DEV ▲' : 'DEV ▼',
-                  style: TextStyle(color: stroke),
+                  style: const TextStyle(color: stroke),
                 ),
               ),
               IconButton(
@@ -858,7 +847,7 @@ class _MobileChatBubble extends StatelessWidget {
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(color: stroke),
+                      borderSide: const BorderSide(color: stroke),
                     ),
                     contentPadding: const EdgeInsets.symmetric(
                       horizontal: 12,
@@ -921,7 +910,7 @@ class _MobileChatBubble extends StatelessWidget {
                   const SizedBox(height: 12),
                   Row(
                     children: [
-                      Text(
+                      const Text(
                         'Voice:',
                         style: TextStyle(color: stroke, fontWeight: FontWeight.w600),
                       ),
@@ -931,7 +920,7 @@ class _MobileChatBubble extends StatelessWidget {
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.transparent,
                           foregroundColor: stroke,
-                          side: BorderSide(color: stroke),
+                          side: const BorderSide(color: stroke),
                           elevation: 0,
                         ),
                         icon: voiceLoading
@@ -1042,8 +1031,8 @@ class _PersonaDialogState extends State<PersonaDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final bg = const Color(0xFF1F1A15);
-    final stroke = const Color(0xFFFFE7B0);
+    const bg = Color(0xFF1F1A15);
+    const stroke = Color(0xFFFFE7B0);
     final faint = const Color(0xFFFFE7B0).withOpacity(0.12);
 
     Widget sliderRow({
@@ -1099,7 +1088,7 @@ class _PersonaDialogState extends State<PersonaDialog> {
       insetPadding: const EdgeInsets.all(16),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: stroke, width: 2),
+        side: const BorderSide(color: stroke, width: 2),
       ),
       child: Container(
         width: double.infinity,
@@ -1294,7 +1283,7 @@ class _PersonaDialogState extends State<PersonaDialog> {
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.transparent,
                           foregroundColor: stroke,
-                          side: BorderSide(color: stroke),
+                          side: const BorderSide(color: stroke),
                         ),
                       ),
                     ),
