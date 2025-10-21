@@ -121,6 +121,10 @@ class _UsageStatsScreenState extends State<UsageStatsScreen> {
                       const SizedBox(height: 16),
                       _buildCostBreakdownCard(),
                       const SizedBox(height: 16),
+                      _buildFirebaseUsageCard(),
+                      const SizedBox(height: 16),
+                      _buildCloudFunctionsCard(),
+                      const SizedBox(height: 16),
                       _buildModelUsageCard(),
                       const SizedBox(height: 16),
                       _buildOperationUsageCard(),
@@ -139,6 +143,9 @@ class _UsageStatsScreenState extends State<UsageStatsScreen> {
     final cost = _sessionData!['cost'] as double;
     final apiCalls = _sessionData!['api_calls'] as int;
     final ttsChars = _sessionData!['tts_characters'] as int;
+    final firebaseOps = _sessionData!['firebase_operations'] as int? ?? 0;
+    final functionCalls = _sessionData!['function_calls'] as int? ?? 0;
+    final searchQueries = _sessionData!['search_queries'] as int? ?? 0;
     final startedAt = _sessionData!['started_at'] as String;
 
     return Card(
@@ -173,6 +180,12 @@ class _UsageStatsScreenState extends State<UsageStatsScreen> {
             _buildStatRow('API Calls', apiCalls.toString(), Colors.blue),
             _buildStatRow('Tokens Used', UsageTrackingService.formatTokens(tokens), Colors.orange),
             _buildStatRow('TTS Characters', UsageTrackingService.formatTokens(ttsChars), Colors.purple),
+            if (firebaseOps > 0)
+              _buildStatRow('Firebase Operations', firebaseOps.toString(), Colors.orange),
+            if (functionCalls > 0)
+              _buildStatRow('Function Calls', functionCalls.toString(), Colors.blue),
+            if (searchQueries > 0)
+              _buildStatRow('Search Queries', searchQueries.toString(), Colors.red),
           ],
         ),
       ),
@@ -216,10 +229,16 @@ class _UsageStatsScreenState extends State<UsageStatsScreen> {
   Widget _buildCostBreakdownCard() {
     final openaiCost = _usageData!['openai_cost'] as double;
     final elevenlabsCost = _usageData!['elevenlabs_cost'] as double;
+    final firebaseCost = _usageData!['firebase_cost'] as double? ?? 0.0;
+    final functionsCost = _usageData!['functions_cost'] as double? ?? 0.0;
+    final googleCost = _usageData!['google_cost'] as double? ?? 0.0;
     final totalCost = _usageData!['total_cost'] as double;
 
     final openaiPercent = totalCost > 0 ? (openaiCost / totalCost * 100) : 0.0;
     final elevenlabsPercent = totalCost > 0 ? (elevenlabsCost / totalCost * 100) : 0.0;
+    final firebasePercent = totalCost > 0 ? (firebaseCost / totalCost * 100) : 0.0;
+    final functionsPercent = totalCost > 0 ? (functionsCost / totalCost * 100) : 0.0;
+    final googlePercent = totalCost > 0 ? (googleCost / totalCost * 100) : 0.0;
 
     return Card(
       child: Padding(
@@ -251,6 +270,29 @@ class _UsageStatsScreenState extends State<UsageStatsScreen> {
               elevenlabsPercent,
               Colors.purple,
             ),
+            const SizedBox(height: 12),
+            _buildCostBreakdownRow(
+              'Firebase (Database)',
+              firebaseCost,
+              firebasePercent,
+              Colors.orange,
+            ),
+            const SizedBox(height: 12),
+            _buildCostBreakdownRow(
+              'Cloud Functions',
+              functionsCost,
+              functionsPercent,
+              Colors.blue,
+            ),
+            if (googleCost > 0) ...[
+              const SizedBox(height: 12),
+              _buildCostBreakdownRow(
+                'Google Search API',
+                googleCost,
+                googlePercent,
+                Colors.red,
+              ),
+            ],
           ],
         ),
       ),
@@ -289,6 +331,128 @@ class _UsageStatsScreenState extends State<UsageStatsScreen> {
           ],
         ),
       ],
+    );
+  }
+
+  Widget _buildFirebaseUsageCard() {
+    final firebaseReads = _usageData!['firebase_reads'] as int? ?? 0;
+    final firebaseWrites = _usageData!['firebase_writes'] as int? ?? 0;
+    final firebaseCost = _usageData!['firebase_cost'] as double? ?? 0.0;
+
+    if (firebaseReads == 0 && firebaseWrites == 0) {
+      return const SizedBox();
+    }
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: const [
+                Icon(Icons.cloud, size: 20, color: Colors.orange),
+                SizedBox(width: 8),
+                Text(
+                  'Firebase Database',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            _buildStatRow('Total Operations', '${firebaseReads + firebaseWrites}', Colors.orange),
+            _buildStatRow('Reads', firebaseReads.toString(), Colors.blue),
+            _buildStatRow('Writes', firebaseWrites.toString(), Colors.green),
+            _buildStatRow('Cost', UsageTrackingService.formatCost(firebaseCost), Colors.orange),
+            const SizedBox(height: 8),
+            Text(
+              'Pricing: \$1.00/100K reads, \$5.00/100K writes',
+              style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCloudFunctionsCard() {
+    final functionInvocations = _usageData!['function_invocations'] as int? ?? 0;
+    final functionComputeSeconds = _usageData!['function_compute_seconds'] as double? ?? 0.0;
+    final functionsCost = _usageData!['functions_cost'] as double? ?? 0.0;
+    final functions = _usageData!['functions'] as Map<String, dynamic>? ?? {};
+
+    if (functionInvocations == 0) {
+      return const SizedBox();
+    }
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: const [
+                Icon(Icons.functions, size: 20, color: Colors.blue),
+                SizedBox(width: 8),
+                Text(
+                  'Cloud Functions',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            _buildStatRow('Total Invocations', functionInvocations.toString(), Colors.blue),
+            _buildStatRow('Compute Time', '${functionComputeSeconds.toStringAsFixed(2)}s', Colors.purple),
+            _buildStatRow('Total Cost', UsageTrackingService.formatCost(functionsCost), Colors.blue),
+            if (functions.isNotEmpty) ...[
+              const Divider(height: 24),
+              const Text(
+                'Per-Function Breakdown',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+              ),
+              const SizedBox(height: 8),
+              ...functions.entries.map((entry) {
+                final functionName = entry.key;
+                final data = entry.value as Map<String, dynamic>;
+                final invocations = data['invocations'] as int? ?? 0;
+                final cost = data['cost'] as double? ?? 0.0;
+
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          functionName,
+                          style: const TextStyle(fontSize: 13),
+                        ),
+                      ),
+                      Text(
+                        '$invocations calls',
+                        style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                      ),
+                      const SizedBox(width: 12),
+                      Text(
+                        UsageTrackingService.formatCost(cost),
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }).toList(),
+            ],
+            const SizedBox(height: 8),
+            Text(
+              'Pricing: \$0.40/1M invocations + \$0.0000025/GB-second',
+              style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -440,7 +604,6 @@ class _UsageStatsScreenState extends State<UsageStatsScreen> {
   }
 
   Widget _buildInsightsCard() {
-    final totalCost = _usageData!['total_cost'] as double;
     final operations = _usageData!['operations'] as Map<String, dynamic>;
     final chatOp = operations['chat'] as Map<String, dynamic>?;
     

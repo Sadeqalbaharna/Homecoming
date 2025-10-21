@@ -1,7 +1,7 @@
 // Firebase Service - Integrates with existing Firebase Realtime Database
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_database/firebase_database.dart';
-import 'dart:convert';
+import 'usage_tracking_service.dart';
 
 class FirebaseService {
   static FirebaseDatabase? _database;
@@ -42,6 +42,10 @@ class FirebaseService {
         'lastUpdated': ServerValue.timestamp,
         'version': '1.0.0',
       });
+      
+      // Track Firebase write
+      await UsageTrackingService.trackFirebaseDatabase(reads: 0, writes: 1);
+      
       print('✅ Personality data saved to Firebase for $personaId');
     } catch (e) {
       print('⚠️ Failed to save to Firebase: $e');
@@ -58,6 +62,9 @@ class FirebaseService {
     try {
       final ref = _database!.ref('personalities/$personaId');
       final snapshot = await ref.get();
+      
+      // Track Firebase read
+      await UsageTrackingService.trackFirebaseDatabase(reads: 1, writes: 0);
       
       if (snapshot.exists) {
         final data = Map<String, dynamic>.from(snapshot.value as Map);
@@ -90,6 +97,10 @@ class FirebaseService {
         'personalityDeltas': personalityDeltas,
         'timestamp': ServerValue.timestamp,
       });
+      
+      // Track Firebase write
+      await UsageTrackingService.trackFirebaseDatabase(reads: 0, writes: 1);
+      
       print('✅ Conversation saved to Firebase');
     } catch (e) {
       print('⚠️ Failed to save conversation: $e');
@@ -109,6 +120,9 @@ class FirebaseService {
           .limitToLast(limit);
       
       final snapshot = await ref.get();
+      
+      // Track Firebase read
+      await UsageTrackingService.trackFirebaseDatabase(reads: 1, writes: 0);
       
       if (snapshot.exists) {
         final data = Map<String, dynamic>.from(snapshot.value as Map);

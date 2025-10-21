@@ -17,6 +17,8 @@ import 'services/voice_service.dart';
 import 'services/audio_player_service.dart';
 import 'services/secure_storage_service.dart';
 import 'services/firebase_service.dart';
+import 'screens/personality_screen.dart';
+import 'screens/usage_stats_screen.dart';
 import 'api_key_setup_screen.dart';
 import 'package:permission_handler/permission_handler.dart';
 
@@ -554,6 +556,24 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
     await _resizeOverlay(false);
     // Reset flag to defaultFlag when closing chat (no keyboard needed)
     await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
+  }
+
+  Future<void> _openPersonalityScreen() async {
+    // Navigate to personality screen in a new route
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => const PersonalityScreen(personaId: 'truekai'),
+      ),
+    );
+  }
+
+  Future<void> _openUsageStatsScreen() async {
+    // Navigate to usage stats screen in a new route
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => const UsageStatsScreen(),
+      ),
+    );
   }
 
   // Initialize Firebase and test connection
@@ -1643,11 +1663,31 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
                         top: 40,
                         right: 16,
                         child: SafeArea(
-                          child: FloatingActionButton(
-                            mini: true,
-                            backgroundColor: Colors.black.withOpacity(0.5),
-                            onPressed: () => _closeChat(),
-                            child: const Icon(Icons.close, color: Color(0xFFFFE7B0), size: 20),
+                          child: Column(
+                            children: [
+                              FloatingActionButton(
+                                mini: true,
+                                backgroundColor: Colors.black.withOpacity(0.5),
+                                onPressed: () => _closeChat(),
+                                child: const Icon(Icons.close, color: Color(0xFFFFE7B0), size: 20),
+                              ),
+                              const SizedBox(height: 8),
+                              FloatingActionButton(
+                                mini: true,
+                                backgroundColor: Colors.purple.withOpacity(0.7),
+                                onPressed: () => _openPersonalityScreen(),
+                                child: const Icon(Icons.psychology, color: Colors.white, size: 20),
+                                heroTag: 'personality_fab',
+                              ),
+                              const SizedBox(height: 8),
+                              FloatingActionButton(
+                                mini: true,
+                                backgroundColor: Colors.green.withOpacity(0.7),
+                                onPressed: () => _openUsageStatsScreen(),
+                                child: const Icon(Icons.analytics, color: Colors.white, size: 20),
+                                heroTag: 'usage_stats_fab',
+                              ),
+                            ],
                           ),
                         ),
                       ),

@@ -36,6 +36,19 @@ class UsageTrackingService {
   // ElevenLabs Pricing (characters, not tokens)
   static const double elevenlabsCharacterCost = 0.30 / 1000; // $0.30 per 1000 characters
 
+  // Firebase Realtime Database Pricing
+  static const double firebaseReadCost = 1.00 / 100000; // $1.00 per 100K reads
+  static const double firebaseWriteCost = 5.00 / 100000; // $5.00 per 100K writes
+  static const double firebaseStorageCost = 1.00; // $1.00 per GB/month (we'll track GB*hours)
+
+  // Cloud Functions Pricing (us-central1)
+  static const double functionInvocationCost = 0.40 / 1000000; // $0.40 per 1M invocations
+  static const double functionComputeCost = 0.0000025; // $0.0000025 per GB-second
+  static const double functionNetworkCost = 0.12; // $0.12 per GB egress
+
+  // Google Custom Search API Pricing
+  static const double googleSearchCost = 5.00 / 1000; // $5.00 per 1000 queries
+
   /// Track OpenAI API usage
   static Future<void> trackOpenAI({
     required String model,
@@ -118,6 +131,96 @@ class UsageTrackingService {
     await _saveUsageData(prefs, data);
   }
 
+  /// Track Firebase Realtime Database usage
+  static Future<void> trackFirebaseDatabase({
+    required int reads,
+    required int writes,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final data = await _loadUsageData(prefs);
+
+    final readCost = reads * firebaseReadCost;
+    final writeCost = writes * firebaseWriteCost;
+    final totalCost = readCost + writeCost;
+
+    data['firebase_reads'] = (data['firebase_reads'] as int) + reads;
+    data['firebase_writes'] = (data['firebase_writes'] as int) + writes;
+    data['firebase_cost'] = (data['firebase_cost'] as double) + totalCost;
+    data['total_cost'] = (data['total_cost'] as double) + totalCost;
+
+    // Update session stats
+    final session = data['current_session'] as Map<String, dynamic>;
+    session['firebase_operations'] = (session['firebase_operations'] as int) + reads + writes;
+    session['cost'] = (session['cost'] as double) + totalCost;
+
+    await _saveUsageData(prefs, data);
+  }
+
+  /// Track Cloud Functions usage
+  static Future<void> trackCloudFunction({
+    required String functionName,
+    required int invocations,
+    required double computeTimeSeconds,
+    required int memoryMB,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final data = await _loadUsageData(prefs);
+
+    // Calculate costs
+    final invocationCost = invocations * functionInvocationCost;
+    final gbSeconds = (memoryMB / 1024.0) * computeTimeSeconds;
+    final computeCost = gbSeconds * functionComputeCost;
+    final totalCost = invocationCost + computeCost;
+
+    data['function_invocations'] = (data['function_invocations'] as int) + invocations;
+    data['function_compute_seconds'] = (data['function_compute_seconds'] as double) + computeTimeSeconds;
+    data['functions_cost'] = (data['functions_cost'] as double) + totalCost;
+    data['total_cost'] = (data['total_cost'] as double) + totalCost;
+
+    // Track per-function stats
+    final functions = data['functions'] as Map<String, dynamic>;
+    if (!functions.containsKey(functionName)) {
+      functions[functionName] = {
+        'invocations': 0,
+        'compute_seconds': 0.0,
+        'total_cost': 0.0,
+      };
+    }
+
+    final funcData = functions[functionName] as Map<String, dynamic>;
+    funcData['invocations'] = (funcData['invocations'] as int) + invocations;
+    funcData['compute_seconds'] = (funcData['compute_seconds'] as double) + computeTimeSeconds;
+    funcData['total_cost'] = (funcData['total_cost'] as double) + totalCost;
+
+    // Update session stats
+    final session = data['current_session'] as Map<String, dynamic>;
+    session['function_calls'] = (session['function_calls'] as int) + invocations;
+    session['cost'] = (session['cost'] as double) + totalCost;
+
+    await _saveUsageData(prefs, data);
+  }
+
+  /// Track Google Custom Search usage
+  static Future<void> trackGoogleSearch({
+    required int queries,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final data = await _loadUsageData(prefs);
+
+    final cost = queries * googleSearchCost;
+
+    data['google_searches'] = (data['google_searches'] as int) + queries;
+    data['google_cost'] = (data['google_cost'] as double) + cost;
+    data['total_cost'] = (data['total_cost'] as double) + cost;
+
+    // Update session stats
+    final session = data['current_session'] as Map<String, dynamic>;
+    session['search_queries'] = (session['search_queries'] as int) + queries;
+    session['cost'] = (session['cost'] as double) + cost;
+
+    await _saveUsageData(prefs, data);
+  }
+
   /// Get current usage statistics
   static Future<Map<String, dynamic>> getUsageStats() async {
     final prefs = await SharedPreferences.getInstance();
@@ -184,6 +287,9 @@ class UsageTrackingService {
     return {
       'openai': data['openai_cost'] as double,
       'elevenlabs': data['elevenlabs_cost'] as double,
+      'firebase': data['firebase_cost'] as double,
+      'functions': data['functions_cost'] as double,
+      'google': data['google_cost'] as double,
       'total': data['total_cost'] as double,
     };
   }
@@ -232,11 +338,23 @@ class UsageTrackingService {
       'openai_cost': 0.0,
       'elevenlabs_cost': 0.0,
       'elevenlabs_characters': 0,
+      'firebase_cost': 0.0,
+      'firebase_reads': 0,
+      'firebase_writes': 0,
+      'functions_cost': 0.0,
+      'function_invocations': 0,
+      'function_compute_seconds': 0.0,
+      'google_cost': 0.0,
+      'google_searches': 0,
       'models': <String, dynamic>{},
       'operations': <String, dynamic>{},
+      'functions': <String, dynamic>{},
       'current_session': {
         'tokens': 0,
         'tts_characters': 0,
+        'firebase_operations': 0,
+        'function_calls': 0,
+        'search_queries': 0,
         'cost': 0.0,
         'api_calls': 0,
         'started_at': DateTime.now().toIso8601String(),
