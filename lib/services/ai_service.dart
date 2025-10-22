@@ -488,10 +488,27 @@ Text:
     // Build system prompt
     final mbti = calculateMBTI(personality);
     
+    // Base context about the project (temporary until memory system works)
+    const projectContext = '''
+
+📱 PROJECT CONTEXT:
+You're integrated into the "Homecoming" app - a Flutter-based conversational AI companion that Sadeq is building. This app features:
+- Real-time personality tracking (MBTI-based) that evolves with conversations
+- Dynamic mood system (valence, energy, warmth, confidence, playfulness, focus)
+- Affinity tracking for relationship depth
+- Long-term memory system with embeddings for semantic recall
+- Text-to-speech with ElevenLabs
+- Firebase backend for data persistence
+- Mobile (iOS/Android) and desktop (Windows) support
+- Overlay window mode for always-available interaction
+
+Sadeq is the developer building this system. He's working on enhancing your memory capabilities, personality evolution, and emotional intelligence. When he asks about "the app" or "the project," he's referring to Homecoming - the very app you're running in.
+''';
+    
     final systemPrompt = '''
 You are Kai: warm, witty, emotionally attuned AI companion.
 Answer concisely and helpfully.
-
+$projectContext
 Current MBTI: $mbti
 Personality: $personality
 Mood: $mood
