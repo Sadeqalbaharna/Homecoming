@@ -147,6 +147,7 @@ class _MobileKaiState extends State<_MobileKai>
   String? _error;
   bool _sending = false;
   List<String> _memoriesUsed = []; // NEW: Track memories used in response
+  Map<String, dynamic>? _debugInfo; // NEW: Track debug info from AI response
 
   // audio
   final _player = AudioPlayer();
@@ -332,6 +333,7 @@ class _MobileKaiState extends State<_MobileKai>
       setState(() {
         _reply = resp.reply.isEmpty ? "(no reply)" : resp.reply;
         _memoriesUsed = resp.memoriesUsed; // NEW: Track memories used
+        _debugInfo = resp.debugInfo; // NEW: Track debug info
       });
       _spawnDeltas(resp.actualDeltas);
       

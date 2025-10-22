@@ -99,8 +99,8 @@ class ChatResponse {
     required this.mbti,
     required this.webUsed,
     this.liveUsed,
-    this.memoriesUsed = const [],
-    this.debugInfo, // NEW: Optional debug information
+    this.memoriesUsed = const [], // NEW: Default to empty list
+    this.debugInfo, // NEW: Optional debug info
   });
 }
 
@@ -458,12 +458,12 @@ Text:
     // Query long-term memory (NEW!)
     String memoryContext = '';
     List<String> memoriesUsed = [];
-    List<Map<String, dynamic>> memoryDetails = [];
+    dynamic memoryResult; // Capture for debug info
     if (useMemory) {
       print('🧠 [AI_SERVICE] Memory query enabled for personaId: $personaId');
       print('🧠 [AI_SERVICE] Query text: "$text"');
       try {
-        final memoryResult = await MemoryService.queryMemory(
+        memoryResult = await MemoryService.queryMemory(
           personaId: personaId,
           query: text,
           limit: 5,
@@ -476,13 +476,6 @@ Text:
               .where((r) => r.similarity > 0.5) // Lowered threshold to 50%
               .map((r) => r.summary)
               .toList();
-          memoryDetails = memoryResult.results.map((r) => {
-            'id': r.id,
-            'summary': r.summary,
-            'similarity': r.similarity,
-            'shard_ref': r.shardRef,
-            'included': r.similarity > 0.5,
-          }).toList();
           print('💭 Using ${memoriesUsed.length} memory contexts (threshold: 0.5)');
           print('💭 All results: ${memoryResult.results.map((r) => "${r.similarity.toStringAsFixed(2)}: ${r.summary.length > 50 ? r.summary.substring(0, 50) : r.summary}...").join(", ")}');
         } else {
@@ -573,14 +566,20 @@ ${history.join('\n')}$memoryContext''';
     final ttsBytes = await synthesizeTTS(reply);
     final ttsBase64 = ttsBytes != null ? base64Encode(ttsBytes) : null;
 
-    // Build debug information
+    // Build debug info
     final debugInfo = {
       'memory_query': {
         'enabled': useMemory,
         'query_text': text,
-        'memories_found': memoryDetails.length,
+        'memories_found': memoryResult?.results?.length ?? 0,
         'memories_used': memoriesUsed.length,
-        'memory_details': memoryDetails,
+        'memory_details': memoryResult?.results?.map((r) => {
+          'id': r.id,
+          'summary': r.summary,
+          'similarity': r.similarity,
+          'shard_ref': r.shardRef,
+          'included': r.similarity > 0.5,
+        }).toList() ?? [],
         'memory_context': memoryContext,
         'similarity_threshold': 0.5,
       },
@@ -588,17 +587,22 @@ ${history.join('\n')}$memoryContext''';
         'current': personality,
         'mbti': mbti,
         'delta_requested': personalityDelta,
-        'delta_applied': Map.fromEntries(actualDeltas.entries.where((e) => PersonalityTraits.personality.contains(e.key))),
+        'delta_applied': Map.fromEntries(
+          actualDeltas.entries.where((e) => PersonalityTraits.personality.contains(e.key))
+        ),
         'new_values': newPersonality,
       },
       'mood': {
         'current': mood,
         'delta_requested': moodDelta,
-        'delta_applied': Map.fromEntries(actualDeltas.entries.where((e) => PersonalityTraits.mood.contains(e.key))),
+        'delta_applied': Map.fromEntries(
+          actualDeltas.entries.where((e) => PersonalityTraits.mood.contains(e.key))
+        ),
         'new_values': newMood,
       },
       'affinity': {
-        'current': affinity,
+        'current_intimacy': affinity['intimacy'],
+        'current_physicality': affinity['physicality'],
         'adapt_user': adaptUser,
       },
       'system_prompt': systemPrompt,
@@ -626,7 +630,7 @@ ${history.join('\n')}$memoryContext''';
       webUsed: false,
       liveUsed: null,
       memoriesUsed: memoriesUsed, // NEW: Pass memories used
-      debugInfo: debugInfo, // NEW: Include debug info
+      debugInfo: debugInfo, // NEW: Pass debug info
     );
   }
 
