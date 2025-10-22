@@ -145,6 +145,7 @@ class _MobileKaiState extends State<_MobileKai>
   String? _reply;
   String? _error;
   bool _sending = false;
+  List<String> _memoriesUsed = []; // NEW: Track memories used in response
 
   // audio
   final _player = AudioPlayer();
@@ -317,6 +318,7 @@ class _MobileKaiState extends State<_MobileKai>
       _error = null;
       _ttsPath = null;
       _devOpen = false;
+      _memoriesUsed = []; // Clear previous memories
     });
     try {
       final resp = await aiService.sendMessage(
@@ -328,6 +330,7 @@ class _MobileKaiState extends State<_MobileKai>
       );
       setState(() {
         _reply = resp.reply.isEmpty ? "(no reply)" : resp.reply;
+        _memoriesUsed = resp.memoriesUsed; // NEW: Track memories used
       });
       _spawnDeltas(resp.actualDeltas);
       
@@ -639,6 +642,7 @@ class _MobileKaiState extends State<_MobileKai>
                     sending: _sending,
                     reply: _reply,
                     error: _error,
+                    memoriesUsed: _memoriesUsed, // NEW: Pass memories used
                     devOpen: _devOpen,
                     controller: _controller,
                     focusNode: _focus,
@@ -727,6 +731,7 @@ class _MobileChatBubble extends StatelessWidget {
   final bool sending;
   final String? reply;
   final String? error;
+  final List<String> memoriesUsed; // NEW: Memories referenced in response
   final bool devOpen;
   final VoidCallback onToggleDev;
   final TextEditingController controller;
@@ -751,6 +756,7 @@ class _MobileChatBubble extends StatelessWidget {
     required this.sending,
     required this.reply,
     required this.error,
+    required this.memoriesUsed, // NEW: Required parameter
     required this.devOpen,
     required this.onToggleDev,
     required this.controller,
@@ -903,6 +909,37 @@ class _MobileChatBubble extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // Memory indicator (NEW!)
+                  if (memoriesUsed.isNotEmpty) ...[
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      margin: const EdgeInsets.only(bottom: 8),
+                      decoration: BoxDecoration(
+                        color: Colors.purple.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.purple.withOpacity(0.5), width: 1),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.psychology,
+                            color: Colors.purple,
+                            size: 14,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            '${memoriesUsed.length} ${memoriesUsed.length == 1 ? "memory" : "memories"} recalled',
+                            style: TextStyle(
+                              color: Colors.purple.shade300,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                   Text(
                     reply!,
                     style: const TextStyle(color: Colors.white, height: 1.4),
