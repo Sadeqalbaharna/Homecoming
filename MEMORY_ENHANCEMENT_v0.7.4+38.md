@@ -2,7 +2,7 @@
 
 ## 🎯 Summary
 
-Enhanced Kai's memory integration with better debugging and lower similarity threshold to ensure memory recall works properly.
+Enhanced Kai's memory integration with better debugging, lower similarity threshold, and **purple memory badge on mobile UI** to show when memories are accessed.
 
 ## ✅ Changes Made
 
@@ -25,7 +25,16 @@ Enhanced Kai's memory integration with better debugging and lower similarity thr
      ```
    - **Why**: Easier to diagnose what's happening with memory queries
 
-### 3. **Created Memory System Status Document**
+### 3. **Added Purple Memory Badge to Mobile UI** 💜
+   - **File**: `lib/main_mobile.dart`
+   - **What**: Purple badge appears below Kai's response showing "X memories recalled"
+   - **Changes**:
+     * Added `_memoriesUsed` state variable
+     * Pass `memoriesUsed` from AIService response to UI
+     * Display purple badge with memory icon when memories are used
+   - **Why**: User can see when Kai is accessing long-term memory
+
+### 4. **Created Memory System Status Document**
    - **File**: `MEMORY_SYSTEM_STATUS.md`
    - **Contents**:
      - Current configuration
@@ -67,6 +76,24 @@ Run the mobile app and send a message that relates to past conversations:
 - **Impact**: Memory queries fail on Windows desktop
 - **Workaround**: Use mobile app (iOS/Android) where Cloud Functions work properly
 - **Note**: This is a known Flutter + Firebase limitation on Windows desktop
+
+## 💜 Purple Memory Badge
+
+The purple memory badge now appears on **mobile** when Kai accesses long-term memory:
+- Shows below Kai's response
+- Displays: "X memory recalled" or "X memories recalled"
+- Only appears when memories are found with similarity > 60%
+- Helps you understand when Kai is referencing past conversations
+
+Example:
+```
+┌─────────────────────────────────────┐
+│ 💜 2 memories recalled              │
+├─────────────────────────────────────┤
+│ [Kai's response referencing your   │
+│  past conversations]                │
+└─────────────────────────────────────┘
+```
 
 ## 📱 Deployment
 
