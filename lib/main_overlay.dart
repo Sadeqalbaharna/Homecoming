@@ -20,6 +20,7 @@ import 'services/firebase_service.dart';
 import 'screens/personality_screen.dart';
 import 'screens/usage_stats_screen.dart';
 import 'api_key_setup_screen.dart';
+import 'widgets/debug_button.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 // API KEYS - Read from build-time environment (--dart-define)
@@ -291,6 +292,7 @@ class ChatMessage {
   final DateTime timestamp;
   final String? audioPath; // Optional: path to audio file for this message
   final List<String> memoriesUsed; // NEW: Memories referenced in this response
+  final Map<String, dynamic>? debugInfo; // DEBUG: AI decision-making data
 
   ChatMessage({
     required this.text,
@@ -298,6 +300,7 @@ class ChatMessage {
     DateTime? timestamp,
     this.audioPath,
     this.memoriesUsed = const [], // NEW: Default to empty list
+    this.debugInfo, // DEBUG: Optional debug data
   }) : timestamp = timestamp ?? DateTime.now();
 }
 
@@ -341,6 +344,7 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
   String? _error;
   String? _ttsPath;
   PlayerState? _playerState;
+  Map<String, dynamic>? _debugInfo; // Debug info from AI response
   
   // Voice recording - TODO: Re-enable after fixing record package
   // final _voiceService = VoiceService();
@@ -1187,6 +1191,18 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
                 ),
               ),
             ],
+            // DEBUG: Show debug button if debugInfo available
+            if (!message.isUser && message.debugInfo != null) ...[
+              const SizedBox(height: 8),
+              DebugButton(debugInfo: message.debugInfo!),
+            ] else if (!message.isUser) ...[
+              // Visual indicator when debugInfo is missing
+              const SizedBox(height: 4),
+              Text(
+                'No debug data',
+                style: TextStyle(color: Colors.red.withOpacity(0.5), fontSize: 10),
+              ),
+            ],
           ],
         ),
       ),
@@ -1230,6 +1246,13 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
       
       final replyText = resp.reply.isEmpty ? "(no reply)" : resp.reply;
       
+      // Capture debug info from AI response
+      _debugInfo = resp.debugInfo;
+      print('🔍 [DEBUG] debugInfo captured: ${_debugInfo != null ? "YES" : "NO"}');
+      if (_debugInfo != null) {
+        print('🔍 [DEBUG] debugInfo keys: ${_debugInfo!.keys.join(", ")}');
+      }
+      
       // Extract personality/mood deltas
       print('🧠 Personality deltas: ${resp.personalityDelta}');
       print('🧠 Mood deltas: ${resp.moodDelta}');
@@ -1255,6 +1278,7 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
           isUser: false,
           audioPath: audioPath,
           memoriesUsed: resp.memoriesUsed, // NEW: Include memory info
+          debugInfo: _debugInfo, // DEBUG: Include debug data
         ));
         _reply = replyText;
         _ttsPath = audioPath;

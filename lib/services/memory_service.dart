@@ -41,7 +41,11 @@ class MemoryQueryResponse {
 
   factory MemoryQueryResponse.fromJson(Map<String, dynamic> json) {
     final results = (json['results'] as List)
-        .map((r) => MemoryResult.fromJson(r as Map<String, dynamic>))
+        .map((r) {
+          // Handle Firebase's Map<Object?, Object?> type
+          final map = (r as Map).cast<String, dynamic>();
+          return MemoryResult.fromJson(map);
+        })
         .toList();
 
     return MemoryQueryResponse(
