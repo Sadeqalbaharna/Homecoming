@@ -76,7 +76,8 @@ $memories
 
 /// Service for querying Kai's long-term memory
 class MemoryService {
-  static final FirebaseFunctions _functions = FirebaseFunctions.instance;
+  // Explicitly set region to us-central1 (where functions are deployed)
+  static final FirebaseFunctions _functions = FirebaseFunctions.instanceFor(region: 'us-central1');
 
   /// Query memory for relevant past conversations
   /// 

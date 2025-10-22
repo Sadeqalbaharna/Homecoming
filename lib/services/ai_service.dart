@@ -459,21 +459,29 @@ Text:
     if (useMemory) {
       print('🧠 [AI_SERVICE] Memory query enabled for personaId: $personaId');
       print('🧠 [AI_SERVICE] Query text: "$text"');
-      final memoryResult = await MemoryService.queryMemory(
-        personaId: personaId,
-        query: text,
-        limit: 5,
-      );
-      print('🧠 [AI_SERVICE] Memory query complete. Results: ${memoryResult?.results.length ?? 0}');
-      
-      if (memoryResult != null && memoryResult.results.isNotEmpty) {
-        memoryContext = memoryResult.toContextString();
-        memoriesUsed = memoryResult.results
-            .where((r) => r.similarity > 0.6) // Lowered threshold to 60%
-            .map((r) => r.summary)
-            .toList();
-        print('💭 Using ${memoriesUsed.length} memory contexts (threshold: 0.6)');
-        print('💭 All results: ${memoryResult.results.map((r) => "${r.similarity.toStringAsFixed(2)}: ${r.summary.substring(0, 50)}...").join(", ")}');
+      try {
+        final memoryResult = await MemoryService.queryMemory(
+          personaId: personaId,
+          query: text,
+          limit: 5,
+        );
+        print('🧠 [AI_SERVICE] Memory query complete. Results: ${memoryResult?.results.length ?? 0}');
+        
+        if (memoryResult != null && memoryResult.results.isNotEmpty) {
+          memoryContext = memoryResult.toContextString();
+          memoriesUsed = memoryResult.results
+              .where((r) => r.similarity > 0.6) // Lowered threshold to 60%
+              .map((r) => r.summary)
+              .toList();
+          print('💭 Using ${memoriesUsed.length} memory contexts (threshold: 0.6)');
+          print('💭 All results: ${memoryResult.results.map((r) => "${r.similarity.toStringAsFixed(2)}: ${r.summary.length > 50 ? r.summary.substring(0, 50) : r.summary}...").join(", ")}');
+        } else {
+          print('⚠️ [AI_SERVICE] No memories found or query returned null');
+        }
+      } catch (e) {
+        print('❌ [AI_SERVICE] Memory query failed: $e');
+        print('⚠️ [AI_SERVICE] Continuing without memory context');
+        // Continue without memory - don't fail the entire request
       }
     }
     
