@@ -457,19 +457,23 @@ Text:
     String memoryContext = '';
     List<String> memoriesUsed = [];
     if (useMemory) {
+      print('🧠 [AI_SERVICE] Memory query enabled for personaId: $personaId');
+      print('🧠 [AI_SERVICE] Query text: "$text"');
       final memoryResult = await MemoryService.queryMemory(
         personaId: personaId,
         query: text,
         limit: 5,
       );
+      print('🧠 [AI_SERVICE] Memory query complete. Results: ${memoryResult?.results.length ?? 0}');
       
       if (memoryResult != null && memoryResult.results.isNotEmpty) {
         memoryContext = memoryResult.toContextString();
         memoriesUsed = memoryResult.results
-            .where((r) => r.similarity > 0.7) // Only track relevant ones
+            .where((r) => r.similarity > 0.6) // Lowered threshold to 60%
             .map((r) => r.summary)
             .toList();
-        print('💭 Using ${memoriesUsed.length} memory contexts');
+        print('💭 Using ${memoriesUsed.length} memory contexts (threshold: 0.6)');
+        print('💭 All results: ${memoryResult.results.map((r) => "${r.similarity.toStringAsFixed(2)}: ${r.summary.substring(0, 50)}...").join(", ")}');
       }
     }
     

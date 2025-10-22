@@ -81,7 +81,7 @@ if ($LASTEXITCODE -eq 0) {
     Write-Host "`nNext: Run your app and test with:" -ForegroundColor Cyan
     Write-Host "  'What do you know about me?'" -ForegroundColor Yellow
     Write-Host "  'What have we discussed?'" -ForegroundColor Yellow
-    Write-Host "`nYou should see purple badges with memory recalls! 💜" -ForegroundColor Magenta
+    Write-Host "`nYou should see purple badges with memory recalls!" -ForegroundColor Magenta
 } else {
     Write-Host "`n❌ Script failed. Check the error messages above." -ForegroundColor Red
     Write-Host "`nCommon issues:" -ForegroundColor Yellow
