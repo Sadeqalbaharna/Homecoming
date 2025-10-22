@@ -85,6 +85,7 @@ class ChatResponse {
   final bool webUsed;
   final String? liveUsed;
   final List<String> memoriesUsed; // NEW: Track which memories were referenced
+  final Map<String, dynamic>? debugInfo; // NEW: Debug information
 
   ChatResponse({
     required this.reply,
@@ -98,7 +99,8 @@ class ChatResponse {
     required this.mbti,
     required this.webUsed,
     this.liveUsed,
-    this.memoriesUsed = const [], // NEW: Default to empty list
+    this.memoriesUsed = const [],
+    this.debugInfo, // NEW: Optional debug information
   });
 }
 
@@ -456,6 +458,7 @@ Text:
     // Query long-term memory (NEW!)
     String memoryContext = '';
     List<String> memoriesUsed = [];
+    List<Map<String, dynamic>> memoryDetails = [];
     if (useMemory) {
       print('🧠 [AI_SERVICE] Memory query enabled for personaId: $personaId');
       print('🧠 [AI_SERVICE] Query text: "$text"');
@@ -473,6 +476,13 @@ Text:
               .where((r) => r.similarity > 0.5) // Lowered threshold to 50%
               .map((r) => r.summary)
               .toList();
+          memoryDetails = memoryResult.results.map((r) => {
+            'id': r.id,
+            'summary': r.summary,
+            'similarity': r.similarity,
+            'shard_ref': r.shardRef,
+            'included': r.similarity > 0.5,
+          }).toList();
           print('💭 Using ${memoriesUsed.length} memory contexts (threshold: 0.5)');
           print('💭 All results: ${memoryResult.results.map((r) => "${r.similarity.toStringAsFixed(2)}: ${r.summary.length > 50 ? r.summary.substring(0, 50) : r.summary}...").join(", ")}');
         } else {
@@ -563,6 +573,40 @@ ${history.join('\n')}$memoryContext''';
     final ttsBytes = await synthesizeTTS(reply);
     final ttsBase64 = ttsBytes != null ? base64Encode(ttsBytes) : null;
 
+    // Build debug information
+    final debugInfo = {
+      'memory_query': {
+        'enabled': useMemory,
+        'query_text': text,
+        'memories_found': memoryDetails.length,
+        'memories_used': memoriesUsed.length,
+        'memory_details': memoryDetails,
+        'memory_context': memoryContext,
+        'similarity_threshold': 0.5,
+      },
+      'personality': {
+        'current': personality,
+        'mbti': mbti,
+        'delta_requested': personalityDelta,
+        'delta_applied': Map.fromEntries(actualDeltas.entries.where((e) => PersonalityTraits.personality.contains(e.key))),
+        'new_values': newPersonality,
+      },
+      'mood': {
+        'current': mood,
+        'delta_requested': moodDelta,
+        'delta_applied': Map.fromEntries(actualDeltas.entries.where((e) => PersonalityTraits.mood.contains(e.key))),
+        'new_values': newMood,
+      },
+      'affinity': {
+        'current': affinity,
+        'adapt_user': adaptUser,
+      },
+      'system_prompt': systemPrompt,
+      'conversation_history_turns': history.length,
+      'tags': tags,
+      'model': model,
+    };
+
     return ChatResponse(
       reply: reply.isEmpty ? "(no reply)" : reply,
       ttsBase64: ttsBase64,
@@ -582,6 +626,7 @@ ${history.join('\n')}$memoryContext''';
       webUsed: false,
       liveUsed: null,
       memoriesUsed: memoriesUsed, // NEW: Pass memories used
+      debugInfo: debugInfo, // NEW: Include debug info
     );
   }
 

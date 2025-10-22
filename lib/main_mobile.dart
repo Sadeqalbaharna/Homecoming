@@ -146,6 +146,7 @@ class _MobileKaiState extends State<_MobileKai>
   String? _error;
   bool _sending = false;
   List<String> _memoriesUsed = []; // NEW: Track memories used in response
+  Map<String, dynamic>? _debugInfo; // NEW: Track debug information
 
   // audio
   final _player = AudioPlayer();
@@ -331,6 +332,7 @@ class _MobileKaiState extends State<_MobileKai>
       setState(() {
         _reply = resp.reply.isEmpty ? "(no reply)" : resp.reply;
         _memoriesUsed = resp.memoriesUsed; // NEW: Track memories used
+        _debugInfo = resp.debugInfo; // NEW: Track debug info
       });
       _spawnDeltas(resp.actualDeltas);
       
@@ -643,6 +645,7 @@ class _MobileKaiState extends State<_MobileKai>
                     reply: _reply,
                     error: _error,
                     memoriesUsed: _memoriesUsed, // NEW: Pass memories used
+                    debugInfo: _debugInfo, // NEW: Pass debug info
                     devOpen: _devOpen,
                     controller: _controller,
                     focusNode: _focus,
@@ -732,6 +735,7 @@ class _MobileChatBubble extends StatelessWidget {
   final String? reply;
   final String? error;
   final List<String> memoriesUsed; // NEW: Memories referenced in response
+  final Map<String, dynamic>? debugInfo; // NEW: Debug information
   final bool devOpen;
   final VoidCallback onToggleDev;
   final TextEditingController controller;
@@ -757,6 +761,7 @@ class _MobileChatBubble extends StatelessWidget {
     required this.reply,
     required this.error,
     required this.memoriesUsed, // NEW: Required parameter
+    this.debugInfo, // NEW: Optional debug info
     required this.devOpen,
     required this.onToggleDev,
     required this.controller,
@@ -975,6 +980,10 @@ class _MobileChatBubble extends StatelessWidget {
                               ),
                         label: const Text('Play/Pause'),
                       ),
+                      if (debugInfo != null) ...[
+                        const SizedBox(width: 8),
+                        _DebugButton(debugInfo: debugInfo!),
+                      ],
                     ],
                   ),
                 ],
