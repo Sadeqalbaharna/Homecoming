@@ -334,6 +334,10 @@ class _MobileKaiState extends State<_MobileKai>
         _reply = resp.reply.isEmpty ? "(no reply)" : resp.reply;
         _memoriesUsed = resp.memoriesUsed; // NEW: Track memories used
         _debugInfo = resp.debugInfo; // NEW: Track debug info
+        print('🔍 [DEBUG] debugInfo captured: ${_debugInfo != null ? "YES" : "NO"}');
+        if (_debugInfo != null) {
+          print('🔍 [DEBUG] debugInfo keys: ${_debugInfo!.keys.join(", ")}');
+        }
       });
       _spawnDeltas(resp.actualDeltas);
       
@@ -984,6 +988,9 @@ class _MobileChatBubble extends StatelessWidget {
                       if (debugInfo != null) ...[
                         const SizedBox(width: 8),
                         DebugButton(debugInfo: debugInfo!),
+                      ] else ...[
+                        // Debug: Show why button isn't appearing
+                        Text('No debug', style: TextStyle(color: Colors.red, fontSize: 10)),
                       ],
                     ],
                   ),
