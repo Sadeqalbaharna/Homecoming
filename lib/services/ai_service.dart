@@ -470,10 +470,10 @@ Text:
         if (memoryResult != null && memoryResult.results.isNotEmpty) {
           memoryContext = memoryResult.toContextString();
           memoriesUsed = memoryResult.results
-              .where((r) => r.similarity > 0.6) // Lowered threshold to 60%
+              .where((r) => r.similarity > 0.5) // Lowered threshold to 50%
               .map((r) => r.summary)
               .toList();
-          print('💭 Using ${memoriesUsed.length} memory contexts (threshold: 0.6)');
+          print('💭 Using ${memoriesUsed.length} memory contexts (threshold: 0.5)');
           print('💭 All results: ${memoryResult.results.map((r) => "${r.similarity.toStringAsFixed(2)}: ${r.summary.length > 50 ? r.summary.substring(0, 50) : r.summary}...").join(", ")}');
         } else {
           print('⚠️ [AI_SERVICE] No memories found or query returned null');

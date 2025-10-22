@@ -441,13 +441,13 @@ exports.queryMemory = functions.https.onCall(async (data, context) => {
   
   try {
     // Generate query embedding
-    const response = await openai.embeddings.create({
+    const embeddingResponse = await openai.embeddings.create({
       model: CONFIG.EMBEDDING_MODEL,
       input: query,
       dimensions: CONFIG.EMBEDDING_DIMENSIONS,
     });
     
-    const queryEmbedding = response.data[0].embedding;
+    const queryEmbedding = embeddingResponse.data[0].embedding;
     
     // Get all embeddings (in production, use vector database like Pinecone)
     const embeddingsSnap = await db.ref(`/memory/embeddings/${personaId}`).once('value');
@@ -467,11 +467,18 @@ exports.queryMemory = functions.https.onCall(async (data, context) => {
     // Sort by similarity and return top results
     results.sort((a, b) => b.similarity - a.similarity);
     
-    return {
+    const response = {
       query,
       results: results.slice(0, limit),
       count: results.length,
     };
+    
+    console.log(`✅ Returning ${response.results.length} results (${response.count} total)`);
+    if (response.results.length > 0) {
+      console.log(`✅ Top result: ${response.results[0].summary.substring(0, 100)}... (${(response.results[0].similarity * 100).toFixed(1)}%)`);
+    }
+    
+    return response;
   } catch (error) {
     console.error('❌ queryMemory error:', error);
     throw new functions.https.HttpsError('internal', error.message);
