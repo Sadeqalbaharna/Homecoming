@@ -5,9 +5,9 @@ class DebugButton extends StatefulWidget {
   final Map<String, dynamic> debugInfo;
 
   const DebugButton({
-    Key? key,
+    super.key,
     required this.debugInfo,
-  }) : super(key: key);
+  });
 
   @override
   State<DebugButton> createState() => _DebugButtonState();
@@ -227,7 +227,7 @@ class _DebugButtonState extends State<DebugButton> {
                 ],
               ),
             );
-          }).toList(),
+          }),
         ],
       );
     }

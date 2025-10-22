@@ -21,6 +21,7 @@ import 'screens/personality_screen.dart';
 import 'screens/usage_stats_screen.dart';
 import 'api_key_setup_screen.dart';
 import 'widgets/debug_button.dart';
+import 'widgets/memory_chips.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 // API KEYS - Read from build-time environment (--dart-define)
@@ -1123,35 +1124,21 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Memory indicator (NEW!)
-            if (!message.isUser && message.memoriesUsed.isNotEmpty) ...[
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                margin: const EdgeInsets.only(bottom: 8),
-                decoration: BoxDecoration(
-                  color: Colors.purple.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.purple.withOpacity(0.5), width: 1),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(
-                      Icons.psychology,
-                      color: Colors.purple,
-                      size: 14,
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      '${message.memoriesUsed.length} ${message.memoriesUsed.length == 1 ? "memory" : "memories"} recalled',
-                      style: TextStyle(
-                        color: Colors.purple.shade300,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
-                ),
+            // Memory chips (NEW! - shows which memories were used with pin/dismiss actions)
+            if (!message.isUser && message.debugInfo != null) ...[
+              MemoryChips(
+                memoryDetails: (message.debugInfo!['memory_query']?['memory_details'] as List?)
+                    ?.cast<Map<String, dynamic>>() ?? [],
+                onPin: (memoryId) {
+                  print('📌 Pin memory: $memoryId');
+                  // TODO: Implement pin to facts
+                  // Will save to /memory/facts/{personaId}/{factId}
+                },
+                onDismiss: (memoryId) {
+                  print('❌ Dismiss memory: $memoryId');
+                  // TODO: Implement dismiss (lower confidence or mark as irrelevant)
+                  // Will update memory shard with dismissal metadata
+                },
               ),
             ],
             Text(
