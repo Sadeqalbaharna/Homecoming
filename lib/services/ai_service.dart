@@ -473,10 +473,10 @@ Text:
         if (memoryResult != null && memoryResult.results.isNotEmpty) {
           memoryContext = memoryResult.toContextString();
           memoriesUsed = memoryResult.results
-              .where((r) => r.similarity > 0.5) // Lowered threshold to 50%
+              .where((r) => r.similarity > 0.35) // Lowered threshold to 35%
               .map((r) => r.summary)
               .toList();
-          print('💭 Using ${memoriesUsed.length} memory contexts (threshold: 0.5)');
+          print('💭 Using ${memoriesUsed.length} memory contexts (threshold: 0.35)');
           print('💭 All results: ${memoryResult.results.map((r) => "${r.similarity.toStringAsFixed(2)}: ${r.summary.length > 50 ? r.summary.substring(0, 50) : r.summary}...").join(", ")}');
         } else {
           print('⚠️ [AI_SERVICE] No memories found or query returned null');
@@ -578,10 +578,10 @@ ${history.join('\n')}$memoryContext''';
           'summary': r.summary,
           'similarity': r.similarity,
           'shard_ref': r.shardRef,
-          'included': r.similarity > 0.5,
+          'included': r.similarity > 0.35,
         }).toList() ?? [],
         'memory_context': memoryContext,
-        'similarity_threshold': 0.5,
+        'similarity_threshold': 0.35,
       },
       'personality': {
         'current': personality,

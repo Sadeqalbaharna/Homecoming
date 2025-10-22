@@ -62,7 +62,7 @@ class MemoryQueryResponse {
     }
 
     final memories = results
-        .where((r) => r.similarity > 0.7) // Only include relevant memories
+        .where((r) => r.similarity > 0.35) // Lowered to 35% to include more relevant memories
         .map((r) => '- ${r.summary} (relevance: ${(r.similarity * 100).toStringAsFixed(0)}%)')
         .join('\n');
 
