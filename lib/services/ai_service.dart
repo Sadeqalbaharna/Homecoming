@@ -71,6 +71,61 @@ class PersonalityTraits {
   static const List<String> mood = ["valence", "energy", "warmth", "confidence", "playfulness", "focus"];
 }
 
+/// Mood snapshot for history tracking
+class MoodSnapshot {
+  final DateTime timestamp;
+  final Map<String, int> mood;
+  final String? trigger;
+  
+  MoodSnapshot({
+    required this.timestamp,
+    required this.mood,
+    this.trigger,
+  });
+  
+  Map<String, dynamic> toJson() => {
+    'timestamp': timestamp.millisecondsSinceEpoch,
+    'mood': mood,
+    'trigger': trigger,
+  };
+  
+  factory MoodSnapshot.fromJson(Map<String, dynamic> json) => MoodSnapshot(
+    timestamp: DateTime.fromMillisecondsSinceEpoch(json['timestamp']),
+    mood: Map<String, int>.from(json['mood']),
+    trigger: json['trigger'],
+  );
+}
+
+/// Evolution settings for personality and mood dynamics
+class EvolutionSettings {
+  // Personality evolution (inelastic - slow to change)
+  static const double personalityResistance = 0.15; // Only 15% of delta applied
+  static const int personalityDecayThresholdDays = 30; // Decay starts after 30 days
+  static const double personalityDecayRate = 0.5; // Points per day toward baseline
+  
+  // Mood evolution (elastic - fast to change, fast to decay)
+  static const Map<String, double> moodDecayRates = {
+    'valence': 2.0,      // Happiness - medium decay (2 pts/hour)
+    'energy': 3.0,       // Energy - fast decay (3 pts/hour)
+    'warmth': 1.5,       // Warmth - slow decay (1.5 pts/hour)
+    'confidence': 1.0,   // Confidence - very slow decay (1 pt/hour)
+    'playfulness': 2.5,  // Playfulness - fast decay (2.5 pts/hour)
+    'focus': 3.5,        // Focus - very fast decay (3.5 pts/hour)
+  };
+  
+  // Context intensity multipliers for mood changes
+  static const Map<String, double> contextMultipliers = {
+    'normal': 1.0,   // Standard conversation
+    'high': 2.0,     // Exciting/frustrating events
+    'radical': 4.0,  // Life-changing events
+  };
+  
+  // Baseline learning
+  static const int minInteractionsForBaseline = 50; // Need 50+ interactions to learn baseline
+  static const int baselineWindowDays = 30; // Use last 30 days for baseline calculation
+  static const int maxMoodHistorySize = 100; // Keep last 100 mood snapshots
+}
+
 /// Chat response model
 class ChatResponse {
   final String reply;
@@ -179,6 +234,41 @@ class AIService {
   /// Clamp values to valid ranges
   int _clamp(int value, int min, int max) => value.clamp(min, max);
 
+  /// Calculate extreme resistance for personality changes near boundaries
+  /// Returns 0.0 (no resistance) in middle range, up to 0.8 (80% resistance) at extremes
+  double _calculateExtremeResistance(int value) {
+    if (value < 100) return 0.8;  // 80% resistance near 0
+    if (value > 900) return 0.8;  // 80% resistance near 1000
+    if (value < 200 || value > 800) return 0.5; // 50% resistance at edges
+    return 0.0; // No additional resistance in middle range (200-800)
+  }
+
+  /// Apply personality delta with resistance (inelastic change)
+  /// Only 15% of requested delta is applied, with additional resistance at extremes
+  int _applyPersonalityDelta(int current, int requestedDelta) {
+    if (requestedDelta == 0) return current;
+    
+    // Base resistance: only 15% gets through
+    final dampedDelta = (requestedDelta * EvolutionSettings.personalityResistance).round();
+    
+    // Additional resistance near extremes
+    final extremeResistance = _calculateExtremeResistance(current);
+    final finalDelta = (dampedDelta * (1.0 - extremeResistance)).round();
+    
+    return _clamp(current + finalDelta, 0, 1000);
+  }
+
+  /// Apply mood delta with context intensity scaling (elastic change)
+  /// Mood can swing dramatically based on context intensity
+  int _applyMoodDelta(int current, int requestedDelta, String contextIntensity) {
+    if (requestedDelta == 0) return current;
+    
+    final multiplier = EvolutionSettings.contextMultipliers[contextIntensity] ?? 1.0;
+    final scaledDelta = (requestedDelta * multiplier).round();
+    
+    return _clamp(current + scaledDelta, 0, 100);
+  }
+
   /// Get current personality from local storage
   Future<Map<String, int>> getPersonality(String personaId) async {
     final prefs = await _prefsInstance;
@@ -254,6 +344,173 @@ class AIService {
     for (final entry in affinity.entries) {
       final key = '${personaId}_affinity_${entry.key}';
       await prefs.setInt(key, entry.value);
+    }
+  }
+
+  /// Get last personality/mood update time
+  Future<DateTime> _getLastUpdateTime(String personaId) async {
+    final prefs = await _prefsInstance;
+    final timestamp = prefs.getInt('${personaId}_last_update') ?? 
+                      DateTime.now().millisecondsSinceEpoch;
+    return DateTime.fromMillisecondsSinceEpoch(timestamp);
+  }
+
+  /// Save last update time
+  Future<void> _saveLastUpdateTime(String personaId, DateTime time) async {
+    final prefs = await _prefsInstance;
+    await prefs.setInt('${personaId}_last_update', time.millisecondsSinceEpoch);
+  }
+
+  /// Apply time-based mood decay toward personal baseline
+  /// Mood returns to learned baseline over time when not interacting
+  Future<Map<String, int>> _applyMoodDecay(
+    String personaId,
+    Map<String, int> currentMood,
+    DateTime lastUpdate,
+  ) async {
+    final timeSinceUpdate = DateTime.now().difference(lastUpdate);
+    final hoursSinceUpdate = timeSinceUpdate.inHours;
+    
+    if (hoursSinceUpdate == 0) return currentMood; // No decay needed
+    
+    // Get personal baselines (learned from history or defaults)
+    final baselines = await _getPersonalMoodBaselines(personaId);
+    final decayedMood = Map<String, int>.from(currentMood);
+    
+    for (final trait in PersonalityTraits.mood) {
+      final current = currentMood[trait]!;
+      final baseline = baselines[trait]!;
+      final decayRate = EvolutionSettings.moodDecayRates[trait]!;
+      final decayAmount = (hoursSinceUpdate * decayRate).round();
+      
+      // Decay toward personal baseline
+      if (current > baseline) {
+        decayedMood[trait] = (current - decayAmount).clamp(baseline, 100);
+      } else if (current < baseline) {
+        decayedMood[trait] = (current + decayAmount).clamp(0, baseline);
+      }
+    }
+    
+    return decayedMood;
+  }
+
+  /// Apply minimal personality decay (only after long absence)
+  /// Personality only decays after 30+ days of inactivity, very slowly
+  Future<Map<String, int>> _applyPersonalityDecay(
+    Map<String, int> currentPersonality,
+    DateTime lastUpdate,
+  ) async {
+    final timeSinceUpdate = DateTime.now().difference(lastUpdate);
+    final daysSinceUpdate = timeSinceUpdate.inDays;
+    
+    if (daysSinceUpdate < EvolutionSettings.personalityDecayThresholdDays) {
+      return currentPersonality; // No decay before 30 days
+    }
+    
+    final decayedPersonality = Map<String, int>.from(currentPersonality);
+    final baseline = 500; // Species baseline (balanced)
+    final daysOverThreshold = daysSinceUpdate - EvolutionSettings.personalityDecayThresholdDays;
+    final totalDecay = (daysOverThreshold * EvolutionSettings.personalityDecayRate).round();
+    
+    for (final trait in PersonalityTraits.personality) {
+      final current = currentPersonality[trait]!;
+      
+      // Slow drift toward species baseline
+      if (current > baseline) {
+        decayedPersonality[trait] = (current - totalDecay).clamp(baseline, 1000);
+      } else if (current < baseline) {
+        decayedPersonality[trait] = (current + totalDecay).clamp(0, baseline);
+      }
+    }
+    
+    return decayedPersonality;
+  }
+
+  /// Get personal mood baselines (learned from history or defaults)
+  Future<Map<String, int>> _getPersonalMoodBaselines(String personaId) async {
+    final prefs = await _prefsInstance;
+    
+    // Try to load learned baselines
+    final baselines = <String, int>{};
+    bool hasBaselines = true;
+    
+    for (final trait in PersonalityTraits.mood) {
+      final key = '${personaId}_baseline_$trait';
+      final value = prefs.getInt(key);
+      if (value == null) {
+        hasBaselines = false;
+        break;
+      }
+      baselines[trait] = value;
+    }
+    
+    if (hasBaselines) return baselines;
+    
+    // Return default baselines until we learn from history
+    return Map<String, int>.from(_defaultMood);
+  }
+
+  /// Get mood history
+  Future<List<MoodSnapshot>> _getMoodHistory(String personaId) async {
+    final prefs = await _prefsInstance;
+    final historyJson = prefs.getString('${personaId}_mood_history') ?? '[]';
+    final historyList = jsonDecode(historyJson) as List;
+    
+    return historyList.map((item) => MoodSnapshot.fromJson(item as Map<String, dynamic>)).toList();
+  }
+
+  /// Save mood snapshot to history
+  Future<void> _saveMoodSnapshot(
+    String personaId,
+    Map<String, int> mood,
+    String? trigger,
+  ) async {
+    final prefs = await _prefsInstance;
+    
+    // Get existing history
+    final history = await _getMoodHistory(personaId);
+    
+    // Add new snapshot
+    history.add(MoodSnapshot(
+      timestamp: DateTime.now(),
+      mood: mood,
+      trigger: trigger,
+    ));
+    
+    // Keep only last 100 snapshots
+    if (history.length > EvolutionSettings.maxMoodHistorySize) {
+      history.removeRange(0, history.length - EvolutionSettings.maxMoodHistorySize);
+    }
+    
+    // Save back
+    final newHistoryJson = jsonEncode(history.map((s) => s.toJson()).toList());
+    await prefs.setString('${personaId}_mood_history', newHistoryJson);
+  }
+
+  /// Update mood baselines from history (learns user's typical mood)
+  /// Called periodically to adapt to user's normal emotional state
+  Future<void> _updateMoodBaselines(String personaId) async {
+    final history = await _getMoodHistory(personaId);
+    
+    if (history.length < EvolutionSettings.minInteractionsForBaseline) {
+      return; // Not enough data yet
+    }
+    
+    // Calculate rolling average from last 30 days
+    final cutoff = DateTime.now().subtract(
+      Duration(days: EvolutionSettings.baselineWindowDays)
+    );
+    final recent = history.where((s) => s.timestamp.isAfter(cutoff)).toList();
+    
+    if (recent.isEmpty) return;
+    
+    final prefs = await _prefsInstance;
+    
+    for (final trait in PersonalityTraits.mood) {
+      final values = recent.map((s) => s.mood[trait]!).toList();
+      final average = values.reduce((a, b) => a + b) ~/ values.length;
+      
+      await prefs.setInt('${personaId}_baseline_$trait', average);
     }
   }
 
@@ -585,9 +842,21 @@ Text:
     bool useMemory = true, // NEW: Enable memory integration
   }) async {
     // Get current state
-    final personality = await getPersonality(personaId);
-    final mood = await getMood(personaId);
+    var personality = await getPersonality(personaId);
+    var mood = await getMood(personaId);
     final affinity = await getAffinity(personaId);
+    final lastUpdate = await _getLastUpdateTime(personaId);
+
+    // Apply time-based decay BEFORE processing new message
+    final timeSinceUpdate = DateTime.now().difference(lastUpdate);
+    print('⏱️ Time since last update: ${timeSinceUpdate.inHours}h ${timeSinceUpdate.inMinutes % 60}m');
+    
+    personality = await _applyPersonalityDecay(personality, lastUpdate);
+    mood = await _applyMoodDecay(personaId, mood, lastUpdate);
+    
+    // Track if decay was applied
+    final personalityDecayed = timeSinceUpdate.inDays >= EvolutionSettings.personalityDecayThresholdDays;
+    final moodDecayed = timeSinceUpdate.inHours > 0;
 
     // Build conversation history (simplified for now)
     final history = await _getConversationHistory(personaId, ctxTurns);
@@ -681,29 +950,57 @@ ${history.join('\n')}$memoryContext''';
     final tagsResult = await _getTagsAndDeltas(reply);
     final personalityDelta = Map<String, int>.from(tagsResult['persona_delta'] ?? {});
     final moodDelta = Map<String, int>.from(tagsResult['mood_delta'] ?? {});
+    final contextIntensity = tagsResult['context_intensity'] ?? 'normal';
     final tags = List<String>.from(tagsResult['tags'] ?? []);
 
-    // Apply deltas
+    // Apply deltas with RESISTANCE (personality) and SCALING (mood)
     final actualDeltas = <String, int>{};
+    final actualPersonalityDeltas = <String, int>{};
+    final actualMoodDeltas = <String, int>{};
     final newPersonality = Map<String, int>.from(personality);
     final newMood = Map<String, int>.from(mood);
 
+    // Personality: Apply with resistance (inelastic)
     for (final trait in PersonalityTraits.personality) {
-      final delta = _clamp(personalityDelta[trait] ?? 0, -10, 10);
-      newPersonality[trait] = _clamp(newPersonality[trait]! + delta, 0, 1000);
-      if (delta != 0) actualDeltas[trait] = delta;
+      if (personalityDelta.containsKey(trait) && personalityDelta[trait] != 0) {
+        final requestedDelta = personalityDelta[trait]!.clamp(-10, 10);
+        final oldValue = newPersonality[trait]!;
+        newPersonality[trait] = _applyPersonalityDelta(oldValue, requestedDelta);
+        final actualDelta = newPersonality[trait]! - oldValue;
+        if (actualDelta != 0) {
+          actualDeltas[trait] = actualDelta;
+          actualPersonalityDeltas[trait] = actualDelta;
+        }
+      }
     }
 
+    // Mood: Apply with context scaling (elastic)
     for (final trait in PersonalityTraits.mood) {
-      final delta = _clamp(moodDelta[trait] ?? 0, -5, 5);
-      newMood[trait] = _clamp(newMood[trait]! + delta, 0, 100);
-      if (delta != 0) actualDeltas[trait] = delta;
+      if (moodDelta.containsKey(trait) && moodDelta[trait] != 0) {
+        final requestedDelta = moodDelta[trait]!.clamp(-5, 5);
+        final oldValue = newMood[trait]!;
+        newMood[trait] = _applyMoodDelta(oldValue, requestedDelta, contextIntensity);
+        final actualDelta = newMood[trait]! - oldValue;
+        if (actualDelta != 0) {
+          actualDeltas[trait] = actualDelta;
+          actualMoodDeltas[trait] = actualDelta;
+        }
+      }
     }
 
     // Save updated state to both local and Firebase
     await savePersonality(personaId, newPersonality);
     await saveMood(personaId, newMood);
+    await _saveLastUpdateTime(personaId, DateTime.now());
     await _saveMessage(personaId, text, reply);
+    
+    // Save mood snapshot for baseline learning
+    await _saveMoodSnapshot(personaId, newMood, text.length > 50 ? text.substring(0, 50) : text);
+    
+    // Periodically update baselines (every ~10th message via random chance)
+    if (DateTime.now().millisecond % 10 == 0) {
+      await _updateMoodBaselines(personaId);
+    }
     
     // Save conversation to Firebase
     await FirebaseService.saveConversation(
@@ -716,6 +1013,9 @@ ${history.join('\n')}$memoryContext''';
     // Generate TTS
     final ttsBytes = await synthesizeTTS(reply);
     final ttsBase64 = ttsBytes != null ? base64Encode(ttsBytes) : null;
+
+    // Get baselines for debug info
+    final moodBaselines = await _getPersonalMoodBaselines(personaId);
 
     // Build debug info
     final debugInfo = {
@@ -739,18 +1039,26 @@ ${history.join('\n')}$memoryContext''';
         'current': personality,
         'mbti': mbti,
         'delta_requested': personalityDelta,
-        'delta_applied': Map.fromEntries(
-          actualDeltas.entries.where((e) => PersonalityTraits.personality.contains(e.key))
-        ),
+        'delta_applied': actualPersonalityDeltas,
+        'resistance_info': {
+          'base_resistance': '${(EvolutionSettings.personalityResistance * 100).toStringAsFixed(0)}%',
+          'applied_percentage': '${((1.0 - EvolutionSettings.personalityResistance) * 100).toStringAsFixed(0)}%',
+          'note': 'Only ${((1.0 - EvolutionSettings.personalityResistance) * 100).toStringAsFixed(0)}% of requested delta applied (inelastic)',
+        },
         'new_values': newPersonality,
+        'decay_applied': personalityDecayed,
       },
       'mood': {
         'summary': personalityMoodSummary.split('\n')[1], // Mood line only
         'current': mood,
+        'baselines': moodBaselines,
         'delta_requested': moodDelta,
-        'delta_applied': Map.fromEntries(
-          actualDeltas.entries.where((e) => PersonalityTraits.mood.contains(e.key))
-        ),
+        'delta_applied': actualMoodDeltas,
+        'context_intensity': contextIntensity,
+        'intensity_multiplier': '${EvolutionSettings.contextMultipliers[contextIntensity]}x',
+        'time_since_update': '${timeSinceUpdate.inHours}h ${timeSinceUpdate.inMinutes % 60}m',
+        'decay_applied': moodDecayed,
+        'decay_rates': EvolutionSettings.moodDecayRates,
         'new_values': newMood,
       },
       'affinity': {
