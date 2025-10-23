@@ -62,23 +62,26 @@ Future<void> main() async {
     print('📱 App will continue with local storage only');
   }
   
-  await acrylic.Window.initialize();
-  await windowManager.ensureInitialized();
-  await acrylic.Window.setEffect(
-      effect: acrylic.WindowEffect.transparent, color: Colors.transparent);
+  // Window manager initialization (Desktop only)
+  if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+    await acrylic.Window.initialize();
+    await windowManager.ensureInitialized();
+    await acrylic.Window.setEffect(
+        effect: acrylic.WindowEffect.transparent, color: Colors.transparent);
 
-  const options = WindowOptions(
-    size: Size(kCanvasWidth, kCanvasHeight),
-    center: true,
-    backgroundColor: Colors.transparent,
-    skipTaskbar: false,
-  );
-  windowManager.waitUntilReadyToShow(options, () async {
-    await windowManager.setAsFrameless();
-    await windowManager.setAlwaysOnTop(kAlwaysOnTop);
-    await windowManager.show();
-    await windowManager.focus();
-  });
+    const options = WindowOptions(
+      size: Size(kCanvasWidth, kCanvasHeight),
+      center: true,
+      backgroundColor: Colors.transparent,
+      skipTaskbar: false,
+    );
+    windowManager.waitUntilReadyToShow(options, () async {
+      await windowManager.setAsFrameless();
+      await windowManager.setAlwaysOnTop(kAlwaysOnTop);
+      await windowManager.show();
+      await windowManager.focus();
+    });
+  }
 
   runApp(const KaiOverlay());
 }
