@@ -870,18 +870,28 @@ Text:
     int ctxTurns = 20,
     bool useMemory = true, // NEW: Enable memory integration
   }) async {
-    // Get current state
-    var personality = await getPersonality(personaId);
-    var mood = await getMood(personaId);
-    final affinity = await getAffinity(personaId);
-    final lastUpdate = await _getLastUpdateTime(personaId);
+    print('💬 [SEND MESSAGE START] text: "$text", personaId: $personaId');
+    
+    try {
+      // Get current state
+      var personality = await getPersonality(personaId);
+      var mood = await getMood(personaId);
+      final affinity = await getAffinity(personaId);
+      final lastUpdate = await _getLastUpdateTime(personaId);
+      print('✅ [SEND MESSAGE] State loaded successfully');
 
     // Apply time-based decay BEFORE processing new message
     final timeSinceUpdate = DateTime.now().difference(lastUpdate);
     print('⏱️ Time since last update: ${timeSinceUpdate.inHours}h ${timeSinceUpdate.inMinutes % 60}m');
     
-    personality = await _applyPersonalityDecay(personality, lastUpdate);
-    mood = await _applyMoodDecay(personaId, mood, lastUpdate);
+    try {
+      personality = await _applyPersonalityDecay(personality, lastUpdate);
+      mood = await _applyMoodDecay(personaId, mood, lastUpdate);
+    } catch (e) {
+      print('⚠️ [DECAY ERROR] Failed to apply decay: $e');
+      print('⚠️ [DECAY ERROR] Continuing with current values');
+      // Continue without decay - don't fail the entire request
+    }
     
     // Track if decay was applied
     final personalityDecayed = timeSinceUpdate.inDays >= EvolutionSettings.personalityDecayThresholdDays;
@@ -969,11 +979,13 @@ ${adaptUser ? '\n💫 AFFINITY: Intimacy level ${affinity['intimacy']}/100, Phys
 Recent conversation:
 ${history.join('\n')}$memoryContext''';
 
+    print('📤 [SEND MESSAGE] Calling OpenAI...');
     // Get AI response
     final reply = await _callOpenAI([
       {"role": "system", "content": systemPrompt},
       {"role": "user", "content": text}
     ], model);
+    print('📥 [SEND MESSAGE] OpenAI response received: ${reply.length} characters');
 
     // Get deltas and update personality/mood
     final tagsResult = await _getTagsAndDeltas(reply);
@@ -1024,11 +1036,16 @@ ${history.join('\n')}$memoryContext''';
     await _saveMessage(personaId, text, reply);
     
     // Save mood snapshot for baseline learning
-    await _saveMoodSnapshot(personaId, newMood, text.length > 50 ? text.substring(0, 50) : text);
-    
-    // Periodically update baselines (every ~10th message via random chance)
-    if (DateTime.now().millisecond % 10 == 0) {
-      await _updateMoodBaselines(personaId);
+    try {
+      await _saveMoodSnapshot(personaId, newMood, text.length > 50 ? text.substring(0, 50) : text);
+      
+      // Periodically update baselines (every ~10th message via random chance)
+      if (DateTime.now().millisecond % 10 == 0) {
+        await _updateMoodBaselines(personaId);
+      }
+    } catch (e) {
+      print('⚠️ [MOOD SNAPSHOT ERROR] Failed to save mood snapshot: $e');
+      // Continue without saving snapshot - don't fail the entire request
     }
     
     // Save conversation to Firebase
@@ -1044,7 +1061,12 @@ ${history.join('\n')}$memoryContext''';
     final ttsBase64 = ttsBytes != null ? base64Encode(ttsBytes) : null;
 
     // Get baselines for debug info
-    final moodBaselines = await _getPersonalMoodBaselines(personaId);
+    Map<String, int> moodBaselines = Map<String, int>.from(_defaultMood);
+    try {
+      moodBaselines = await _getPersonalMoodBaselines(personaId);
+    } catch (e) {
+      print('⚠️ [BASELINE ERROR] Failed to load mood baselines for debug: $e');
+    }
 
     // Build debug info
     final debugInfo = {
@@ -1122,6 +1144,11 @@ ${history.join('\n')}$memoryContext''';
       memoriesUsed: memoriesUsed, // NEW: Pass memories used
       debugInfo: debugInfo, // NEW: Pass debug info
     );
+    } catch (e, stackTrace) {
+      print('❌ [SEND MESSAGE ERROR] Exception occurred: $e');
+      print('❌ [SEND MESSAGE ERROR] Stack trace: $stackTrace');
+      rethrow; // Re-throw so UI can handle it
+    }
   }
 
   /// Get agent state

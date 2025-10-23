@@ -1356,6 +1356,73 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
     );
   }
 
+  /// Show voice selector modal
+  Future<void> _showVoiceSelector() async {
+    await showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        decoration: BoxDecoration(
+          color: Colors.grey[900],
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Select Kai\'s Voice',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 20),
+            ...AIConfig.availableVoices.entries.map((entry) {
+              final voiceInfo = entry.value;
+              
+              return FutureBuilder<String>(
+                future: AIConfig.getSelectedVoiceId(),
+                builder: (context, snapshot) {
+                  final currentId = snapshot.data ?? AIConfig.availableVoices['kai_default']!['id']!;
+                  final isSelected = currentId == voiceInfo['id'];
+                  
+                  return Card(
+                    color: isSelected ? Colors.blue[900] : Colors.grey[800],
+                    margin: const EdgeInsets.only(bottom: 12),
+                    child: ListTile(
+                      leading: Icon(
+                        isSelected ? Icons.check_circle : Icons.record_voice_over,
+                        color: isSelected ? Colors.blue : Colors.grey,
+                      ),
+                      title: Text(
+                        voiceInfo['name']!,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      subtitle: Text(
+                        voiceInfo['description']!,
+                        style: TextStyle(color: Colors.grey[400]),
+                      ),
+                      onTap: () async {
+                        await AIConfig.setSelectedVoiceId(voiceInfo['id']!);
+                        Navigator.pop(context);
+                        setState(() {}); // Refresh UI
+                      },
+                    ),
+                  );
+                },
+              );
+            }).toList(),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Stack(
@@ -1505,20 +1572,14 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
                       },
                     ),
                     
-                    // TEST: Record/Play button (top-left)
+                    // Voice selector button (top-left)
                     _buildCircularButton(
                       angle: -135,
                       radius: 68, // Wrapped tightly around avatar
-                      icon: _isTestRecording 
-                        ? Icons.stop_circle 
-                        : (_testAudioPath != null ? Icons.play_circle : Icons.fiber_manual_record),
+                      icon: Icons.record_voice_over,
                       onTap: () async {
                         setState(() => _showMenu = false);
-                        if (_testAudioPath != null && !_isTestRecording) {
-                          await _playTestAudio();
-                        } else {
-                          await _toggleTestRecording();
-                        }
+                        await _showVoiceSelector();
                       },
                     ),
                   ],
