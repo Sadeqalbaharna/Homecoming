@@ -1,7 +1,7 @@
 name: homecoming_app
 description: Overlay avatar app (mobile + desktop)
 publish_to: "none"
-version: 0.7.5+50
+version: 0.7.5+51
 
 environment:
   sdk: ">=3.0.0 <4.0.0"

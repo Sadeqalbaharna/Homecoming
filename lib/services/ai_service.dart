@@ -63,6 +63,32 @@ class AIConfig {
       defaultValue: 'rjyk3ukVFAi8OdkRXxK2');
   static const String elevenlabsModelId = String.fromEnvironment('ELEVENLABS_MODEL_ID', 
       defaultValue: 'eleven_monolingual_v1');
+  
+  // Available voices
+  static const Map<String, Map<String, String>> availableVoices = {
+    'kai_default': {
+      'id': 'rjyk3ukVFAi8OdkRXxK2',
+      'name': 'Kai (Default)',
+      'description': 'Warm, friendly, conversational',
+    },
+    'kai_alt': {
+      'id': 'Ke5IEaBOPxAcw6fm0mO6',
+      'name': 'Kai (Alternative)',
+      'description': 'Mature, expressive, engaging',
+    },
+  };
+  
+  /// Get selected voice ID from preferences
+  static Future<String> getSelectedVoiceId() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('selected_voice_id') ?? elevenlabsVoiceId;
+  }
+  
+  /// Set selected voice ID in preferences
+  static Future<void> setSelectedVoiceId(String voiceId) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('selected_voice_id', voiceId);
+  }
 }
 
 /// Personality and mood traits
@@ -800,9 +826,12 @@ Text:
       return null;
     }
 
+    // Get selected voice ID
+    final selectedVoiceId = await AIConfig.getSelectedVoiceId();
+
     try {
       final response = await _dio.post(
-        'https://api.elevenlabs.io/v1/text-to-speech/${AIConfig.elevenlabsVoiceId}',
+        'https://api.elevenlabs.io/v1/text-to-speech/$selectedVoiceId',
         options: Options(
           headers: {
             'xi-api-key': elevenlabsKey,

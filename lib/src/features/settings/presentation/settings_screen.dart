@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../../widgets/voice_selector.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -10,6 +11,12 @@ class SettingsScreen extends StatelessWidget {
       appBar: AppBar(title: const Text('Settings')),
       body: ListView(
         children: [
+          const SizedBox(height: 8),
+          // Voice Selection Section
+          const VoiceSelector(),
+          const SizedBox(height: 24),
+          const Divider(height: 1, thickness: 2),
+          const SizedBox(height: 8),
           ListTile(
             leading: Icon(Icons.color_lens, color: cs.primary),
             title: const Text('Theme'),
