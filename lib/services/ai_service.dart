@@ -306,6 +306,143 @@ class AIService {
     };
   }
 
+  /// Generate compact personality and mood summary for AI prompt
+  String generatePersonalityMoodSummary(Map<String, int> personality, Map<String, int> mood) {
+    final mbti = calculateMBTI(personality);
+    final labels = getLabels(personality, mood);
+    final pLabels = labels['personality_labels'] as Map<String, String>;
+    final mLabels = labels['mood_labels'] as Map<String, String>;
+    
+    // MBTI archetype descriptions
+    const mbtiDescriptions = {
+      'INTJ': 'strategic mastermind',
+      'INTP': 'logical architect', 
+      'ENTJ': 'bold leader',
+      'ENTP': 'innovative debater',
+      'INFJ': 'compassionate idealist',
+      'INFP': 'thoughtful mediator',
+      'ENFJ': 'charismatic protagonist',
+      'ENFP': 'enthusiastic visionary',
+      'ISTJ': 'reliable pragmatist',
+      'ISFJ': 'devoted protector',
+      'ESTJ': 'efficient executive',
+      'ESFJ': 'caring consul',
+      'ISTP': 'practical craftsman',
+      'ISFP': 'gentle artist',
+      'ESTP': 'energetic entrepreneur',
+      'ESFP': 'spontaneous entertainer',
+    };
+    
+    final archetype = mbtiDescriptions[mbti] ?? 'balanced individual';
+    
+    // Build personality summary
+    final personalitySummary = "🎭 PERSONALITY ($mbti): You're ${_addArticle(archetype)}—"
+        "${pLabels['extraversion']} and ${_getSocialDescriptor(pLabels['extraversion']!)}, "
+        "${pLabels['intuition']}ly ${_getThinkingStyle(pLabels['intuition']!)}, "
+        "${pLabels['feeling']}ly ${_getDecisionStyle(pLabels['feeling']!)}, "
+        "and ${pLabels['perceiving']}ly ${_getLifestyleDescriptor(pLabels['perceiving']!)}.";
+    
+    // Build mood summary
+    final moodSummary = "🌈 MOOD: You're feeling ${mLabels['valence']} right now, "
+        "with ${mLabels['energy']} energy and ${mLabels['warmth']} warmth. "
+        "Your confidence is ${mLabels['confidence']}, "
+        "expressing ${mLabels['playfulness']} energy, "
+        "${_getFocusDescriptor(mLabels['focus']!)}.";
+    
+    return '$personalitySummary $moodSummary';
+  }
+  
+  /// Helper: Add article (a/an) before word
+  String _addArticle(String word) {
+    final vowels = ['a', 'e', 'i', 'o', 'u'];
+    return vowels.contains(word[0].toLowerCase()) ? 'an $word' : 'a $word';
+  }
+  
+  /// Helper: Get social descriptor based on extraversion level
+  String _getSocialDescriptor(String level) {
+    const descriptors = {
+      'withdrawn': 'introspective',
+      'introverted': 'reflective',
+      'reserved': 'composed',
+      'quiet': 'thoughtful',
+      'neutral': 'balanced',
+      'sociable': 'engaging',
+      'friendly': 'approachable',
+      'talkative': 'expressive',
+      'outgoing': 'animated',
+      'vivacious': 'vibrant',
+    };
+    return descriptors[level] ?? 'present';
+  }
+  
+  /// Helper: Get thinking style based on intuition level
+  String _getThinkingStyle(String level) {
+    const styles = {
+      'concrete': 'practical',
+      'practical': 'grounded',
+      'grounded': 'realistic',
+      'realistic': 'factual',
+      'balanced': 'flexible',
+      'imaginative': 'creative',
+      'inventive': 'innovative',
+      'intuitive': 'insightful',
+      'visionary': 'forward-thinking',
+      'dreamy': 'abstract',
+    };
+    return styles[level] ?? 'thoughtful';
+  }
+  
+  /// Helper: Get decision style based on feeling level
+  String _getDecisionStyle(String level) {
+    const styles = {
+      'detached': 'analytical',
+      'objective': 'logical',
+      'logical': 'rational',
+      'analytical': 'systematic',
+      'even': 'balanced',
+      'gentle': 'considerate',
+      'caring': 'compassionate',
+      'empathetic': 'understanding',
+      'warm': 'heartfelt',
+      'compassionate': 'deeply caring',
+    };
+    return styles[level] ?? 'measured';
+  }
+  
+  /// Helper: Get lifestyle descriptor based on perceiving level
+  String _getLifestyleDescriptor(String level) {
+    const descriptors = {
+      'rigid': 'structured',
+      'structured': 'organized',
+      'methodical': 'systematic',
+      'organized': 'planful',
+      'flexible': 'adaptable',
+      'casual': 'easygoing',
+      'adaptive': 'responsive',
+      'spontaneous': 'improvisational',
+      'chaotic': 'free-flowing',
+      'free-spirited': 'unbounded',
+    };
+    return descriptors[level] ?? 'present';
+  }
+  
+  /// Helper: Get focus descriptor
+  String _getFocusDescriptor(String level) {
+    const descriptors = {
+      'scattered': 'with your attention diffused across multiple threads',
+      'distracted': 'with your mind wandering between topics',
+      'unfocused': 'exploring various threads of thought',
+      'wandering': 'with fluid, meandering attention',
+      'neutral': 'with moderate focus',
+      'collected': 'with gathered attention',
+      'attentive': 'maintaining steady concentration',
+      'engaged': 'deeply absorbed in the moment',
+      'laser': 'with sharp, precise focus',
+      'locked-in': 'completely immersed and concentrated',
+    };
+    return descriptors[level] ?? 'with present awareness';
+  }
+
   /// Call OpenAI API for chat completion
   Future<String> _callOpenAI(List<Map<String, String>> messages, String model, {String operation = 'chat'}) async {
     final openaiKey = await AIConfig.getOpenAIKey();
@@ -519,15 +656,17 @@ Sadeq is the developer building this system. He's working on enhancing your memo
 - Language: English (with occasional Arabic context awareness)
 - Wake word: "Hey Kai" or "Kai"
 ''';
+
+    // Generate personality and mood summary
+    final personalityMoodSummary = generatePersonalityMoodSummary(personality, mood);
     
     final systemPrompt = '''
 You are Kai: warm, witty, emotionally attuned AI companion.
 Answer concisely and helpfully.
 $projectContext$constraintsBlock
-Current MBTI: $mbti
-Personality: $personality
-Mood: $mood
-${adaptUser ? 'Affinity: $affinity' : ''}
+
+$personalityMoodSummary
+${adaptUser ? '\n💫 AFFINITY: Intimacy level ${affinity['intimacy']}/100, Physical comfort ${affinity['physicality']}/100' : ''}
 
 Recent conversation:
 ${history.join('\n')}$memoryContext''';
@@ -596,6 +735,7 @@ ${history.join('\n')}$memoryContext''';
         'similarity_threshold': 0.35,
       },
       'personality': {
+        'summary': personalityMoodSummary.split('\n')[0], // Personality line only
         'current': personality,
         'mbti': mbti,
         'delta_requested': personalityDelta,
@@ -605,6 +745,7 @@ ${history.join('\n')}$memoryContext''';
         'new_values': newPersonality,
       },
       'mood': {
+        'summary': personalityMoodSummary.split('\n')[1], // Mood line only
         'current': mood,
         'delta_requested': moodDelta,
         'delta_applied': Map.fromEntries(
