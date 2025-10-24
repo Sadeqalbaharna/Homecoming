@@ -1124,21 +1124,11 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Memory chips (NEW! - shows which memories were used with pin/dismiss actions)
+            // Memory chips (shows simple count, details in Debug Info)
             if (!message.isUser && message.debugInfo != null) ...[
               MemoryChips(
                 memoryDetails: (message.debugInfo!['memory_query']?['memory_details'] as List?)
                     ?.cast<Map<String, dynamic>>() ?? [],
-                onPin: (memoryId) {
-                  print('📌 Pin memory: $memoryId');
-                  // TODO: Implement pin to facts
-                  // Will save to /memory/facts/{personaId}/{factId}
-                },
-                onDismiss: (memoryId) {
-                  print('❌ Dismiss memory: $memoryId');
-                  // TODO: Implement dismiss (lower confidence or mark as irrelevant)
-                  // Will update memory shard with dismissal metadata
-                },
               ),
             ],
             Text(
@@ -1356,71 +1346,38 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
     );
   }
 
-  /// Show voice selector modal
-  Future<void> _showVoiceSelector() async {
-    await showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (context) => Container(
-        decoration: BoxDecoration(
-          color: Colors.grey[900],
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              'Select Kai\'s Voice',
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 20),
-            ...AIConfig.availableVoices.entries.map((entry) {
-              final voiceInfo = entry.value;
-              
-              return FutureBuilder<String>(
-                future: AIConfig.getSelectedVoiceId(),
-                builder: (context, snapshot) {
-                  final currentId = snapshot.data ?? AIConfig.availableVoices['kai_default']!['id']!;
-                  final isSelected = currentId == voiceInfo['id'];
-                  
-                  return Card(
-                    color: isSelected ? Colors.blue[900] : Colors.grey[800],
-                    margin: const EdgeInsets.only(bottom: 12),
-                    child: ListTile(
-                      leading: Icon(
-                        isSelected ? Icons.check_circle : Icons.record_voice_over,
-                        color: isSelected ? Colors.blue : Colors.grey,
-                      ),
-                      title: Text(
-                        voiceInfo['name']!,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      subtitle: Text(
-                        voiceInfo['description']!,
-                        style: TextStyle(color: Colors.grey[400]),
-                      ),
-                      onTap: () async {
-                        await AIConfig.setSelectedVoiceId(voiceInfo['id']!);
-                        Navigator.pop(context);
-                        setState(() {}); // Refresh UI
-                      },
-                    ),
-                  );
-                },
-              );
-            }).toList(),
-          ],
-        ),
-      ),
-    );
+  /// Toggle between available voices (simple toggle, no modal)
+  Future<void> _toggleVoice() async {
+    final currentId = await AIConfig.getSelectedVoiceId();
+    
+    // Get list of voice IDs
+    final voiceIds = AIConfig.availableVoices.values.map((v) => v['id']!).toList();
+    
+    // Find current index and get next voice
+    final currentIndex = voiceIds.indexOf(currentId);
+    final nextIndex = (currentIndex + 1) % voiceIds.length;
+    final nextVoiceId = voiceIds[nextIndex];
+    
+    // Set new voice
+    await AIConfig.setSelectedVoiceId(nextVoiceId);
+    
+    // Get voice name for feedback
+    final voiceName = AIConfig.availableVoices.values
+        .firstWhere((v) => v['id'] == nextVoiceId)['name']!;
+    
+    // Show brief feedback
+    if (mounted) {
+      FlutterOverlayWindow.showOverlay(
+        height: 180,
+        width: 180,
+        alignment: OverlayAlignment.center,
+      );
+      
+      // You could add a toast/snackbar here if desired
+      print('🎤 Voice changed to: $voiceName');
+    }
+    
+    setState(() {}); // Refresh UI
   }
 
   @override
@@ -1572,14 +1529,14 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
                       },
                     ),
                     
-                    // Voice selector button (top-left)
+                    // Voice toggle button (top-left) - cycles between voices
                     _buildCircularButton(
                       angle: -135,
                       radius: 68, // Wrapped tightly around avatar
                       icon: Icons.record_voice_over,
                       onTap: () async {
                         setState(() => _showMenu = false);
-                        await _showVoiceSelector();
+                        await _toggleVoice();
                       },
                     ),
                   ],
