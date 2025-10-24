@@ -434,7 +434,7 @@ class AIService {
     }
     
     final decayedPersonality = Map<String, int>.from(currentPersonality);
-    final baseline = 500; // Species baseline (balanced)
+    const baseline = 500; // Species baseline (balanced)
     final daysOverThreshold = daysSinceUpdate - EvolutionSettings.personalityDecayThresholdDays;
     final totalDecay = (daysOverThreshold * EvolutionSettings.personalityDecayRate).round();
     
@@ -524,7 +524,7 @@ class AIService {
     
     // Calculate rolling average from last 30 days
     final cutoff = DateTime.now().subtract(
-      Duration(days: EvolutionSettings.baselineWindowDays)
+      const Duration(days: EvolutionSettings.baselineWindowDays)
     );
     final recent = history.where((s) => s.timestamp.isAfter(cutoff)).toList();
     
@@ -1100,7 +1100,9 @@ ${history.join('\n')}$memoryContext''';
         'decay_applied': personalityDecayed,
       },
       'mood': {
-        'summary': personalityMoodSummary.split('\n')[1], // Mood line only
+        'summary': personalityMoodSummary.split('\n').length > 1 
+            ? personalityMoodSummary.split('\n')[1] 
+            : personalityMoodSummary, // Mood line only, or full summary if no newline
         'current': mood,
         'baselines': moodBaselines,
         'delta_requested': moodDelta,
