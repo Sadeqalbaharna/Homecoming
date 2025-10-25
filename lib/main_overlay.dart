@@ -22,6 +22,7 @@ import 'screens/usage_stats_screen.dart';
 import 'api_key_setup_screen.dart';
 import 'widgets/debug_button.dart';
 import 'widgets/memory_chips.dart';
+import 'widgets/expanded_window.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 // API KEYS - Read from build-time environment (--dart-define)
@@ -333,6 +334,8 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
   bool _showMenu = false; // New: controls circular menu visibility
   bool _showPersonality = false; // Controls personality screen fullscreen
   bool _showAnalytics = false; // Controls analytics screen fullscreen
+  bool _showExpandedWindow = false; // NEW: Controls unified expanded window with tabs
+  int _expandedWindowInitialTab = 0; // NEW: Which tab to open (0=Chat, 1=Personality, 2=Analytics)
   final _controller = TextEditingController();
   final _player = AudioPlayer();
   
@@ -613,6 +616,32 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
     setState(() => _showAnalytics = false);
     await _resizeOverlay(false);
     await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
+  }
+
+  // NEW: Open unified expanded window with tabs
+  Future<void> _openExpandedWindow(int initialTab) async {
+    print('📱 [EXPANDED] Opening unified expanded window (tab: $initialTab)...');
+    setState(() {
+      _showExpandedWindow = true;
+      _expandedWindowInitialTab = initialTab;
+      _expanded = false;
+      _showPersonality = false;
+      _showAnalytics = false;
+    });
+    print('📱 [EXPANDED] State updated, calling resize...');
+    await _resizeOverlay(true); // Resize to fullscreen
+    // Use defaultFlag for full-screen expanded window (focusAndAwakeScreen doesn't exist)
+    await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
+    print('📱 [EXPANDED] Expanded window opened!');
+  }
+
+  // NEW: Close unified expanded window
+  Future<void> _closeExpandedWindow() async {
+    print('📱 [EXPANDED] Closing unified expanded window...');
+    setState(() => _showExpandedWindow = false);
+    await _resizeOverlay(false);
+    await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
+    print('📱 [EXPANDED] Expanded window closed!');
   }
 
   // Initialize Firebase and test connection
@@ -1464,13 +1493,8 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
                       radius: 68, // Wrapped tightly around avatar
                       icon: Icons.chat_bubble,
                       onTap: () {
-                        setState(() {
-                          _showMenu = false;
-                          _expanded = true;
-                          _showPersonality = false;
-                          _showAnalytics = false;
-                        });
-                        _resizeOverlay(true); // Resize to chat dimensions
+                        setState(() => _showMenu = false);
+                        _openExpandedWindow(0); // Open with Chat tab (index 0)
                       },
                     ),
                     
@@ -1497,7 +1521,7 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
                       icon: Icons.psychology,
                       onTap: () {
                         setState(() => _showMenu = false);
-                        _openPersonalityScreen();
+                        _openExpandedWindow(1); // Open with Personality tab (index 1)
                       },
                     ),
                     
@@ -1518,7 +1542,7 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
                       icon: Icons.analytics,
                       onTap: () {
                         setState(() => _showMenu = false);
-                        _openUsageStatsScreen();
+                        _openExpandedWindow(2); // Open with Analytics tab (index 2)
                       },
                     ),
                     
@@ -1575,8 +1599,30 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
                   }),
           ],
         
+        // NEW: Unified Expanded Window with Tabs (Chat, Personality, Analytics)
+        if (_showExpandedWindow)
+          Positioned.fill(
+            child: ExpandedWindow(
+              personaId: 'truekai',
+              onClose: _closeExpandedWindow,
+              onSendMessage: (text) async {
+                _controller.text = text;
+                await _sendMessage(text);
+              },
+              messages: _chatHistory.map((msg) => {
+                'role': msg.isUser ? 'user' : 'assistant',
+                'content': msg.text,
+                'timestamp': msg.timestamp,
+                'memoriesUsed': msg.memoriesUsed,
+              }).toList(),
+              isLoading: _sending,
+              scrollController: _chatScrollController,
+              initialTab: _expandedWindowInitialTab, // Pass the initial tab
+            ),
+          ),
+        
         // Expanded chat UI - Fills expanded overlay window (90% x 85% of screen)
-        if (_expanded)
+        if (_expanded && !_showExpandedWindow)
           Positioned(
             left: 0,
             right: 0,
@@ -1827,7 +1873,7 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
           ),
         
         // Personality Screen - Fills expanded overlay window (90% x 85% of screen)
-        if (_showPersonality)
+        if (_showPersonality && !_showExpandedWindow)
           Positioned(
             left: 0,
             right: 0,
@@ -1907,7 +1953,8 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
           ),
         
         // Analytics/Usage Stats Screen - Fills expanded overlay window (90% x 85% of screen)
-        if (_showAnalytics)
+        // Analytics/Usage Stats Screen - Fills expanded overlay window (90% x 85% of screen)
+        if (_showAnalytics && !_showExpandedWindow)
           Positioned(
             left: 0,
             right: 0,
