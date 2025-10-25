@@ -9,6 +9,12 @@
         }
       }
     },
+    "personalities": {
+      "$personaId": {
+        ".read": true,
+        ".write": true
+      }
+    },
     "memory": {
       "buffers": {
         "$personaId": {

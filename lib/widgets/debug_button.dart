@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
+import '../services/memory_service.dart';
 
 /// Debug button widget that displays AI decision-making data
 class DebugButton extends StatefulWidget {
   final Map<String, dynamic> debugInfo;
+  final String personaId;
 
   const DebugButton({
     super.key,
     required this.debugInfo,
+    required this.personaId,
   });
 
   @override
@@ -154,6 +157,9 @@ class _DebugButtonState extends State<DebugButton> {
           ...value.map((item) {
             final included = item['included'] ?? false;
             final similarity = ((item['similarity'] ?? 0.0) * 100).toStringAsFixed(1);
+            final memoryId = item['id'] ?? '';
+            final summary = item['summary'] ?? '';
+            final shardRef = item['shard_ref'] ?? '';
             
             return Container(
               margin: const EdgeInsets.only(bottom: 8),
@@ -210,7 +216,7 @@ class _DebugButtonState extends State<DebugButton> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'Summary: ${item['summary']}',
+                    'Summary: $summary',
                     style: const TextStyle(
                       color: Colors.white70,
                       fontSize: 11,
@@ -218,11 +224,85 @@ class _DebugButtonState extends State<DebugButton> {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    'ID: ${item['id']}',
+                    'ID: $memoryId',
                     style: const TextStyle(
                       color: Colors.white38,
                       fontSize: 10,
                     ),
+                  ),
+                  const SizedBox(height: 6),
+                  // Action buttons
+                  Row(
+                    children: [
+                      // Pin to Facts button
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: () async {
+                            if (memoryId.isEmpty || summary.isEmpty || shardRef.isEmpty) {
+                              _showSnackBar('Missing memory data', isError: true);
+                              return;
+                            }
+                            
+                            final success = await MemoryService.pinMemoryToFacts(
+                              personaId: widget.personaId,
+                              memoryId: memoryId,
+                              summary: summary,
+                              shardRef: shardRef,
+                            );
+                            
+                            if (success) {
+                              _showSnackBar('Memory pinned to facts ✓');
+                            } else {
+                              _showSnackBar('Failed to pin memory', isError: true);
+                            }
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.green.shade700,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          ),
+                          icon: const Icon(Icons.push_pin, size: 14),
+                          label: const Text(
+                            'Pin',
+                            style: TextStyle(fontSize: 11),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      // Dismiss button
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: () async {
+                            if (memoryId.isEmpty || shardRef.isEmpty) {
+                              _showSnackBar('Missing memory data', isError: true);
+                              return;
+                            }
+                            
+                            final success = await MemoryService.dismissMemory(
+                              personaId: widget.personaId,
+                              memoryId: memoryId,
+                              shardRef: shardRef,
+                            );
+                            
+                            if (success) {
+                              _showSnackBar('Memory dismissed ✓');
+                            } else {
+                              _showSnackBar('Failed to dismiss memory', isError: true);
+                            }
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.red.shade700,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          ),
+                          icon: const Icon(Icons.close, size: 14),
+                          label: const Text(
+                            'Dismiss',
+                            style: TextStyle(fontSize: 11),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -255,5 +335,17 @@ class _DebugButtonState extends State<DebugButton> {
       return value.join(', ');
     }
     return value.toString();
+  }
+
+  void _showSnackBar(String message, {bool isError = false}) {
+    if (!mounted) return;
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: isError ? Colors.red.shade700 : Colors.green.shade700,
+        duration: const Duration(seconds: 2),
+      ),
+    );
   }
 }

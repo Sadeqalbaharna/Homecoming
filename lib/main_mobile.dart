@@ -987,10 +987,13 @@ class _MobileChatBubble extends StatelessWidget {
                       ),
                       if (debugInfo != null) ...[
                         const SizedBox(width: 8),
-                        DebugButton(debugInfo: debugInfo!),
+                        DebugButton(
+                          debugInfo: debugInfo!,
+                          personaId: personaId,
+                        ),
                       ] else ...[
                         // Debug: Show why button isn't appearing
-                        Text('No debug', style: TextStyle(color: Colors.red, fontSize: 10)),
+                        const Text('No debug', style: TextStyle(color: Colors.red, fontSize: 10)),
                       ],
                     ],
                   ),

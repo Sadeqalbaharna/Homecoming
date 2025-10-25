@@ -195,4 +195,76 @@ class MemoryService {
       return null;
     }
   }
+
+  /// Pin a memory shard to facts (makes it permanent)
+  /// 
+  /// Converts a temporary memory shard into a permanent fact
+  /// Facts are immune to decay and always included in context
+  static Future<bool> pinMemoryToFacts({
+    required String personaId,
+    required String memoryId,
+    required String summary,
+    required String shardRef,
+  }) async {
+    try {
+      print('📌 [MEMORY] Pinning memory to facts...');
+      print('📌 [MEMORY] Memory ID: $memoryId');
+      print('📌 [MEMORY] Summary: $summary');
+      
+      final callable = _functions.httpsCallable('pinMemoryToFacts');
+      final result = await callable.call({
+        'personaId': personaId,
+        'memoryId': memoryId,
+        'summary': summary,
+        'shardRef': shardRef,
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+      });
+
+      if (result.data?['success'] == true) {
+        print('✅ [MEMORY] Memory pinned successfully');
+        return true;
+      } else {
+        print('⚠️ [MEMORY] Pin failed: ${result.data?['error']}');
+        return false;
+      }
+    } catch (e, stackTrace) {
+      print('❌ [MEMORY] Pin error: $e');
+      print('❌ [MEMORY] Stack trace: $stackTrace');
+      return false;
+    }
+  }
+
+  /// Dismiss a memory (marks it as irrelevant)
+  /// 
+  /// Lowers confidence score so it won't appear in future queries
+  static Future<bool> dismissMemory({
+    required String personaId,
+    required String memoryId,
+    required String shardRef,
+  }) async {
+    try {
+      print('❌ [MEMORY] Dismissing memory...');
+      print('❌ [MEMORY] Memory ID: $memoryId');
+      
+      final callable = _functions.httpsCallable('dismissMemory');
+      final result = await callable.call({
+        'personaId': personaId,
+        'memoryId': memoryId,
+        'shardRef': shardRef,
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+      });
+
+      if (result.data?['success'] == true) {
+        print('✅ [MEMORY] Memory dismissed successfully');
+        return true;
+      } else {
+        print('⚠️ [MEMORY] Dismiss failed: ${result.data?['error']}');
+        return false;
+      }
+    } catch (e, stackTrace) {
+      print('❌ [MEMORY] Dismiss error: $e');
+      print('❌ [MEMORY] Stack trace: $stackTrace');
+      return false;
+    }
+  }
 }

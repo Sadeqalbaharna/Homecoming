@@ -1171,7 +1171,10 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
             // DEBUG: Show debug button if debugInfo available
             if (!message.isUser && message.debugInfo != null) ...[
               const SizedBox(height: 8),
-              DebugButton(debugInfo: message.debugInfo!),
+              DebugButton(
+                debugInfo: message.debugInfo!,
+                personaId: 'truekai',
+              ),
             ] else if (!message.isUser) ...[
               // Visual indicator when debugInfo is missing
               const SizedBox(height: 4),

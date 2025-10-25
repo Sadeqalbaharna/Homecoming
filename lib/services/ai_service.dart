@@ -4,12 +4,14 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
+import 'dart:math';
 import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'firebase_service.dart';
 import 'secure_storage_service.dart';
 import 'usage_tracking_service.dart';
 import 'memory_service.dart';
+import 'curiosity_service.dart';
 
 /// Configuration class to hold all API keys
 /// Uses secure storage for encrypted key management
@@ -933,6 +935,57 @@ Text:
       }
     }
     
+    // Analyze knowledge gaps and generate curious questions
+    String curiosityPrompt = '';
+    CuriosityQuestion? selectedQuestion;
+    if (useMemory) {
+      print('🤔 [AI_SERVICE] Analyzing curiosity opportunities...');
+      try {
+        final curiosityService = CuriosityService();
+        
+        // Convert memory results to format expected by curiosity service
+        List<Map<String, dynamic>> recentMemories = [];
+        if (memoryResult != null && memoryResult.results.isNotEmpty) {
+          recentMemories = memoryResult.results.map((r) => {
+            'summary': r.summary,
+            'timestamp': r.timestamp,
+            'shardId': r.shardId,
+          }).toList();
+        }
+        
+        final questions = await curiosityService.analyzeKnowledgeGaps(
+          personaId: personaId,
+          recentMemories: recentMemories,
+          currentContext: text,
+        );
+        
+        print('🤔 [AI_SERVICE] Found ${questions.length} potential questions');
+        
+        // 40% chance to include a question (higher for emotional topics)
+        final includeQuestion = questions.isNotEmpty && (
+          questions.first.priority >= 9 || // Always ask high-priority (emotional)
+          Random().nextDouble() < 0.4 // 40% chance otherwise
+        );
+        
+        if (includeQuestion) {
+          selectedQuestion = questions.first;
+          curiosityPrompt = '''
+
+🤔 CURIOSITY:
+You're genuinely curious about the user. If it feels natural in this conversation, you might ask: "${selectedQuestion.question}"
+(Why: ${selectedQuestion.reasoning})
+Don't force it - only ask if the flow of conversation makes it appropriate.''';
+          print('🤔 [AI_SERVICE] Selected question: ${selectedQuestion.question} (priority: ${selectedQuestion.priority})');
+        } else {
+          print('🤔 [AI_SERVICE] No question selected this time');
+        }
+      } catch (e) {
+        print('❌ [AI_SERVICE] Curiosity analysis failed: $e');
+        print('⚠️ [AI_SERVICE] Continuing without curiosity prompt');
+        // Continue without curiosity - don't fail the entire request
+      }
+    }
+    
     // Build system prompt
     final mbti = calculateMBTI(personality);
     
@@ -977,7 +1030,7 @@ $personalityMoodSummary
 ${adaptUser ? '\n💫 AFFINITY: Intimacy level ${affinity['intimacy']}/100, Physical comfort ${affinity['physicality']}/100' : ''}
 
 Recent conversation:
-${history.join('\n')}$memoryContext''';
+${history.join('\n')}$memoryContext$curiosityPrompt''';
 
     print('📤 [SEND MESSAGE] Calling OpenAI...');
     // Get AI response
@@ -986,6 +1039,35 @@ ${history.join('\n')}$memoryContext''';
       {"role": "user", "content": text}
     ], model);
     print('📥 [SEND MESSAGE] OpenAI response received: ${reply.length} characters');
+
+    // Track if curiosity question was asked
+    if (selectedQuestion != null) {
+      print('🤔 [AI_SERVICE] Checking if question was asked in response...');
+      try {
+        final curiosityService = CuriosityService();
+        // Simple check: if any significant words from the question appear in the reply
+        final questionWords = selectedQuestion.question.toLowerCase().split(' ')
+            .where((w) => w.length > 3) // Only check words longer than 3 chars
+            .toSet();
+        final replyWords = reply.toLowerCase().split(' ').toSet();
+        final matchingWords = questionWords.intersection(replyWords);
+        
+        // If at least 2 key words match or if reply ends with '?', assume question was asked
+        if (matchingWords.length >= 2 || reply.trim().endsWith('?')) {
+          await curiosityService.markQuestionAsked(
+            personaId: personaId,
+            question: selectedQuestion.question,
+            category: selectedQuestion.category.toString().split('.').last,
+          );
+          print('🤔 [AI_SERVICE] ✅ Marked question as asked');
+        } else {
+          print('🤔 [AI_SERVICE] Question not detected in reply (${matchingWords.length} matches)');
+        }
+      } catch (e) {
+        print('❌ [AI_SERVICE] Failed to mark question as asked: $e');
+        // Continue - don't fail the request
+      }
+    }
 
     // Get deltas and update personality/mood
     final tagsResult = await _getTagsAndDeltas(reply);
@@ -1084,6 +1166,14 @@ ${history.join('\n')}$memoryContext''';
         }).toList() ?? [],
         'memory_context': memoryContext,
         'similarity_threshold': 0.35,
+      },
+      'curiosity': {
+        'enabled': useMemory,
+        'question_suggested': selectedQuestion?.question ?? 'None',
+        'question_category': selectedQuestion?.category.toString() ?? 'N/A',
+        'question_priority': selectedQuestion?.priority ?? 0,
+        'question_reasoning': selectedQuestion?.reasoning ?? 'N/A',
+        'question_included': selectedQuestion != null,
       },
       'personality': {
         'summary': personalityMoodSummary.split('\n')[0], // Personality line only
