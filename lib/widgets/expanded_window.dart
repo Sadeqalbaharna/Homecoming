@@ -105,30 +105,28 @@ class _ExpandedWindowState extends State<ExpandedWindow> with SingleTickerProvid
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return Material(
       color: Colors.black,
-      child: SafeArea(
-        child: Column(
-          children: [
-            // Header with close button
-            _buildHeader(),
-            
-            // Tab bar
-            _buildTabBar(),
-            
-            // Tab content
-            Expanded(
-              child: TabBarView(
-                controller: _tabController,
-                children: [
-                  _buildChatTab(),
-                  _buildPersonalityTab(),
-                  _buildAnalyticsTab(),
-                ],
-              ),
+      child: Column(
+        children: [
+          // Header with close button
+          _buildHeader(),
+          
+          // Tab bar
+          _buildTabBar(),
+          
+          // Tab content
+          Expanded(
+            child: TabBarView(
+              controller: _tabController,
+              children: [
+                _buildChatTab(),
+                _buildPersonalityTab(),
+                _buildAnalyticsTab(),
+              ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

@@ -31,10 +31,11 @@ const String OPENAI_API_KEY = String.fromEnvironment('OPENAI_API_KEY', defaultVa
 const String ELEVENLABS_API_KEY = String.fromEnvironment('ELEVENLABS_API_KEY', defaultValue: '');
 
 // DEV CONFIG - Only for local development without rebuild
-const bool USE_DEV_MODE = false; // Set to true locally, false in repo
+const bool USE_DEV_MODE = true; // Set to true locally, false in repo
+const bool SKIP_API_CHECK_FOR_UI_DEV = true; // NEW: Skip API checks for UI development
 class DevConfig {
-  static const String DEV_OPENAI_KEY = '';
-  static const String DEV_ELEVENLABS_KEY = '';
+  static const String DEV_OPENAI_KEY = 'dummy-key-for-ui-dev';
+  static const String DEV_ELEVENLABS_KEY = 'dummy-key-for-ui-dev';
   static bool get hasDevKeys => DEV_OPENAI_KEY.isNotEmpty && DEV_ELEVENLABS_KEY.isNotEmpty;
 }
 
