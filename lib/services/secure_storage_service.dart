@@ -94,6 +94,15 @@ class SecureStorageService {
   Future<String?> getGoogleKey() async {
     if (_cachedGoogleKey != null) return _cachedGoogleKey;
     
+    // Try dart-define first (for CI/CD builds)
+    const defineKey = String.fromEnvironment('GOOGLE_API_KEY');
+    if (defineKey.isNotEmpty) {
+      _cachedGoogleKey = defineKey;
+      print('✅ Google API Key loaded from dart-define');
+      return _cachedGoogleKey;
+    }
+    
+    // Fall back to secure storage
     try {
       _cachedGoogleKey = await _storage.read(key: _googleKeyName);
       return _cachedGoogleKey;
@@ -119,6 +128,15 @@ class SecureStorageService {
   Future<String?> getGoogleCseId() async {
     if (_cachedGoogleCseId != null) return _cachedGoogleCseId;
     
+    // Try dart-define first (for CI/CD builds)
+    const defineId = String.fromEnvironment('GOOGLE_CSE_ID');
+    if (defineId.isNotEmpty) {
+      _cachedGoogleCseId = defineId;
+      print('✅ Google CSE ID loaded from dart-define');
+      return _cachedGoogleCseId;
+    }
+    
+    // Fall back to secure storage
     try {
       _cachedGoogleCseId = await _storage.read(key: _googleCseIdName);
       return _cachedGoogleCseId;

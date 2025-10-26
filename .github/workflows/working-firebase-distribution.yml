@@ -51,6 +51,18 @@ jobs:
         else
           echo "✅ ELEVENLABS_API_KEY is set (length: $(echo -n '${{ secrets.ELEVENLABS_API_KEY }}' | wc -c) chars)"
         fi
+        
+        if [ -z "${{ secrets.GOOGLE_API_KEY }}" ]; then
+          echo "❌ GOOGLE_API_KEY secret is EMPTY or NOT SET"
+        else
+          echo "✅ GOOGLE_API_KEY is set (length: $(echo -n '${{ secrets.GOOGLE_API_KEY }}' | wc -c) chars)"
+        fi
+        
+        if [ -z "${{ secrets.GOOGLE_CSE_ID }}" ]; then
+          echo "❌ GOOGLE_CSE_ID secret is EMPTY or NOT SET"
+        else
+          echo "✅ GOOGLE_CSE_ID is set (length: $(echo -n '${{ secrets.GOOGLE_CSE_ID }}' | wc -c) chars)"
+        fi
       
     - name: Build Android APK (Release)
       run: |
@@ -58,7 +70,9 @@ jobs:
         flutter build apk --release \
           -t lib/main_mobile.dart \
           --dart-define=OPENAI_API_KEY='${{ secrets.OPEN_API_KEY }}' \
-          --dart-define=ELEVENLABS_API_KEY='${{ secrets.ELEVENLABS_API_KEY }}'
+          --dart-define=ELEVENLABS_API_KEY='${{ secrets.ELEVENLABS_API_KEY }}' \
+          --dart-define=GOOGLE_API_KEY='${{ secrets.GOOGLE_API_KEY }}' \
+          --dart-define=GOOGLE_CSE_ID='${{ secrets.GOOGLE_CSE_ID }}'
         
         # Rename the standard APK
         mv build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/kai-mobile.apk
@@ -67,7 +81,9 @@ jobs:
         flutter build apk --release \
           -t lib/main_overlay.dart \
           --dart-define=OPENAI_API_KEY='${{ secrets.OPEN_API_KEY }}' \
-          --dart-define=ELEVENLABS_API_KEY='${{ secrets.ELEVENLABS_API_KEY }}'
+          --dart-define=ELEVENLABS_API_KEY='${{ secrets.ELEVENLABS_API_KEY }}' \
+          --dart-define=GOOGLE_API_KEY='${{ secrets.GOOGLE_API_KEY }}' \
+          --dart-define=GOOGLE_CSE_ID='${{ secrets.GOOGLE_CSE_ID }}'
         
         # Rename the overlay APK
         mv build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/kai-overlay.apk
