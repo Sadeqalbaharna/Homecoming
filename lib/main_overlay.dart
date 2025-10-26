@@ -1376,8 +1376,7 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
         setState(() {
           _chatHistory.add(ChatMessage(
             text: "💭 ${question.question}",
-            isUser: false,
-            isSystem: true, // Mark as system message (curiosity prompt)
+            isUser: false, // From Kai (curiosity prompt)
           ));
         });
         _scrollToBottom();
