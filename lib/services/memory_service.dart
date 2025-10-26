@@ -9,6 +9,26 @@ class MemoryResult {
   final String summary;
   final double similarity;
   final String shardRef;
+  
+  // Computed property for compatibility - extract timestamp from shard ID
+  DateTime? get timestamp {
+    try {
+      // Shard IDs are in format: shard_<timestamp_in_ms>
+      final parts = id.split('_');
+      if (parts.length >= 2) {
+        final timestampMs = int.tryParse(parts[1]);
+        if (timestampMs != null) {
+          return DateTime.fromMillisecondsSinceEpoch(timestampMs);
+        }
+      }
+    } catch (e) {
+      // Fallback to now if parsing fails
+    }
+    return null;
+  }
+  
+  // Alias for id (for compatibility)
+  String get shardId => id;
 
   MemoryResult({
     required this.id,

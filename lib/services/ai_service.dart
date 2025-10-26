@@ -172,6 +172,7 @@ class ChatResponse {
   final Map<String, dynamic>? debugInfo; // Debug information
   final bool webSearchUsed; // NEW: Track if web search was used
   final List<SearchResult> searchResults; // NEW: Store search results
+  final CuriosityQuestion? curiosityQuestion; // NEW: Curiosity question if triggered
 
   ChatResponse({
     required this.reply,
@@ -189,6 +190,7 @@ class ChatResponse {
     this.debugInfo,
     this.webSearchUsed = false, // NEW: Default false
     this.searchResults = const [], // NEW: Default empty
+    this.curiosityQuestion, // NEW: Curiosity question
   });
 }
 
@@ -992,6 +994,7 @@ Text:
                 webUsed: true,
                 webSearchUsed: true,
                 searchResults: searchResults,
+                curiosityQuestion: null, // No curiosity for headlines
               );
             } else {
               final errorMsg = searchResponse.error ?? 'unknown error';
@@ -1011,6 +1014,7 @@ Text:
                 webUsed: false,
                 webSearchUsed: false,
                 searchResults: [],
+                curiosityQuestion: null, // No curiosity for errors
               );
             }
           } else {
@@ -1363,6 +1367,7 @@ ${history.join('\n')}$memoryContext$webContext$curiosityPrompt''';
       debugInfo: debugInfo,
       webSearchUsed: webSearchUsed, // NEW: Pass web search status
       searchResults: searchResults, // NEW: Pass search results
+      curiosityQuestion: selectedQuestion, // NEW: Pass curiosity question
     );
     } catch (e, stackTrace) {
       print('❌ [SEND MESSAGE ERROR] Exception occurred: $e');

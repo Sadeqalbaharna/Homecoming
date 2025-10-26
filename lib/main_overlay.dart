@@ -17,12 +17,14 @@ import 'services/voice_service.dart';
 import 'services/audio_player_service.dart';
 import 'services/secure_storage_service.dart';
 import 'services/firebase_service.dart';
+import 'services/curiosity_service.dart';
 import 'screens/personality_screen.dart';
 import 'screens/usage_stats_screen.dart';
 import 'api_key_setup_screen.dart';
 import 'widgets/debug_button.dart';
 import 'widgets/memory_chips.dart';
 import 'widgets/expanded_window.dart';
+import 'widgets/curiosity_indicator.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 // API KEYS - Read from build-time environment (--dart-define)
@@ -1324,6 +1326,11 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
         _ttsPath = audioPath;
       });
       
+      // Show curiosity indicator if question triggered
+      if (resp.curiosityQuestion != null && mounted) {
+        _showCuriosityIndicator(resp.curiosityQuestion!);
+      }
+      
       // Auto-scroll to bottom
       _scrollToBottom();
       
@@ -1348,6 +1355,34 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
     print('🔵 Calling _sendMessage("$text")');
     await _sendMessage(text);
     print('🔵 _sendMessage completed');
+  }
+  
+  /// Show curiosity indicator when Kai has a question
+  void _showCuriosityIndicator(CuriosityQuestion question) {
+    print('🤔 [CURIOSITY] Showing indicator: ${question.question}');
+    print('🤔 [CURIOSITY] Priority: ${question.priority}, Category: ${question.category}');
+    
+    if (!mounted) return;
+    
+    // Show floating question mark indicator
+    CuriosityOverlay.show(
+      context: context,
+      question: question,
+      alignment: Alignment.topRight,
+      padding: const EdgeInsets.only(top: 80, right: 20),
+      onTap: () {
+        print('🤔 [CURIOSITY] User tapped indicator - adding question to chat');
+        // Add the curiosity question to chat as if user asked it
+        setState(() {
+          _chatHistory.add(ChatMessage(
+            text: "💭 ${question.question}",
+            isUser: false,
+            isSystem: true, // Mark as system message (curiosity prompt)
+          ));
+        });
+        _scrollToBottom();
+      },
+    );
   }
   
   /// Helper to build circular menu buttons around Kai
