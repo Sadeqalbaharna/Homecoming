@@ -981,13 +981,15 @@ Text:
               
               // Return headlines directly (skip AI processing)
               return ChatResponse(
-                response: headlines,
+                reply: headlines,
                 mbti: calculateMBTI(personality),
-                personality: personality,
-                mood: mood,
+                raw: {'role': 'assistant', 'content': headlines},
                 personalityDelta: {},
                 moodDelta: {},
+                actualDeltas: {},
+                tags: [],
                 memoriesUsed: memoriesUsed,
+                webUsed: true,
                 webSearchUsed: true,
                 searchResults: searchResults,
               );
@@ -996,15 +998,17 @@ Text:
               print('⚠️ [AI_SERVICE] Search failed: $errorMsg');
               
               return ChatResponse(
-                response: "I couldn't fetch fresh headlines right now.\n\n"
+                reply: "I couldn't fetch fresh headlines right now.\n\n"
                     "• Search error: $errorMsg\n"
                     "• Check the JSON API is enabled & billing active",
                 mbti: calculateMBTI(personality),
-                personality: personality,
-                mood: mood,
+                raw: {'role': 'assistant', 'content': 'Search error'},
                 personalityDelta: {},
                 moodDelta: {},
+                actualDeltas: {},
+                tags: [],
                 memoriesUsed: memoriesUsed,
+                webUsed: false,
                 webSearchUsed: false,
                 searchResults: [],
               );
