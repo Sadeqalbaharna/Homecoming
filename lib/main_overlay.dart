@@ -1755,12 +1755,12 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
                             
                             // Input area at TOP - semi-transparent background
                             Container(
-                              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16), // Increased bottom padding for keyboard
                               decoration: BoxDecoration(
                                 color: Colors.black.withOpacity(0.5), // Semi-transparent background
                               ),
                               child: SafeArea(
-                                bottom: false,
+                                bottom: true, // Now respect bottom inset (keyboard)
                                 child: Row(
                                   children: [
                                     Expanded(
