@@ -1,41 +1,77 @@
-# Quick Guide: Add GitHub Secrets
+# 🔐 Add GitHub Secrets for Google Search
 
-## 🔐 You Need to Add These Secrets
+## Quick Setup (2 minutes)
 
-Go to: https://github.com/Sadeqalbaharna/Homecoming/settings/secrets/actions
+### 1. Get Your Credentials
 
-Click "New repository secret" and add:
+**You need to obtain these from Google Cloud Console:**
 
-### 1. GOOGLE_API_KEY
+1. **Google API Key**:
+   - Go to: https://console.cloud.google.com/apis/credentials
+   - Create API Key
+   - Restrict to "Custom Search API"
+
+2. **Google Custom Search Engine ID**:
+   - Go to: https://programmablesearchengine.google.com/
+   - Create new search engine
+   - Copy the Search Engine ID
+
+See `GOOGLE_SEARCH_SETUP.md` for detailed instructions.
+
+---
+
+### 2. Add to GitHub Secrets
+
+**Go to**: https://github.com/Sadeqalbaharna/Homecoming/settings/secrets/actions
+
+**Add these 2 secrets:**
+
+1. Click "New repository secret"
+2. Name: `GOOGLE_API_KEY`
+3. Value: `YOUR_ACTUAL_API_KEY_HERE`
+4. Click "Add secret"
+
+5. Click "New repository secret" again
+6. Name: `GOOGLE_CSE_ID`
+7. Value: `YOUR_SEARCH_ENGINE_ID_HERE`
+8. Click "Add secret"
+
+---
+
+### 3. Verify
+
+Next GitHub Actions build will show:
 ```
-AIzaSyDn1-1b9AUqxlV7mWFYUWPvRwvI2l5NCk8
+✅ GOOGLE_API_KEY is set (length: XX chars)
+✅ GOOGLE_CSE_ID is set (length: XX chars)
 ```
 
-### 2. GOOGLE_CSE_ID
+---
+
+## ⚠️ Security Notes
+
+- **NEVER** commit these credentials to the repository
+- **NEVER** share them publicly
+- **ALWAYS** use GitHub Secrets for CI/CD
+- **ROTATE** keys if exposed
+
+---
+
+## 🧪 Testing
+
+After adding secrets and rebuilding:
+
+```bash
+# Check device logs
+adb logcat | grep "GOOGLE"
+
+# Should see:
+✅ Google API Key loaded from dart-define
+✅ Google CSE ID loaded from dart-define
 ```
-55de057cd04434b4d
-```
 
-## ⚡ Quick Steps
+Ask Kai: "What's the latest tech news?"
 
-1. Open https://github.com/Sadeqalbaharna/Homecoming/settings/secrets/actions
-2. Click "New repository secret"
-3. Name: `GOOGLE_API_KEY`
-4. Value: `AIzaSyDn1-1b9AUqxlV7mWFYUWPvRwvI2l5NCk8`
-5. Click "Add secret"
-6. Click "New repository secret" again
-7. Name: `GOOGLE_CSE_ID`
-8. Value: `55de057cd04434b4d`
-9. Click "Add secret"
+---
 
-## ✅ Done!
-
-The next build (v0.7.5+63) will automatically include these credentials!
-
-Kai will be able to:
-- Search for news
-- Check stock prices
-- Find sports scores
-- Get current events
-
-No more "Google API credentials not configured" message! 🎉
+**Status**: Ready to add credentials ⏳
