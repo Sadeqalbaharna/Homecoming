@@ -1,7 +1,6 @@
 // Golden Test Set for Memory System
 // Run this before and after any memory changes to prevent regressions
 
-import 'package:flutter_test/flutter_test.dart';
 
 /// A single test case for memory recall quality
 class MemoryTest {

@@ -12,6 +12,7 @@ import 'secure_storage_service.dart';
 import 'usage_tracking_service.dart';
 import 'memory_service.dart';
 import 'curiosity_service.dart';
+import 'google_search_service.dart';
 
 /// Configuration class to hold all API keys
 /// Uses secure storage for encrypted key management
@@ -167,8 +168,10 @@ class ChatResponse {
   final String mbti;
   final bool webUsed;
   final String? liveUsed;
-  final List<String> memoriesUsed; // NEW: Track which memories were referenced
-  final Map<String, dynamic>? debugInfo; // NEW: Debug information
+  final List<String> memoriesUsed; // Track which memories were referenced
+  final Map<String, dynamic>? debugInfo; // Debug information
+  final bool webSearchUsed; // NEW: Track if web search was used
+  final List<SearchResult> searchResults; // NEW: Store search results
 
   ChatResponse({
     required this.reply,
@@ -182,8 +185,10 @@ class ChatResponse {
     required this.mbti,
     required this.webUsed,
     this.liveUsed,
-    this.memoriesUsed = const [], // NEW: Default to empty list
-    this.debugInfo, // NEW: Optional debug info
+    this.memoriesUsed = const [],
+    this.debugInfo,
+    this.webSearchUsed = false, // NEW: Default false
+    this.searchResults = const [], // NEW: Default empty
   });
 }
 
@@ -870,7 +875,8 @@ Text:
     String model = 'gpt-4o',
     bool adaptUser = false,
     int ctxTurns = 20,
-    bool useMemory = true, // NEW: Enable memory integration
+    bool useMemory = true, // Enable memory integration
+    bool useWebSearch = true, // NEW: Enable Google Search
   }) async {
     print('💬 [SEND MESSAGE START] text: "$text", personaId: $personaId');
     
@@ -902,7 +908,7 @@ Text:
     // Build conversation history (simplified for now)
     final history = await _getConversationHistory(personaId, ctxTurns);
     
-    // Query long-term memory (NEW!)
+    // Query long-term memory
     String memoryContext = '';
     List<String> memoriesUsed = [];
     dynamic memoryResult; // Capture for debug info
@@ -932,6 +938,108 @@ Text:
         print('❌ [AI_SERVICE] Memory query failed: $e');
         print('⚠️ [AI_SERVICE] Continuing without memory context');
         // Continue without memory - don't fail the entire request
+      }
+    }
+    
+    // Perform Google Search if needed (NEW!)
+    String webContext = '';
+    bool webSearchUsed = false;
+    List<SearchResult> searchResults = [];
+    if (useWebSearch && GoogleSearchService.shouldSearch(text)) {
+      print('🔍 [AI_SERVICE] Web search triggered for query');
+      try {
+        final googleKey = await AIConfig.getGoogleKey();
+        final googleCseId = await AIConfig.getGoogleCseId();
+        
+        if (googleKey.isNotEmpty && googleCseId.isNotEmpty) {
+          final searchService = GoogleSearchService();
+          
+          // Check if this is a headline/news request
+          final isHeadlineRequest = RegExp(
+            r'\b(news|headlines|breaking|top stories|latest)\b',
+            caseSensitive: false,
+          ).hasMatch(text);
+          
+          if (isHeadlineRequest) {
+            print('🔍 [AI_SERVICE] Headline mode activated');
+            final searchResponse = await searchService.search(
+              apiKey: googleKey,
+              cseId: googleCseId,
+              query: text,
+              num: 5,
+              dateRestrict: 'd1',
+              newsBias: true,
+            );
+            
+            if (searchResponse.hasResults) {
+              searchResults = searchResponse.results;
+              final headlines = GoogleSearchService.formatAsHeadlines(searchResults);
+              print('✅ [AI_SERVICE] Got ${searchResults.length} headlines');
+              
+              // Track usage
+              await UsageTrackingService.trackGoogleSearch(queries: 1);
+              
+              // Return headlines directly (skip AI processing)
+              return ChatResponse(
+                response: headlines,
+                mbti: calculateMBTI(personality),
+                personality: personality,
+                mood: mood,
+                personalityDelta: {},
+                moodDelta: {},
+                memoriesUsed: memoriesUsed,
+                webSearchUsed: true,
+                searchResults: searchResults,
+              );
+            } else {
+              final errorMsg = searchResponse.error ?? 'unknown error';
+              print('⚠️ [AI_SERVICE] Search failed: $errorMsg');
+              
+              return ChatResponse(
+                response: "I couldn't fetch fresh headlines right now.\n\n"
+                    "• Search error: $errorMsg\n"
+                    "• Check the JSON API is enabled & billing active",
+                mbti: calculateMBTI(personality),
+                personality: personality,
+                mood: mood,
+                personalityDelta: {},
+                moodDelta: {},
+                memoriesUsed: memoriesUsed,
+                webSearchUsed: false,
+                searchResults: [],
+              );
+            }
+          } else {
+            // Context mode: Use search results as additional context
+            print('🔍 [AI_SERVICE] Context mode activated');
+            final searchResponse = await searchService.search(
+              apiKey: googleKey,
+              cseId: googleCseId,
+              query: text,
+              num: 5,
+              dateRestrict: 'd1',
+              newsBias: false,
+            );
+            
+            if (searchResponse.hasResults) {
+              searchResults = searchResponse.results;
+              webContext = '\n\n${GoogleSearchService.buildWebContext(searchResults)}';
+              webSearchUsed = true;
+              print('✅ [AI_SERVICE] Got ${searchResults.length} search results for context');
+              
+              // Track usage
+              await UsageTrackingService.trackGoogleSearch(queries: 1);
+            } else {
+              print('⚠️ [AI_SERVICE] No search results found');
+            }
+          }
+        } else {
+          print('⚠️ [AI_SERVICE] Google API credentials not configured');
+        }
+      } catch (e) {
+        print('❌ [AI_SERVICE] Web search failed: $e');
+        print('⚠️ [AI_SERVICE] Continuing without web context');
+        // Continue without web search - don't fail the entire request
       }
     }
     
@@ -1023,14 +1131,14 @@ Sadeq is the developer building this system. He's working on enhancing your memo
     
     final systemPrompt = '''
 You are Kai: warm, witty, emotionally attuned AI companion.
-Answer concisely and helpfully.
+Answer concisely and helpfully.${webContext.isNotEmpty ? '\n\nIf WEB CONTEXT is provided, **treat it as the source of truth** for time-sensitive or factual claims and cite as [1], [2], etc. If not relevant, ignore it.' : ''}
 $projectContext$constraintsBlock
 
 $personalityMoodSummary
 ${adaptUser ? '\n💫 AFFINITY: Intimacy level ${affinity['intimacy']}/100, Physical comfort ${affinity['physicality']}/100' : ''}
 
 Recent conversation:
-${history.join('\n')}$memoryContext$curiosityPrompt''';
+${history.join('\n')}$memoryContext$webContext$curiosityPrompt''';
 
     print('📤 [SEND MESSAGE] Calling OpenAI...');
     // Get AI response
@@ -1167,6 +1275,20 @@ ${history.join('\n')}$memoryContext$curiosityPrompt''';
         'memory_context': memoryContext,
         'similarity_threshold': 0.35,
       },
+      'web_search': { // NEW: Web search debug info
+        'enabled': useWebSearch,
+        'triggered': webSearchUsed,
+        'should_search': GoogleSearchService.shouldSearch(text),
+        'results_count': searchResults.length,
+        'search_results': searchResults.map((r) => {
+          'title': r.title,
+          'link': r.link,
+          'snippet': r.snippet.length > 100 ? '${r.snippet.substring(0, 100)}...' : r.snippet,
+          'domain': r.displayLink,
+          'published_at': r.publishedAt,
+        }).toList(),
+        'web_context': webContext,
+      },
       'curiosity': {
         'enabled': useMemory,
         'question_suggested': selectedQuestion?.question ?? 'None',
@@ -1231,10 +1353,12 @@ ${history.join('\n')}$memoryContext$curiosityPrompt''';
       actualDeltas: actualDeltas,
       tags: tags,
       mbti: calculateMBTI(newPersonality),
-      webUsed: false,
+      webUsed: webSearchUsed, // Updated to use actual web search status
       liveUsed: null,
-      memoriesUsed: memoriesUsed, // NEW: Pass memories used
-      debugInfo: debugInfo, // NEW: Pass debug info
+      memoriesUsed: memoriesUsed,
+      debugInfo: debugInfo,
+      webSearchUsed: webSearchUsed, // NEW: Pass web search status
+      searchResults: searchResults, // NEW: Pass search results
     );
     } catch (e, stackTrace) {
       print('❌ [SEND MESSAGE ERROR] Exception occurred: $e');

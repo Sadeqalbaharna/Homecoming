@@ -7,8 +7,11 @@ A cross-platform Flutter application featuring Kai, an AI avatar with personalit
 - **Pure Flutter Implementation**: No Python backend required
 - **Cross-Platform Support**: Desktop (Windows, macOS, Linux) and Mobile (Android, iOS)
 - **AI Integration**: OpenAI GPT-4o/GPT-5 for conversations
+- **Google Search**: Real-time web search for news and current events
 - **Text-to-Speech**: ElevenLabs integration for voice responses
 - **Dynamic Personality**: Personality traits, mood states, and user affinity tracking
+- **Long-Term Memory**: Semantic memory system with Firebase Cloud Functions
+- **Curiosity System**: Proactive question generation and knowledge gap analysis
 - **Animated Avatar**: Multiple GIF states (idle, attention, thinking, speaking)
 - **Real-time Personality Changes**: Visual feedback for personality/mood adjustments
 - **🔥 Firebase Integration**: Cloud data persistence and cross-device sync

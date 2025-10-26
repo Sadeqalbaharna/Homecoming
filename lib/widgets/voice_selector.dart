@@ -90,7 +90,7 @@ class _VoiceSelectorState extends State<VoiceSelector> {
                       decoration: BoxDecoration(
                         color: isSelected
                             ? Theme.of(context).colorScheme.primary
-                            : Theme.of(context).colorScheme.surfaceVariant,
+                            : Theme.of(context).colorScheme.surfaceContainerHighest,
                         shape: BoxShape.circle,
                       ),
                       child: Icon(
@@ -138,7 +138,7 @@ class _VoiceSelectorState extends State<VoiceSelector> {
               ),
             ),
           );
-        }).toList(),
+        }),
         const SizedBox(height: 16),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16.0),
