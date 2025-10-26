@@ -622,6 +622,17 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
   // NEW: Open unified expanded window with tabs
   Future<void> _openExpandedWindow(int initialTab) async {
     print('📱 [EXPANDED] Opening unified expanded window (tab: $initialTab)...');
+    
+    // Save current position before moving to (0,0)
+    try {
+      final pos = await FlutterOverlayWindow.getOverlayPosition();
+      _currentX = pos.x;
+      _currentY = pos.y;
+      print('📍 [EXPANDED] Saved current position: ($_currentX, $_currentY)');
+    } catch (e) {
+      print('❌ [EXPANDED] Failed to save position: $e');
+    }
+    
     setState(() {
       _showExpandedWindow = true;
       _expandedWindowInitialTab = initialTab;
@@ -629,7 +640,17 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
       _showPersonality = false;
       _showAnalytics = false;
     });
-    print('📱 [EXPANDED] State updated, calling resize...');
+    print('📱 [EXPANDED] State updated, moving to (0,0) and resizing...');
+    
+    // CRITICAL: Move overlay to (0,0) BEFORE resizing to full screen
+    // This ensures the full-screen window covers the entire device screen
+    try {
+      await FlutterOverlayWindow.moveOverlay(const OverlayPosition(0, 0));
+      print('📱 [EXPANDED] Moved overlay to position (0, 0)');
+    } catch (e) {
+      print('❌ [EXPANDED] Failed to move overlay: $e');
+    }
+    
     await _resizeOverlay(true); // Resize to fullscreen
     // Use defaultFlag for full-screen expanded window (focusAndAwakeScreen doesn't exist)
     await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
@@ -641,6 +662,15 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
     print('📱 [EXPANDED] Closing unified expanded window...');
     setState(() => _showExpandedWindow = false);
     await _resizeOverlay(false);
+    
+    // Restore previous position after resizing back to compact
+    try {
+      await FlutterOverlayWindow.moveOverlay(OverlayPosition(_currentX, _currentY));
+      print('📍 [EXPANDED] Restored position to ($_currentX, $_currentY)');
+    } catch (e) {
+      print('❌ [EXPANDED] Failed to restore position: $e');
+    }
+    
     await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
     print('📱 [EXPANDED] Expanded window closed!');
   }
