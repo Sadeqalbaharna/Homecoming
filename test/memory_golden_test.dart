@@ -113,6 +113,9 @@ class MemoryTestResult {
     this.errorMessage,
   });
 
+  /// Convenience getter for failed status
+  bool get failed => !passed;
+
   @override
   String toString() {
     final status = passed ? '✅ PASS' : '❌ FAIL';
