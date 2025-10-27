@@ -654,9 +654,9 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
     }
     
     await _resizeOverlay(true); // Resize to fullscreen
-    // Use defaultFlag for full-screen expanded window (focusAndAwakeScreen doesn't exist)
-    await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
-    print('📱 [EXPANDED] Expanded window opened!');
+    // Use focusPointer to allow keyboard input in expanded window
+    await FlutterOverlayWindow.updateFlag(OverlayFlag.focusPointer);
+    print('📱 [EXPANDED] Expanded window opened with keyboard support!');
   }
 
   // NEW: Close unified expanded window
