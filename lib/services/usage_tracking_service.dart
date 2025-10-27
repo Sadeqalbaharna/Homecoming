@@ -221,6 +221,23 @@ class UsageTrackingService {
     await _saveUsageData(prefs, data);
   }
 
+  /// Track web page fetching (no cost, just stats)
+  static Future<void> trackWebFetch({
+    required int pages,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final data = await _loadUsageData(prefs);
+
+    // Initialize web fetch counters if not exist
+    data['web_fetches'] = (data['web_fetches'] as int? ?? 0) + pages;
+
+    // Update session stats
+    final session = data['current_session'] as Map<String, dynamic>;
+    session['web_fetches'] = (session['web_fetches'] as int? ?? 0) + pages;
+
+    await _saveUsageData(prefs, data);
+  }
+
   /// Get current usage statistics
   static Future<Map<String, dynamic>> getUsageStats() async {
     final prefs = await SharedPreferences.getInstance();
@@ -346,6 +363,7 @@ class UsageTrackingService {
       'function_compute_seconds': 0.0,
       'google_cost': 0.0,
       'google_searches': 0,
+      'web_fetches': 0,
       'models': <String, dynamic>{},
       'operations': <String, dynamic>{},
       'functions': <String, dynamic>{},
@@ -355,6 +373,7 @@ class UsageTrackingService {
         'firebase_operations': 0,
         'function_calls': 0,
         'search_queries': 0,
+        'web_fetches': 0,
         'cost': 0.0,
         'api_calls': 0,
         'started_at': DateTime.now().toIso8601String(),

@@ -1,7 +1,7 @@
 name: homecoming_app
 description: Overlay avatar app (mobile + desktop)
 publish_to: "none"
-version: 0.7.5+73
+version: 0.7.5+74
 
 environment:
   sdk: ">=3.0.0 <4.0.0"
@@ -17,6 +17,7 @@ dependencies:
   flutter_acrylic: ^1.1.4
   # Net
   dio: ^5.5.0
+  html: ^0.15.4
   # Audio (choose ONE lib → audioplayers)
   audioplayers: ^6.0.0
   # Voice input - using native Android MediaRecorder via MethodChannel

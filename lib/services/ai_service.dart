@@ -13,6 +13,7 @@ import 'usage_tracking_service.dart';
 import 'memory_service.dart';
 import 'curiosity_service.dart';
 import 'google_search_service.dart';
+import 'web_fetch_service.dart';
 
 /// Configuration class to hold all API keys
 /// Uses secure storage for encrypted key management
@@ -218,6 +219,7 @@ class AIService {
   late final Dio _dio;
   SharedPreferences? _prefs;
   Completer<void>? _prefsCompleter;
+  final WebFetchService _webFetch = WebFetchService();
   
   // Default personality values (matching Python backend)
   static const Map<String, int> _defaultPersonality = {
@@ -943,6 +945,36 @@ Text:
       }
     }
     
+    // NEW: Detect and fetch web pages from URLs in the user's message
+    String urlContext = '';
+    List<WebPageResult> fetchedPages = [];
+    final urls = extractUrls(text);
+    if (urls.isNotEmpty) {
+      print('🌐 [AI_SERVICE] Detected ${urls.length} URL(s) in message: ${urls.join(", ")}');
+      try {
+        fetchedPages = await _webFetch.fetchMultiplePages(urls);
+        if (fetchedPages.isNotEmpty) {
+          print('✅ [AI_SERVICE] Successfully fetched ${fetchedPages.length} web pages');
+          
+          // Build context from fetched pages
+          final buffer = StringBuffer();
+          buffer.writeln('\n\n=== Web Page Content ===');
+          for (final page in fetchedPages) {
+            buffer.writeln('\n${page.toAIContext()}\n');
+          }
+          urlContext = buffer.toString();
+          
+          // Track usage
+          await UsageTrackingService.trackWebFetch(pages: fetchedPages.length);
+        } else {
+          print('⚠️ [AI_SERVICE] No pages could be fetched');
+        }
+      } catch (e) {
+        print('❌ [AI_SERVICE] Web fetch failed: $e');
+        // Continue without web content - don't fail the entire request
+      }
+    }
+    
     // Perform Google Search if needed (NEW!)
     String webContext = '';
     bool webSearchUsed = false;
@@ -1139,14 +1171,14 @@ Sadeq is the developer building this system. He's working on enhancing your memo
     
     final systemPrompt = '''
 You are Kai: warm, witty, emotionally attuned AI companion.
-Answer concisely and helpfully.${webContext.isNotEmpty ? '\n\nIf WEB CONTEXT is provided, **treat it as the source of truth** for time-sensitive or factual claims and cite as [1], [2], etc. If not relevant, ignore it.' : ''}
+Answer concisely and helpfully.${webContext.isNotEmpty ? '\n\nIf WEB CONTEXT is provided, **treat it as the source of truth** for time-sensitive or factual claims and cite as [1], [2], etc. If not relevant, ignore it.' : ''}${urlContext.isNotEmpty ? '\n\nIf WEB PAGE CONTENT is provided, use it to answer questions about the specific pages. Cite sources and summarize key points.' : ''}
 $projectContext$constraintsBlock
 
 $personalityMoodSummary
 ${adaptUser ? '\n💫 AFFINITY: Intimacy level ${affinity['intimacy']}/100, Physical comfort ${affinity['physicality']}/100' : ''}
 
 Recent conversation:
-${history.join('\n')}$memoryContext$webContext$curiosityPrompt''';
+${history.join('\n')}$memoryContext$urlContext$webContext$curiosityPrompt''';
 
     print('📤 [SEND MESSAGE] Calling OpenAI...');
     // Get AI response
@@ -1474,5 +1506,35 @@ ${history.join('\n')}$memoryContext$webContext$curiosityPrompt''';
         'GOOGLE_CSE_ID_set': googleCseId.isNotEmpty,
       }
     };
+  }
+
+  /// Extract URLs from text
+  static List<String> extractUrls(String text) {
+    final urlPattern = RegExp(
+      r'https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)',
+      caseSensitive: false,
+    );
+    
+    return urlPattern.allMatches(text).map((match) => match.group(0)!).toList();
+  }
+
+  /// Fetch web page content
+  Future<WebPageResult?> fetchWebPage(String url) async {
+    return await _webFetch.fetchWebPage(url);
+  }
+
+  /// Fetch multiple web pages
+  Future<List<WebPageResult>> fetchMultiplePages(List<String> urls) async {
+    return await _webFetch.fetchMultiplePages(urls);
+  }
+
+  /// Get web fetch cache statistics
+  Map<String, dynamic> getWebCacheStats() {
+    return _webFetch.getCacheStats();
+  }
+
+  /// Clear web fetch cache
+  void clearWebCache() {
+    _webFetch.clearCache();
   }
 }
