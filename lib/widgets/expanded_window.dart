@@ -192,7 +192,7 @@ class _ExpandedWindowState extends State<ExpandedWindow> with SingleTickerProvid
 
   Widget _buildChatTab() {
     return Container(
-      color: Colors.black,
+      color: Colors.transparent,
       child: Column(
         children: [
           // Messages list
@@ -435,7 +435,7 @@ class _ExpandedWindowState extends State<ExpandedWindow> with SingleTickerProvid
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.grey[900],
+        color: Colors.black.withOpacity(0.3),
         border: Border(
           top: BorderSide(color: Colors.grey[800]!, width: 1),
         ),
@@ -472,7 +472,7 @@ class _ExpandedWindowState extends State<ExpandedWindow> with SingleTickerProvid
           ),
           const SizedBox(width: 12),
           Container(
-            decoration: BoxDecoration(
+            decoration: const BoxDecoration(
               color: Colors.purple,
               shape: BoxShape.circle,
             ),
