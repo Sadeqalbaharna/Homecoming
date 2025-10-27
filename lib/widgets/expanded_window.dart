@@ -432,44 +432,48 @@ class _ExpandedWindowState extends State<ExpandedWindow> with SingleTickerProvid
   Widget _buildMessageInput() {
     final controller = TextEditingController();
     
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.3),
-        border: Border(
-          top: BorderSide(color: Colors.grey[800]!, width: 1),
-        ),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: TextField(
-              controller: controller,
-              style: const TextStyle(color: Colors.white),
-              decoration: InputDecoration(
-                hintText: 'Message Kai...',
-                hintStyle: TextStyle(color: Colors.grey[600]),
-                filled: true,
-                fillColor: Colors.grey[850],
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(24),
-                  borderSide: BorderSide.none,
-                ),
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 12,
-                ),
-              ),
-              maxLines: null,
-              textInputAction: TextInputAction.send,
-              onSubmitted: (text) {
-                if (text.trim().isNotEmpty) {
-                  widget.onSendMessage(text.trim());
-                  controller.clear();
-                }
-              },
-            ),
+    return SafeArea(
+      bottom: true,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.black.withOpacity(0.3),
+          border: Border(
+            top: BorderSide(color: Colors.grey[800]!, width: 1),
           ),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: controller,
+                autofocus: false,
+                enableInteractiveSelection: true,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  hintText: 'Message Kai...',
+                  hintStyle: TextStyle(color: Colors.grey[600]),
+                  filled: true,
+                  fillColor: Colors.grey[850],
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(24),
+                    borderSide: BorderSide.none,
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 12,
+                  ),
+                ),
+                maxLines: null,
+                textInputAction: TextInputAction.send,
+                onSubmitted: (text) {
+                  if (text.trim().isNotEmpty) {
+                    widget.onSendMessage(text.trim());
+                    controller.clear();
+                  }
+                },
+              ),
+            ),
           const SizedBox(width: 12),
           Container(
             decoration: const BoxDecoration(
@@ -489,6 +493,7 @@ class _ExpandedWindowState extends State<ExpandedWindow> with SingleTickerProvid
           ),
         ],
       ),
+    ),
     );
   }
 
