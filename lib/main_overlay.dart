@@ -1237,13 +1237,6 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
                 debugInfo: message.debugInfo!,
                 personaId: 'truekai',
               ),
-            ] else if (!message.isUser) ...[
-              // Visual indicator when debugInfo is missing
-              const SizedBox(height: 4),
-              Text(
-                'No debug data',
-                style: TextStyle(color: Colors.red.withOpacity(0.5), fontSize: 10),
-              ),
             ],
           ],
         ),
@@ -1775,6 +1768,8 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
                                     },
                                     child: TextField(
                                       controller: _controller,
+                                      autofocus: false,
+                                      enableInteractiveSelection: true,
                                       style: const TextStyle(color: Colors.white),
                                       decoration: InputDecoration(
                                         hintText: 'Message Kai...',
@@ -1786,6 +1781,10 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
                                           borderSide: BorderSide.none,
                                         ),
                                       ),
+                                      onTap: () async {
+                                        // Ensure keyboard shows on tap
+                                        await FlutterOverlayWindow.updateFlag(OverlayFlag.focusPointer);
+                                      },
                                       onSubmitted: (_) => _send(),
                                     ),
                                   ),

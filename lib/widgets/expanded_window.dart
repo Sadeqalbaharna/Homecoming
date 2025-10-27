@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/ai_service.dart';
-import '../services/usage_tracking_service.dart';
+import '../screens/usage_stats_screen.dart';
 
 /// Full-screen locked expanded window with tabs: Chat, Personality, Analytics
 /// Unmovable and fills entire screen for stable interaction
@@ -37,9 +37,9 @@ class _ExpandedWindowState extends State<ExpandedWindow> with SingleTickerProvid
   String _mbti = 'ENFP';
   bool _loadingPersonality = true;
   
-  // Analytics state
-  Map<String, dynamic> _usageStats = {};
-  bool _loadingAnalytics = true;
+  // Analytics state - No longer needed, using full UsageStatsScreen
+  // Map<String, dynamic> _usageStats = {};
+  // bool _loadingAnalytics = true;
 
   @override
   void initState() {
@@ -51,7 +51,7 @@ class _ExpandedWindowState extends State<ExpandedWindow> with SingleTickerProvid
     );
     _tabController.addListener(_onTabChanged);
     _loadPersonalityData();
-    _loadAnalyticsData();
+    // _loadAnalyticsData(); // No longer needed
   }
 
   @override
@@ -64,9 +64,8 @@ class _ExpandedWindowState extends State<ExpandedWindow> with SingleTickerProvid
   void _onTabChanged() {
     if (_tabController.index == 1) {
       _loadPersonalityData(); // Refresh when switching to personality
-    } else if (_tabController.index == 2) {
-      _loadAnalyticsData(); // Refresh when switching to analytics
     }
+    // Analytics tab uses UsageStatsScreen which handles its own loading
   }
 
   Future<void> _loadPersonalityData() async {
@@ -89,19 +88,7 @@ class _ExpandedWindowState extends State<ExpandedWindow> with SingleTickerProvid
     }
   }
 
-  Future<void> _loadAnalyticsData() async {
-    setState(() => _loadingAnalytics = true);
-    try {
-      final stats = await UsageTrackingService.getUsageStats();
-      setState(() {
-        _usageStats = stats;
-        _loadingAnalytics = false;
-      });
-    } catch (e) {
-      print('❌ Failed to load analytics: $e');
-      setState(() => _loadingAnalytics = false);
-    }
-  }
+  // _loadAnalyticsData() removed - UsageStatsScreen handles its own data loading
 
   @override
   Widget build(BuildContext context) {
@@ -642,142 +629,7 @@ class _ExpandedWindowState extends State<ExpandedWindow> with SingleTickerProvid
   }
 
   Widget _buildAnalyticsTab() {
-    if (_loadingAnalytics) {
-      return const Center(
-        child: CircularProgressIndicator(color: Colors.purple),
-      );
-    }
-
-    return Container(
-      color: Colors.black,
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _buildSectionHeader('Usage Statistics'),
-            _buildStatCard(
-              'Total Messages',
-              _usageStats['totalMessages']?.toString() ?? '0',
-              Icons.chat_bubble_outline,
-              Colors.blue,
-            ),
-            const SizedBox(height: 12),
-            _buildStatCard(
-              'OpenAI Cost',
-              '\$${(_usageStats['openaiCost'] ?? 0.0).toStringAsFixed(4)}',
-              Icons.attach_money,
-              Colors.green,
-            ),
-            const SizedBox(height: 12),
-            _buildStatCard(
-              'ElevenLabs Characters',
-              _usageStats['elevenlabsChars']?.toString() ?? '0',
-              Icons.record_voice_over,
-              Colors.purple,
-            ),
-            const SizedBox(height: 24),
-            
-            _buildSectionHeader('Recent Activity'),
-            _buildActivityList(),
-            const SizedBox(height: 24),
-            
-            ElevatedButton.icon(
-              onPressed: _loadAnalyticsData,
-              icon: const Icon(Icons.refresh),
-              label: const Text('Refresh Stats'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.purple,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                minimumSize: const Size(double.infinity, 48),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildStatCard(String title, String value, IconData icon, Color color) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.grey[900],
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withOpacity(0.3), width: 1),
-      ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: color.withOpacity(0.2),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(icon, color: color, size: 24),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: TextStyle(
-                    color: Colors.grey[400],
-                    fontSize: 13,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  value,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildActivityList() {
-    // Mock data - replace with real activity from Firebase
-    final activities = [
-      {'action': 'Message sent', 'time': '2 min ago', 'icon': Icons.send},
-      {'action': 'Personality updated', 'time': '15 min ago', 'icon': Icons.psychology},
-      {'action': 'Voice generated', 'time': '1 hour ago', 'icon': Icons.volume_up},
-    ];
-
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.grey[900],
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey[800]!, width: 1),
-      ),
-      child: Column(
-        children: activities.map((activity) {
-          return ListTile(
-            leading: Icon(
-              activity['icon'] as IconData,
-              color: Colors.purple,
-            ),
-            title: Text(
-              activity['action'] as String,
-              style: const TextStyle(color: Colors.white),
-            ),
-            subtitle: Text(
-              activity['time'] as String,
-              style: TextStyle(color: Colors.grey[600]),
-            ),
-          );
-        }).toList(),
-      ),
-    );
+    // Use the full UsageStatsScreen for complete analytics
+    return const UsageStatsScreen();
   }
 }
