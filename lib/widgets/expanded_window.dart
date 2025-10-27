@@ -106,7 +106,7 @@ class _ExpandedWindowState extends State<ExpandedWindow> with SingleTickerProvid
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: Colors.black,
+      color: Colors.transparent,
       child: Column(
         children: [
           // Header with close button
@@ -500,7 +500,7 @@ class _ExpandedWindowState extends State<ExpandedWindow> with SingleTickerProvid
     }
 
     return Container(
-      color: Colors.black,
+      color: Colors.black.withOpacity(0.7),
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
         child: Column(
