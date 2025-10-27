@@ -61,8 +61,9 @@ class _FloatingKaiState extends State<_FloatingKai> with TickerProviderStateMixi
   void initState() {
     super.initState();
     
-    // Initialize GIF controller
+    // Initialize GIF controller and start animation
     _gifController = GifController(vsync: this);
+    _gifController.repeat(min: 0, max: 1, period: const Duration(milliseconds: 1000));
     
     _blinkCtrl = AnimationController(
       vsync: this,
@@ -128,6 +129,7 @@ class _FloatingKaiState extends State<_FloatingKai> with TickerProviderStateMixi
                       controller: _gifController,
                       image: const AssetImage('assets/avatar/idle.gif'),
                       fit: BoxFit.contain,
+                      autostart: Autostart.loop,
                     ),
                   ),
 
