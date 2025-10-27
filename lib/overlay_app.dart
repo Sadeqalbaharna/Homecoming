@@ -112,22 +112,15 @@ class _FloatingKaiState extends State<_FloatingKai> with TickerProviderStateMixi
                   ),
 
                   // === YOUR SPRITE ===
-                  // A) If you're using PNG with alpha:
+                  // Using idle.gif animation
                   SizedBox(
                     width: spriteSize,
                     height: spriteSize,
                     child: Image.asset(
-                      'assets/avatar/images/mage.png',
+                      'assets/avatar/idle.gif',
                       fit: BoxFit.contain,
                     ),
                   ),
-
-                  // B) Or if you prefer Lottie, comment A and uncomment this:
-                  // SizedBox(
-                  //   width: spriteSize,
-                  //   height: spriteSize,
-                  //   child: Lottie.asset('assets/kai.json', fit: BoxFit.contain),
-                  // ),
 
                   // Blink overlay (simple eyelid sweep). Tweak position/size to your art.
                   Positioned.fill(
