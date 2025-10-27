@@ -1681,6 +1681,8 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
                 'content': msg.text,
                 'timestamp': msg.timestamp,
                 'memoriesUsed': msg.memoriesUsed,
+                'audioPath': msg.audioPath, // ADD: Pass audio path for replay button
+                'debugInfo': msg.debugInfo, // ADD: Pass debug info for debug button
               }).toList(),
               isLoading: _sending,
               scrollController: _chatScrollController,

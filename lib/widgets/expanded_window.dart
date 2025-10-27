@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:audioplayers/audioplayers.dart';
 import '../services/ai_service.dart';
 import '../screens/usage_stats_screen.dart';
+import 'debug_button.dart';
+import 'memory_chips.dart';
 
 /// Full-screen locked expanded window with tabs: Chat, Personality, Analytics
 /// Unmovable and fills entire screen for stable interaction
@@ -30,6 +33,8 @@ class ExpandedWindow extends StatefulWidget {
 
 class _ExpandedWindowState extends State<ExpandedWindow> with SingleTickerProviderStateMixin {
   late TabController _tabController;
+  final AudioPlayer _audioPlayer = AudioPlayer(); // For replay functionality
+  PlayerState _playerState = PlayerState.stopped;
   
   // Personality state
   Map<String, int> _personality = {};
@@ -52,12 +57,20 @@ class _ExpandedWindowState extends State<ExpandedWindow> with SingleTickerProvid
     _tabController.addListener(_onTabChanged);
     _loadPersonalityData();
     // _loadAnalyticsData(); // No longer needed
+    
+    // Listen to audio player state
+    _audioPlayer.onPlayerStateChanged.listen((state) {
+      if (mounted) {
+        setState(() => _playerState = state);
+      }
+    });
   }
 
   @override
   void dispose() {
     _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
+    _audioPlayer.dispose();
     super.dispose();
   }
 
@@ -217,6 +230,8 @@ class _ExpandedWindowState extends State<ExpandedWindow> with SingleTickerProvid
                         isUser,
                         msg['timestamp'] as DateTime?,
                         msg['memoriesUsed'] as List<String>?,
+                        msg['audioPath'] as String?,
+                        msg['debugInfo'] as Map<String, dynamic>?,
                       );
                     },
                   ),
@@ -261,6 +276,8 @@ class _ExpandedWindowState extends State<ExpandedWindow> with SingleTickerProvid
     bool isUser,
     DateTime? timestamp,
     List<String>? memoriesUsed,
+    String? audioPath,
+    Map<String, dynamic>? debugInfo,
   ) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
@@ -279,6 +296,15 @@ class _ExpandedWindowState extends State<ExpandedWindow> with SingleTickerProvid
                 ),
               ),
             ),
+          
+          // Memory chips (detailed view like main overlay)
+          if (!isUser && debugInfo != null && debugInfo['memory_query']?['memory_details'] != null) ...[
+            MemoryChips(
+              memoryDetails: (debugInfo['memory_query']['memory_details'] as List?)
+                  ?.cast<Map<String, dynamic>>() ?? [],
+            ),
+            const SizedBox(height: 4),
+          ],
           
           // Message bubble
           Container(
@@ -308,8 +334,54 @@ class _ExpandedWindowState extends State<ExpandedWindow> with SingleTickerProvid
             ),
           ),
           
-          // Memory badge
-          if (!isUser && memoriesUsed != null && memoriesUsed.isNotEmpty)
+          // Replay audio button
+          if (!isUser && audioPath != null) ...[
+            const SizedBox(height: 8),
+            InkWell(
+              onTap: () async {
+                if (_playerState == PlayerState.playing) {
+                  await _audioPlayer.pause();
+                } else {
+                  await _audioPlayer.play(DeviceFileSource(audioPath));
+                }
+              },
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    _playerState == PlayerState.playing 
+                        ? Icons.pause_circle 
+                        : Icons.play_circle,
+                    color: Colors.purple,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 4),
+                  const Text(
+                    'Play voice',
+                    style: TextStyle(
+                      color: Colors.purple,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          
+          // Debug button
+          if (!isUser && debugInfo != null) ...[
+            const SizedBox(height: 8),
+            DebugButton(
+              debugInfo: debugInfo,
+              personaId: widget.personaId,
+            ),
+          ],
+          
+          // Memory badge (simple count) - only show if no detailed chips above
+          if (!isUser && 
+              memoriesUsed != null && 
+              memoriesUsed.isNotEmpty &&
+              (debugInfo == null || debugInfo['memory_query']?['memory_details'] == null))
             Padding(
               padding: const EdgeInsets.only(top: 4),
               child: Container(
