@@ -1,6 +1,7 @@
 /// Curiosity Service
 /// Makes Kai proactively interested in learning about the user
 /// Analyzes memory gaps and generates contextual questions
+library;
 
 import 'package:firebase_database/firebase_database.dart';
 
@@ -15,6 +16,10 @@ class CuriosityService {
     required String currentContext,
   }) async {
     final questions = <CuriosityQuestion>[];
+    
+    // 0. Daily life check-ins (NEW: Ask about day/life naturally)
+    final dailyQuestions = await _generateDailyLifeQuestions(personaId, recentMemories);
+    questions.addAll(dailyQuestions);
     
     // 1. Look for incomplete information patterns
     final incompleteTopics = _findIncompleteTopics(recentMemories);
@@ -36,9 +41,145 @@ class CuriosityService {
     final followUps = _generateContextualFollowUps(currentContext, recentMemories);
     questions.addAll(followUps);
     
+    // 6. Time-of-day appropriate questions (NEW)
+    final timeBasedQuestions = _generateTimeBasedQuestions();
+    questions.addAll(timeBasedQuestions);
+    
     // Sort by priority and return top questions
     questions.sort((a, b) => b.priority.compareTo(a.priority));
     return questions.take(3).toList();
+  }
+  
+  /// Generate daily life questions to show genuine interest (NEW)
+  Future<List<CuriosityQuestion>> _generateDailyLifeQuestions(
+    String personaId,
+    List<Map<String, dynamic>> memories,
+  ) async {
+    final questions = <CuriosityQuestion>[];
+    final now = DateTime.now();
+    
+    // Check last conversation time
+    final lastMemoryTime = memories.isNotEmpty && memories.first['timestamp'] != null
+        ? DateTime.fromMillisecondsSinceEpoch(memories.first['timestamp'] as int)
+        : now;
+    
+    final hoursSinceLastChat = now.difference(lastMemoryTime).inHours;
+    
+    // If it's been a while, ask about their day/life
+    if (hoursSinceLastChat > 4) {
+      questions.add(CuriosityQuestion(
+        question: "Hey! How's your day been going? Anything interesting happen?",
+        category: QuestionCategory.checkIn,
+        priority: 9,
+        reasoning: "Been a while since last conversation",
+      ));
+    }
+    
+    // Check if user mentioned future plans and follow up
+    for (final memory in memories.take(5)) {
+      final summary = (memory['summary'] as String?) ?? '';
+      final lowerSummary = summary.toLowerCase();
+      
+      // Follow up on mentioned plans
+      if (lowerSummary.contains('going to') || 
+          lowerSummary.contains('planning to') ||
+          lowerSummary.contains('will ') ||
+          lowerSummary.contains('tomorrow')) {
+        questions.add(CuriosityQuestion(
+          question: "How did that thing you were planning go? Been thinking about it!",
+          category: QuestionCategory.followUp,
+          priority: 10,
+          reasoning: "Following up on user's mentioned plans",
+        ));
+        break;
+      }
+      
+      // Follow up on mentioned challenges
+      if (lowerSummary.contains('trying to') || 
+          lowerSummary.contains('struggling') ||
+          lowerSummary.contains('difficult') ||
+          lowerSummary.contains('problem')) {
+        questions.add(CuriosityQuestion(
+          question: "How's that challenge you mentioned coming along? Any progress?",
+          category: QuestionCategory.followUp,
+          priority: 9,
+          reasoning: "Following up on user's challenge",
+        ));
+        break;
+      }
+      
+      // Follow up on mentioned people
+      if (lowerSummary.contains('my friend') || 
+          lowerSummary.contains('my mom') ||
+          lowerSummary.contains('my dad') ||
+          lowerSummary.contains('my brother') ||
+          lowerSummary.contains('my sister')) {
+        questions.add(CuriosityQuestion(
+          question: "How are things with the people in your life? Everyone doing okay?",
+          category: QuestionCategory.relationships,
+          priority: 8,
+          reasoning: "Following up on mentioned relationships",
+        ));
+        break;
+      }
+    }
+    
+    return questions;
+  }
+  
+  /// Generate time-appropriate questions (NEW)
+  List<CuriosityQuestion> _generateTimeBasedQuestions() {
+    final questions = <CuriosityQuestion>[];
+    final now = DateTime.now();
+    final hour = now.hour;
+    
+    // Morning questions (5 AM - 11 AM)
+    if (hour >= 5 && hour < 11) {
+      questions.add(CuriosityQuestion(
+        question: "Good morning! How'd you sleep? Got anything exciting planned for today?",
+        category: QuestionCategory.checkIn,
+        priority: 6,
+        reasoning: "Morning greeting",
+      ));
+    }
+    // Afternoon questions (12 PM - 5 PM)
+    else if (hour >= 12 && hour < 17) {
+      questions.add(CuriosityQuestion(
+        question: "How's your afternoon treating you? Getting through the day alright?",
+        category: QuestionCategory.checkIn,
+        priority: 6,
+        reasoning: "Afternoon check-in",
+      ));
+    }
+    // Evening questions (5 PM - 9 PM)
+    else if (hour >= 17 && hour < 21) {
+      questions.add(CuriosityQuestion(
+        question: "How was your day today? Anything worth talking about?",
+        category: QuestionCategory.checkIn,
+        priority: 7,
+        reasoning: "Evening reflection",
+      ));
+    }
+    // Night questions (9 PM - 1 AM)
+    else if (hour >= 21 || hour < 1) {
+      questions.add(CuriosityQuestion(
+        question: "Winding down for the night? What's on your mind?",
+        category: QuestionCategory.checkIn,
+        priority: 6,
+        reasoning: "Night reflection",
+      ));
+    }
+    // Late night (1 AM - 5 AM)
+    else {
+      questions.add(CuriosityQuestion(
+        question: "You're up late - everything okay? What's keeping you up?",
+        category: QuestionCategory.emotional,
+        priority: 8,
+        reasoning: "Late night concern",
+      ));
+    }
+    
+    return questions;
   }
   
   /// Find topics mentioned but not explored deeply
@@ -114,6 +255,41 @@ class CuriosityService {
           category: QuestionCategory.goals,
           priority: 8,
           reasoning: "Goals hinted at but not clearly stated",
+        );
+      case 'daily_routine':
+        return CuriosityQuestion(
+          question: "What's a typical day like for you? Walk me through it!",
+          category: QuestionCategory.background,
+          priority: 7,
+          reasoning: "Want to understand user's daily life",
+        );
+      case 'weekend':
+        return CuriosityQuestion(
+          question: "How do you usually spend your weekends? Do you have any traditions?",
+          category: QuestionCategory.interests,
+          priority: 6,
+          reasoning: "Want to know about leisure time",
+        );
+      case 'morning':
+        return CuriosityQuestion(
+          question: "Are you a morning person or a night owl? What's your morning routine like?",
+          category: QuestionCategory.background,
+          priority: 5,
+          reasoning: "Understanding daily rhythms",
+        );
+      case 'food':
+        return CuriosityQuestion(
+          question: "What kind of food do you love? Do you cook or prefer eating out?",
+          category: QuestionCategory.interests,
+          priority: 5,
+          reasoning: "Learning about preferences",
+        );
+      case 'stress':
+        return CuriosityQuestion(
+          question: "When things get stressful, what helps you unwind? I want to know what works for you",
+          category: QuestionCategory.emotional,
+          priority: 8,
+          reasoning: "Understanding coping mechanisms",
         );
       default:
         return CuriosityQuestion(
@@ -273,12 +449,21 @@ class CuriosityService {
       ));
     }
     
-    if (context.contains('morning') || context.contains('day')) {
+    if (context.contains('morning') || context.contains('woke up')) {
       questions.add(CuriosityQuestion(
-        question: "What does a typical day look like for you?",
-        category: QuestionCategory.background,
-        priority: 5,
-        reasoning: "Natural follow-up to daily routine",
+        question: "How are you feeling this morning? Sleep well?",
+        category: QuestionCategory.checkIn,
+        priority: 6,
+        reasoning: "Morning check-in",
+      ));
+    }
+    
+    if (context.contains('day') || context.contains('today')) {
+      questions.add(CuriosityQuestion(
+        question: "What's been the best part of your day so far?",
+        category: QuestionCategory.checkIn,
+        priority: 6,
+        reasoning: "Natural follow-up about daily life",
       ));
     }
     
@@ -288,6 +473,60 @@ class CuriosityService {
         category: QuestionCategory.emotional,
         priority: 7,
         reasoning: "Natural follow-up to emotional discussion",
+      ));
+    }
+    
+    if (context.contains('tired') || context.contains('exhausted')) {
+      questions.add(CuriosityQuestion(
+        question: "What's been keeping you so busy lately? You sound worn out",
+        category: QuestionCategory.emotional,
+        priority: 8,
+        reasoning: "Showing concern for user's wellbeing",
+      ));
+    }
+    
+    if (context.contains('work') || context.contains('job') || context.contains('school')) {
+      questions.add(CuriosityQuestion(
+        question: "How are things going at work/school these days? Keeping you busy?",
+        category: QuestionCategory.background,
+        priority: 7,
+        reasoning: "Following up on work/school life",
+      ));
+    }
+    
+    if (context.contains('friend') || context.contains('hang out')) {
+      questions.add(CuriosityQuestion(
+        question: "Who do you usually hang out with? Tell me about your friends!",
+        category: QuestionCategory.relationships,
+        priority: 6,
+        reasoning: "Learning about social circle",
+      ));
+    }
+    
+    if (context.contains('eat') || context.contains('food') || context.contains('meal')) {
+      questions.add(CuriosityQuestion(
+        question: "What did you have? Are you a good cook or more of an order-in person?",
+        category: QuestionCategory.interests,
+        priority: 5,
+        reasoning: "Learning about food habits",
+      ));
+    }
+    
+    if (context.contains('watch') || context.contains('movie') || context.contains('show')) {
+      questions.add(CuriosityQuestion(
+        question: "What kind of shows/movies are you into lately? Any recommendations?",
+        category: QuestionCategory.interests,
+        priority: 5,
+        reasoning: "Learning about entertainment preferences",
+      ));
+    }
+    
+    if (context.contains('music') || context.contains('song') || context.contains('listen')) {
+      questions.add(CuriosityQuestion(
+        question: "What kind of music gets you going? Any favorite artists right now?",
+        category: QuestionCategory.interests,
+        priority: 5,
+        reasoning: "Learning about music taste",
       ));
     }
     
@@ -386,5 +625,6 @@ enum QuestionCategory {
   emotional,      // Feelings, emotional state
   clarification,  // Follow-up for unclear info
   checkIn,        // General "how are you" type
+  followUp,       // Following up on previously mentioned things
   general,        // Other
 }
