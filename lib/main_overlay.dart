@@ -1186,11 +1186,14 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Memory chips (shows simple count, details in Debug Info)
-            if (!message.isUser && message.debugInfo != null) ...[
+            // Memory chips - show if debugInfo has memory details OR if memoriesUsed is not empty
+            if (!message.isUser && 
+                ((message.debugInfo != null && message.debugInfo!['memory_query']?['memory_details'] != null) ||
+                 message.memoriesUsed.isNotEmpty)) ...[
               MemoryChips(
-                memoryDetails: (message.debugInfo!['memory_query']?['memory_details'] as List?)
-                    ?.cast<Map<String, dynamic>>() ?? [],
+                memoryDetails: (message.debugInfo?['memory_query']?['memory_details'] as List?)
+                    ?.cast<Map<String, dynamic>>() ?? 
+                    message.memoriesUsed.map((m) => {'text': m}).toList(),
               ),
             ],
             Text(
@@ -1318,6 +1321,12 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
         _reply = replyText;
         _ttsPath = audioPath;
       });
+      
+      // DEBUG: Log what we're adding
+      print('💬 [CHAT] Added message with:');
+      print('   - audioPath: ${audioPath != null ? "YES" : "NO"}');
+      print('   - memoriesUsed: ${resp.memoriesUsed.length} memories');
+      print('   - debugInfo: ${_debugInfo != null ? "YES (${_debugInfo!.keys.length} keys)" : "NO"}');
       
       // Show curiosity indicator if question triggered
       if (resp.curiosityQuestion != null && mounted) {
@@ -1757,38 +1766,32 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
                                 child: Row(
                                   children: [
                                     Expanded(
-                                  child: Focus(
-                                    onFocusChange: (hasFocus) async {
-                                      // Update flag to allow keyboard when TextField is focused
-                                      if (hasFocus) {
-                                        await FlutterOverlayWindow.updateFlag(OverlayFlag.focusPointer);
-                                      } else {
-                                        await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
-                                      }
-                                    },
-                                    child: TextField(
-                                      controller: _controller,
-                                      autofocus: false,
-                                      enableInteractiveSelection: true,
-                                      style: const TextStyle(color: Colors.white),
-                                      decoration: InputDecoration(
-                                        hintText: 'Message Kai...',
-                                        hintStyle: TextStyle(color: Colors.white.withOpacity(0.5)),
-                                        filled: true,
-                                        fillColor: const Color(0xFF2A2119),
-                                        border: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(25),
-                                          borderSide: BorderSide.none,
+                                      child: TextField(
+                                        controller: _controller,
+                                        autofocus: false,
+                                        enableInteractiveSelection: true,
+                                        readOnly: false,
+                                        style: const TextStyle(color: Colors.white),
+                                        decoration: InputDecoration(
+                                          hintText: 'Message Kai...',
+                                          hintStyle: TextStyle(color: Colors.white.withOpacity(0.5)),
+                                          filled: true,
+                                          fillColor: const Color(0xFF2A2119),
+                                          border: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(25),
+                                            borderSide: BorderSide.none,
+                                          ),
                                         ),
+                                        onTap: () async {
+                                          print('📝 [KEYBOARD] TextField tapped');
+                                          await FlutterOverlayWindow.updateFlag(OverlayFlag.focusPointer);
+                                        },
+                                        onEditingComplete: () {
+                                          print('📝 [KEYBOARD] Editing complete');
+                                        },
+                                        onSubmitted: (_) => _send(),
                                       ),
-                                      onTap: () async {
-                                        // Ensure keyboard shows on tap
-                                        await FlutterOverlayWindow.updateFlag(OverlayFlag.focusPointer);
-                                      },
-                                      onSubmitted: (_) => _send(),
                                     ),
-                                  ),
-                                ),
                                 const SizedBox(width: 8),
                                 // Show playback controls if audio is recorded
                                 if (_recordedAudioPath != null) ...[
