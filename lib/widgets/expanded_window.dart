@@ -195,6 +195,36 @@ class _ExpandedWindowState extends State<ExpandedWindow> with SingleTickerProvid
       color: Colors.transparent,
       child: Column(
         children: [
+          // Input field at the top
+          _buildMessageInput(),
+          
+          // Loading indicator
+          if (widget.isLoading)
+            Container(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.purple,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    'Kai is thinking...',
+                    style: TextStyle(
+                      color: Colors.grey[400],
+                      fontSize: 14,
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          
           // Messages list
           Expanded(
             child: widget.messages.isEmpty
@@ -236,36 +266,6 @@ class _ExpandedWindowState extends State<ExpandedWindow> with SingleTickerProvid
                     },
                   ),
           ),
-          
-          // Loading indicator
-          if (widget.isLoading)
-            Container(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Colors.purple,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Text(
-                    'Kai is thinking...',
-                    style: TextStyle(
-                      color: Colors.grey[400],
-                      fontSize: 14,
-                      fontStyle: FontStyle.italic,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          
-          // Input field
-          _buildMessageInput(),
         ],
       ),
     );
@@ -433,13 +433,13 @@ class _ExpandedWindowState extends State<ExpandedWindow> with SingleTickerProvid
     final controller = TextEditingController();
     
     return SafeArea(
-      bottom: true,
+      top: true,
       child: Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
           color: Colors.black.withOpacity(0.3),
           border: Border(
-            top: BorderSide(color: Colors.grey[800]!, width: 1),
+            bottom: BorderSide(color: Colors.grey[800]!, width: 1),
           ),
         ),
         child: Row(
