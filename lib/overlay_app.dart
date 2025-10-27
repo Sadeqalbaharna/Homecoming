@@ -1,7 +1,7 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
-// if you use Lottie
+import 'package:gif/gif.dart';
 
 class KaiOverlay extends StatelessWidget {
   const KaiOverlay({super.key});
@@ -34,6 +34,9 @@ class _FloatingKaiState extends State<_FloatingKai> with TickerProviderStateMixi
     await windowManager.setPosition(Offset(pos.dx + delta.dx, pos.dy + delta.dy));
   }
 
+  // --- GIF controller ---
+  late final GifController _gifController;
+
   // --- blink animation ---
   late final AnimationController _blinkCtrl;
   late final Animation<double> _blink; // 1.0 open -> 0.0 closed
@@ -57,6 +60,10 @@ class _FloatingKaiState extends State<_FloatingKai> with TickerProviderStateMixi
   @override
   void initState() {
     super.initState();
+    
+    // Initialize GIF controller
+    _gifController = GifController(vsync: this);
+    
     _blinkCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 90),
@@ -80,6 +87,7 @@ class _FloatingKaiState extends State<_FloatingKai> with TickerProviderStateMixi
 
   @override
   void dispose() {
+    _gifController.dispose();
     _blinkCtrl.dispose();
     _glowCtrl.dispose();
     super.dispose();
@@ -116,8 +124,9 @@ class _FloatingKaiState extends State<_FloatingKai> with TickerProviderStateMixi
                   SizedBox(
                     width: spriteSize,
                     height: spriteSize,
-                    child: Image.asset(
-                      'assets/avatar/idle.gif',
+                    child: Gif(
+                      controller: _gifController,
+                      image: const AssetImage('assets/avatar/idle.gif'),
                       fit: BoxFit.contain,
                     ),
                   ),
