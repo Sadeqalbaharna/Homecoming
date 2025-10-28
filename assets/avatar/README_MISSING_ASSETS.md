@@ -1,53 +1,60 @@
 # Avatar Assets
 
-## Missing GIF Files
+## Current Status (v0.7.5+85)
 
-The following GIF animation files are required for the app to function properly:
+✅ **Using Lottie Animations** (Preferred Method)
+- `kai_idle.json` - Idle animation with breathing and blinking
+- `kai_talk.json` - Talking animation
 
-- `idle.gif` - Default idle animation (was ~55MB)
-- `attention.gif` - Attention-getting animation (was ~52MB) 
-- `thinking.gif` - Thinking/processing animation (was ~52MB)
-- `speaking.gif` - Speaking animation (was ~110MB)
+## Missing GIF Files (Optional)
 
-## Why Are They Missing?
+The following GIF animation files are **enabled in pubspec.yaml** but need to be added:
 
-These files exceeded GitHub's file size limits (100MB max, 50MB recommended). 
+- ✅ `idle.gif` - Available (57.5 MB) - Converted to kai_idle.json
+- ❌ `attention.gif` - Not yet added
+- ❌ `thinking.gif` - Not yet added  
+- ❌ `speaking.gif` - Not yet added
 
-## Solutions:
+## Recommendations
 
-### Option 1: Use Git LFS (Large File Storage)
-GitHub supports Git LFS for large files, but requires setup.
+### Option 1: Convert GIFs to Lottie (RECOMMENDED)
+Lottie animations are:
+- ✅ Vector-based (sharp at any size)
+- ✅ Much smaller file size
+- ✅ Better performance
+- ✅ Native Flutter support
+- ✅ Already working for idle & talk
 
-### Option 2: Optimize Assets
-Reduce GIF file sizes through:
-- Lower resolution
-- Reduced frame rate
-- Shorter animation loops
-- Better compression
+**To convert:**
+1. Use After Effects with Bodymovin plugin
+2. Or use online converters like lottiefiles.com
+3. Save as `kai_attention.json`, `kai_thinking.json`, `kai_speaking.json`
 
-### Option 3: Use Placeholder Assets
-Create smaller placeholder GIFs for development/testing.
+### Option 2: Add GIF Files
+If you have the original GIF files, add them to this folder:
+- Use Git LFS for files > 50MB
+- Or optimize/compress them first
 
-### Option 4: External Asset Hosting
-Host large assets on cloud storage and download at runtime.
-
-## Temporary Workaround
-
-For now, you can:
-1. Create simple placeholder GIFs
-2. Use static images instead of animations
-3. Download the original assets from the developer
-
-## Original Asset Locations
-
-If you have access to the original development environment, the assets were located at:
+### Option 3: Extract Frames (Current Method)
+Use the included `extract_gif_frames.py` script:
+```bash
+python extract_gif_frames.py
 ```
-assets/avatar/idle.gif (54.87 MB)
-assets/avatar/attention.gif (52.28 MB)  
-assets/avatar/thinking.gif (52.49 MB)
-assets/avatar/speaking.gif (109.81 MB)
+This creates PNG frames for animation (currently used as fallback).
+
+## Original Asset Sizes
+
+```
+idle.gif      - 57.5 MB (available)
+attention.gif - ~52 MB (needs to be added)
+thinking.gif  - ~52 MB (needs to be added)
+speaking.gif  - ~110 MB (needs to be added)
 ```
 
 ## App Functionality
 
-The app will still run without these assets, but avatar animations will not display properly. Consider implementing fallback behavior or placeholder images.
+The app currently uses:
+1. **Primary**: Lottie animations (kai_idle.json, kai_talk.json)
+2. **Fallback**: mage.png static image if Lottie fails
+
+No GIF files are required for the app to function properly.
