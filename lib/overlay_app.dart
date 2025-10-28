@@ -1,7 +1,9 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
-import 'package:gif/gif.dart';
+
+const int _totalFrames = 121;
+const Duration _frameDuration = Duration(milliseconds: 40); // 25 FPS
 
 class KaiOverlay extends StatelessWidget {
   const KaiOverlay({super.key});
@@ -34,8 +36,9 @@ class _FloatingKaiState extends State<_FloatingKai> with TickerProviderStateMixi
     await windowManager.setPosition(Offset(pos.dx + delta.dx, pos.dy + delta.dy));
   }
 
-  // --- GIF controller ---
-  late final GifController _gifController;
+  // --- Frame animation ---
+  int _currentFrame = 0;
+  late final AnimationController _frameController;
 
   // --- blink animation ---
   late final AnimationController _blinkCtrl;
@@ -61,9 +64,21 @@ class _FloatingKaiState extends State<_FloatingKai> with TickerProviderStateMixi
   void initState() {
     super.initState();
     
-    // Initialize GIF controller and start animation
-    _gifController = GifController(vsync: this);
-    _gifController.repeat(min: 0, max: 1, period: const Duration(milliseconds: 1000));
+    // Initialize frame animation controller
+    _frameController = AnimationController(
+      vsync: this,
+      duration: _frameDuration * _totalFrames, // Total animation duration
+    )..repeat(); // Loop forever
+    
+    // Update current frame based on animation value
+    _frameController.addListener(() {
+      final newFrame = (_frameController.value * _totalFrames).floor() % _totalFrames;
+      if (newFrame != _currentFrame) {
+        setState(() {
+          _currentFrame = newFrame;
+        });
+      }
+    });
     
     _blinkCtrl = AnimationController(
       vsync: this,
@@ -88,7 +103,7 @@ class _FloatingKaiState extends State<_FloatingKai> with TickerProviderStateMixi
 
   @override
   void dispose() {
-    _gifController.dispose();
+    _frameController.dispose();
     _blinkCtrl.dispose();
     _glowCtrl.dispose();
     super.dispose();
@@ -121,15 +136,14 @@ class _FloatingKaiState extends State<_FloatingKai> with TickerProviderStateMixi
                   ),
 
                   // === YOUR SPRITE ===
-                  // Using idle.gif animation
+                  // Using frame-by-frame animation from extracted GIF
                   SizedBox(
                     width: spriteSize,
                     height: spriteSize,
-                    child: Gif(
-                      controller: _gifController,
-                      image: const AssetImage('assets/avatar/idle.gif'),
+                    child: Image.asset(
+                      'assets/avatar/idle_frames/frame_${_currentFrame.toString().padLeft(4, '0')}.png',
                       fit: BoxFit.contain,
-                      autostart: Autostart.loop,
+                      gaplessPlayback: true, // Smooth frame transitions
                     ),
                   ),
 

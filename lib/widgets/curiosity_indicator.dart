@@ -10,11 +10,11 @@ class CuriosityIndicator extends StatefulWidget {
   final Duration displayDuration;
 
   const CuriosityIndicator({
-    Key? key,
+    super.key,
     required this.question,
     required this.onTap,
     this.displayDuration = const Duration(seconds: 8),
-  }) : super(key: key);
+  });
 
   @override
   State<CuriosityIndicator> createState() => _CuriosityIndicatorState();

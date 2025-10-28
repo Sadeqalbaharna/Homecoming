@@ -1,7 +1,7 @@
 name: homecoming_app
 description: Overlay avatar app (mobile + desktop)
 publish_to: "none"
-version: 0.7.5+80
+version: 0.7.5+81
 
 environment:
   sdk: ">=3.0.0 <4.0.0"
@@ -11,7 +11,9 @@ dependencies:
     sdk: flutter
   # UI
   lottie: ^3.1.0
+  cupertino_icons: ^1.0.8
   gif: ^2.3.0
+  http: ^1.2.0
   # Desktop-specific packages (will be ignored on mobile)
   window_manager: ^0.3.9
   flutter_acrylic: ^1.1.4
@@ -53,6 +55,7 @@ flutter:
     - assets/audio/record_stop.wav
     # GIF assets
     - assets/avatar/idle.gif
+    - assets/avatar/idle_frames/
     # - assets/avatar/attention.gif
     # - assets/avatar/thinking.gif
     # - assets/avatar/speaking.gif
