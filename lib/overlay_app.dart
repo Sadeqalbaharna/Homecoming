@@ -151,6 +151,27 @@ class _FloatingKaiState extends State<_FloatingKai> with TickerProviderStateMixi
                       ),
                     ),
                   ),
+                  
+                  // DEBUG: Show current frame number
+                  Positioned(
+                    bottom: 10,
+                    right: 10,
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.black54,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        'Frame: $currentFrame',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                    ),
+                  ),
                 ],
               );
             },
