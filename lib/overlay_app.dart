@@ -2,9 +2,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart'; // For kDebugMode
 import 'package:window_manager/window_manager.dart';
-
-const int _totalFrames = 121;
-const Duration _frameDuration = Duration(milliseconds: 40); // 25 FPS
+import 'package:lottie/lottie.dart';
 
 class KaiOverlay extends StatelessWidget {
   const KaiOverlay({super.key});
@@ -37,10 +35,6 @@ class _FloatingKaiState extends State<_FloatingKai> with TickerProviderStateMixi
     await windowManager.setPosition(Offset(pos.dx + delta.dx, pos.dy + delta.dy));
   }
 
-  // --- Frame animation ---
-  late final AnimationController _frameController;
-  late final Animation<int> _frameAnimation;
-
   // --- blink animation ---
   late final AnimationController _blinkCtrl;
   late final Animation<double> _blink; // 1.0 open -> 0.0 closed
@@ -65,17 +59,6 @@ class _FloatingKaiState extends State<_FloatingKai> with TickerProviderStateMixi
   void initState() {
     super.initState();
     
-    // Initialize frame animation controller
-    _frameController = AnimationController(
-      vsync: this,
-      duration: _frameDuration * _totalFrames, // Total animation duration
-    )..repeat(); // Loop forever
-    
-    // Create an animation that maps 0.0-1.0 to frame indices 0-120
-    _frameAnimation = _frameController.drive(
-      IntTween(begin: 0, end: _totalFrames - 1),
-    );
-    
     _blinkCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 90),
@@ -99,7 +82,6 @@ class _FloatingKaiState extends State<_FloatingKai> with TickerProviderStateMixi
 
   @override
   void dispose() {
-    _frameController.dispose();
     _blinkCtrl.dispose();
     _glowCtrl.dispose();
     super.dispose();
@@ -117,9 +99,8 @@ class _FloatingKaiState extends State<_FloatingKai> with TickerProviderStateMixi
         onPanUpdate: _drag,
         child: Center(
           child: AnimatedBuilder(
-            animation: Listenable.merge([_frameAnimation, _glow, _blink]),
+            animation: Listenable.merge([_glow, _blink]),
             builder: (context, _) {
-              final currentFrame = _frameAnimation.value;
               return Stack(
                 alignment: Alignment.center,
                 children: [
@@ -133,24 +114,15 @@ class _FloatingKaiState extends State<_FloatingKai> with TickerProviderStateMixi
                   ),
 
                   // === YOUR SPRITE ===
-                  // Using frame-by-frame animation from extracted GIF
+                  // Using Lottie animation (much better than GIF!)
                   SizedBox(
                     width: spriteSize,
                     height: spriteSize,
-                    child: Image.asset(
-                      'assets/avatar/idle_frames/frame_${currentFrame.toString().padLeft(4, '0')}.png',
+                    child: Lottie.asset(
+                      'assets/avatar/kai_idle.json',
                       fit: BoxFit.contain,
-                      gaplessPlayback: true, // Smooth frame transitions
-                      errorBuilder: (context, error, stackTrace) {
-                        // Fallback if frames don't load
-                        if (kDebugMode) {
-                          print('Error loading frame $currentFrame: $error');
-                        }
-                        return Image.asset(
-                          'assets/avatar/images/mage.png',
-                          fit: BoxFit.contain,
-                        );
-                      },
+                      repeat: true,
+                      animate: true,
                     ),
                   ),
 
@@ -162,42 +134,6 @@ class _FloatingKaiState extends State<_FloatingKai> with TickerProviderStateMixi
                       ),
                     ),
                   ),
-                  
-                  // DEBUG: Show current frame number (debug builds only)
-                  if (kDebugMode)
-                    Positioned(
-                      bottom: 10,
-                      right: 10,
-                      child: Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: Colors.black54,
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            Text(
-                              'Frame: $currentFrame/${_totalFrames - 1}',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 12,
-                                fontFamily: 'monospace',
-                              ),
-                            ),
-                            Text(
-                              'Progress: ${(_frameController.value * 100).toStringAsFixed(1)}%',
-                              style: const TextStyle(
-                                color: Colors.white70,
-                                fontSize: 10,
-                                fontFamily: 'monospace',
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
                 ],
               );
             },
