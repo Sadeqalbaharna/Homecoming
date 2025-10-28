@@ -141,6 +141,16 @@ class _FloatingKaiState extends State<_FloatingKai> with TickerProviderStateMixi
                       'assets/avatar/idle_frames/frame_${currentFrame.toString().padLeft(4, '0')}.png',
                       fit: BoxFit.contain,
                       gaplessPlayback: true, // Smooth frame transitions
+                      errorBuilder: (context, error, stackTrace) {
+                        // Fallback if frames don't load
+                        if (kDebugMode) {
+                          print('Error loading frame $currentFrame: $error');
+                        }
+                        return Image.asset(
+                          'assets/avatar/images/mage.png',
+                          fit: BoxFit.contain,
+                        );
+                      },
                     ),
                   ),
 
@@ -164,13 +174,27 @@ class _FloatingKaiState extends State<_FloatingKai> with TickerProviderStateMixi
                           color: Colors.black54,
                           borderRadius: BorderRadius.circular(4),
                         ),
-                        child: Text(
-                          'Frame: $currentFrame',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                            fontFamily: 'monospace',
-                          ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Text(
+                              'Frame: $currentFrame/${_totalFrames - 1}',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontFamily: 'monospace',
+                              ),
+                            ),
+                            Text(
+                              'Progress: ${(_frameController.value * 100).toStringAsFixed(1)}%',
+                              style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 10,
+                                fontFamily: 'monospace',
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ),
