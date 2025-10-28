@@ -1,7 +1,7 @@
 name: homecoming_app
 description: Overlay avatar app (mobile + desktop)
 publish_to: "none"
-version: 0.7.5+84
+version: 0.7.5+85
 
 environment:
   sdk: ">=3.0.0 <4.0.0"
@@ -49,6 +49,7 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
+    - assets/avatar/kai_idle.json
     - assets/avatar/kai_talk.json
     - assets/avatar/images/mage.png
     - assets/audio/record_start.wav
