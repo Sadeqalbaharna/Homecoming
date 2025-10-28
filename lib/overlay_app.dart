@@ -1,4 +1,5 @@
 import 'dart:math';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart'; // For kDebugMode
 import 'package:window_manager/window_manager.dart';
@@ -25,14 +26,70 @@ class _FloatingKai extends StatefulWidget {
 }
 
 class _FloatingKaiState extends State<_FloatingKai> with TickerProviderStateMixin {
+  // --- floating movement ---
+  bool _isFloating = false;
+  Timer? _floatingTimer;
+  final _floatingRng = Random();
+  
+  void _toggleFloating() {
+    setState(() {
+      _isFloating = !_isFloating;
+    });
+    
+    if (_isFloating) {
+      _startFloating();
+    } else {
+      _stopFloating();
+    }
+  }
+  
+  void _startFloating() {
+    _floatingTimer?.cancel();
+    _floatingTimer = Timer.periodic(const Duration(seconds: 3), (timer) async {
+      if (!_isFloating || !mounted) {
+        timer.cancel();
+        return;
+      }
+      
+      // Get current position
+      final pos = await windowManager.getPosition();
+      
+      // Generate random movement (small steps)
+      final dx = (_floatingRng.nextDouble() - 0.5) * 50; // -25 to +25 pixels
+      final dy = (_floatingRng.nextDouble() - 0.5) * 50;
+      
+      // Move to new position
+      await windowManager.setPosition(Offset(pos.dx + dx, pos.dy + dy));
+    });
+  }
+  
+  void _stopFloating() {
+    _floatingTimer?.cancel();
+    _floatingTimer = null;
+  }
+  
   // --- window drag (same as before) ---
   Offset _dragStart = Offset.zero;
-  void _startDrag(DragStartDetails d) => _dragStart = d.globalPosition;
+  void _startDrag(DragStartDetails d) {
+    _dragStart = d.globalPosition;
+    // Pause floating during drag
+    if (_isFloating) {
+      _floatingTimer?.cancel();
+    }
+  }
+  
   void _drag(DragUpdateDetails d) async {
     final pos = await windowManager.getPosition();
     final delta = d.globalPosition - _dragStart;
     _dragStart = d.globalPosition;
     await windowManager.setPosition(Offset(pos.dx + delta.dx, pos.dy + delta.dy));
+  }
+  
+  void _endDrag(DragEndDetails d) {
+    // Resume floating after drag if enabled
+    if (_isFloating) {
+      _startFloating();
+    }
   }
 
   // --- blink animation ---
@@ -82,6 +139,7 @@ class _FloatingKaiState extends State<_FloatingKai> with TickerProviderStateMixi
 
   @override
   void dispose() {
+    _stopFloating();
     _blinkCtrl.dispose();
     _glowCtrl.dispose();
     super.dispose();
@@ -97,6 +155,7 @@ class _FloatingKaiState extends State<_FloatingKai> with TickerProviderStateMixi
       body: GestureDetector(
         onPanStart: _startDrag,
         onPanUpdate: _drag,
+        onPanEnd: _endDrag,
         child: Center(
           child: AnimatedBuilder(
             animation: Listenable.merge([_glow, _blink]),
@@ -131,6 +190,35 @@ class _FloatingKaiState extends State<_FloatingKai> with TickerProviderStateMixi
                     child: IgnorePointer(
                       child: CustomPaint(
                         painter: _BlinkPainter(progressOpen: _blink.value),
+                      ),
+                    ),
+                  ),
+                  
+                  // Floating toggle button
+                  Positioned(
+                    bottom: 10,
+                    right: 10,
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: _toggleFloating,
+                        borderRadius: BorderRadius.circular(20),
+                        child: Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.black54,
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(
+                              color: _isFloating ? Colors.greenAccent : Colors.white38,
+                              width: 2,
+                            ),
+                          ),
+                          child: Icon(
+                            _isFloating ? Icons.pause : Icons.play_arrow,
+                            color: _isFloating ? Colors.greenAccent : Colors.white,
+                            size: 20,
+                          ),
+                        ),
                       ),
                     ),
                   ),
