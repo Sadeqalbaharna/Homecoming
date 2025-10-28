@@ -37,8 +37,8 @@ class _FloatingKaiState extends State<_FloatingKai> with TickerProviderStateMixi
   }
 
   // --- Frame animation ---
-  int _currentFrame = 0;
   late final AnimationController _frameController;
+  late final Animation<int> _frameAnimation;
 
   // --- blink animation ---
   late final AnimationController _blinkCtrl;
@@ -70,15 +70,10 @@ class _FloatingKaiState extends State<_FloatingKai> with TickerProviderStateMixi
       duration: _frameDuration * _totalFrames, // Total animation duration
     )..repeat(); // Loop forever
     
-    // Update current frame based on animation value
-    _frameController.addListener(() {
-      final newFrame = (_frameController.value * _totalFrames).floor() % _totalFrames;
-      if (newFrame != _currentFrame) {
-        setState(() {
-          _currentFrame = newFrame;
-        });
-      }
-    });
+    // Create an animation that maps 0.0-1.0 to frame indices 0-120
+    _frameAnimation = _frameController.drive(
+      IntTween(begin: 0, end: _totalFrames - 1),
+    );
     
     _blinkCtrl = AnimationController(
       vsync: this,
@@ -121,8 +116,9 @@ class _FloatingKaiState extends State<_FloatingKai> with TickerProviderStateMixi
         onPanUpdate: _drag,
         child: Center(
           child: AnimatedBuilder(
-            animation: Listenable.merge([_glow, _blink]),
+            animation: Listenable.merge([_frameAnimation, _glow, _blink]),
             builder: (context, _) {
+              final currentFrame = _frameAnimation.value;
               return Stack(
                 alignment: Alignment.center,
                 children: [
@@ -141,7 +137,7 @@ class _FloatingKaiState extends State<_FloatingKai> with TickerProviderStateMixi
                     width: spriteSize,
                     height: spriteSize,
                     child: Image.asset(
-                      'assets/avatar/idle_frames/frame_${_currentFrame.toString().padLeft(4, '0')}.png',
+                      'assets/avatar/idle_frames/frame_${currentFrame.toString().padLeft(4, '0')}.png',
                       fit: BoxFit.contain,
                       gaplessPlayback: true, // Smooth frame transitions
                     ),
