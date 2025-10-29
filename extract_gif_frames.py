@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-Extract frames from an animated GIF and save them as individual PNG files.
+Extract frames from animated GIFs and save them as individual PNG files.
 This allows using them in a Flutter AnimationController instead of the gif package.
 """
 
 from PIL import Image
 import os
+import sys
 
 def extract_gif_frames(gif_path, output_dir):
     """Extract all frames from a GIF and save as PNGs."""
@@ -51,14 +52,26 @@ def extract_gif_frames(gif_path, output_dir):
     return frame_count, durations
 
 if __name__ == '__main__':
-    gif_path = r'assets\avatar\idle.gif'
-    output_dir = r'assets\avatar\idle_frames'
+    # Process all GIF files
+    gifs = [
+        ('assets/avatar/idle.gif', 'assets/avatar/idle_frames'),
+        ('assets/avatar/kai_attention.gif', 'assets/avatar/attention_frames'),
+        ('assets/avatar/kai_thinking.gif', 'assets/avatar/thinking_frames'),
+        ('assets/avatar/kai_speaking.gif', 'assets/avatar/speaking_frames'),
+    ]
     
-    if not os.path.exists(gif_path):
-        print(f"Error: GIF file not found at {gif_path}")
-        exit(1)
-    
-    frame_count, durations = extract_gif_frames(gif_path, output_dir)
-    
-    print(f"\n✓ Done! Use these {frame_count} frames in your Flutter app.")
-    print(f"Output directory: {output_dir}")
+    for gif_path, output_dir in gifs:
+        if not os.path.exists(gif_path):
+            print(f"Skipping {gif_path} - file not found")
+            continue
+        
+        print(f"\n{'='*60}")
+        print(f"Processing: {gif_path}")
+        print(f"Output: {output_dir}")
+        print('='*60)
+        
+        frame_count, durations = extract_gif_frames(gif_path, output_dir)
+        
+        print(f"\n✓ Done! Use these {frame_count} frames in your Flutter app.")
+        print(f"Output directory: {output_dir}")
+
