@@ -183,102 +183,107 @@ class _FloatingKaiState extends State<_FloatingKai> with TickerProviderStateMixi
 
     return Scaffold(
       backgroundColor: Colors.transparent,
-      body: GestureDetector(
-        onPanStart: _startDrag,
-        onPanUpdate: _drag,
-        onPanEnd: _endDrag,
-        child: Center(
-          child: AnimatedBuilder(
-            animation: Listenable.merge([_glow, _blink]),
-            builder: (context, _) {
-              return Stack(
-                alignment: Alignment.center,
-                children: [
-                  // Pulsing candle glow ring (thin)
-                  SizedBox(
-                    width: spriteSize + 24,
-                    height: spriteSize + 24,
-                    child: CustomPaint(
-                      painter: _GlowRingPainter(intensity: _glow.value),
-                    ),
-                  ),
-
-                  // === YOUR SPRITE ===
-                  SizedBox(
-                    width: spriteSize,
-                    height: spriteSize,
-                    child: _buildAnimation(),
-                  ),
-
-                  // Blink overlay (simple eyelid sweep). Tweak position/size to your art.
-                  Positioned.fill(
-                    child: IgnorePointer(
-                      child: CustomPaint(
-                        painter: _BlinkPainter(progressOpen: _blink.value),
+      body: Stack(
+        children: [
+          // Main draggable avatar in center
+          GestureDetector(
+            onPanStart: _startDrag,
+            onPanUpdate: _drag,
+            onPanEnd: _endDrag,
+            child: Center(
+              child: AnimatedBuilder(
+                animation: Listenable.merge([_glow, _blink]),
+                builder: (context, _) {
+                  return Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      // Pulsing candle glow ring (thin)
+                      SizedBox(
+                        width: spriteSize + 24,
+                        height: spriteSize + 24,
+                        child: CustomPaint(
+                          painter: _GlowRingPainter(intensity: _glow.value),
+                        ),
                       ),
-                    ),
-                  ),
-                  
-                  // Floating toggle button
-                  Positioned(
-                    bottom: 10,
-                    right: 10,
-                    child: Material(
-                      color: Colors.transparent,
-                      child: InkWell(
-                        onTap: _toggleFloating,
-                        borderRadius: BorderRadius.circular(20),
-                        child: Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: Colors.black54,
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(
-                              color: _isFloating ? Colors.greenAccent : Colors.white38,
-                              width: 2,
-                            ),
-                          ),
-                          child: Icon(
-                            _isFloating ? Icons.pause : Icons.play_arrow,
-                            color: _isFloating ? Colors.greenAccent : Colors.white,
-                            size: 20,
+
+                      // === YOUR SPRITE ===
+                      SizedBox(
+                        width: spriteSize,
+                        height: spriteSize,
+                        child: _buildAnimation(),
+                      ),
+
+                      // Blink overlay (simple eyelid sweep). Tweak position/size to your art.
+                      Positioned.fill(
+                        child: IgnorePointer(
+                          child: CustomPaint(
+                            painter: _BlinkPainter(progressOpen: _blink.value),
                           ),
                         ),
                       ),
-                    ),
-                  ),
-                  
-                  // Animation controller buttons
-                  Positioned(
-                    bottom: 10,
-                    left: 10,
-                    child: Material(
-                      color: Colors.transparent,
-                      child: Container(
-                        padding: const EdgeInsets.all(4),
-                        decoration: BoxDecoration(
-                          color: Colors.black54,
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(color: Colors.white38, width: 2),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            _animButton('idle', 'Idle'),
-                            _animButton('talk', 'Talk'),
-                            _animButton('attention', 'Att'),
-                            _animButton('thinking', 'Think'),
-                            _animButton('speaking', 'Speak'),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              );
-            },
+                    ],
+                  );
+                },
+              ),
+            ),
           ),
-        ),
+          
+          // Floating toggle button (top layer)
+          Positioned(
+            bottom: 10,
+            right: 10,
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: _toggleFloating,
+                borderRadius: BorderRadius.circular(20),
+                child: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.black54,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: _isFloating ? Colors.greenAccent : Colors.white38,
+                      width: 2,
+                    ),
+                  ),
+                  child: Icon(
+                    _isFloating ? Icons.pause : Icons.play_arrow,
+                    color: _isFloating ? Colors.greenAccent : Colors.white,
+                    size: 20,
+                  ),
+                ),
+              ),
+            ),
+          ),
+          
+          // Animation controller buttons
+          Positioned(
+            bottom: 10,
+            left: 10,
+            child: Material(
+              color: Colors.transparent,
+              child: Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: Colors.black54,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: Colors.white38, width: 2),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _animButton('idle', 'Idle'),
+                    _animButton('talk', 'Talk'),
+                    _animButton('attention', 'Att'),
+                    _animButton('thinking', 'Think'),
+                    _animButton('speaking', 'Speak'),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
