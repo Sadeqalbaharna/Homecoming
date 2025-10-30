@@ -196,6 +196,10 @@ class _FloatingKaiState extends State<_FloatingKai>
   DateTime _attentionUntil = DateTime.fromMillisecondsSinceEpoch(0);
   Timer? _idleTicker;
 
+  // ANIMATION TEST MODE - manual override for testing animations
+  bool _animTestMode = false;
+  _AvatarState? _manualState; // null = automatic, non-null = manual override
+
   void _markInteraction() {
     _lastInteraction = DateTime.now();
   }
@@ -208,6 +212,12 @@ class _FloatingKaiState extends State<_FloatingKai>
   bool get _isSpeaking => _currentState == PlayerState.playing;
 
   _AvatarState _resolveAvatarState() {
+    // MANUAL OVERRIDE: If in test mode and manual state is set, use that
+    if (_animTestMode && _manualState != null) {
+      return _manualState!;
+    }
+    
+    // AUTOMATIC STATE: Normal behavior
     if (_isSpeaking) return _AvatarState.speaking;
     if (_sending) return _AvatarState.thinking;
     if (DateTime.now().isBefore(_attentionUntil)) return _AvatarState.attention;
@@ -227,6 +237,13 @@ class _FloatingKaiState extends State<_FloatingKai>
       case _AvatarState.idle:
         return kAvatarIdleGif;
     }
+  }
+  
+  // TEST: Set manual animation state
+  void _setManualState(_AvatarState state) {
+    setState(() {
+      _manualState = state;
+    });
   }
 
   // persona toggle
@@ -715,6 +732,89 @@ class _FloatingKaiState extends State<_FloatingKai>
                             pg13: _isClone,
                           ),
                         ),
+                      
+                      // ANIMATION TEST BUTTONS - Bottom of screen
+                      Positioned(
+                        bottom: 10,
+                        left: 10,
+                        right: 10,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            // Toggle test mode button
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withOpacity(0.6),
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(
+                                  color: const Color(0xFFFFE7B0).withOpacity(0.5),
+                                ),
+                              ),
+                              child: InkWell(
+                                onTap: () {
+                                  setState(() {
+                                    _animTestMode = !_animTestMode;
+                                    if (!_animTestMode) _manualState = null; // Clear on disable
+                                  });
+                                },
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      _animTestMode ? Icons.check_box : Icons.check_box_outline_blank,
+                                      color: const Color(0xFFFFE7B0),
+                                      size: 16,
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      'Animation Test Mode',
+                                      style: TextStyle(
+                                        color: const Color(0xFFFFE7B0),
+                                        fontSize: 12,
+                                        fontWeight: _animTestMode ? FontWeight.bold : FontWeight.normal,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            
+                            // Animation buttons (only visible when test mode enabled)
+                            if (_animTestMode) ...[
+                              const SizedBox(height: 8),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  _AnimTestButton(
+                                    label: 'Idle',
+                                    isActive: _manualState == _AvatarState.idle,
+                                    onTap: () => _setManualState(_AvatarState.idle),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  _AnimTestButton(
+                                    label: 'Attn',
+                                    isActive: _manualState == _AvatarState.attention,
+                                    onTap: () => _setManualState(_AvatarState.attention),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  _AnimTestButton(
+                                    label: 'Think',
+                                    isActive: _manualState == _AvatarState.thinking,
+                                    onTap: () => _setManualState(_AvatarState.thinking),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  _AnimTestButton(
+                                    label: 'Speak',
+                                    isActive: _manualState == _AvatarState.speaking,
+                                    onTap: () => _setManualState(_AvatarState.speaking),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
                     ],
                   );
                 },
@@ -728,6 +828,46 @@ class _FloatingKaiState extends State<_FloatingKai>
 }
 
 // Copy all the UI widget classes from original main.dart
+class _AnimTestButton extends StatelessWidget {
+  final String label;
+  final bool isActive;
+  final VoidCallback onTap;
+
+  const _AnimTestButton({
+    required this.label,
+    required this.isActive,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: BoxDecoration(
+          color: isActive 
+            ? const Color(0xFFFFE7B0) 
+            : Colors.black.withOpacity(0.6),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: const Color(0xFFFFE7B0),
+            width: isActive ? 2 : 1,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: isActive ? const Color(0xFF0D0A07) : const Color(0xFFFFE7B0),
+            fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+            fontSize: 12,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _RingButton extends StatelessWidget {
   final Offset center;
   final IconData icon;
