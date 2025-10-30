@@ -1,7 +1,7 @@
 name: homecoming_app
 description: Overlay avatar app (mobile + desktop)
 publish_to: "none"
-version: 0.7.5+90
+version: 0.7.5+91
 
 environment:
   sdk: ">=3.0.0 <4.0.0"
@@ -54,6 +54,8 @@ flutter:
     - assets/avatar/images/mage.png
     - assets/audio/record_start.wav
     - assets/audio/record_stop.wav
-    # Note: GIF files and frame directories excluded to reduce app size
-    # Only using Lottie JSON animations (kai_idle.json, kai_talk.json)
+    # Frame-based animations for attention, thinking, speaking
+    - assets/avatar/attention_frames/
+    - assets/avatar/thinking_frames/
+    - assets/avatar/speaking_frames/
 

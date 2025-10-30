@@ -26,6 +26,11 @@ class _FloatingKai extends StatefulWidget {
 }
 
 class _FloatingKaiState extends State<_FloatingKai> with TickerProviderStateMixin {
+  // --- Animation state ---
+  String _currentAnimation = 'idle'; // 'idle', 'talk', 'attention', 'thinking', 'speaking'
+  int _currentFrame = 0;
+  AnimationController? _frameAnimController;
+  
   // --- floating movement ---
   bool _isFloating = false;
   Timer? _floatingTimer;
@@ -40,6 +45,31 @@ class _FloatingKaiState extends State<_FloatingKai> with TickerProviderStateMixi
       _startFloating();
     } else {
       _stopFloating();
+    }
+  }
+  
+  // --- Animation switching ---
+  void _switchAnimation(String animName) {
+    setState(() {
+      _currentAnimation = animName;
+      _currentFrame = 0;
+    });
+    
+    // For frame-based animations, setup controller
+    if (animName == 'attention' || animName == 'thinking' || animName == 'speaking') {
+      _frameAnimController?.dispose();
+      final frameCount = animName == 'thinking' ? 241 : 121;
+      _frameAnimController = AnimationController(
+        vsync: this,
+        duration: Duration(milliseconds: frameCount * 40), // 40ms per frame
+      )..addListener(() {
+        setState(() {
+          _currentFrame = (_frameAnimController!.value * frameCount).floor();
+        });
+      })..repeat();
+    } else {
+      _frameAnimController?.dispose();
+      _frameAnimController = null;
     }
   }
   
@@ -142,6 +172,7 @@ class _FloatingKaiState extends State<_FloatingKai> with TickerProviderStateMixi
     _stopFloating();
     _blinkCtrl.dispose();
     _glowCtrl.dispose();
+    _frameAnimController?.dispose();
     super.dispose();
   }
 
@@ -173,16 +204,10 @@ class _FloatingKaiState extends State<_FloatingKai> with TickerProviderStateMixi
                   ),
 
                   // === YOUR SPRITE ===
-                  // Using Lottie animation (much better than GIF!)
                   SizedBox(
                     width: spriteSize,
                     height: spriteSize,
-                    child: Lottie.asset(
-                      'assets/avatar/kai_talk.json', // Using talking animation
-                      fit: BoxFit.contain,
-                      repeat: true,
-                      animate: true,
-                    ),
+                    child: _buildAnimation(),
                   ),
 
                   // Blink overlay (simple eyelid sweep). Tweak position/size to your art.
@@ -222,9 +247,99 @@ class _FloatingKaiState extends State<_FloatingKai> with TickerProviderStateMixi
                       ),
                     ),
                   ),
+                  
+                  // Animation controller buttons
+                  Positioned(
+                    bottom: 10,
+                    left: 10,
+                    child: Material(
+                      color: Colors.transparent,
+                      child: Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: BoxDecoration(
+                          color: Colors.black54,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: Colors.white38, width: 2),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            _animButton('idle', 'Idle'),
+                            _animButton('talk', 'Talk'),
+                            _animButton('attention', 'Att'),
+                            _animButton('thinking', 'Think'),
+                            _animButton('speaking', 'Speak'),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
                 ],
               );
             },
+          ),
+        ),
+      ),
+    );
+  }
+  
+  // Build animation widget based on current selection
+  Widget _buildAnimation() {
+    switch (_currentAnimation) {
+      case 'idle':
+        return Lottie.asset(
+          'assets/avatar/kai_idle.json',
+          fit: BoxFit.contain,
+          repeat: true,
+          animate: true,
+        );
+      case 'talk':
+        return Lottie.asset(
+          'assets/avatar/kai_talk.json',
+          fit: BoxFit.contain,
+          repeat: true,
+          animate: true,
+        );
+      case 'attention':
+      case 'thinking':
+      case 'speaking':
+        // Frame-based animation
+        String frameDir = _currentAnimation == 'attention' 
+          ? 'attention_frames'
+          : _currentAnimation == 'thinking'
+          ? 'thinking_frames'
+          : 'speaking_frames';
+        return Image.asset(
+          'assets/avatar/$frameDir/frame_${_currentFrame.toString().padLeft(4, '0')}.png',
+          fit: BoxFit.contain,
+          errorBuilder: (context, error, stack) => const Icon(Icons.error, color: Colors.red),
+        );
+      default:
+        return const Icon(Icons.person, size: 100, color: Colors.white);
+    }
+  }
+  
+  // Animation button widget
+  Widget _animButton(String animName, String label) {
+    final isActive = _currentAnimation == animName;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 2),
+      child: InkWell(
+        onTap: () => _switchAnimation(animName),
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          decoration: BoxDecoration(
+            color: isActive ? Colors.greenAccent.withOpacity(0.3) : Colors.transparent,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: isActive ? Colors.greenAccent : Colors.white70,
+              fontSize: 10,
+              fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+            ),
           ),
         ),
       ),
