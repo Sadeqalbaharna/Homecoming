@@ -178,7 +178,7 @@ class _FloatingKaiState extends State<_FloatingKai> with TickerProviderStateMixi
                     width: spriteSize,
                     height: spriteSize,
                     child: Lottie.asset(
-                      'assets/avatar/kai_idle.json',
+                      'assets/avatar/kai_talk.json', // Using talking animation
                       fit: BoxFit.contain,
                       repeat: true,
                       animate: true,
