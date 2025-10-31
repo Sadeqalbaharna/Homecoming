@@ -29,11 +29,11 @@ const double kUiLiftPx = 64;
 const bool kAlwaysOnTop = false;
 
 /// ===== Avatar assets + timings =====
-// Using static image as fallback for missing GIF animations  
-const String kAvatarIdleGif = 'assets/avatar/images/mage.png';
-const String kAvatarAttentionGif = 'assets/avatar/images/mage.png';
-const String kAvatarThinkingGif = 'assets/avatar/images/mage.png';
-const String kAvatarSpeakingGif = 'assets/avatar/images/mage.png';
+// GIF animations for each state
+const String kAvatarIdleGif = 'assets/avatar/idle.gif';
+const String kAvatarAttentionGif = 'assets/avatar/kai_attention.gif';
+const String kAvatarThinkingGif = 'assets/avatar/kai_thinking.gif';
+const String kAvatarSpeakingGif = 'assets/avatar/kai_speaking.gif';
 
 const Duration kIdleAfter = Duration(seconds: 15);
 const Duration kAttentionPulse = Duration(seconds: 2);
