@@ -41,8 +41,11 @@ class DevConfig {
   static bool get hasDevKeys => DEV_OPENAI_KEY.isNotEmpty && DEV_ELEVENLABS_KEY.isNotEmpty;
 }
 
-/// Kai avatar asset
-const String kAvatarIdleGif = 'assets/avatar/images/mage.png';
+/// Kai avatar assets - GIF animations for each state
+const String kAvatarIdleGif = 'assets/avatar/idle.gif';
+const String kAvatarAttentionGif = 'assets/avatar/kai_attention.gif';
+const String kAvatarThinkingGif = 'assets/avatar/kai_thinking.gif';
+const String kAvatarSpeakingGif = 'assets/avatar/kai_speaking.gif';
 
 /// Global AI service instance
 final aiService = AIService();
@@ -384,6 +387,30 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
   Timer? _positionMonitor;
   bool _userIsDragging = false;
   Timer? _dragResumeTimer;
+  
+  // ANIMATION TEST MODE - manual override for testing animations
+  bool _animTestMode = false;
+  String _currentAnimation = 'idle'; // 'idle', 'attention', 'thinking', 'speaking'
+  
+  // Helper to get current avatar asset based on test mode or automatic state
+  String _getCurrentAvatarAsset() {
+    if (_animTestMode) {
+      // Manual mode: use selected animation
+      switch (_currentAnimation) {
+        case 'idle': return kAvatarIdleGif;
+        case 'attention': return kAvatarAttentionGif;
+        case 'thinking': return kAvatarThinkingGif;
+        case 'speaking': return kAvatarSpeakingGif;
+        default: return kAvatarIdleGif;
+      }
+    } else {
+      // Automatic mode: based on app state
+      if (_sending) return kAvatarThinkingGif;
+      if (_playerState == PlayerState.playing) return kAvatarSpeakingGif;
+      // Could add attention state here if needed
+      return kAvatarIdleGif;
+    }
+  }
 
   // Start auto-movement - moves the entire window programmatically
   void _startAutoMovement() async {
@@ -1444,6 +1471,39 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
       ),
     );
   }
+  
+  /// Build animation test button
+  Widget _buildAnimButton(String animType, String label) {
+    final isActive = _currentAnimation == animType;
+    return InkWell(
+      onTap: () {
+        setState(() {
+          _currentAnimation = animType;
+        });
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: isActive 
+            ? const Color(0xFFFFE7B0) 
+            : Colors.black.withOpacity(0.6),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: const Color(0xFFFFE7B0),
+            width: isActive ? 2 : 1,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: isActive ? const Color(0xFF0D0A07) : const Color(0xFFFFE7B0),
+            fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+            fontSize: 10,
+          ),
+        ),
+      ),
+    );
+  }
 
   /// Toggle between available voices (simple toggle, no modal)
   Future<void> _toggleVoice() async {
@@ -1544,7 +1604,7 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
                       // Removed boxShadow - it was expanding hit area!
                     ),
                     child: Image.asset(
-                      kAvatarIdleGif,
+                      _getCurrentAvatarAsset(), // Dynamic: changes based on test mode or app state
                       fit: BoxFit.contain,
                     ),
                   ),
@@ -1664,6 +1724,73 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
                       ),
                     );
                   }),
+                  
+                  // ANIMATION TEST BUTTONS - Bottom of compact overlay
+                  if (!_expanded && !_showExpandedWindow)
+                    Positioned(
+                      bottom: 10,
+                      left: 10,
+                      right: 10,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // Toggle test mode button
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withOpacity(0.6),
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: const Color(0xFFFFE7B0).withOpacity(0.5),
+                              ),
+                            ),
+                            child: InkWell(
+                              onTap: () {
+                                setState(() {
+                                  _animTestMode = !_animTestMode;
+                                });
+                              },
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    _animTestMode ? Icons.check_box : Icons.check_box_outline_blank,
+                                    color: const Color(0xFFFFE7B0),
+                                    size: 14,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    'Test',
+                                    style: TextStyle(
+                                      color: const Color(0xFFFFE7B0),
+                                      fontSize: 10,
+                                      fontWeight: _animTestMode ? FontWeight.bold : FontWeight.normal,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          
+                          // Animation buttons (only visible when test mode enabled)
+                          if (_animTestMode) ...[
+                            const SizedBox(height: 6),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                _buildAnimButton('idle', 'Idle'),
+                                const SizedBox(width: 6),
+                                _buildAnimButton('attention', 'Attn'),
+                                const SizedBox(width: 6),
+                                _buildAnimButton('thinking', 'Think'),
+                                const SizedBox(width: 6),
+                                _buildAnimButton('speaking', 'Speak'),
+                              ],
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
           ],
         
         // NEW: Unified Expanded Window with Tabs (Chat, Personality, Analytics)
