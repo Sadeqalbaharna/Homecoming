@@ -1,7 +1,7 @@
 name: homecoming_app
 description: Overlay avatar app (mobile + desktop)
 publish_to: "none"
-version: 0.7.5+95
+version: 0.7.5+96
 
 environment:
   sdk: ">=3.0.0 <4.0.0"
@@ -54,12 +54,7 @@ flutter:
     - assets/avatar/images/mage.png
     - assets/audio/record_start.wav
     - assets/audio/record_stop.wav
-    # GIF animations for main.dart (all 4 states)
-    - assets/avatar/idle.gif
-    - assets/avatar/kai_attention.gif
-    - assets/avatar/kai_thinking.gif
-    - assets/avatar/kai_speaking.gif
-    # Frame-based animations (not currently used by main.dart)
+    # Frame-based animations (lightweight PNG sequences)
     - assets/avatar/attention_frames/
     - assets/avatar/thinking_frames/
     - assets/avatar/speaking_frames/

@@ -41,11 +41,16 @@ class DevConfig {
   static bool get hasDevKeys => DEV_OPENAI_KEY.isNotEmpty && DEV_ELEVENLABS_KEY.isNotEmpty;
 }
 
-/// Kai avatar assets - GIF animations for each state
-const String kAvatarIdleGif = 'assets/avatar/idle.gif';
-const String kAvatarAttentionGif = 'assets/avatar/kai_attention.gif';
-const String kAvatarThinkingGif = 'assets/avatar/kai_thinking.gif';
-const String kAvatarSpeakingGif = 'assets/avatar/kai_speaking.gif';
+/// Kai avatar assets - Frame-based animations (lightweight!)
+const String kAvatarIdleGif = 'assets/avatar/images/mage.png'; // Static for idle
+const String kAvatarAttentionFrameDir = 'assets/avatar/attention_frames/';
+const String kAvatarThinkingFrameDir = 'assets/avatar/thinking_frames/';
+const String kAvatarSpeakingFrameDir = 'assets/avatar/speaking_frames/';
+const int kAttentionFrameCount = 121;
+const int kThinkingFrameCount = 241;
+const int kSpeakingFrameCount = 121;
+// Fallback static image
+const String kAvatarFallback = 'assets/avatar/images/mage.png';
 
 /// Global AI service instance
 final aiService = AIService();
@@ -391,24 +396,87 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
   // ANIMATION TEST MODE - manual override for testing animations
   bool _animTestMode = false;
   String _currentAnimation = 'idle'; // 'idle', 'attention', 'thinking', 'speaking'
+  int _currentFrame = 0;
+  AnimationController? _frameAnimController;
   
-  // Helper to get current avatar asset based on test mode or automatic state
-  String _getCurrentAvatarAsset() {
-    if (_animTestMode) {
-      // Manual mode: use selected animation
-      switch (_currentAnimation) {
-        case 'idle': return kAvatarIdleGif;
-        case 'attention': return kAvatarAttentionGif;
-        case 'thinking': return kAvatarThinkingGif;
-        case 'speaking': return kAvatarSpeakingGif;
-        default: return kAvatarIdleGif;
-      }
+  // Helper to get current frame count based on animation
+  int _getFrameCount(String animType) {
+    switch (animType) {
+      case 'attention': return kAttentionFrameCount;
+      case 'thinking': return kThinkingFrameCount;
+      case 'speaking': return kSpeakingFrameCount;
+      default: return 0;
+    }
+  }
+  
+  // Helper to switch animation and start frame controller
+  void _switchToAnimation(String animType) {
+    setState(() {
+      _currentAnimation = animType;
+      _currentFrame = 0;
+    });
+    
+    // Dispose old controller
+    _frameAnimController?.dispose();
+    _frameAnimController = null;
+    
+    // Only create controller for frame-based animations
+    if (animType != 'idle') {
+      final frameCount = _getFrameCount(animType);
+      _frameAnimController = AnimationController(
+        vsync: this,
+        duration: Duration(milliseconds: frameCount * 40), // ~25 fps
+      )..addListener(() {
+        if (mounted) {
+          setState(() {
+            _currentFrame = (_frameAnimController!.value * frameCount).floor() % frameCount;
+          });
+        }
+      })..repeat();
+    }
+  }
+  
+  // Build avatar widget based on current animation
+  Widget _buildAvatarWidget() {
+    if (_currentAnimation == 'idle') {
+      return Image.asset(
+        kAvatarIdleGif,
+        fit: BoxFit.contain,
+        errorBuilder: (context, error, stackTrace) {
+          return Image.asset(kAvatarFallback, fit: BoxFit.contain);
+        },
+      );
     } else {
-      // Automatic mode: based on app state
-      if (_sending) return kAvatarThinkingGif;
-      if (_playerState == PlayerState.playing) return kAvatarSpeakingGif;
-      // Could add attention state here if needed
-      return kAvatarIdleGif;
+      // Frame-based animation
+      String frameDir;
+      switch (_currentAnimation) {
+        case 'attention': frameDir = kAvatarAttentionFrameDir; break;
+        case 'thinking': frameDir = kAvatarThinkingFrameDir; break;
+        case 'speaking': frameDir = kAvatarSpeakingFrameDir; break;
+        default: frameDir = kAvatarAttentionFrameDir;
+      }
+      
+      return Image.asset(
+        '${frameDir}frame_${_currentFrame.toString().padLeft(4, '0')}.png',
+        fit: BoxFit.contain,
+        errorBuilder: (context, error, stackTrace) {
+          return Image.asset(kAvatarFallback, fit: BoxFit.contain);
+        },
+      );
+    }
+  }
+  
+  // Update animation based on app state (automatic mode)
+  void _updateAnimationState() {
+    if (_animTestMode) return; // Don't auto-update in test mode
+    
+    String targetAnim = 'idle';
+    if (_sending) {
+      targetAnim = 'thinking';
+    } else if (_playerState == PlayerState.playing) targetAnim = 'speaking';
+    
+    if (targetAnim != _currentAnimation) {
+      _switchToAnimation(targetAnim);
     }
   }
 
@@ -753,6 +821,8 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
             _isPlayingTest = false;
           }
         });
+        // Update animation automatically when player state changes
+        _updateAnimationState();
       }
     });
     
@@ -770,6 +840,7 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
     _player.dispose();
     _beepPlayer.dispose();
     voiceService.dispose();
+    _frameAnimController?.dispose(); // Dispose frame animation controller
     // Dispose all delta animation controllers
     for (final f in _floaters) {
       f.ctrl.dispose();
@@ -1291,6 +1362,9 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
       _ttsPath = null;
     });
     
+    // Update animation to thinking state
+    _updateAnimationState();
+    
     // Clear the text field
     _controller.clear();
     
@@ -1369,6 +1443,8 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
       setState(() => _error = e.toString());
     } finally {
       setState(() => _sending = false);
+      // Update animation back to idle
+      _updateAnimationState();
     }
   }
   
@@ -1477,9 +1553,7 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
     final isActive = _currentAnimation == animType;
     return InkWell(
       onTap: () {
-        setState(() {
-          _currentAnimation = animType;
-        });
+        _switchToAnimation(animType);
       },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -1603,10 +1677,7 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
                       borderRadius: BorderRadius.circular(50),
                       // Removed boxShadow - it was expanding hit area!
                     ),
-                    child: Image.asset(
-                      _getCurrentAvatarAsset(), // Dynamic: changes based on test mode or app state
-                      fit: BoxFit.contain,
-                    ),
+                    child: _buildAvatarWidget(), // Dynamic frame-based animation!
                   ),
                 ),
               ),
