@@ -42,10 +42,11 @@ class DevConfig {
 }
 
 /// Kai avatar assets - Frame-based animations (lightweight!)
-const String kAvatarIdleGif = 'assets/avatar/images/mage.png'; // Static for idle
+const String kAvatarIdleFrameDir = 'assets/avatar/idle_frames/';
 const String kAvatarAttentionFrameDir = 'assets/avatar/attention_frames/';
 const String kAvatarThinkingFrameDir = 'assets/avatar/thinking_frames/';
 const String kAvatarSpeakingFrameDir = 'assets/avatar/speaking_frames/';
+const int kIdleFrameCount = 121;
 const int kAttentionFrameCount = 121;
 const int kThinkingFrameCount = 241;
 const int kSpeakingFrameCount = 121;
@@ -402,10 +403,11 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
   // Helper to get current frame count based on animation
   int _getFrameCount(String animType) {
     switch (animType) {
+      case 'idle': return kIdleFrameCount;
       case 'attention': return kAttentionFrameCount;
       case 'thinking': return kThinkingFrameCount;
       case 'speaking': return kSpeakingFrameCount;
-      default: return 0;
+      default: return kIdleFrameCount;
     }
   }
   
@@ -420,50 +422,39 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
     _frameAnimController?.dispose();
     _frameAnimController = null;
     
-    // Only create controller for frame-based animations
-    if (animType != 'idle') {
-      final frameCount = _getFrameCount(animType);
-      _frameAnimController = AnimationController(
-        vsync: this,
-        duration: Duration(milliseconds: frameCount * 40), // ~25 fps
-      )..addListener(() {
-        if (mounted) {
-          setState(() {
-            _currentFrame = (_frameAnimController!.value * frameCount).floor() % frameCount;
-          });
-        }
-      })..repeat();
-    }
+    // Create controller for all animations (including idle!)
+    final frameCount = _getFrameCount(animType);
+    _frameAnimController = AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: frameCount * 40), // ~25 fps
+    )..addListener(() {
+      if (mounted) {
+        setState(() {
+          _currentFrame = (_frameAnimController!.value * frameCount).floor() % frameCount;
+        });
+      }
+    })..repeat();
   }
   
   // Build avatar widget based on current animation
   Widget _buildAvatarWidget() {
-    if (_currentAnimation == 'idle') {
-      return Image.asset(
-        kAvatarIdleGif,
-        fit: BoxFit.contain,
-        errorBuilder: (context, error, stackTrace) {
-          return Image.asset(kAvatarFallback, fit: BoxFit.contain);
-        },
-      );
-    } else {
-      // Frame-based animation
-      String frameDir;
-      switch (_currentAnimation) {
-        case 'attention': frameDir = kAvatarAttentionFrameDir; break;
-        case 'thinking': frameDir = kAvatarThinkingFrameDir; break;
-        case 'speaking': frameDir = kAvatarSpeakingFrameDir; break;
-        default: frameDir = kAvatarAttentionFrameDir;
-      }
-      
-      return Image.asset(
-        '${frameDir}frame_${_currentFrame.toString().padLeft(4, '0')}.png',
-        fit: BoxFit.contain,
-        errorBuilder: (context, error, stackTrace) {
-          return Image.asset(kAvatarFallback, fit: BoxFit.contain);
-        },
-      );
+    // All animations now use frame-based animation
+    String frameDir;
+    switch (_currentAnimation) {
+      case 'idle': frameDir = kAvatarIdleFrameDir; break;
+      case 'attention': frameDir = kAvatarAttentionFrameDir; break;
+      case 'thinking': frameDir = kAvatarThinkingFrameDir; break;
+      case 'speaking': frameDir = kAvatarSpeakingFrameDir; break;
+      default: frameDir = kAvatarIdleFrameDir;
     }
+    
+    return Image.asset(
+      '${frameDir}frame_${_currentFrame.toString().padLeft(4, '0')}.png',
+      fit: BoxFit.contain,
+      errorBuilder: (context, error, stackTrace) {
+        return Image.asset(kAvatarFallback, fit: BoxFit.contain);
+      },
+    );
   }
   
   // Update animation based on app state (automatic mode)
