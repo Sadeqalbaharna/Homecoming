@@ -803,6 +803,9 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
     // Initialize Firebase and test connection
     _initializeFirebase();
     
+    // Start idle animation immediately
+    _switchToAnimation('idle');
+    
     _player.onPlayerStateChanged.listen((state) {
       if (mounted) {
         setState(() {
