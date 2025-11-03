@@ -252,7 +252,7 @@ class _PermissionScreenState extends State<PermissionScreen> with WidgetsBinding
                   border: Border.all(color: const Color(0xFFFFE7B0), width: 3),
                 ),
                 child: ClipOval(
-                  child: Image.asset(kAvatarIdleGif, fit: BoxFit.cover),
+                  child: Image.asset(kAvatarFallback, fit: BoxFit.cover),
                 ),
               ),
               const SizedBox(height: 32),
