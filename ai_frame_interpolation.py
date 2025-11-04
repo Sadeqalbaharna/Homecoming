@@ -303,11 +303,15 @@ def batch_process_transitions(animations_dir, output_dir, num_frames=8, method='
     ordered_states = ['idle', 'attention', 'thinking', 'speaking']
     available_ordered = [s for s in ordered_states if s in state_dirs]
     
-    # Create transitions in order
+    # Create transitions in order (state-to-state)
     for i in range(len(available_ordered)):
         start = available_ordered[i]
         end = available_ordered[(i + 1) % len(available_ordered)]
         transitions.append((start, end))
+    
+    # Add loop transitions (last frame to first frame of same animation)
+    for state in available_ordered:
+        transitions.append((state, state))  # Loop transition
     
     interpolator = FrameInterpolator(method=method)
     
@@ -318,8 +322,12 @@ def batch_process_transitions(animations_dir, output_dir, num_frames=8, method='
     print(f"   Found states: {', '.join(available_ordered)}\n")
     
     for start_state, end_state in transitions:
+        # Determine transition type
+        is_loop = (start_state == end_state)
+        transition_type = "LOOP" if is_loop else "TRANSITION"
+        
         print(f"\n{'='*60}")
-        print(f"🔄 Transition: {start_state.upper()} → {end_state.upper()}")
+        print(f"🔄 {transition_type}: {start_state.upper()} → {end_state.upper()}")
         print(f"{'='*60}")
         
         # Get last frame of start state
@@ -341,7 +349,10 @@ def batch_process_transitions(animations_dir, output_dir, num_frames=8, method='
         print(f"   End: {frame2_path.name} from {end_dir.name}/")
         
         # Create transition
-        transition_output = output_dir / f"{start_state}_to_{end_state}"
+        if is_loop:
+            transition_output = output_dir / f"{start_state}_loop"
+        else:
+            transition_output = output_dir / f"{start_state}_to_{end_state}"
         interpolator.interpolate(
             frame1_path,
             frame2_path,
