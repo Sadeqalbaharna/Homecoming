@@ -20,6 +20,7 @@ class VoiceActivationService {
   bool _isListening = false;
   bool _isEnabled = false;
   bool _isInConversation = false; // NEW: Track if in active conversation
+  bool _isPaused = false; // NEW: Pause while Kai is speaking
   Timer? _listeningTimer;
   Timer? _conversationTimer; // NEW: Timer to end conversation after silence
   StreamController<String>? _wakeWordController;
@@ -123,7 +124,7 @@ class VoiceActivationService {
 
   /// Listen for a single chunk and check for wake word OR conversation input
   Future<void> _listenForWakeWord() async {
-    if (!_isListening) return;
+    if (!_isListening || _isPaused) return; // Skip if paused
     
     try {
       // Record a short audio chunk
@@ -246,6 +247,18 @@ class VoiceActivationService {
   
   /// Check if in active conversation mode
   bool get isInConversation => _isInConversation;
+
+  /// Pause listening temporarily (e.g., while Kai is speaking)
+  void pause() {
+    _isPaused = true;
+    print('⏸️ [VoiceActivation] Paused listening (Kai speaking)');
+  }
+
+  /// Resume listening after pause
+  void resume() {
+    _isPaused = false;
+    print('▶️ [VoiceActivation] Resumed listening');
+  }
 
   /// Clean up resources
   Future<void> dispose() async {

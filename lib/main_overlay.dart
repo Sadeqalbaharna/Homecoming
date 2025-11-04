@@ -889,6 +889,11 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
         });
         // Update animation automatically when player state changes
         _updateAnimationState();
+        
+        // Resume voice activation when TTS finishes playing
+        if (state == PlayerState.completed) {
+          _voiceActivation.resume();
+        }
       }
     });
     
@@ -1351,6 +1356,9 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
       // Handle TTS
       String? audioPath;
       if (resp.ttsBase64 != null) {
+        // Pause voice activation while Kai speaks (prevent self-listening)
+        _voiceActivation.pause();
+        
         final mp3Path = await _writeTempMp3(base64Decode(resp.ttsBase64!));
         await _player.play(DeviceFileSource(mp3Path));
         audioPath = mp3Path;

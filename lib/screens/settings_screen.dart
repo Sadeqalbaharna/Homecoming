@@ -185,7 +185,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               Switch(
                 value: _voiceActivationEnabled,
                 onChanged: _toggleVoiceActivation,
-                activeColor: const Color(0xFFFFE7B0),
+                activeThumbColor: const Color(0xFFFFE7B0),
               ),
             ],
           ),
@@ -291,7 +291,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               Switch(
                 value: _proactiveEnabled,
                 onChanged: _toggleProactive,
-                activeColor: const Color(0xFFFFE7B0),
+                activeThumbColor: const Color(0xFFFFE7B0),
               ),
             ],
           ),
