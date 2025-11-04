@@ -1,9 +1,10 @@
 /// Settings Screen
-/// Configure app behavior including proactive AI
+/// Configure app behavior including proactive AI and voice activation
 library;
 
 import 'package:flutter/material.dart';
 import '../services/proactive_service.dart';
+import '../services/voice_activation_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -15,7 +16,9 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   final ProactiveService _proactive = ProactiveService();
+  final VoiceActivationService _voiceActivation = VoiceActivationService();
   bool _proactiveEnabled = true;
+  bool _voiceActivationEnabled = false;
   bool _isLoading = true;
 
   @override
@@ -28,6 +31,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
       _proactiveEnabled = prefs.getBool('proactive_enabled') ?? true;
+      _voiceActivationEnabled = prefs.getBool('voice_activation_enabled') ?? false;
       _isLoading = false;
     });
   }
@@ -45,6 +49,43 @@ class _SettingsScreenState extends State<SettingsScreen> {
             value 
               ? '✨ Kai will now reach out proactively!'
               : '🔕 Kai will only respond when you initiate',
+          ),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
+  Future<void> _toggleVoiceActivation(bool value) async {
+    setState(() {
+      _voiceActivationEnabled = value;
+    });
+    
+    if (value) {
+      final started = await _voiceActivation.start();
+      if (!started && mounted) {
+        setState(() {
+          _voiceActivationEnabled = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('❌ Failed to start voice activation. Check microphone permissions.'),
+            duration: Duration(seconds: 3),
+          ),
+        );
+        return;
+      }
+    } else {
+      await _voiceActivation.stop();
+    }
+    
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            value 
+              ? '🎤 "Hey Kai" voice activation enabled!'
+              : '🔕 Voice activation disabled',
           ),
           duration: const Duration(seconds: 2),
         ),
@@ -76,6 +117,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [
+                _buildSectionTitle('🎤 Voice Controls'),
+                const SizedBox(height: 8),
+                _buildVoiceActivationToggle(),
+                const SizedBox(height: 24),
+                
                 _buildSectionTitle('🤖 AI Behavior'),
                 const SizedBox(height: 8),
                 _buildProactiveToggle(),
@@ -96,6 +142,112 @@ class _SettingsScreenState extends State<SettingsScreen> {
         color: Color(0xFFFFE7B0),
         fontSize: 18,
         fontWeight: FontWeight.bold,
+      ),
+    );
+  }
+
+  Widget _buildVoiceActivationToggle() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF16213E),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '"Hey Kai" Voice Activation',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      'Always listen for "Hey Kai" to start conversations',
+                      style: TextStyle(
+                        color: Colors.white70,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Switch(
+                value: _voiceActivationEnabled,
+                onChanged: _toggleVoiceActivation,
+                activeColor: const Color(0xFFFFE7B0),
+              ),
+            ],
+          ),
+          if (_voiceActivationEnabled) ...[
+            const SizedBox(height: 12),
+            const Divider(color: Colors.white24),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1A1A2E),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.mic, color: Color(0xFFFFE7B0), size: 20),
+                      SizedBox(width: 8),
+                      Text(
+                        'How it works:',
+                        style: TextStyle(
+                          color: Color(0xFFFFE7B0),
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    '• Say "Hey Kai" to activate\n'
+                    '• Continue speaking your message\n'
+                    '• Or just say "Hey Kai" to start recording',
+                    style: TextStyle(
+                      color: Colors.white70,
+                      fontSize: 12,
+                      height: 1.4,
+                    ),
+                  ),
+                  SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Icon(Icons.battery_alert, color: Colors.orange, size: 16),
+                      SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          'May increase battery usage',
+                          style: TextStyle(
+                            color: Colors.orange,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }

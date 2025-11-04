@@ -19,6 +19,7 @@ import 'services/secure_storage_service.dart';
 import 'services/firebase_service.dart';
 import 'services/curiosity_service.dart';
 import 'services/proactive_service.dart';
+import 'services/voice_activation_service.dart';
 import 'screens/personality_screen.dart';
 import 'screens/usage_stats_screen.dart';
 import 'api_key_setup_screen.dart';
@@ -379,6 +380,9 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
   
   // Proactive AI service
   final ProactiveService _proactive = ProactiveService();
+  
+  // Voice activation service
+  final VoiceActivationService _voiceActivation = VoiceActivationService();
   
   // Proactive notification bubble
   String? _proactiveMessage;
@@ -832,6 +836,38 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
     }
   }
 
+  /// Initialize voice activation for "Hey Kai" wake word
+  Future<void> _initializeVoiceActivation() async {
+    try {
+      await _voiceActivation.initialize();
+      
+      // Listen for wake word detection
+      _voiceActivation.onWakeWordDetected.listen((followUpText) async {
+        print('🎯 [WAKE WORD] Detected! Follow-up: "$followUpText"');
+        
+        // Open chat window
+        if (!_expanded && !_showExpandedWindow) {
+          setState(() {
+            _showExpandedWindow = true;
+            _expandedWindowInitialTab = 0; // Chat tab
+          });
+        }
+        
+        // If there's follow-up text, send it immediately
+        if (followUpText.isNotEmpty) {
+          await _sendMessage(followUpText);
+        } else {
+          // Otherwise, start recording for their full message
+          await _startVoiceRecording();
+        }
+      });
+      
+      print('✅ [VOICE ACTIVATION] Initialized and ready');
+    } catch (e) {
+      print('❌ [VOICE ACTIVATION] Initialization error: $e');
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -847,6 +883,9 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
     
     // Initialize proactive AI
     _initializeProactiveAI();
+    
+    // Initialize voice activation
+    _initializeVoiceActivation();
     
     _player.onPlayerStateChanged.listen((state) {
       if (mounted) {
@@ -867,6 +906,7 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
   @override
   void dispose() {
     _proactive.stop(); // Stop proactive monitoring
+    _voiceActivation.dispose(); // Stop voice activation
     _stopAutoMovement();
     _controller.dispose();
     _chatScrollController.dispose();
