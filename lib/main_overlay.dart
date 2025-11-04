@@ -1664,6 +1664,27 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
                       },
                     ),
                     
+                    // Float/Pause toggle button (bottom-right, 45 degrees)
+                    _buildCircularButton(
+                      angle: 45,
+                      radius: 68, // Wrapped tightly around avatar
+                      icon: _isAutoMoving ? Icons.pause : Icons.play_arrow,
+                      backgroundColor: _isAutoMoving 
+                          ? const Color(0xFFFF9800) // Orange when floating
+                          : const Color(0xFF4CAF50), // Green when paused
+                      iconColor: Colors.white,
+                      onTap: () {
+                        setState(() {
+                          if (_isAutoMoving) {
+                            _stopAutoMovement();
+                          } else {
+                            _startAutoMovement();
+                          }
+                        });
+                        print('🎈 [FLOAT] ${_isAutoMoving ? "Paused" : "Resumed"}');
+                      },
+                    ),
+                    
                     // Close button (bottom)
                     _buildCircularButton(
                       angle: 90,
