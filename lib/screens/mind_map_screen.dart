@@ -1,0 +1,417 @@
+/// Mind Map Screen - Obsidian-style knowledge graph visualization
+library;
+
+import 'dart:math';
+import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
+import '../models/knowledge_node.dart';
+import '../services/knowledge_graph_service.dart';
+import '../widgets/graph_canvas.dart';
+import '../widgets/node_detail_card.dart';
+
+class MindMapScreen extends StatefulWidget {
+  final String personaId;
+
+  const MindMapScreen({
+    super.key,
+    required this.personaId,
+  });
+
+  @override
+  State<MindMapScreen> createState() => _MindMapScreenState();
+}
+
+class _MindMapScreenState extends State<MindMapScreen> with TickerProviderStateMixin {
+  final KnowledgeGraphService _graphService = KnowledgeGraphService();
+  
+  KnowledgeGraph? _graph;
+  bool _isLoading = true;
+  String? _error;
+  
+  // View state
+  final TransformationController _transformationController = TransformationController();
+  
+  // Selection
+  KnowledgeNode? _selectedNode;
+  Set<String> _highlightedNodeIds = {};
+  
+  // Animation
+  late AnimationController _forceAnimationController;
+  bool _isAnimating = false;
+  
+  // Filters
+  Set<NodeType> _visibleTypes = NodeType.values.toSet();
+
+  @override
+  void initState() {
+    super.initState();
+    _forceAnimationController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 3),
+    );
+    _loadGraph();
+  }
+
+  @override
+  void dispose() {
+    _forceAnimationController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadGraph() async {
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+
+    try {
+      final graph = await _graphService.buildGraph(
+        personaId: widget.personaId,
+        forceRebuild: false,
+      );
+      
+      // Initialize node positions in a circle
+      _initializeNodePositions(graph);
+      
+      setState(() {
+        _graph = graph;
+        _isLoading = false;
+      });
+      
+      // Start force-directed layout animation
+      _startForceSimulation();
+    } catch (e) {
+      setState(() {
+        _error = e.toString();
+        _isLoading = false;
+      });
+    }
+  }
+
+  /// Initialize nodes in a circular layout
+  void _initializeNodePositions(KnowledgeGraph graph) {
+    final centerX = 400.0;
+    final centerY = 400.0;
+    final radius = 300.0;
+    
+    for (var i = 0; i < graph.nodes.length; i++) {
+      final angle = (i / graph.nodes.length) * 2 * pi;
+      graph.nodes[i].x = centerX + radius * cos(angle);
+      graph.nodes[i].y = centerY + radius * sin(angle);
+    }
+  }
+
+  /// Start force-directed layout simulation
+  void _startForceSimulation() {
+    if (_graph == null || _isAnimating) return;
+    
+    _isAnimating = true;
+    
+    _forceAnimationController.addListener(() {
+      if (_graph != null) {
+        _applyForces(_graph!);
+        setState(() {});
+      }
+    });
+    
+    _forceAnimationController.repeat();
+    
+    // Stop after 3 seconds
+    Future.delayed(const Duration(seconds: 3), () {
+      _forceAnimationController.stop();
+      _isAnimating = false;
+    });
+  }
+
+  /// Apply force-directed layout physics
+  void _applyForces(KnowledgeGraph graph) {
+    const double repulsionStrength = 500.0;
+    const double attractionStrength = 0.01;
+    const double damping = 0.9;
+    
+    // Reset forces
+    for (final node in graph.nodes) {
+      node.vx = 0;
+      node.vy = 0;
+    }
+    
+    // 1. Repulsion between all nodes
+    for (var i = 0; i < graph.nodes.length; i++) {
+      for (var j = i + 1; j < graph.nodes.length; j++) {
+        final node1 = graph.nodes[i];
+        final node2 = graph.nodes[j];
+        
+        final dx = node2.x - node1.x;
+        final dy = node2.y - node1.y;
+        final distance = sqrt(dx * dx + dy * dy);
+        
+        if (distance > 0) {
+          final force = repulsionStrength / (distance * distance);
+          node1.vx -= (dx / distance) * force;
+          node1.vy -= (dy / distance) * force;
+          node2.vx += (dx / distance) * force;
+          node2.vy += (dy / distance) * force;
+        }
+      }
+    }
+    
+    // 2. Attraction along edges
+    for (final edge in graph.edges) {
+      final node1 = graph.getNode(edge.fromId);
+      final node2 = graph.getNode(edge.toId);
+      
+      if (node1 != null && node2 != null) {
+        final dx = node2.x - node1.x;
+        final dy = node2.y - node1.y;
+        final distance = sqrt(dx * dx + dy * dy);
+        
+        final force = distance * attractionStrength * edge.strength;
+        node1.vx += (dx / distance) * force;
+        node1.vy += (dy / distance) * force;
+        node2.vx -= (dx / distance) * force;
+        node2.vy -= (dy / distance) * force;
+      }
+    }
+    
+    // 3. Apply velocities with damping
+    for (final node in graph.nodes) {
+      node.x += node.vx;
+      node.y += node.vy;
+      node.vx *= damping;
+      node.vy *= damping;
+    }
+  }
+
+  void _onNodeTap(KnowledgeNode node) {
+    setState(() {
+      _selectedNode = node;
+      
+      // Highlight connected nodes
+      _highlightedNodeIds = {node.id};
+      final connectedNodes = _graph!.getConnectedNodes(node.id);
+      _highlightedNodeIds.addAll(connectedNodes.map((n) => n.id));
+    });
+  }
+
+  void _clearSelection() {
+    setState(() {
+      _selectedNode = null;
+      _highlightedNodeIds.clear();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF1E1E1E), // Dark background like Obsidian
+      appBar: AppBar(
+        title: const Text('Knowledge Graph'),
+        backgroundColor: const Color(0xFF2D2D2D),
+        actions: [
+          // Search
+          IconButton(
+            icon: const Icon(Icons.search),
+            onPressed: () => _showSearchDialog(),
+          ),
+          // Filter
+          IconButton(
+            icon: const Icon(Icons.filter_list),
+            onPressed: () => _showFilterDialog(),
+          ),
+          // Refresh
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: () => _loadGraph(),
+          ),
+          // Center view
+          IconButton(
+            icon: const Icon(Icons.center_focus_strong),
+            onPressed: () {
+              setState(() {
+                _transformationController.value = Matrix4.identity();
+              });
+            },
+          ),
+        ],
+      ),
+      body: _buildBody(),
+    );
+  }
+
+  Widget _buildBody() {
+    if (_isLoading) {
+      return const Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 16),
+            Text('Building knowledge graph...', style: TextStyle(color: Colors.white70)),
+          ],
+        ),
+      );
+    }
+
+    if (_error != null) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.error_outline, size: 64, color: Colors.red),
+            const SizedBox(height: 16),
+            Text('Error: $_error', style: const TextStyle(color: Colors.white70)),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: _loadGraph,
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (_graph == null || _graph!.nodes.isEmpty) {
+      return const Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.bubble_chart_outlined, size: 64, color: Colors.white30),
+            SizedBox(height: 16),
+            Text(
+              'No memories yet',
+              style: TextStyle(color: Colors.white70, fontSize: 18),
+            ),
+            SizedBox(height: 8),
+            Text(
+              'Start chatting with Kai to build the knowledge graph',
+              style: TextStyle(color: Colors.white38, fontSize: 14),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Stack(
+      children: [
+        // Graph canvas
+        GestureDetector(
+          onTapUp: (details) {
+            // Check if tapped on background (not a node)
+            if (_selectedNode != null) {
+              _clearSelection();
+            }
+          },
+          child: Listener(
+            onPointerSignal: (event) {
+              if (event is PointerScrollEvent) {
+                setState(() {
+                  // Zoom with mouse wheel - adjust transformation matrix
+                  final delta = event.scrollDelta.dy;
+                  final scale = (_transformationController.value.getMaxScaleOnAxis() - delta * 0.001).clamp(0.1, 5.0);
+                  _transformationController.value = Matrix4.identity()..scale(scale);
+                });
+              }
+            },
+            child: InteractiveViewer(
+              transformationController: _transformationController,
+              minScale: 0.1,
+              maxScale: 5.0,
+              boundaryMargin: const EdgeInsets.all(double.infinity),
+              child: GraphCanvas(
+                graph: _graph!,
+                selectedNode: _selectedNode,
+                highlightedNodeIds: _highlightedNodeIds,
+                visibleTypes: _visibleTypes,
+                onNodeTap: _onNodeTap,
+              ),
+            ),
+          ),
+        ),
+        
+        // Node detail card
+        if (_selectedNode != null)
+          Positioned(
+            right: 16,
+            top: 16,
+            child: NodeDetailCard(
+              node: _selectedNode!,
+              graph: _graph!,
+              onClose: _clearSelection,
+              onPinMemory: (node) {
+                // TODO: Implement pinning
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Pinned: ${node.label}')),
+                );
+              },
+            ),
+          ),
+        
+        // Stats overlay
+        Positioned(
+          left: 16,
+          bottom: 16,
+          child: Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.black54,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${_graph!.nodes.length} nodes',
+                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                ),
+                Text(
+                  '${_graph!.edges.length} connections',
+                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Zoom: ${(_transformationController.value.getMaxScaleOnAxis() * 100).toStringAsFixed(0)}%',
+                  style: const TextStyle(color: Colors.white38, fontSize: 10),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _showSearchDialog() {
+    // TODO: Implement search
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Search coming soon!')),
+    );
+  }
+
+  void _showFilterDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Filter Node Types'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: NodeType.values.map((type) {
+            return CheckboxListTile(
+              title: Text(type.name),
+              value: _visibleTypes.contains(type),
+              onChanged: (value) {
+                setState(() {
+                  if (value == true) {
+                    _visibleTypes.add(type);
+                  } else {
+                    _visibleTypes.remove(type);
+                  }
+                });
+                Navigator.pop(context);
+              },
+            );
+          }).toList(),
+        ),
+      ),
+    );
+  }
+}

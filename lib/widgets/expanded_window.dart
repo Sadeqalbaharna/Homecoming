@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:audioplayers/audioplayers.dart';
 import '../services/ai_service.dart';
 import '../screens/usage_stats_screen.dart';
+import '../screens/mind_map_screen.dart';
 import 'debug_button.dart';
 import 'memory_chips.dart';
 
@@ -153,6 +154,20 @@ class _ExpandedWindowState extends State<ExpandedWindow> with SingleTickerProvid
             ),
           ),
           const Spacer(),
+          // Mind Map button
+          IconButton(
+            icon: const Icon(Icons.hub_outlined, color: Colors.purple),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => MindMapScreen(personaId: widget.personaId),
+                ),
+              );
+            },
+            tooltip: 'Knowledge Graph',
+          ),
+          const SizedBox(width: 8),
           IconButton(
             icon: const Icon(Icons.close, color: Colors.white),
             onPressed: widget.onClose,
