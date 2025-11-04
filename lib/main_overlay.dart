@@ -18,6 +18,7 @@ import 'services/audio_player_service.dart';
 import 'services/secure_storage_service.dart';
 import 'services/firebase_service.dart';
 import 'services/curiosity_service.dart';
+import 'services/proactive_service.dart';
 import 'screens/personality_screen.dart';
 import 'screens/usage_stats_screen.dart';
 import 'api_key_setup_screen.dart';
@@ -380,6 +381,9 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
   bool _isTestRecording = false;
   String? _testAudioPath;
   bool _isPlayingTest = false;
+  
+  // Proactive AI service
+  final ProactiveService _proactive = ProactiveService();
   
   // Auto-movement variables
   Timer? _moveTimer;
@@ -822,6 +826,53 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
     }
   }
 
+  /// Initialize proactive AI that initiates conversations
+  Future<void> _initializeProactiveAI() async {
+    try {
+      await _proactive.initialize();
+      
+      // Set callback for when Kai wants to start a conversation
+      _proactive.onProactiveMessage = (message, trigger) async {
+        print('💬 [PROACTIVE] Kai initiated: "$message"');
+        
+        // Add as user message (what Kai is asking/saying)
+        setState(() {
+          _chatHistory.add(ChatMessage(
+            isUser: false, // It's from Kai
+            text: message,
+            timestamp: DateTime.now(),
+          ));
+        });
+        
+        // Expand window to show the message
+        if (!_showExpandedWindow) {
+          setState(() {
+            _showExpandedWindow = true;
+            _expandedWindowInitialTab = 0; // Open to chat tab
+          });
+        }
+        
+        // Scroll to bottom
+        Future.delayed(const Duration(milliseconds: 100), () {
+          if (_chatScrollController.hasClients) {
+            _chatScrollController.animateTo(
+              _chatScrollController.position.maxScrollExtent,
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeOut,
+            );
+          }
+        });
+        
+        // Play TTS for the proactive message
+        await _playTTS(message);
+      };
+      
+      print('✅ [PROACTIVE] AI initialized and ready');
+    } catch (e) {
+      print('❌ [PROACTIVE] Initialization error: $e');
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -834,6 +885,9 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
     
     // Start idle animation immediately
     _switchToAnimation('idle');
+    
+    // Initialize proactive AI
+    _initializeProactiveAI();
     
     _player.onPlayerStateChanged.listen((state) {
       if (mounted) {
@@ -857,6 +911,7 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
 
   @override
   void dispose() {
+    _proactive.stop(); // Stop proactive monitoring
     _stopAutoMovement();
     _controller.dispose();
     _chatScrollController.dispose();
@@ -1379,6 +1434,9 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
       print('⚠️ Text is empty, returning');
       return;
     }
+    
+    // Record user interaction for proactive AI
+    _proactive.recordInteraction();
     
     // Add user message to chat history
     setState(() {
