@@ -7,7 +7,7 @@
 
 ## 🎯 **What Is Proactive AI?**
 
-Previously, Kai only responded when you spoke to her. Now **Kai initiates conversations** on her own! She'll reach out throughout the day with:
+Previously, Kai only responded when you spoke to him. Now **Kai initiates conversations** on his own! He'll reach out throughout the day with:
 
 - 🌅 Morning greetings
 - 🍽️ Lunch reminders
