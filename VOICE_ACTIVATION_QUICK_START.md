@@ -2,18 +2,26 @@
 
 ## Enable Voice Activation
 
-1. **Open Settings**
-   - Tap Kai's avatar
-   - Select "Settings" from the menu
+**Method 1: Quick Toggle (Recommended)**
+1. Look at the top-right corner of Kai's overlay
+2. Tap the microphone icon
+   - 🟢 Green with glow = Listening
+   - ⚫ Grey = Off
+3. That's it! Start saying "Hey Kai"
 
-2. **Enable Voice Activation**
-   - Find "🎤 Voice Controls" section
-   - Toggle ON "Hey Kai" Voice Activation
-   - Grant microphone permission if prompted
+**Method 2: Settings Menu**
+1. Tap Kai's avatar
+2. Select "Settings" from the menu
+3. Toggle ON "Hey Kai" Voice Activation
+4. Grant microphone permission if prompted
 
-3. **Wait for Initialization**
-   - Look for "✅ [VOICE ACTIVATION] Initialized and ready" in logs
-   - Takes 3-5 seconds to start listening
+## Visual Indicator
+
+Look for the microphone icon in the top-right corner:
+- 🎤 **Green with glow** = Actively listening for "Hey Kai"
+- 🔇 **Grey** = Voice activation disabled
+
+**Tap the icon to instantly toggle on/off!**
 
 ## How to Use
 
@@ -66,9 +74,10 @@ All of these work:
 Voice activation uses ~5-10% additional battery per day.
 
 **To save battery:**
-1. Disable when not needed (Settings → Toggle OFF)
-2. Use WiFi instead of mobile data
-3. Close other battery-intensive apps
+1. **Quick toggle**: Tap microphone icon to turn off instantly
+2. **Settings toggle**: Disable in Settings when not needed
+3. Use WiFi instead of mobile data
+4. Close other battery-intensive apps
 
 ## Troubleshooting
 

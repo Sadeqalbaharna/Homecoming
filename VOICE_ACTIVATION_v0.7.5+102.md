@@ -94,7 +94,7 @@ Future<void> _initializeVoiceActivation() async {
 
 ### 2. Settings UI (`screens/settings_screen.dart`)
 
-New toggle added to settings screen:
+New toggle added to settings screen for persistent control:
 
 **Features:**
 - ✅ Enable/disable voice activation
@@ -102,6 +102,55 @@ New toggle added to settings screen:
 - ✅ Battery warning
 - ✅ Microphone permission handling
 - ✅ Visual feedback
+
+### 3. Main Overlay Toggle (`main_overlay.dart`)
+
+**Quick Access Microphone Icon:**
+- 🎤 Position: Top-right corner (right: 10, top: 5)
+- 🟢 Color: Green when listening, grey when off
+- ✨ Effect: Glowing green shadow when active
+- 👆 Interaction: Tap to toggle instantly
+- 🔄 State sync: Syncs with settings toggle
+
+**Implementation:**
+```dart
+Positioned(
+  right: 10, top: 5,
+  child: GestureDetector(
+    onTap: () async {
+      final newState = !_voiceActivation.isListening;
+      if (newState) {
+        await _voiceActivation.start();
+      } else {
+        await _voiceActivation.stop();
+      }
+      setState(() {});
+    },
+    child: Container(
+      width: 32, height: 32,
+      decoration: BoxDecoration(
+        color: _voiceActivation.isListening 
+            ? Color(0xFF4CAF50) // Green
+            : Colors.grey.withOpacity(0.5),
+        shape: BoxShape.circle,
+        boxShadow: [
+          if (_voiceActivation.isListening)
+            BoxShadow(
+              color: Color(0xFF4CAF50).withOpacity(0.5),
+              blurRadius: 12,
+              spreadRadius: 2,
+            ),
+        ],
+      ),
+      child: Icon(
+        _voiceActivation.isListening ? Icons.mic : Icons.mic_off,
+        color: Colors.white,
+        size: 18,
+      ),
+    ),
+  ),
+)
+```
 
 **UI Layout:**
 ```
@@ -124,6 +173,28 @@ New toggle added to settings screen:
 ---
 
 ## 📱 User Experience
+
+### Quick Toggle
+
+A **microphone icon** appears in the top-right corner of Kai's overlay:
+
+```
+┌─────────────────────────┐
+│        [🎤]      [Test] │ ← Mic icon
+│                         │
+│         (Kai)           │
+│                         │
+└─────────────────────────┘
+```
+
+**Visual States:**
+- 🎤 **Green with glow**: Actively listening for "Hey Kai"
+- 🔇 **Grey**: Voice activation disabled
+
+**Interaction:**
+- Tap icon to instantly toggle on/off
+- No need to go to Settings for quick control
+- Visual feedback with color and glow effect
 
 ### Usage Scenarios
 
@@ -245,7 +316,16 @@ By supporting multiple variations, we ensure reliable wake word detection across
 
 ### Manual Testing Steps
 
-#### 1. Enable Voice Activation
+#### 1. Enable Voice Activation (Quick Method)
+```
+1. Look at Kai's overlay
+2. Find microphone icon in top-right corner
+3. Tap icon (should turn green with glow)
+4. Wait 3-5 seconds for initialization
+5. Check logs for "✅ [VOICE ACTIVATION] Initialized and ready"
+```
+
+#### 1b. Enable Voice Activation (Settings Method)
 ```
 1. Open Kai overlay
 2. Tap avatar → Settings
@@ -277,12 +357,22 @@ By supporting multiple variations, we ensure reliable wake word detection across
 4. Verify transcription sent to chat
 ```
 
-#### 5. Test Disable
+#### 5. Test Quick Toggle
+```
+1. Tap microphone icon (should turn grey)
+2. Say "Hey Kai" (should not respond)
+3. Tap icon again (should turn green)
+4. Say "Hey Kai" (should respond)
+5. Verify icon color changes immediately
+```
+
+#### 6. Test Disable
 ```
 1. Go to Settings
 2. Disable voice activation toggle
-3. Say "Hey Kai" (should not respond)
-4. Verify no wake word detection
+3. Verify microphone icon turns grey
+4. Say "Hey Kai" (should not respond)
+5. Verify no wake word detection
 ```
 
 ### Log Monitoring
@@ -359,13 +449,15 @@ Monitor these metrics during testing:
 **Symptoms:**
 - Saying "Hey Kai" does nothing
 - No logs in console
+- Microphone icon is grey
 
 **Solutions:**
-1. Check voice activation toggle in Settings
-2. Verify microphone permission granted
-3. Check internet connection (Whisper API needs network)
-4. Try speaking louder and clearer
-5. Check logs for initialization errors
+1. **Check microphone icon**: Tap to enable if grey
+2. **Check Settings toggle**: Verify enabled in Settings
+3. Verify microphone permission granted
+4. Check internet connection (Whisper API needs network)
+5. Try speaking louder and clearer
+6. Check logs for initialization errors
 
 #### 2. False Activations
 
@@ -376,8 +468,9 @@ Monitor these metrics during testing:
 **Solutions:**
 1. Reduce environmental noise
 2. Position phone away from speakers/TV
-3. Temporarily disable voice activation
-4. Adjust wake word variations (future feature)
+3. **Quick disable**: Tap microphone icon to turn off temporarily
+4. **Settings disable**: Turn off in Settings for longer periods
+5. Adjust wake word variations (future feature)
 
 #### 3. High Battery Drain
 
@@ -386,10 +479,11 @@ Monitor these metrics during testing:
 - Phone gets warm
 
 **Solutions:**
-1. Disable voice activation when not needed
-2. Close other battery-intensive apps
-3. Check Settings → Battery → App usage
-4. Consider reducing listen frequency (future config)
+1. **Quick toggle**: Tap microphone icon when not needed
+2. **Settings toggle**: Disable in Settings for extended periods
+3. Close other battery-intensive apps
+4. Check Settings → Battery → App usage
+5. Consider reducing listen frequency (future config)
 
 #### 4. Slow Response Time
 
@@ -413,6 +507,9 @@ Monitor these metrics during testing:
 - [x] Support multiple wake word variations
 - [x] Integrate with `main_overlay.dart`
 - [x] Add settings toggle UI
+- [x] **Add quick-access microphone icon toggle**
+- [x] **Implement visual indicator (green/grey states)**
+- [x] **Add glowing effect for active state**
 - [x] Implement permission handling
 - [x] Add usage instructions
 - [x] Create comprehensive documentation

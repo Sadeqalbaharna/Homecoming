@@ -1703,6 +1703,58 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
                     ),
                   ),
                   
+                  // 🎤 Voice Activation Indicator (top-right of avatar)
+                  Positioned(
+                    right: 10,
+                    top: 5,
+                    child: GestureDetector(
+                      onTap: () async {
+                        // Toggle voice activation
+                        final newState = !_voiceActivation.isListening;
+                        if (newState) {
+                          await _voiceActivation.start();
+                        } else {
+                          await _voiceActivation.stop();
+                        }
+                        setState(() {}); // Rebuild to show new state
+                        
+                        // Show feedback
+                        print('🎤 [VOICE ACTIVATION] ${newState ? "Enabled" : "Disabled"}');
+                      },
+                      child: Container(
+                        width: 32,
+                        height: 32,
+                        decoration: BoxDecoration(
+                          color: _voiceActivation.isListening 
+                              ? const Color(0xFF4CAF50) // Green when listening
+                              : Colors.grey.withOpacity(0.5), // Grey when off
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: _voiceActivation.isListening 
+                                ? Colors.white 
+                                : Colors.grey,
+                            width: 2,
+                          ),
+                          boxShadow: [
+                            if (_voiceActivation.isListening)
+                              BoxShadow(
+                                color: const Color(0xFF4CAF50).withOpacity(0.5),
+                                blurRadius: 12,
+                                spreadRadius: 2,
+                              ),
+                          ],
+                        ),
+                        child: Icon(
+                          _voiceActivation.isListening 
+                              ? Icons.mic 
+                              : Icons.mic_off,
+                          color: Colors.white,
+                          size: 18,
+                        ),
+                      ),
+                    ),
+                  ),
+                  
                   // 💬 Proactive notification bubble (above Kai's head)
                   if (_showProactiveBubble && _proactiveMessage != null)
                     Positioned(
