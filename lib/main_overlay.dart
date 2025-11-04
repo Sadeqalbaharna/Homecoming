@@ -1666,94 +1666,48 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
                   // 💬 Proactive notification bubble (above Kai's head)
                   if (_showProactiveBubble && _proactiveMessage != null)
                     Positioned(
-                      left: 50, // Avatar left position
-                      top: 10, // Above Kai's head
+                      left: 85, // Centered above avatar
+                      top: 5, // Above Kai's head
                       child: GestureDetector(
-                        onTap: () {
-                          // Dismiss bubble and open chat with the message
-                          setState(() {
-                            _chatHistory.add(ChatMessage(
-                              isUser: false,
-                              text: _proactiveMessage!,
-                              timestamp: DateTime.now(),
-                            ));
-                            _showProactiveBubble = false;
-                          });
-                          _openExpandedWindow(0); // Open chat tab
+                        onTap: () async {
+                          // Dismiss bubble
+                          setState(() => _showProactiveBubble = false);
+                          
+                          // Generate and play TTS
+                          try {
+                            final ttsBytes = await AIService().synthesizeTTS(_proactiveMessage!);
+                            if (ttsBytes != null) {
+                              final mp3Path = await _writeTempMp3(ttsBytes);
+                              await _player.play(DeviceFileSource(mp3Path));
+                            }
+                          } catch (e) {
+                            print('❌ [TTS] Failed to play proactive message: $e');
+                          }
                         },
                         child: Container(
-                          constraints: const BoxConstraints(maxWidth: 200),
-                          padding: const EdgeInsets.all(12),
+                          width: 32,
+                          height: 32,
                           decoration: BoxDecoration(
-                            color: const Color(0xFF16213E),
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: const Color(0xFFFFE7B0), width: 2),
+                            color: const Color(0xFFFFE7B0),
+                            shape: BoxShape.circle,
+                            border: Border.all(color: const Color(0xFF16213E), width: 2),
                             boxShadow: [
                               BoxShadow(
-                                color: Colors.black.withOpacity(0.5),
-                                blurRadius: 10,
-                                spreadRadius: 2,
+                                color: Colors.black.withOpacity(0.3),
+                                blurRadius: 8,
+                                spreadRadius: 1,
                               ),
                             ],
                           ),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const Icon(
-                                    Icons.notifications_active,
-                                    color: Color(0xFFFFE7B0),
-                                    size: 16,
-                                  ),
-                                  const SizedBox(width: 6),
-                                  const Text(
-                                    'Kai wants to chat',
-                                    style: TextStyle(
-                                      color: Color(0xFFFFE7B0),
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                  const Spacer(),
-                                  GestureDetector(
-                                    onTap: () {
-                                      setState(() => _showProactiveBubble = false);
-                                    },
-                                    child: const Icon(
-                                      Icons.close,
-                                      color: Colors.white54,
-                                      size: 14,
-                                    ),
-                                  ),
-                                ],
+                          child: const Center(
+                            child: Text(
+                              '!',
+                              style: TextStyle(
+                                color: Color(0xFF16213E),
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
                               ),
-                              const SizedBox(height: 8),
-                              Text(
-                                _proactiveMessage!,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 13,
-                                  height: 1.3,
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.end,
-                                children: [
-                                  Text(
-                                    'Tap to reply',
-                                    style: TextStyle(
-                                      color: Colors.white.withOpacity(0.5),
-                                      fontSize: 10,
-                                      fontStyle: FontStyle.italic,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
+                            ),
                           ),
                         ),
                       ),
