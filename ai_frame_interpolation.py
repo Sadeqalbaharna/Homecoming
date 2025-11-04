@@ -265,36 +265,57 @@ def batch_process_transitions(animations_dir, output_dir, num_frames=8, method='
     
     Expected directory structure:
     animations_dir/
-        idle/
+        idle/ or idle_frames/
             frame_0000.png
             frame_0001.png
             ...
-        attention/
+        attention/ or attention_frames/
             frame_0000.png
             ...
-        thinking/
+        thinking/ or thinking_frames/
             ...
-        speaking/
+        speaking/ or speaking_frames/
             ...
     """
     animations_dir = Path(animations_dir)
     output_dir = Path(output_dir)
     
     # Define animation states and transitions
-    states = ['idle', 'attention', 'thinking', 'speaking']
-    transitions = [
-        ('idle', 'attention'),
-        ('attention', 'thinking'),
-        ('thinking', 'speaking'),
-        ('speaking', 'idle'),
-    ]
+    state_names = ['idle', 'attention', 'thinking', 'speaking']
+    
+    # Find actual directories (try with and without _frames suffix)
+    state_dirs = {}
+    for state in state_names:
+        if (animations_dir / state).exists():
+            state_dirs[state] = animations_dir / state
+        elif (animations_dir / f"{state}_frames").exists():
+            state_dirs[state] = animations_dir / f"{state}_frames"
+        else:
+            print(f"⚠️  Warning: Could not find directory for '{state}' state")
+    
+    if len(state_dirs) < 2:
+        print(f"\n❌ Error: Need at least 2 animation states to create transitions")
+        print(f"   Found: {list(state_dirs.keys())}")
+        return
+    
+    # Define transitions based on available states
+    transitions = []
+    ordered_states = ['idle', 'attention', 'thinking', 'speaking']
+    available_ordered = [s for s in ordered_states if s in state_dirs]
+    
+    # Create transitions in order
+    for i in range(len(available_ordered)):
+        start = available_ordered[i]
+        end = available_ordered[(i + 1) % len(available_ordered)]
+        transitions.append((start, end))
     
     interpolator = FrameInterpolator(method=method)
     
     print(f"\n🎭 Processing Animation Transitions")
     print(f"   Source: {animations_dir}")
     print(f"   Output: {output_dir}")
-    print(f"   Frames per transition: {num_frames}\n")
+    print(f"   Frames per transition: {num_frames}")
+    print(f"   Found states: {', '.join(available_ordered)}\n")
     
     for start_state, end_state in transitions:
         print(f"\n{'='*60}")
@@ -302,20 +323,22 @@ def batch_process_transitions(animations_dir, output_dir, num_frames=8, method='
         print(f"{'='*60}")
         
         # Get last frame of start state
-        start_dir = animations_dir / start_state
+        start_dir = state_dirs[start_state]
         start_frames = sorted(start_dir.glob('*.png'))
         if not start_frames:
-            print(f"⚠️  No frames found in {start_dir}")
+            print(f"⚠️  No PNG frames found in {start_dir}")
             continue
         frame1_path = start_frames[-1]  # Last frame
+        print(f"   Start: {frame1_path.name} from {start_dir.name}/")
         
         # Get first frame of end state
-        end_dir = animations_dir / end_state
+        end_dir = state_dirs[end_state]
         end_frames = sorted(end_dir.glob('*.png'))
         if not end_frames:
-            print(f"⚠️  No frames found in {end_dir}")
+            print(f"⚠️  No PNG frames found in {end_dir}")
             continue
         frame2_path = end_frames[0]  # First frame
+        print(f"   End: {frame2_path.name} from {end_dir.name}/")
         
         # Create transition
         transition_output = output_dir / f"{start_state}_to_{end_state}"
