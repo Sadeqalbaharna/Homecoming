@@ -394,8 +394,7 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
   bool _userIsDragging = false;
   Timer? _dragResumeTimer;
   
-  // ANIMATION TEST MODE - manual override for testing animations
-  bool _animTestMode = false;
+  // Animation state - automatic based on app activity
   String _currentAnimation = 'idle'; // 'idle', 'attention', 'thinking', 'speaking'
   int _currentFrame = 0;
   AnimationController? _frameAnimController;
@@ -459,8 +458,6 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
   
   // Update animation based on app state (automatic mode)
   void _updateAnimationState() {
-    if (_animTestMode) return; // Don't auto-update in test mode
-    
     String targetAnim = 'idle';
     
     // Priority order: recording > playing > sending > idle
@@ -1579,36 +1576,6 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
   }
   
   /// Build animation test button
-  Widget _buildAnimButton(String animType, String label) {
-    final isActive = _currentAnimation == animType;
-    return InkWell(
-      onTap: () {
-        _switchToAnimation(animType);
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-          color: isActive 
-            ? const Color(0xFFFFE7B0) 
-            : Colors.black.withOpacity(0.6),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: const Color(0xFFFFE7B0),
-            width: isActive ? 2 : 1,
-          ),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: isActive ? const Color(0xFF0D0A07) : const Color(0xFFFFE7B0),
-            fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
-            fontSize: 10,
-          ),
-        ),
-      ),
-    );
-  }
-
   /// Toggle between available voices (simple toggle, no modal)
   Future<void> _toggleVoice() async {
     final currentId = await AIConfig.getSelectedVoiceId();
@@ -1826,72 +1793,7 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
                     );
                   }),
                   
-                  // ANIMATION TEST BUTTONS - Bottom of compact overlay
-                  if (!_expanded && !_showExpandedWindow)
-                    Positioned(
-                      bottom: 10,
-                      left: 10,
-                      right: 10,
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          // Toggle test mode button
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: Colors.black.withOpacity(0.6),
-                              borderRadius: BorderRadius.circular(16),
-                              border: Border.all(
-                                color: const Color(0xFFFFE7B0).withOpacity(0.5),
-                              ),
-                            ),
-                            child: InkWell(
-                              onTap: () {
-                                setState(() {
-                                  _animTestMode = !_animTestMode;
-                                });
-                              },
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    _animTestMode ? Icons.check_box : Icons.check_box_outline_blank,
-                                    color: const Color(0xFFFFE7B0),
-                                    size: 14,
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    'Test',
-                                    style: TextStyle(
-                                      color: const Color(0xFFFFE7B0),
-                                      fontSize: 10,
-                                      fontWeight: _animTestMode ? FontWeight.bold : FontWeight.normal,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                          
-                          // Animation buttons (only visible when test mode enabled)
-                          if (_animTestMode) ...[
-                            const SizedBox(height: 6),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                _buildAnimButton('idle', 'Idle'),
-                                const SizedBox(width: 6),
-                                _buildAnimButton('attention', 'Attn'),
-                                const SizedBox(width: 6),
-                                _buildAnimButton('thinking', 'Think'),
-                                const SizedBox(width: 6),
-                                _buildAnimButton('speaking', 'Speak'),
-                              ],
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
+                  // Animation is now fully automatic based on app state!
           ],
         
         // NEW: Unified Expanded Window with Tabs (Chat, Personality, Analytics)
