@@ -377,11 +377,6 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
   // Sound indicators for recording
   final _beepPlayer = AudioPlayer();
   
-  // TEST: Simple audio recording/playback test (will use service when fixed)
-  bool _isTestRecording = false;
-  String? _testAudioPath;
-  bool _isPlayingTest = false;
-  
   // Proactive AI service
   final ProactiveService _proactive = ProactiveService();
   
@@ -701,34 +696,10 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
     await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
   }
 
-  Future<void> _openPersonalityScreen() async {
-    print('🧠 [PERSONALITY] Opening personality screen...');
-    setState(() {
-      _showPersonality = true;
-      _expanded = false;
-      _showAnalytics = false;
-    });
-    print('🧠 [PERSONALITY] State updated, calling resize...');
-    await _resizeOverlay(true); // Resize to fullscreen
-    print('🧠 [PERSONALITY] Personality screen opened!');
-  }
-
   Future<void> _closePersonalityScreen() async {
     setState(() => _showPersonality = false);
     await _resizeOverlay(false);
     await FlutterOverlayWindow.updateFlag(OverlayFlag.defaultFlag);
-  }
-
-  Future<void> _openUsageStatsScreen() async {
-    print('📊 [ANALYTICS] Opening analytics screen...');
-    setState(() {
-      _showAnalytics = true;
-      _expanded = false;
-      _showPersonality = false;
-    });
-    print('📊 [ANALYTICS] State updated, calling resize...');
-    await _resizeOverlay(true); // Resize to fullscreen
-    print('📊 [ANALYTICS] Analytics screen opened!');
   }
 
   Future<void> _closeUsageStatsScreen() async {
@@ -894,10 +865,6 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
       if (mounted) {
         setState(() {
           _playerState = state;
-          // Clear test playing state when playback stops
-          if (state == PlayerState.stopped || state == PlayerState.completed) {
-            _isPlayingTest = false;
-          }
         });
         // Update animation automatically when player state changes
         _updateAnimationState();
@@ -1178,135 +1145,6 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
     setState(() {
       _recordedAudioPath = null;
       _isPlayingRecording = false;
-    });
-  }
-  
-  // ============= TEST AUDIO FUNCTIONS =============
-  /// TEST: Simple record/playback test - no transcription
-  Future<void> _toggleTestRecording() async {
-    if (_isTestRecording) {
-      // Stop recording
-      await _stopTestRecording();
-    } else {
-      // Start recording
-      await _startTestRecording();
-    }
-  }
-  
-  Future<void> _startTestRecording() async {
-    print('🧪 [TEST] Start test recording (using VoiceService)');
-    
-    setState(() {
-      _isTestRecording = true;
-      _testAudioPath = null;
-      _error = null;
-    });
-    
-    final started = await voiceService.startRecording();
-    if (!started) {
-      setState(() {
-        _error = 'TEST: Failed to start recording - check service binding';
-        _isTestRecording = false;
-      });
-    }
-  }
-  
-  Future<void> _stopTestRecording() async {
-    print('🧪 [TEST] Stop test recording');
-    
-    setState(() {
-      _isTestRecording = false;
-    });
-    
-    try {
-      final audioPath = await voiceService.stopRecording();
-      
-      if (audioPath == null) {
-        throw Exception('No audio path returned');
-      }
-      
-      final file = File(audioPath);
-      if (!await file.exists()) {
-        throw Exception('Audio file not found at: $audioPath');
-      }
-      
-      final fileSize = await file.length();
-      print('🧪 [TEST] Recorded audio: $fileSize bytes at $audioPath');
-      
-      setState(() {
-        _testAudioPath = audioPath;
-        _error = 'TEST: Recorded $fileSize bytes';
-      });
-    } catch (e) {
-      print('❌ [TEST] Failed to stop: $e');
-      setState(() {
-        _error = 'TEST: Failed to stop: $e';
-      });
-    }
-  }
-  
-  Future<void> _playTestAudio() async {
-    if (_testAudioPath == null) {
-      print('🧪 [TEST] No test audio to play');
-      return;
-    }
-    
-    print('🧪 [TEST] Playing test audio: $_testAudioPath');
-    
-    setState(() {
-      _isPlayingTest = true;
-      _error = null;
-    });
-    
-    try {
-      // Stop if already playing
-      if (_isPlayingTest) {
-        await _audioPlayer.stop();
-        setState(() => _isPlayingTest = false);
-        print('🧪 [TEST] Stopped playback');
-        return;
-      }
-      
-      final success = await _audioPlayer.play(_testAudioPath!);
-      if (success) {
-        print('🧪 [TEST] Playback started');
-        
-        // Auto-stop after playback completes (estimate)
-        Future.delayed(const Duration(seconds: 6), () {
-          if (mounted && _isPlayingTest) {
-            setState(() => _isPlayingTest = false);
-          }
-        });
-      } else {
-        setState(() {
-          _isPlayingTest = false;
-          _error = 'TEST: Failed to start playback';
-        });
-      }
-    } catch (e) {
-      print('🧪 [TEST] Playback error: $e');
-      setState(() {
-        _error = 'TEST: Playback failed: $e';
-        _isPlayingTest = false;
-      });
-    }
-  }
-  
-  void _deleteTestAudio() {
-    if (_testAudioPath != null) {
-      try {
-        final file = File(_testAudioPath!);
-        if (file.existsSync()) {
-          file.deleteSync();
-        }
-      } catch (e) {
-        print('🧪 [TEST] Failed to delete: $e');
-      }
-    }
-    
-    setState(() {
-      _testAudioPath = null;
-      _error = null;
     });
   }
   
