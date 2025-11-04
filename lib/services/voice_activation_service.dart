@@ -19,12 +19,15 @@ class VoiceActivationService {
   
   bool _isListening = false;
   bool _isEnabled = false;
+  bool _isInConversation = false; // NEW: Track if in active conversation
   Timer? _listeningTimer;
+  Timer? _conversationTimer; // NEW: Timer to end conversation after silence
   StreamController<String>? _wakeWordController;
 
   // Configuration
   static const Duration _listenDuration = Duration(seconds: 3); // Listen in 3-second chunks
   static const Duration _pauseBetweenListens = Duration(milliseconds: 500);
+  static const Duration _conversationTimeout = Duration(seconds: 15); // NEW: End conversation after 15s of silence
   static const List<String> _wakeWords = [
     'hey kai',
     'hey kay',
@@ -90,6 +93,8 @@ class VoiceActivationService {
     _isListening = false;
     _isEnabled = false;
     _listeningTimer?.cancel();
+    _conversationTimer?.cancel();
+    _isInConversation = false;
     
     // Save state
     final prefs = await SharedPreferences.getInstance();
@@ -116,7 +121,7 @@ class VoiceActivationService {
     _listenForWakeWord();
   }
 
-  /// Listen for a single chunk and check for wake word
+  /// Listen for a single chunk and check for wake word OR conversation input
   Future<void> _listenForWakeWord() async {
     if (!_isListening) return;
     
@@ -135,19 +140,36 @@ class VoiceActivationService {
       final transcription = await _voiceService.transcribeAudio(recordingFile.path);
       
       if (transcription == null || transcription.isEmpty) {
+        // No speech detected - if in conversation, this counts as silence
         return;
       }
       
       final lowerTranscription = transcription.toLowerCase().trim();
       print('🎤 [VoiceActivation] Heard: "$lowerTranscription"');
       
-      // Check if wake word is present
+      // If we're in conversation mode, any speech continues the conversation
+      if (_isInConversation) {
+        print('💬 [VoiceActivation] Conversation continues: "$lowerTranscription"');
+        
+        // Reset conversation timer
+        _resetConversationTimer();
+        
+        // Send the message
+        _wakeWordController?.add(lowerTranscription);
+        
+        return;
+      }
+      
+      // Not in conversation - check for wake word
       final wakeWordDetected = _wakeWords.any((wakeWord) => 
         lowerTranscription.contains(wakeWord)
       );
       
       if (wakeWordDetected) {
         print('🎯 [VoiceActivation] WAKE WORD DETECTED!');
+        
+        // Enter conversation mode
+        _enterConversationMode();
         
         // Extract any text after the wake word
         String? followUpText;
@@ -166,15 +188,45 @@ class VoiceActivationService {
         
         // Notify listeners
         _wakeWordController?.add(followUpText ?? '');
-        
-        // Pause listening briefly to avoid re-detecting
-        await Future.delayed(const Duration(seconds: 2));
       }
       
     } catch (e) {
       print('❌ [VoiceActivation] Error during listen cycle: $e');
       // Continue listening despite errors
     }
+  }
+
+  /// Enter conversation mode - keep listening for follow-up without wake word
+  void _enterConversationMode() {
+    if (_isInConversation) return;
+    
+    _isInConversation = true;
+    print('🗣️ [VoiceActivation] Entered conversation mode');
+    
+    // Start conversation timer
+    _resetConversationTimer();
+  }
+
+  /// Reset conversation timer (called when user speaks)
+  void _resetConversationTimer() {
+    _conversationTimer?.cancel();
+    _conversationTimer = Timer(_conversationTimeout, () {
+      _exitConversationMode();
+    });
+  }
+
+  /// Exit conversation mode - return to wake word only
+  void _exitConversationMode() {
+    if (!_isInConversation) return;
+    
+    _isInConversation = false;
+    _conversationTimer?.cancel();
+    print('💤 [VoiceActivation] Exited conversation mode (idle timeout)');
+  }
+
+  /// Manually end conversation (can be called when user closes interaction)
+  void endConversation() {
+    _exitConversationMode();
   }
 
   /// Enable/disable voice activation
@@ -191,6 +243,9 @@ class VoiceActivationService {
   
   /// Check if enabled (persisted setting)
   bool get isEnabled => _isEnabled;
+  
+  /// Check if in active conversation mode
+  bool get isInConversation => _isInConversation;
 
   /// Clean up resources
   Future<void> dispose() async {
