@@ -3,9 +3,8 @@
 library;
 
 import 'dart:async';
-import 'package:flutter/material.dart';
+import 'dart:math';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'ai_service.dart';
 
 enum ProactiveTrigger {
   morningGreeting,
@@ -24,7 +23,6 @@ class ProactiveService {
   factory ProactiveService() => _instance;
   ProactiveService._internal();
 
-  final AIService _aiService = AIService();
   Timer? _checkTimer;
   DateTime? _lastInteraction;
   DateTime? _lastProactive;
@@ -108,17 +106,17 @@ class ProactiveService {
     // Check triggers in priority order
     ProactiveTrigger? trigger;
     
-    if (_shouldGreetMorning()) {
+    if (await _shouldGreetMorning()) {
       trigger = ProactiveTrigger.morningGreeting;
-    } else if (_shouldRemindLunch()) {
+    } else if (await _shouldRemindLunch()) {
       trigger = ProactiveTrigger.lunchReminder;
-    } else if (_shouldRecapEvening()) {
+    } else if (await _shouldRecapEvening()) {
       trigger = ProactiveTrigger.eveningRecap;
     } else if (_shouldCheckInIdle()) {
       trigger = ProactiveTrigger.idleCheckIn;
     } else if (_shouldRemindBreak()) {
       trigger = ProactiveTrigger.breakReminder;
-    } else if (_shouldShareCuriosity()) {
+    } else if (await _shouldShareCuriosity()) {
       trigger = ProactiveTrigger.curiosityFact;
     }
 
@@ -172,19 +170,6 @@ class ProactiveService {
     }
   }
 
-  /// Show notification to user
-  Future<void> _showProactiveNotification(ProactiveTrigger trigger, String message) async {
-    // TODO: Integrate with Flutter Local Notifications
-    // For now, just log
-    print('📱 [NOTIFICATION] $message');
-    
-    // Could also:
-    // - Show system notification
-    // - Animate Kai in overlay
-    // - Play subtle sound
-    // - Vibrate device
-  }
-
   /// Record trigger for analytics
   Future<void> _recordTrigger(ProactiveTrigger trigger) async {
     final prefs = await SharedPreferences.getInstance();
@@ -198,7 +183,7 @@ class ProactiveService {
 
   // ===== TRIGGER CONDITIONS =====
 
-  bool _shouldGreetMorning() {
+  Future<bool> _shouldGreetMorning() async {
     final now = DateTime.now();
     final hour = now.hour;
     
@@ -206,27 +191,27 @@ class ProactiveService {
     if (hour < 7 || hour >= 9) return false;
     
     // Not already greeted today
-    return !_wasTriggeredToday(ProactiveTrigger.morningGreeting);
+    return !(await _wasTriggeredToday(ProactiveTrigger.morningGreeting));
   }
 
-  bool _shouldRemindLunch() {
+  Future<bool> _shouldRemindLunch() async {
     final now = DateTime.now();
     final hour = now.hour;
     
     // Between 12-1pm
     if (hour != 12) return false;
     
-    return !_wasTriggeredToday(ProactiveTrigger.lunchReminder);
+    return !(await _wasTriggeredToday(ProactiveTrigger.lunchReminder));
   }
 
-  bool _shouldRecapEvening() {
+  Future<bool> _shouldRecapEvening() async {
     final now = DateTime.now();
     final hour = now.hour;
     
     // Between 8-10pm
     if (hour < 20 || hour >= 22) return false;
     
-    return !_wasTriggeredToday(ProactiveTrigger.eveningRecap);
+    return !(await _wasTriggeredToday(ProactiveTrigger.eveningRecap));
   }
 
   bool _shouldCheckInIdle() {
@@ -242,10 +227,10 @@ class ProactiveService {
     return DateTime.now().minute == 0 && DateTime.now().hour % 2 == 0;
   }
 
-  bool _shouldShareCuriosity() {
+  Future<bool> _shouldShareCuriosity() async {
     // Random throughout day, max once
     return DateTime.now().hour % 6 == 0 && 
-           !_wasTriggeredToday(ProactiveTrigger.curiosityFact);
+           !(await _wasTriggeredToday(ProactiveTrigger.curiosityFact));
   }
 
   Future<bool> _wasTriggeredToday(ProactiveTrigger trigger) async {

@@ -1,7 +1,7 @@
 import 'dart:math';
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart'; // For kDebugMode
+// For kDebugMode
 import 'package:window_manager/window_manager.dart';
 import 'package:lottie/lottie.dart';
 
