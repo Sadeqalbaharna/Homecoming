@@ -845,19 +845,14 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
       _voiceActivation.onWakeWordDetected.listen((followUpText) async {
         print('🎯 [WAKE WORD] Detected! Follow-up: "$followUpText"');
         
-        // Open chat window
-        if (!_expanded && !_showExpandedWindow) {
-          setState(() {
-            _showExpandedWindow = true;
-            _expandedWindowInitialTab = 0; // Chat tab
-          });
-        }
-        
-        // If there's follow-up text, send it immediately
+        // Don't open chat window - just process the message
+        // If there's follow-up text, send it and play TTS response
         if (followUpText.isNotEmpty) {
+          // Send message in background (don't open chat)
           await _sendMessage(followUpText);
+          // TTS will play automatically from _sendMessage
         } else {
-          // Otherwise, start recording for their full message
+          // If no follow-up text, start recording for their full message
           await _startVoiceRecording();
         }
       });
