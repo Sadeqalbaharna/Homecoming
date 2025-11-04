@@ -462,12 +462,41 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
     if (_animTestMode) return; // Don't auto-update in test mode
     
     String targetAnim = 'idle';
-    if (_sending) {
-      targetAnim = 'thinking';
-    } else if (_playerState == PlayerState.playing) targetAnim = 'speaking';
+    
+    // Priority order: recording > playing > sending > idle
+    if (_isRecording) {
+      targetAnim = 'attention'; // Listening animation when recording
+    } else if (_playerState == PlayerState.playing) {
+      targetAnim = 'speaking'; // Speaking animation when playing TTS
+    } else if (_sending) {
+      targetAnim = 'thinking'; // Thinking animation when loading/processing
+    }
+    // else stays 'idle'
     
     if (targetAnim != _currentAnimation) {
       _switchToAnimation(targetAnim);
+    }
+  }
+  
+  // Precache animation frames to prevent glitchy first load
+  Future<void> _precacheAnimationFrames() async {
+    if (!mounted) return;
+    
+    // Precache first few frames of each animation
+    final animations = [
+      (kIdleFrameCount, kAvatarIdleFrameDir),
+      (kAttentionFrameCount, kAvatarAttentionFrameDir),
+      (kThinkingFrameCount, kAvatarThinkingFrameDir),
+      (kSpeakingFrameCount, kAvatarSpeakingFrameDir),
+    ];
+    
+    for (final (frameCount, frameDir) in animations) {
+      // Precache first 10 frames of each animation
+      final framesToCache = frameCount < 10 ? frameCount : 10;
+      for (int i = 0; i < framesToCache; i++) {
+        final framePath = '${frameDir}frame_${i.toString().padLeft(4, '0')}.png';
+        precacheImage(AssetImage(framePath), context);
+      }
     }
   }
 
@@ -803,6 +832,9 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
     // Initialize Firebase and test connection
     _initializeFirebase();
     
+    // Precache animation frames to prevent glitchy first load
+    _precacheAnimationFrames();
+    
     // Start idle animation immediately
     _switchToAnimation('idle');
     
@@ -925,6 +957,7 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
           _error = 'Microphone permission denied.\n\nPlease enable manually:\n1. Open Settings\n2. Apps → Homecoming\n3. Permissions → Microphone → Allow';
           _isRecording = false;
         });
+        _updateAnimationState(); // Return to idle
         return;
       }
       
@@ -937,6 +970,7 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
       _error = null;
       _isRecording = true;
     });
+    _updateAnimationState(); // Switch to attention (listening) animation
     
     print('🎤 [UI] Starting recording...');
     final started = await voiceService.startRecording();
@@ -947,6 +981,7 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
         _error = 'Failed to start recording.\n\nTroubleshooting:\n1. Check Settings → Apps → Homecoming → Permissions\n2. Ensure Microphone is allowed\n3. Try restarting the app';
         _isRecording = false;
       });
+      _updateAnimationState(); // Return to idle on error
     } else {
       print('✅ [UI] Voice recording started successfully');
     }
@@ -961,6 +996,7 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
       _reply = null;
       _error = null;
     });
+    _updateAnimationState(); // Return to idle animation
     
     try {
       // Stop recording
