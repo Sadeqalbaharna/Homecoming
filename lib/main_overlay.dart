@@ -1446,6 +1446,8 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
     required double radius,
     required IconData icon,
     required VoidCallback onTap,
+    Color? backgroundColor, // Optional custom background color
+    Color? iconColor, // Optional custom icon color
   }) {
     // Convert angle to radians
     final radians = angle * pi / 180;
@@ -1479,17 +1481,24 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
               width: 52, // Original button size
               height: 52,
               decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.7),
+                color: backgroundColor ?? Colors.black.withOpacity(0.7),
                 shape: BoxShape.circle,
                 border: Border.all(
                   color: const Color(0xFFFFE7B0),
                   width: 2,
                 ),
+                boxShadow: backgroundColor != null ? [
+                  BoxShadow(
+                    color: backgroundColor.withOpacity(0.5),
+                    blurRadius: 8,
+                    spreadRadius: 2,
+                  ),
+                ] : null,
                 // Removed boxShadow - it was expanding hit area!
               ),
               child: Icon(
                 icon,
-                color: const Color(0xFFFFE7B0),
+                color: iconColor ?? const Color(0xFFFFE7B0),
                 size: 24, // Original icon size
               ),
             ),
@@ -1617,19 +1626,27 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
                       },
                     ),
                     
-                    // Voice/TTS button (top-right)
+                    // Voice Activation Toggle (top-right)
                     _buildCircularButton(
                       angle: -45,
                       radius: 68, // Wrapped tightly around avatar
-                      icon: _playerState == PlayerState.playing ? Icons.pause : Icons.play_arrow,
+                      icon: _voiceActivation.isListening ? Icons.mic : Icons.mic_off,
+                      backgroundColor: _voiceActivation.isListening 
+                          ? const Color(0xFF4CAF50) // Green when listening
+                          : null, // Default color when off
+                      iconColor: Colors.white, // White icon for better contrast
                       onTap: () async {
-                        if (_ttsPath != null) {
-                          if (_playerState == PlayerState.playing) {
-                            await _player.pause();
-                          } else {
-                            await _player.play(DeviceFileSource(_ttsPath!));
-                          }
+                        // Toggle voice activation
+                        final newState = !_voiceActivation.isListening;
+                        if (newState) {
+                          await _voiceActivation.start();
+                        } else {
+                          await _voiceActivation.stop();
                         }
+                        setState(() {}); // Rebuild to show new state
+                        
+                        // Show feedback
+                        print('🎤 [VOICE ACTIVATION] ${newState ? "Enabled" : "Disabled"}');
                       },
                     ),
                     
@@ -1700,58 +1717,6 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
                         print('🧪 [TEST] Proactive test scheduled for 1 minute from now');
                       },
                       child: const Icon(Icons.science, color: Colors.white, size: 18),
-                    ),
-                  ),
-                  
-                  // 🎤 Voice Activation Indicator (top-right of avatar)
-                  Positioned(
-                    right: 10,
-                    top: 5,
-                    child: GestureDetector(
-                      onTap: () async {
-                        // Toggle voice activation
-                        final newState = !_voiceActivation.isListening;
-                        if (newState) {
-                          await _voiceActivation.start();
-                        } else {
-                          await _voiceActivation.stop();
-                        }
-                        setState(() {}); // Rebuild to show new state
-                        
-                        // Show feedback
-                        print('🎤 [VOICE ACTIVATION] ${newState ? "Enabled" : "Disabled"}');
-                      },
-                      child: Container(
-                        width: 32,
-                        height: 32,
-                        decoration: BoxDecoration(
-                          color: _voiceActivation.isListening 
-                              ? const Color(0xFF4CAF50) // Green when listening
-                              : Colors.grey.withOpacity(0.5), // Grey when off
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: _voiceActivation.isListening 
-                                ? Colors.white 
-                                : Colors.grey,
-                            width: 2,
-                          ),
-                          boxShadow: [
-                            if (_voiceActivation.isListening)
-                              BoxShadow(
-                                color: const Color(0xFF4CAF50).withOpacity(0.5),
-                                blurRadius: 12,
-                                spreadRadius: 2,
-                              ),
-                          ],
-                        ),
-                        child: Icon(
-                          _voiceActivation.isListening 
-                              ? Icons.mic 
-                              : Icons.mic_off,
-                          color: Colors.white,
-                          size: 18,
-                        ),
-                      ),
                     ),
                   ),
                   
