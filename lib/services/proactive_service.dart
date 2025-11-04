@@ -75,22 +75,44 @@ class ProactiveService {
   }
 
   /// TEST: Manually trigger a proactive message after delay
+  /// Uses real trigger logic based on time of day and context
   Future<void> testProactive({Duration delay = const Duration(minutes: 1)}) async {
-    print('🧪 [PROACTIVE TEST] Will trigger in ${delay.inSeconds} seconds...');
+    print('🧪 [PROACTIVE TEST] Will check triggers in ${delay.inSeconds} seconds...');
     
     await Future.delayed(delay);
     
-    final testMessages = [
-      "Hey! This is a test message. Testing 1, 2, 3! 🧪",
-      "Just checking in! This is the proactive AI test. How cool is this? 🎉",
-      "Surprise! I'm reaching out on my own. Test successful! ✨",
-      "Beep boop! Testing the proactive system. Did it work? 🤖",
-    ];
+    print('🧪 [PROACTIVE TEST] Running real trigger check...');
     
-    final message = testMessages[DateTime.now().second % testMessages.length];
+    // Run through the actual trigger logic
+    ProactiveTrigger? trigger;
     
-    print('🧪 [PROACTIVE TEST] Triggering now: "$message"');
-    await _triggerProactive(ProactiveTrigger.curiosityFact, overrideMessage: message);
+    // Check triggers in priority order (same as _checkTriggers)
+    if (await _shouldGreetMorning()) {
+      trigger = ProactiveTrigger.morningGreeting;
+      print('🧪 [TEST] Matched: Morning greeting');
+    } else if (await _shouldRemindLunch()) {
+      trigger = ProactiveTrigger.lunchReminder;
+      print('🧪 [TEST] Matched: Lunch reminder');
+    } else if (await _shouldRecapEvening()) {
+      trigger = ProactiveTrigger.eveningRecap;
+      print('🧪 [TEST] Matched: Evening recap');
+    } else if (_shouldCheckInIdle()) {
+      trigger = ProactiveTrigger.idleCheckIn;
+      print('🧪 [TEST] Matched: Idle check-in');
+    } else if (_shouldRemindBreak()) {
+      trigger = ProactiveTrigger.breakReminder;
+      print('🧪 [TEST] Matched: Break reminder');
+    } else if (await _shouldShareCuriosity()) {
+      trigger = ProactiveTrigger.curiosityFact;
+      print('🧪 [TEST] Matched: Curiosity fact');
+    } else {
+      // Fallback: Use curiosity if no other trigger matches
+      trigger = ProactiveTrigger.curiosityFact;
+      print('🧪 [TEST] No triggers matched, using curiosity fallback');
+    }
+    
+    print('🧪 [PROACTIVE TEST] Triggering: ${trigger.toString()}');
+    await _triggerProactive(trigger);
   }
 
   /// Check all triggers and decide if Kai should speak up
