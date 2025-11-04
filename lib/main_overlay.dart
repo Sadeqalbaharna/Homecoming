@@ -380,6 +380,11 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
   // Proactive AI service
   final ProactiveService _proactive = ProactiveService();
   
+  // Proactive notification bubble
+  String? _proactiveMessage;
+  ProactiveTrigger? _proactiveTrigger;
+  bool _showProactiveBubble = false;
+  
   // Auto-movement variables
   Timer? _moveTimer;
   bool _isAutoMoving = false;
@@ -806,37 +811,19 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
       _proactive.onProactiveMessage = (message, trigger) async {
         print('💬 [PROACTIVE] Kai initiated: "$message"');
         
-        // Add as user message (what Kai is asking/saying)
+        // Show notification bubble above Kai's head
         setState(() {
-          _chatHistory.add(ChatMessage(
-            isUser: false, // It's from Kai
-            text: message,
-            timestamp: DateTime.now(),
-          ));
+          _proactiveMessage = message;
+          _proactiveTrigger = trigger;
+          _showProactiveBubble = true;
         });
         
-        // Expand window to show the message
-        if (!_showExpandedWindow) {
-          setState(() {
-            _showExpandedWindow = true;
-            _expandedWindowInitialTab = 0; // Open to chat tab
-          });
-        }
-        
-        // Scroll to bottom
-        Future.delayed(const Duration(milliseconds: 100), () {
-          if (_chatScrollController.hasClients) {
-            _chatScrollController.animateTo(
-              _chatScrollController.position.maxScrollExtent,
-              duration: const Duration(milliseconds: 300),
-              curve: Curves.easeOut,
-            );
+        // Auto-hide bubble after 30 seconds
+        Future.delayed(const Duration(seconds: 30), () {
+          if (mounted && _showProactiveBubble) {
+            setState(() => _showProactiveBubble = false);
           }
         });
-        
-        // Note: Proactive messages are just prompts/questions from Kai
-        // They don't have TTS since they didn't go through the AI service
-        // User can reply and get full TTS response
       };
       
       print('✅ [PROACTIVE] AI initialized and ready');
@@ -1668,23 +1655,109 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
                       mini: true,
                       backgroundColor: Colors.purple.withOpacity(0.8),
                       onPressed: () async {
-                        // Show confirmation
-                        setState(() {
-                          _chatHistory.add(ChatMessage(
-                            isUser: false,
-                            text: '🧪 Test scheduled! Kai will reach out in 1 minute...',
-                            timestamp: DateTime.now(),
-                          ));
-                        });
-                        
                         // Trigger test proactive message
                         await _proactive.testProactive(delay: const Duration(minutes: 1));
-                        
                         print('🧪 [TEST] Proactive test scheduled for 1 minute from now');
                       },
                       child: const Icon(Icons.science, color: Colors.white, size: 18),
                     ),
                   ),
+                  
+                  // 💬 Proactive notification bubble (above Kai's head)
+                  if (_showProactiveBubble && _proactiveMessage != null)
+                    Positioned(
+                      left: 50, // Avatar left position
+                      top: 10, // Above Kai's head
+                      child: GestureDetector(
+                        onTap: () {
+                          // Dismiss bubble and open chat with the message
+                          setState(() {
+                            _chatHistory.add(ChatMessage(
+                              isUser: false,
+                              text: _proactiveMessage!,
+                              timestamp: DateTime.now(),
+                            ));
+                            _showProactiveBubble = false;
+                          });
+                          _openExpandedWindow(0); // Open chat tab
+                        },
+                        child: Container(
+                          constraints: const BoxConstraints(maxWidth: 200),
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF16213E),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: const Color(0xFFFFE7B0), width: 2),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.5),
+                                blurRadius: 10,
+                                spreadRadius: 2,
+                              ),
+                            ],
+                          ),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(
+                                    Icons.notifications_active,
+                                    color: Color(0xFFFFE7B0),
+                                    size: 16,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  const Text(
+                                    'Kai wants to chat',
+                                    style: TextStyle(
+                                      color: Color(0xFFFFE7B0),
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  const Spacer(),
+                                  GestureDetector(
+                                    onTap: () {
+                                      setState(() => _showProactiveBubble = false);
+                                    },
+                                    child: const Icon(
+                                      Icons.close,
+                                      color: Colors.white54,
+                                      size: 14,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                _proactiveMessage!,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 13,
+                                  height: 1.3,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.end,
+                                children: [
+                                  Text(
+                                    'Tap to reply',
+                                    style: TextStyle(
+                                      color: Colors.white.withOpacity(0.5),
+                                      fontSize: 10,
+                                      fontStyle: FontStyle.italic,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
                   
                   // Delta popup floaters (personality/mood changes)
                   ..._floaters.map((f) {
