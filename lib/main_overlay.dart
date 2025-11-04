@@ -863,8 +863,9 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
           }
         });
         
-        // Play TTS for the proactive message
-        await _playTTS(message);
+        // Note: Proactive messages are just prompts/questions from Kai
+        // They don't have TTS since they didn't go through the AI service
+        // User can reply and get full TTS response
       };
       
       print('✅ [PROACTIVE] AI initialized and ready');
