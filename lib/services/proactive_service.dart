@@ -76,6 +76,25 @@ class ProactiveService {
     _lastInteraction = DateTime.now();
   }
 
+  /// TEST: Manually trigger a proactive message after delay
+  Future<void> testProactive({Duration delay = const Duration(minutes: 1)}) async {
+    print('🧪 [PROACTIVE TEST] Will trigger in ${delay.inSeconds} seconds...');
+    
+    await Future.delayed(delay);
+    
+    final testMessages = [
+      "Hey! This is a test message. Testing 1, 2, 3! 🧪",
+      "Just checking in! This is the proactive AI test. How cool is this? 🎉",
+      "Surprise! I'm reaching out on my own. Test successful! ✨",
+      "Beep boop! Testing the proactive system. Did it work? 🤖",
+    ];
+    
+    final message = testMessages[DateTime.now().second % testMessages.length];
+    
+    print('🧪 [PROACTIVE TEST] Triggering now: "$message"');
+    await _triggerProactive(ProactiveTrigger.curiosityFact, overrideMessage: message);
+  }
+
   /// Check all triggers and decide if Kai should speak up
   Future<void> _checkTriggers() async {
     if (!_isEnabled) return;
@@ -109,10 +128,10 @@ class ProactiveService {
   }
 
   /// Trigger a proactive message
-  Future<void> _triggerProactive(ProactiveTrigger trigger) async {
+  Future<void> _triggerProactive(ProactiveTrigger trigger, {String? overrideMessage}) async {
     _lastProactive = DateTime.now();
     
-    final message = _generateMessage(trigger);
+    final message = overrideMessage ?? _generateMessage(trigger);
     print('🔔 [PROACTIVE] Triggered: $trigger - "$message"');
     
     // Call the callback to initiate chat

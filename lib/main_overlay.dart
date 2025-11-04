@@ -1821,6 +1821,32 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
                     ),
                   ],
                   
+                  // 🧪 DEBUG: Test Proactive AI button (top-right corner)
+                  Positioned(
+                    top: 10,
+                    right: 10,
+                    child: FloatingActionButton(
+                      mini: true,
+                      backgroundColor: Colors.purple.withOpacity(0.8),
+                      onPressed: () async {
+                        // Show confirmation
+                        setState(() {
+                          _chatHistory.add(ChatMessage(
+                            isUser: false,
+                            text: '🧪 Test scheduled! Kai will reach out in 1 minute...',
+                            timestamp: DateTime.now(),
+                          ));
+                        });
+                        
+                        // Trigger test proactive message
+                        await _proactive.testProactive(delay: const Duration(minutes: 1));
+                        
+                        print('🧪 [TEST] Proactive test scheduled for 1 minute from now');
+                      },
+                      child: const Icon(Icons.science, color: Colors.white, size: 18),
+                    ),
+                  ),
+                  
                   // Delta popup floaters (personality/mood changes)
                   ..._floaters.map((f) {
                     final anim = CurvedAnimation(
