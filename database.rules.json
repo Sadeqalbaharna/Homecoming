@@ -4,9 +4,16 @@
       "$personaId": {
         ".read": true,
         ".write": true,
+        ".indexOn": ["timestamp"],
         "$conversationId": {
           ".validate": "newData.hasChildren(['userMessage', 'aiResponse', 'timestamp'])"
         }
+      }
+    },
+    "knowledge_graphs": {
+      "$personaId": {
+        ".read": true,
+        ".write": true
       }
     },
     "personalities": {
