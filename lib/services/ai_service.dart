@@ -14,6 +14,7 @@ import 'memory_service.dart';
 import 'curiosity_service.dart';
 import 'google_search_service.dart';
 import 'web_fetch_service.dart';
+import 'brain_debug_service.dart';
 
 /// Configuration class to hold all API keys
 /// Uses secure storage for encrypted key management
@@ -882,15 +883,46 @@ Text:
     bool useMemory = true, // Enable memory integration
     bool useWebSearch = true, // NEW: Enable Google Search
   }) async {
+    // 🧠 START BRAIN TRACE
+    final debugService = BrainDebugService();
+    final trace = debugService.startTrace(text);
+    final traceTimer = BrainTimer();
+    
+    debugService.addStep(
+      BrainPhase.processing,
+      'Starting message processing',
+      data: {
+        'personaId': personaId,
+        'model': model,
+        'useMemory': useMemory,
+        'useWebSearch': useWebSearch,
+      },
+    );
+    
     print('💬 [SEND MESSAGE START] text: "$text", personaId: $personaId');
     
     try {
       // Get current state
+      debugService.addStep(
+        BrainPhase.workingMemory,
+        'Loading personality and mood state',
+      );
+      
       var personality = await getPersonality(personaId);
       var mood = await getMood(personaId);
       final affinity = await getAffinity(personaId);
       final lastUpdate = await _getLastUpdateTime(personaId);
       print('✅ [SEND MESSAGE] State loaded successfully');
+      
+      debugService.addStep(
+        BrainPhase.workingMemory,
+        'State loaded successfully',
+        data: {
+          'mood': mood,
+          'affinity': affinity,
+          'lastUpdate': lastUpdate.toIso8601String(),
+        },
+      );
 
     // Apply time-based decay BEFORE processing new message
     final timeSinceUpdate = DateTime.now().difference(lastUpdate);
@@ -917,6 +949,12 @@ Text:
     List<String> memoriesUsed = [];
     dynamic memoryResult; // Capture for debug info
     if (useMemory) {
+      debugService.addStep(
+        BrainPhase.semanticRetrieval,
+        'Querying long-term memory with embeddings',
+        data: {'query': text.length > 100 ? '${text.substring(0, 100)}...' : text},
+      );
+      
       print('🧠 [AI_SERVICE] Memory query enabled for personaId: $personaId');
       print('🧠 [AI_SERVICE] Query text: "$text"');
       try {
@@ -935,12 +973,30 @@ Text:
               .toList();
           print('💭 Using ${memoriesUsed.length} memory contexts (threshold: 0.35)');
           print('💭 All results: ${memoryResult.results.map((r) => "${r.similarity.toStringAsFixed(2)}: ${r.summary.length > 50 ? r.summary.substring(0, 50) : r.summary}...").join(", ")}');
+          
+          debugService.addStep(
+            BrainPhase.semanticRetrieval,
+            'Memory retrieval complete',
+            data: {
+              'results': memoryResult.results.length,
+              'used': memoriesUsed.length,
+              'topSimilarity': memoryResult.results.first.similarity.toStringAsFixed(2),
+            },
+          );
         } else {
           print('⚠️ [AI_SERVICE] No memories found or query returned null');
+          debugService.addStep(
+            BrainPhase.semanticRetrieval,
+            'No relevant memories found',
+          );
         }
       } catch (e) {
         print('❌ [AI_SERVICE] Memory query failed: $e');
         print('⚠️ [AI_SERVICE] Continuing without memory context');
+        debugService.addStep(
+          BrainPhase.semanticRetrieval,
+          'Memory query failed: $e',
+        );
         // Continue without memory - don't fail the entire request
       }
     }
@@ -950,6 +1006,11 @@ Text:
     List<WebPageResult> fetchedPages = [];
     final urls = extractUrls(text);
     if (urls.isNotEmpty) {
+      debugService.addStep(
+        BrainPhase.episodicRetrieval,
+        'Fetching URL content from message',
+        data: {'urls': urls.length, 'detected': urls},
+      );
       print('🌐 [AI_SERVICE] Detected ${urls.length} URL(s) in message: ${urls.join(", ")}');
       try {
         fetchedPages = await _webFetch.fetchMultiplePages(urls);
@@ -964,13 +1025,27 @@ Text:
           }
           urlContext = buffer.toString();
           
+          debugService.addStep(
+            BrainPhase.episodicRetrieval,
+            'Web pages fetched successfully',
+            data: {'pages': fetchedPages.length, 'totalChars': urlContext.length},
+          );
+          
           // Track usage
           await UsageTrackingService.trackWebFetch(pages: fetchedPages.length);
         } else {
           print('⚠️ [AI_SERVICE] No pages could be fetched');
+          debugService.addStep(
+            BrainPhase.episodicRetrieval,
+            'No web pages could be fetched',
+          );
         }
       } catch (e) {
         print('❌ [AI_SERVICE] Web fetch failed: $e');
+        debugService.addStep(
+          BrainPhase.episodicRetrieval,
+          'Web fetch failed: $e',
+        );
         // Continue without web content - don't fail the entire request
       }
     }
@@ -980,6 +1055,11 @@ Text:
     bool webSearchUsed = false;
     List<SearchResult> searchResults = [];
     if (useWebSearch && GoogleSearchService.shouldSearch(text)) {
+      debugService.addStep(
+        BrainPhase.episodicRetrieval,
+        'Triggering web search for query',
+        data: {'shouldSearch': true},
+      );
       print('🔍 [AI_SERVICE] Web search triggered for query');
       try {
         final googleKey = await AIConfig.getGoogleKey();
@@ -1010,8 +1090,17 @@ Text:
               final headlines = GoogleSearchService.formatAsHeadlines(searchResults);
               print('✅ [AI_SERVICE] Got ${searchResults.length} headlines');
               
+              debugService.addStep(
+                BrainPhase.responseGeneration,
+                'Generated headline response from search',
+                data: {'headlines': searchResults.length},
+              );
+              
               // Track usage
               await UsageTrackingService.trackGoogleSearch(queries: 1);
+              
+              // Complete trace
+              debugService.completeTrace(headlines);
               
               // Return headlines directly (skip AI processing)
               return ChatResponse(
@@ -1031,6 +1120,13 @@ Text:
             } else {
               final errorMsg = searchResponse.error ?? 'unknown error';
               print('⚠️ [AI_SERVICE] Search failed: $errorMsg');
+              
+              debugService.addStep(
+                BrainPhase.responseGeneration,
+                'Search failed - returning error message',
+                data: {'error': errorMsg},
+              );
+              debugService.completeTrace("I couldn't fetch fresh headlines right now.");
               
               return ChatResponse(
                 reply: "I couldn't fetch fresh headlines right now.\n\n"
@@ -1067,10 +1163,20 @@ Text:
               webSearchUsed = true;
               print('✅ [AI_SERVICE] Got ${searchResults.length} search results for context');
               
+              debugService.addStep(
+                BrainPhase.episodicRetrieval,
+                'Web search complete',
+                data: {'results': searchResults.length, 'contextLength': webContext.length},
+              );
+              
               // Track usage
               await UsageTrackingService.trackGoogleSearch(queries: 1);
             } else {
               print('⚠️ [AI_SERVICE] No search results found');
+              debugService.addStep(
+                BrainPhase.episodicRetrieval,
+                'No search results found',
+              );
             }
           }
         } else {
@@ -1087,6 +1193,10 @@ Text:
     String curiosityPrompt = '';
     CuriosityQuestion? selectedQuestion;
     if (useMemory) {
+      debugService.addStep(
+        BrainPhase.emotionalCheck,
+        'Analyzing knowledge gaps for curiosity',
+      );
       print('🤔 [AI_SERVICE] Analyzing curiosity opportunities...');
       try {
         final curiosityService = CuriosityService();
@@ -1124,8 +1234,22 @@ You're genuinely curious about the user. If it feels natural in this conversatio
 (Why: ${selectedQuestion.reasoning})
 Don't force it - only ask if the flow of conversation makes it appropriate.''';
           print('🤔 [AI_SERVICE] Selected question: ${selectedQuestion.question} (priority: ${selectedQuestion.priority})');
+          
+          debugService.addStep(
+            BrainPhase.emotionalCheck,
+            'Curiosity question selected',
+            data: {
+              'question': selectedQuestion.question,
+              'priority': selectedQuestion.priority,
+              'category': selectedQuestion.category.toString(),
+            },
+          );
         } else {
           print('🤔 [AI_SERVICE] No question selected this time');
+          debugService.addStep(
+            BrainPhase.emotionalCheck,
+            'No curiosity question needed',
+          );
         }
       } catch (e) {
         print('❌ [AI_SERVICE] Curiosity analysis failed: $e');
@@ -1181,12 +1305,34 @@ Recent conversation:
 ${history.join('\n')}$memoryContext$urlContext$webContext$curiosityPrompt''';
 
     print('📤 [SEND MESSAGE] Calling OpenAI...');
+    debugService.addStep(
+      BrainPhase.reasoning,
+      'Sending to GPT for reasoning',
+      data: {
+        'model': model,
+        'systemPromptLength': systemPrompt.length,
+        'userMessage': text.length > 100 ? '${text.substring(0, 100)}...' : text,
+        'hasMemory': memoryContext.isNotEmpty,
+        'hasWeb': webContext.isNotEmpty,
+        'hasUrl': urlContext.isNotEmpty,
+      },
+    );
+    
     // Get AI response
     final reply = await _callOpenAI([
       {"role": "system", "content": systemPrompt},
       {"role": "user", "content": text}
     ], model);
     print('📥 [SEND MESSAGE] OpenAI response received: ${reply.length} characters');
+    
+    debugService.addStep(
+      BrainPhase.responseGeneration,
+      'GPT response received',
+      data: {
+        'responseLength': reply.length,
+        'responsePreview': reply.length > 150 ? '${reply.substring(0, 150)}...' : reply,
+      },
+    );
 
     // Track if curiosity question was asked
     if (selectedQuestion != null) {
@@ -1279,16 +1425,48 @@ ${history.join('\n')}$memoryContext$urlContext$webContext$curiosityPrompt''';
     }
     
     // Save conversation to Firebase
+    debugService.addStep(
+      BrainPhase.consolidation,
+      'Saving conversation to Firebase',
+      data: {
+        'personaId': personaId,
+        'personalityDeltas': actualDeltas,
+      },
+    );
+    
     await FirebaseService.saveConversation(
       personaId: personaId,
       userMessage: text,
       aiResponse: reply,
       personalityDeltas: actualDeltas,
     );
+    
+    debugService.addStep(
+      BrainPhase.consolidation,
+      'Conversation saved successfully',
+    );
 
     // Generate TTS
+    debugService.addStep(
+      BrainPhase.tts,
+      'Generating audio response',
+    );
+    
     final ttsBytes = await synthesizeTTS(reply);
     final ttsBase64 = ttsBytes != null ? base64Encode(ttsBytes) : null;
+    
+    if (ttsBytes != null) {
+      debugService.addStep(
+        BrainPhase.tts,
+        'Audio generated successfully',
+        data: {'audioSize': ttsBytes.length, 'base64Length': ttsBase64?.length ?? 0},
+      );
+    } else {
+      debugService.addStep(
+        BrainPhase.tts,
+        'Audio generation failed',
+      );
+    }
 
     // Get baselines for debug info
     Map<String, int> moodBaselines = Map<String, int>.from(_defaultMood);
@@ -1376,6 +1554,9 @@ ${history.join('\n')}$memoryContext$urlContext$webContext$curiosityPrompt''';
       'tags': tags,
       'model': model,
     };
+
+    // Complete brain debug trace
+    debugService.completeTrace(reply);
 
     return ChatResponse(
       reply: reply.isEmpty ? "(no reply)" : reply,

@@ -1,6 +1,7 @@
 /// Knowledge Graph Node - Represents entities in Kai's memory
 library;
 
+import 'dart:math' show exp;
 import 'package:flutter/material.dart';
 
 enum NodeType {
@@ -23,6 +24,13 @@ class KnowledgeNode {
   final double importance; // 0-1, affects node size
   final Map<String, dynamic> metadata;
   
+  // Neuromorphic fields (Phase 1 enhancement)
+  double emotionalIntensity;  // 0-1, how emotionally charged
+  int accessCount;             // How many times recalled
+  double retention;            // 0-1, forgetting curve value
+  DateTime? lastAccessed;      // When last recalled
+  double activationLevel;      // 0-1, current activation (spreading)
+  
   // Visual properties (will be computed)
   double x = 0.0;
   double y = 0.0;
@@ -37,6 +45,11 @@ class KnowledgeNode {
     this.tags = const [],
     this.importance = 0.5,
     this.metadata = const {},
+    this.emotionalIntensity = 0.0,
+    this.accessCount = 0,
+    this.retention = 1.0,
+    this.lastAccessed,
+    this.activationLevel = 0.0,
   });
   
   /// Get color based on node type
@@ -101,6 +114,13 @@ class KnowledgeNode {
       tags: (json['tags'] as List?)?.cast<String>() ?? [],
       importance: (json['importance'] as num?)?.toDouble() ?? 0.5,
       metadata: json['metadata'] as Map<String, dynamic>? ?? {},
+      emotionalIntensity: (json['emotionalIntensity'] as num?)?.toDouble() ?? 0.0,
+      accessCount: json['accessCount'] as int? ?? 0,
+      retention: (json['retention'] as num?)?.toDouble() ?? 1.0,
+      lastAccessed: json['lastAccessed'] != null 
+          ? DateTime.fromMillisecondsSinceEpoch(json['lastAccessed'] as int)
+          : null,
+      activationLevel: (json['activationLevel'] as num?)?.toDouble() ?? 0.0,
     );
   }
   
@@ -113,7 +133,44 @@ class KnowledgeNode {
     'tags': tags,
     'importance': importance,
     'metadata': metadata,
+    'emotionalIntensity': emotionalIntensity,
+    'accessCount': accessCount,
+    'retention': retention,
+    'lastAccessed': lastAccessed?.millisecondsSinceEpoch,
+    'activationLevel': activationLevel,
   };
+  
+  /// Record access (strengthens memory)
+  void recall() {
+    accessCount++;
+    lastAccessed = DateTime.now();
+    retention = (retention + 0.1).clamp(0.0, 1.0); // Recall strengthens memory
+    print('🔄 [NODE] Recalled "$label" (count: $accessCount, retention: ${retention.toStringAsFixed(2)})');
+  }
+  
+  /// Apply forgetting curve (Ebbinghaus)
+  void applyForgetting() {
+    final now = DateTime.now();
+    final age = now.difference(timestamp).inDays;
+    
+    // Strength depends on importance and reinforcement
+    final S = 30 * importance * (1 + accessCount);
+    
+    // Retention probability: R = e^(-t/S)
+    retention = exp(-age / S);
+    
+    // Important memories decay slower
+    if (importance > 0.8) {
+      retention = retention.clamp(0.5, 1.0);
+    }
+    
+    // Emotional memories decay slower (flashbulb effect)
+    if (emotionalIntensity > 0.8) {
+      retention = retention.clamp(0.7, 1.0);
+    }
+    
+    print('⏳ [NODE] Applied forgetting to "$label": retention=${retention.toStringAsFixed(2)} (age=${age}d, S=$S)');
+  }
 }
 
 class KnowledgeEdge {
