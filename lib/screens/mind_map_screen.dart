@@ -1,6 +1,7 @@
 /// Mind Map Screen - Obsidian-style knowledge graph visualization
 library;
 
+import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
@@ -27,6 +28,9 @@ class _MindMapScreenState extends State<MindMapScreen> with TickerProviderStateM
   KnowledgeGraph? _graph;
   bool _isLoading = true;
   String? _error;
+  double _loadingProgress = 0.0;
+  String _loadingStatus = 'Initializing...';
+  Timer? _timeoutTimer;
   
   // View state
   final TransformationController _transformationController = TransformationController();
@@ -54,6 +58,7 @@ class _MindMapScreenState extends State<MindMapScreen> with TickerProviderStateM
 
   @override
   void dispose() {
+    _timeoutTimer?.cancel();
     _forceAnimationController.dispose();
     super.dispose();
   }
@@ -62,24 +67,61 @@ class _MindMapScreenState extends State<MindMapScreen> with TickerProviderStateM
     setState(() {
       _isLoading = true;
       _error = null;
+      _loadingProgress = 0.0;
+      _loadingStatus = 'Loading from Firebase...';
+    });
+
+    // Set a timeout - if loading takes more than 10 seconds, fail gracefully
+    _timeoutTimer?.cancel();
+    _timeoutTimer = Timer(const Duration(seconds: 10), () {
+      if (_isLoading && mounted) {
+        print('❌ [MindMap] Loading timeout - returning to overlay');
+        setState(() {
+          _error = 'Loading timeout';
+          _isLoading = false;
+        });
+        // Auto-close after timeout
+        Future.delayed(const Duration(seconds: 2), () {
+          if (mounted) {
+            Navigator.of(context).pop();
+          }
+        });
+      }
     });
 
     try {
+      setState(() {
+        _loadingProgress = 0.2;
+        _loadingStatus = 'Connecting to Firebase...';
+      });
+      
       final graph = await _graphService.buildGraph(
         personaId: widget.personaId,
         forceRebuild: false,
       );
       
+      _timeoutTimer?.cancel(); // Cancel timeout if successful
+      
+      setState(() {
+        _loadingProgress = 0.6;
+        _loadingStatus = 'Processing nodes...';
+      });
+      
       // Safety check: ensure graph has valid data
       if (graph.nodes.isEmpty) {
-        print('⚠️ [MindMap] Graph is empty, creating placeholder');
-        // Don't show error, just show empty state
+        print('⚠️ [MindMap] Graph is empty, showing empty state');
         setState(() {
           _graph = graph;
           _isLoading = false;
+          _loadingProgress = 1.0;
         });
         return;
       }
+      
+      setState(() {
+        _loadingProgress = 0.8;
+        _loadingStatus = 'Initializing layout...';
+      });
       
       // Initialize node positions in a circle
       _initializeNodePositions(graph);
@@ -87,6 +129,8 @@ class _MindMapScreenState extends State<MindMapScreen> with TickerProviderStateM
       setState(() {
         _graph = graph;
         _isLoading = false;
+        _loadingProgress = 1.0;
+        _loadingStatus = 'Complete!';
       });
       
       // Start force-directed layout animation
@@ -94,9 +138,18 @@ class _MindMapScreenState extends State<MindMapScreen> with TickerProviderStateM
     } catch (e, stackTrace) {
       print('❌ [MindMap] Error loading graph: $e');
       print('❌ [MindMap] Stack trace: $stackTrace');
+      _timeoutTimer?.cancel();
       setState(() {
         _error = e.toString();
         _isLoading = false;
+      });
+      
+      // Auto-close after error
+      Future.delayed(const Duration(seconds: 3), () {
+        if (mounted && _error != null) {
+          print('🔙 [MindMap] Auto-closing due to error');
+          Navigator.of(context).pop();
+        }
       });
     }
   }
@@ -274,18 +327,53 @@ class _MindMapScreenState extends State<MindMapScreen> with TickerProviderStateM
   }
 
   Widget _buildBody() {
-    print('🗺️ [MindMap] _buildBody called - isLoading: $_isLoading, error: $_error, hasGraph: ${_graph != null}, nodeCount: ${_graph?.nodes.length ?? 0}');
+    print('🗺️ [MindMap] _buildBody called - isLoading: $_isLoading, error: $_error, hasGraph: ${_graph != null}, nodeCount: ${_graph?.nodes.length ?? 0}, progress: $_loadingProgress');
     
     if (_isLoading) {
-      print('🗺️ [MindMap] Showing loading spinner');
-      return const Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            CircularProgressIndicator(),
-            SizedBox(height: 16),
-            Text('Building knowledge graph...', style: TextStyle(color: Colors.white70)),
-          ],
+      print('🗺️ [MindMap] Showing loading with progress: $_loadingProgress - $_loadingStatus');
+      return Center(
+        child: Container(
+          padding: const EdgeInsets.all(32),
+          constraints: const BoxConstraints(maxWidth: 400),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const CircularProgressIndicator(),
+              const SizedBox(height: 24),
+              Text(
+                _loadingStatus,
+                style: const TextStyle(color: Colors.white70, fontSize: 16),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              LinearProgressIndicator(
+                value: _loadingProgress,
+                backgroundColor: Colors.white12,
+                valueColor: const AlwaysStoppedAnimation<Color>(Colors.purple),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '${(_loadingProgress * 100).toInt()}%',
+                style: const TextStyle(color: Colors.white38, fontSize: 12),
+              ),
+              const SizedBox(height: 24),
+              Text(
+                'Loading may take up to 10 seconds...',
+                style: const TextStyle(color: Colors.white24, fontSize: 12),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              TextButton(
+                onPressed: () {
+                  print('🔙 [MindMap] User cancelled loading');
+                  _timeoutTimer?.cancel();
+                  Navigator.of(context).pop();
+                },
+                child: const Text('Cancel'),
+              ),
+            ],
+          ),
         ),
       );
     }
@@ -293,18 +381,54 @@ class _MindMapScreenState extends State<MindMapScreen> with TickerProviderStateM
     if (_error != null) {
       print('🗺️ [MindMap] Showing error: $_error');
       return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.error_outline, size: 64, color: Colors.red),
-            const SizedBox(height: 16),
-            Text('Error: $_error', style: const TextStyle(color: Colors.white70)),
-            const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: _loadGraph,
-              child: const Text('Retry'),
-            ),
-          ],
+        child: Container(
+          padding: const EdgeInsets.all(32),
+          constraints: const BoxConstraints(maxWidth: 400),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.error_outline, size: 64, color: Colors.red),
+              const SizedBox(height: 16),
+              Text(
+                'Failed to load knowledge graph',
+                style: const TextStyle(color: Colors.white70, fontSize: 18, fontWeight: FontWeight.bold),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                _error!,
+                style: const TextStyle(color: Colors.white54, fontSize: 14),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  ElevatedButton.icon(
+                    onPressed: _loadGraph,
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('Retry'),
+                  ),
+                  const SizedBox(width: 16),
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      print('🔙 [MindMap] User closed error screen');
+                      Navigator.of(context).pop();
+                    },
+                    icon: const Icon(Icons.close),
+                    label: const Text('Close'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Returning to overlay automatically in 3 seconds...',
+                style: TextStyle(color: Colors.white24, fontSize: 12),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
         ),
       );
     }
