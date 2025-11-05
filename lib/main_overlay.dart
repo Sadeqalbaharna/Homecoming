@@ -893,7 +893,8 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
         // Pause voice activation when Kai is speaking to avoid self-activation
         if (state == PlayerState.playing) {
           _voiceActivation.pause();
-        } else if (state == PlayerState.paused || state == PlayerState.stopped || state == PlayerState.completed) {
+        } else if (state == PlayerState.stopped || state == PlayerState.completed) {
+          // Resume with buffer delay after TTS completes
           _voiceActivation.resume();
         }
       }

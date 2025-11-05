@@ -276,7 +276,8 @@ class _FloatingKaiState extends State<_FloatingKai>
       // Pause voice activation when Kai is speaking to avoid self-activation
       if (s == PlayerState.playing) {
         VoiceActivationService().pause();
-      } else if (s == PlayerState.paused || s == PlayerState.stopped || s == PlayerState.completed) {
+      } else if (s == PlayerState.stopped || s == PlayerState.completed) {
+        // Resume with buffer delay after TTS completes
         VoiceActivationService().resume();
       }
       

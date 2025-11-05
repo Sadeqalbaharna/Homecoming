@@ -215,11 +215,21 @@ class _MindMapScreenState extends State<MindMapScreen> with TickerProviderStateM
 
   @override
   Widget build(BuildContext context) {
+    print('🗺️ [MindMap] Building UI - isLoading: $_isLoading, error: $_error, hasGraph: ${_graph != null}, nodeCount: ${_graph?.nodes.length ?? 0}');
+    
     return Scaffold(
       backgroundColor: const Color(0xFF1E1E1E), // Dark background like Obsidian
       appBar: AppBar(
         title: const Text('Knowledge Graph'),
         backgroundColor: const Color(0xFF2D2D2D),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () {
+            print('🗺️ [MindMap] Back button pressed');
+            Navigator.of(context).pop();
+          },
+          tooltip: 'Back',
+        ),
         actions: [
           // Archive status
           IconButton(
@@ -251,6 +261,12 @@ class _MindMapScreenState extends State<MindMapScreen> with TickerProviderStateM
               });
             },
           ),
+          // Close button
+          IconButton(
+            icon: const Icon(Icons.close),
+            onPressed: () => Navigator.of(context).pop(),
+            tooltip: 'Close',
+          ),
         ],
       ),
       body: _buildBody(),
@@ -258,7 +274,10 @@ class _MindMapScreenState extends State<MindMapScreen> with TickerProviderStateM
   }
 
   Widget _buildBody() {
+    print('🗺️ [MindMap] _buildBody called - isLoading: $_isLoading, error: $_error, hasGraph: ${_graph != null}, nodeCount: ${_graph?.nodes.length ?? 0}');
+    
     if (_isLoading) {
+      print('🗺️ [MindMap] Showing loading spinner');
       return const Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -272,6 +291,7 @@ class _MindMapScreenState extends State<MindMapScreen> with TickerProviderStateM
     }
 
     if (_error != null) {
+      print('🗺️ [MindMap] Showing error: $_error');
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -290,26 +310,33 @@ class _MindMapScreenState extends State<MindMapScreen> with TickerProviderStateM
     }
 
     if (_graph == null || _graph!.nodes.isEmpty) {
-      return const Center(
+      print('🗺️ [MindMap] Showing empty state');
+      return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.bubble_chart_outlined, size: 64, color: Colors.white30),
-            SizedBox(height: 16),
-            Text(
+            const Icon(Icons.bubble_chart_outlined, size: 64, color: Colors.white30),
+            const SizedBox(height: 16),
+            const Text(
               'No memories yet',
               style: TextStyle(color: Colors.white70, fontSize: 18),
             ),
-            SizedBox(height: 8),
-            Text(
+            const SizedBox(height: 8),
+            const Text(
               'Start chatting with Kai to build the knowledge graph',
               style: TextStyle(color: Colors.white38, fontSize: 14),
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Close'),
             ),
           ],
         ),
       );
     }
 
+    print('🗺️ [MindMap] Rendering graph with ${_graph!.nodes.length} nodes');
     return Stack(
       children: [
         // Graph canvas

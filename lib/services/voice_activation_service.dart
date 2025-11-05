@@ -19,16 +19,20 @@ class VoiceActivationService {
   
   bool _isListening = false;
   bool _isEnabled = false;
-  bool _isInConversation = false; // NEW: Track if in active conversation
-  bool _isPaused = false; // NEW: Pause while Kai is speaking
+  bool _isInConversation = false; // Track if in active conversation
+  bool _isPaused = false; // Pause while Kai is speaking
+  DateTime? _lastPauseTime; // Track when we last paused
   Timer? _listeningTimer;
-  Timer? _conversationTimer; // NEW: Timer to end conversation after silence
+  Timer? _conversationTimer; // Timer to end conversation after silence
+  Timer? _resumeBufferTimer; // Delay resume to prevent catching TTS tail
   StreamController<String>? _wakeWordController;
 
   // Configuration
   static const Duration _listenDuration = Duration(seconds: 3); // Listen in 3-second chunks
   static const Duration _pauseBetweenListens = Duration(milliseconds: 500);
-  static const Duration _conversationTimeout = Duration(seconds: 15); // NEW: End conversation after 15s of silence
+  static const Duration _conversationTimeout = Duration(seconds: 15); // End conversation after 15s of silence
+  static const Duration _resumeBufferDelay = Duration(milliseconds: 2000); // Wait 2s after TTS stops before resuming
+  static const Duration _minPauseDuration = Duration(milliseconds: 500); // Minimum pause duration
   static const List<String> _wakeWords = [
     'hey kai',
     'hey kay',
@@ -250,18 +254,61 @@ class VoiceActivationService {
 
   /// Pause listening temporarily (e.g., while Kai is speaking)
   void pause() {
+    if (_isPaused) return;
+    
     _isPaused = true;
+    _lastPauseTime = DateTime.now();
+    
+    // Cancel any pending resume
+    _resumeBufferTimer?.cancel();
+    
     print('⏸️ [VoiceActivation] Paused listening (Kai speaking)');
   }
 
-  /// Resume listening after pause
+  /// Resume listening after pause with buffer delay
   void resume() {
+    if (!_isPaused) return;
+    
+    final now = DateTime.now();
+    
+    // Calculate how long we've been paused
+    final pauseDuration = _lastPauseTime != null 
+        ? now.difference(_lastPauseTime!)
+        : Duration.zero;
+    
+    // If we paused very recently, enforce minimum pause duration
+    if (pauseDuration < _minPauseDuration) {
+      print('⏱️ [VoiceActivation] Pause too short (${pauseDuration.inMilliseconds}ms), waiting ${_minPauseDuration.inMilliseconds}ms total');
+      _resumeBufferTimer?.cancel();
+      _resumeBufferTimer = Timer(_minPauseDuration - pauseDuration, _actuallyResume);
+      return;
+    }
+    
+    // Add buffer delay before resuming to avoid catching TTS tail/echo
+    print('⏱️ [VoiceActivation] Scheduling resume in ${_resumeBufferDelay.inMilliseconds}ms (buffer delay)');
+    _resumeBufferTimer?.cancel();
+    _resumeBufferTimer = Timer(_resumeBufferDelay, _actuallyResume);
+  }
+  
+  /// Actually resume listening (called after buffer delay)
+  void _actuallyResume() {
+    if (!_isPaused) return;
+    
     _isPaused = false;
-    print('▶️ [VoiceActivation] Resumed listening');
+    _resumeBufferTimer = null;
+    
+    // Calculate total pause time
+    if (_lastPauseTime != null) {
+      final totalPauseDuration = DateTime.now().difference(_lastPauseTime!);
+      print('▶️ [VoiceActivation] Resumed listening (paused for ${totalPauseDuration.inMilliseconds}ms)');
+    } else {
+      print('▶️ [VoiceActivation] Resumed listening');
+    }
   }
 
   /// Clean up resources
   Future<void> dispose() async {
+    _resumeBufferTimer?.cancel();
     await stop();
     await _wakeWordController?.close();
   }
