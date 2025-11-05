@@ -90,8 +90,9 @@ class GraphArchiveService {
       await prefs.setInt(_lastArchivedTimestampKey, now);
       await prefs.setStringList(_archivedConversationIdsKey, archivedIds);
       
-      // 7. Force rebuild graph cache
+      // 7. Force rebuild and save graph to Firebase
       _graphService.clearCache();
+      await _graphService.buildGraph(personaId: personaId, forceRebuild: true);
       
       print('✅ [ARCHIVE] Archive complete!');
       print('📊 [ARCHIVE] Created ${result.nodesCreated} nodes, ${result.edgesCreated} edges');

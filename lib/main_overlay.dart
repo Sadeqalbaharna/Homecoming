@@ -890,8 +890,10 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
         // Update animation automatically when player state changes
         _updateAnimationState();
         
-        // Resume voice activation when TTS finishes playing
-        if (state == PlayerState.completed) {
+        // Pause voice activation when Kai is speaking to avoid self-activation
+        if (state == PlayerState.playing) {
+          _voiceActivation.pause();
+        } else if (state == PlayerState.paused || state == PlayerState.stopped || state == PlayerState.completed) {
           _voiceActivation.resume();
         }
       }

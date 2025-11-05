@@ -70,6 +70,17 @@ class _MindMapScreenState extends State<MindMapScreen> with TickerProviderStateM
         forceRebuild: false,
       );
       
+      // Safety check: ensure graph has valid data
+      if (graph.nodes.isEmpty) {
+        print('⚠️ [MindMap] Graph is empty, creating placeholder');
+        // Don't show error, just show empty state
+        setState(() {
+          _graph = graph;
+          _isLoading = false;
+        });
+        return;
+      }
+      
       // Initialize node positions in a circle
       _initializeNodePositions(graph);
       
@@ -80,7 +91,9 @@ class _MindMapScreenState extends State<MindMapScreen> with TickerProviderStateM
       
       // Start force-directed layout animation
       _startForceSimulation();
-    } catch (e) {
+    } catch (e, stackTrace) {
+      print('❌ [MindMap] Error loading graph: $e');
+      print('❌ [MindMap] Stack trace: $stackTrace');
       setState(() {
         _error = e.toString();
         _isLoading = false;

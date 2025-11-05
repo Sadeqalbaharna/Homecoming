@@ -18,6 +18,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'services/ai_service.dart';
 import 'services/firebase_service.dart';
 import 'services/knowledge_graph_service.dart';
+import 'services/voice_activation_service.dart';
 import 'firebase_options.dart';
 
 /// ===== Layout / Window =====
@@ -271,6 +272,14 @@ class _FloatingKaiState extends State<_FloatingKai>
 
     _stateSub = _player.onPlayerStateChanged.listen((s) {
       _currentState = s;
+      
+      // Pause voice activation when Kai is speaking to avoid self-activation
+      if (s == PlayerState.playing) {
+        VoiceActivationService().pause();
+      } else if (s == PlayerState.paused || s == PlayerState.stopped || s == PlayerState.completed) {
+        VoiceActivationService().resume();
+      }
+      
       if (mounted) setState(() {});
     });
 

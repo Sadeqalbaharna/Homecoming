@@ -4,6 +4,7 @@ library;
 
 import 'dart:async';
 import 'dart:math';
+import 'package:firebase_database/firebase_database.dart';
 import '../models/knowledge_node.dart';
 import 'firebase_service.dart';
 import 'graph_archive_service.dart';
@@ -20,6 +21,7 @@ class KnowledgeGraphService {
   final GraphArchiveService _archiveService = GraphArchiveService();
 
   /// Build knowledge graph from memories and conversations
+  /// First tries to load from Firebase, then builds from conversations if needed
   Future<KnowledgeGraph> buildGraph({
     required String personaId,
     bool forceRebuild = false,
@@ -34,6 +36,34 @@ class KnowledgeGraphService {
     }
 
     print('🔨 [GRAPH] Building knowledge graph...');
+
+    // Try to load from Firebase first
+    if (!forceRebuild && FirebaseService.isAvailable) {
+      final savedGraph = await _loadGraphFromFirebase(personaId);
+      if (savedGraph != null && savedGraph.nodes.isNotEmpty) {
+        print('✅ [GRAPH] Loaded ${savedGraph.nodes.length} nodes from Firebase');
+        _cachedGraph = savedGraph;
+        _lastBuildTime = DateTime.now();
+        return savedGraph;
+      }
+    }
+
+    // Build from conversations if no saved graph
+    final graph = await _buildGraphFromConversations(personaId);
+    
+    // Save to Firebase for next time
+    if (FirebaseService.isAvailable) {
+      await _saveGraphToFirebase(personaId, graph);
+    }
+    
+    _cachedGraph = graph;
+    _lastBuildTime = DateTime.now();
+    
+    return graph;
+  }
+  
+  /// Build graph from conversations (used when no saved graph exists)
+  Future<KnowledgeGraph> _buildGraphFromConversations(String personaId) async {
 
     final nodes = <KnowledgeNode>[];
     final edges = <KnowledgeEdge>[];
@@ -275,6 +305,136 @@ class KnowledgeGraphService {
     _cachedGraph = null;
     _lastBuildTime = null;
     print('🗑️ [GRAPH] Cache cleared');
+  }
+  
+  /// Save knowledge graph to Firebase
+  Future<void> _saveGraphToFirebase(String personaId, KnowledgeGraph graph) async {
+    if (!FirebaseService.isAvailable) return;
+    
+    try {
+      print('💾 [GRAPH] Saving graph to Firebase...');
+      
+      final ref = FirebaseDatabase.instance.ref('knowledge_graph/$personaId');
+      
+      // Serialize graph
+      final data = {
+        'nodes': graph.nodes.map((n) => {
+          'id': n.id,
+          'label': n.label,
+          'type': n.type.toString().split('.').last,
+          'timestamp': n.timestamp.millisecondsSinceEpoch,
+          'importance': n.importance,
+          'metadata': n.metadata,
+          'x': n.x,
+          'y': n.y,
+        }).toList(),
+        'edges': graph.edges.map((e) => {
+          'fromId': e.fromId,
+          'toId': e.toId,
+          'type': e.type.toString().split('.').last,
+          'strength': e.strength,
+          'timestamp': e.timestamp.millisecondsSinceEpoch,
+          if (e.label != null) 'label': e.label,
+        }).toList(),
+        'lastUpdated': DateTime.now().millisecondsSinceEpoch,
+      };
+      
+      await ref.set(data);
+      print('✅ [GRAPH] Saved ${graph.nodes.length} nodes, ${graph.edges.length} edges to Firebase');
+    } catch (e) {
+      print('❌ [GRAPH] Failed to save to Firebase: $e');
+    }
+  }
+  
+  /// Load knowledge graph from Firebase
+  Future<KnowledgeGraph?> _loadGraphFromFirebase(String personaId) async {
+    if (!FirebaseService.isAvailable) return null;
+    
+    try {
+      print('📥 [GRAPH] Loading graph from Firebase...');
+      
+      final ref = FirebaseDatabase.instance.ref('knowledge_graph/$personaId');
+      final snapshot = await ref.get();
+      
+      if (!snapshot.exists) {
+        print('ℹ️ [GRAPH] No saved graph found in Firebase');
+        return null;
+      }
+      
+      final data = Map<String, dynamic>.from(snapshot.value as Map);
+      
+      // Deserialize nodes
+      final nodes = <KnowledgeNode>[];
+      final nodesData = data['nodes'] as List? ?? [];
+      
+      for (final nodeData in nodesData) {
+        final n = Map<String, dynamic>.from(nodeData as Map);
+        
+        // Parse node type
+        NodeType type;
+        try {
+          type = NodeType.values.firstWhere(
+            (t) => t.toString().split('.').last == n['type'],
+            orElse: () => NodeType.fact,
+          );
+        } catch (e) {
+          type = NodeType.fact;
+        }
+        
+        nodes.add(KnowledgeNode(
+          id: n['id'] as String,
+          label: n['label'] as String,
+          type: type,
+          timestamp: DateTime.fromMillisecondsSinceEpoch(n['timestamp'] as int),
+          importance: (n['importance'] as num?)?.toDouble() ?? 0.5,
+          metadata: Map<String, dynamic>.from(n['metadata'] as Map? ?? {}),
+        )
+          ..x = (n['x'] as num?)?.toDouble() ?? 0
+          ..y = (n['y'] as num?)?.toDouble() ?? 0);
+      }
+      
+      // Deserialize edges
+      final edges = <KnowledgeEdge>[];
+      final edgesData = data['edges'] as List? ?? [];
+      
+      for (final edgeData in edgesData) {
+        final e = Map<String, dynamic>.from(edgeData as Map);
+        
+        // Parse edge type
+        EdgeType type;
+        try {
+          type = EdgeType.values.firstWhere(
+            (t) => t.toString().split('.').last == e['type'],
+            orElse: () => EdgeType.related,
+          );
+        } catch (ex) {
+          type = EdgeType.related;
+        }
+        
+        edges.add(KnowledgeEdge(
+          fromId: e['fromId'] as String,
+          toId: e['toId'] as String,
+          type: type,
+          strength: (e['strength'] as num?)?.toDouble() ?? 0.5,
+          timestamp: DateTime.fromMillisecondsSinceEpoch(e['timestamp'] as int),
+          label: e['label'] as String?,
+        ));
+      }
+      
+      print('✅ [GRAPH] Loaded ${nodes.length} nodes, ${edges.length} edges from Firebase');
+      
+      final lastUpdated = data['lastUpdated'] as int?;
+      return KnowledgeGraph(
+        nodes: nodes,
+        edges: edges,
+        lastUpdated: lastUpdated != null 
+          ? DateTime.fromMillisecondsSinceEpoch(lastUpdated)
+          : DateTime.now(),
+      );
+    } catch (e) {
+      print('❌ [GRAPH] Failed to load from Firebase: $e');
+      return null;
+    }
   }
   
   /// Archive unprocessed conversations to the graph

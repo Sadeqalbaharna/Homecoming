@@ -70,6 +70,24 @@ class GraphPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    // Safety check: ensure graph has nodes
+    if (graph.nodes.isEmpty) {
+      // Draw "No data" message
+      final textPainter = TextPainter(
+        text: const TextSpan(
+          text: 'No nodes to display',
+          style: TextStyle(color: Colors.white38, fontSize: 16),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      
+      textPainter.paint(
+        canvas,
+        Offset(size.width / 2 - textPainter.width / 2, size.height / 2),
+      );
+      return;
+    }
+    
     // 1. Draw edges first (behind nodes)
     _drawEdges(canvas);
     
