@@ -18,7 +18,8 @@ class KnowledgeGraphService {
   DateTime? _lastBuildTime;
   static const Duration _cacheValidDuration = Duration(minutes: 5);
   
-  final GraphArchiveService _archiveService = GraphArchiveService();
+  // Use lazy getter to avoid circular dependency
+  GraphArchiveService get _archiveService => GraphArchiveService();
 
   /// Build knowledge graph from memories and conversations
   /// First tries to load from Firebase, then builds from conversations if needed

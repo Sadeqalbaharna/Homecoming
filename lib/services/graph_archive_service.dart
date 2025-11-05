@@ -15,7 +15,8 @@ class GraphArchiveService {
   factory GraphArchiveService() => _instance;
   GraphArchiveService._internal();
 
-  final KnowledgeGraphService _graphService = KnowledgeGraphService();
+  // Use lazy getter to avoid circular dependency
+  KnowledgeGraphService get _graphService => KnowledgeGraphService();
   
   // Track what's been archived
   static const String _lastArchivedTimestampKey = 'last_archived_timestamp';
