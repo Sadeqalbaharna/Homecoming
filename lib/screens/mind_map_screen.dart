@@ -49,10 +49,12 @@ class _MindMapScreenState extends State<MindMapScreen> with TickerProviderStateM
   @override
   void initState() {
     super.initState();
+    print('🗺️ [MindMap] initState called for personaId: ${widget.personaId}');
     _forceAnimationController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 3),
     );
+    print('🗺️ [MindMap] Starting graph load...');
     _loadGraph();
   }
 
@@ -64,12 +66,14 @@ class _MindMapScreenState extends State<MindMapScreen> with TickerProviderStateM
   }
 
   Future<void> _loadGraph() async {
+    print('🗺️ [MindMap] _loadGraph started');
     setState(() {
       _isLoading = true;
       _error = null;
       _loadingProgress = 0.0;
       _loadingStatus = 'Loading from Firebase...';
     });
+    print('🗺️ [MindMap] Loading state set, isLoading: $_isLoading');
 
     // Set a timeout - if loading takes more than 10 seconds, fail gracefully
     _timeoutTimer?.cancel();
@@ -77,7 +81,7 @@ class _MindMapScreenState extends State<MindMapScreen> with TickerProviderStateM
       if (_isLoading && mounted) {
         print('❌ [MindMap] Loading timeout - returning to overlay');
         setState(() {
-          _error = 'Loading timeout';
+          _error = 'Loading timeout - Firebase may be slow or offline';
           _isLoading = false;
         });
         // Auto-close after timeout
@@ -94,12 +98,14 @@ class _MindMapScreenState extends State<MindMapScreen> with TickerProviderStateM
         _loadingProgress = 0.2;
         _loadingStatus = 'Connecting to Firebase...';
       });
+      print('🗺️ [MindMap] Calling buildGraph with personaId: ${widget.personaId}');
       
       final graph = await _graphService.buildGraph(
         personaId: widget.personaId,
         forceRebuild: false,
       );
       
+      print('🗺️ [MindMap] buildGraph returned with ${graph.nodes.length} nodes and ${graph.edges.length} edges');
       _timeoutTimer?.cancel(); // Cancel timeout if successful
       
       setState(() {
