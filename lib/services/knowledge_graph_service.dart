@@ -64,9 +64,9 @@ class KnowledgeGraphService {
     return graph;
   }
   
-  /// Build graph from conversations (used when no saved graph exists)
+  /// Build graph from conversations using intelligent local NLP (ZERO API CALLS!)
   Future<KnowledgeGraph> _buildGraphFromConversations(String personaId) async {
-
+    final nlp = LocalNLPService();
     final nodes = <KnowledgeNode>[];
     final edges = <KnowledgeEdge>[];
 
@@ -74,83 +74,249 @@ class KnowledgeGraphService {
       // 1. Get recent conversations from Firebase
       final conversations = await FirebaseService.getRecentConversations(
         personaId,
-        limit: 50, // Last 50 conversations
+        limit: 100, // Increased for better analysis
       );
 
-      print('📚 [GRAPH] Processing ${conversations.length} conversations');
+      print('📚 [GRAPH] Processing ${conversations.length} conversations with intelligent NLP');
 
-      // 2. Extract entities from conversations
-      final entityMap = <String, KnowledgeNode>{};
-      final conversationNodes = <KnowledgeNode>[];
+      if (conversations.isEmpty) {
+        return KnowledgeGraph(nodes: [], edges: [], lastUpdated: DateTime.now());
+      }
 
+      // 2. Prepare conversation texts for batch NLP analysis
+      final convTexts = <String>[];
+      final convData = <Map<String, dynamic>>[];
+      
       for (final conv in conversations) {
-        final timestamp = DateTime.fromMillisecondsSinceEpoch(
-          conv['timestamp'] as int? ?? DateTime.now().millisecondsSinceEpoch,
-        );
-        final userMessage = conv['userMessage'] as String? ?? '';
-        final aiResponse = conv['aiResponse'] as String? ?? '';
-        final convId = conv['id'] as String;
+        final userMsg = conv['userMessage'] as String? ?? '';
+        final aiMsg = conv['aiResponse'] as String? ?? '';
+        final fullText = '$userMsg $aiMsg';
+        convTexts.add(fullText);
+        convData.add({
+          'id': conv['id'] as String,
+          'timestamp': conv['timestamp'] as int? ?? DateTime.now().millisecondsSinceEpoch,
+          'userMessage': userMsg,
+          'aiResponse': aiMsg,
+          'fullText': fullText,
+        });
+      }
 
-        // Create conversation node
-        final convNode = KnowledgeNode(
-          id: 'conv_$convId',
-          label: _summarizeConversation(userMessage, aiResponse),
-          type: NodeType.conversation,
-          timestamp: timestamp,
-          importance: 0.3,
+      // 3. Calculate TF-IDF to find important terms across ALL conversations
+      print('🔍 [GRAPH] Running TF-IDF analysis...');
+      final tfidf = nlp.calculateTFIDF(convTexts);
+      
+      // Extract top terms from each conversation
+      final importantTerms = <String, Set<int>>{}; // term -> conversation indices
+      for (var i = 0; i < convTexts.length; i++) {
+        final docKey = 'doc_$i';
+        if (tfidf.containsKey(docKey)) {
+          final scores = tfidf[docKey]!.entries.toList()
+            ..sort((a, b) => b.value.compareTo(a.value));
+          
+          // Take top 5 most important terms from each conversation
+          for (var j = 0; j < min(5, scores.length); j++) {
+            final term = scores[j].key;
+            importantTerms[term] ??= {};
+            importantTerms[term]!.add(i);
+          }
+        }
+      }
+
+      print('💡 [GRAPH] Found ${importantTerms.length} important terms');
+
+      // 4. Find co-occurring terms to establish relationships
+      print('🔗 [GRAPH] Analyzing term relationships...');
+      final coOccurrences = nlp.findCoOccurrences(convTexts, windowSize: 10);
+
+      // 5. Create topic clusters by analyzing all conversations
+      final topicClusters = <String, List<int>>{}; // topic -> conversation indices
+      for (var i = 0; i < convTexts.length; i++) {
+        final topicAnalysis = nlp.analyzeTopics(convTexts[i]);
+        if (topicAnalysis.primaryTopic != null) {
+          final topic = topicAnalysis.primaryTopic!;
+          topicClusters[topic] ??= [];
+          topicClusters[topic]!.add(i);
+        }
+      }
+
+      print('📂 [GRAPH] Identified ${topicClusters.length} topic clusters');
+
+      // 6. Create topic nodes (high-level categories)
+      final topicNodes = <String, KnowledgeNode>{};
+      for (final entry in topicClusters.entries) {
+        final topic = entry.key;
+        final convIndices = entry.value;
+        
+        final topicNode = KnowledgeNode(
+          id: 'topic_$topic',
+          label: topic[0].toUpperCase() + topic.substring(1),
+          type: NodeType.topic,
+          timestamp: DateTime.now(),
+          importance: min(1.0, convIndices.length * 0.15),
           metadata: {
-            'userMessage': userMessage,
-            'aiResponse': aiResponse,
+            'conversationCount': convIndices.length,
+            'emoji': _getTopicEmoji(topic),
           },
         );
-        conversationNodes.add(convNode);
+        topicNodes[topic] = topicNode;
+        nodes.add(topicNode);
+      }
 
-        // Extract entities from both messages
-        final entities = _extractEntitiesSimple(userMessage + ' ' + aiResponse, timestamp);
+      // 7. Create concept nodes from important terms (mentioned multiple times)
+      final conceptNodes = <String, KnowledgeNode>{};
+      for (final entry in importantTerms.entries) {
+        final term = entry.key;
+        final convIndices = entry.value;
+        
+        // Only create concept nodes for terms mentioned in 2+ conversations
+        if (convIndices.length >= 2) {
+          final conceptNode = KnowledgeNode(
+            id: 'concept_${term.toLowerCase().replaceAll(' ', '_')}',
+            label: term,
+            type: NodeType.concept,
+            timestamp: DateTime.now(),
+            importance: min(1.0, convIndices.length * 0.2),
+            metadata: {
+              'mentionCount': convIndices.length,
+              'conversations': convIndices.toList(),
+            },
+          );
+          conceptNodes[term] = conceptNode;
+          nodes.add(conceptNode);
+        }
+      }
 
-        for (final entity in entities) {
-          // Deduplicate entities
-          final existingEntity = entityMap[entity.label.toLowerCase()];
-          if (existingEntity != null) {
-            // Increase importance if mentioned multiple times
-            existingEntity.metadata['mentionCount'] = 
-              (existingEntity.metadata['mentionCount'] as int? ?? 1) + 1;
-            existingEntity.metadata['importance'] = 
-              min(1.0, (existingEntity.metadata['mentionCount'] as int) * 0.1);
-            
-            // Create edge from conversation to entity
-            edges.add(KnowledgeEdge(
-              fromId: convNode.id,
-              toId: existingEntity.id,
-              type: EdgeType.mentioned,
-              strength: 0.6,
+      print('🧠 [GRAPH] Created ${conceptNodes.length} concept nodes');
+
+      // 8. Extract entities and create entity nodes
+      final entityNodes = <String, KnowledgeNode>{};
+      
+      for (var i = 0; i < convData.length; i++) {
+        final conv = convData[i];
+        final fullText = conv['fullText'] as String;
+        final timestamp = DateTime.fromMillisecondsSinceEpoch(conv['timestamp'] as int);
+
+        // Use NLP to extract entities
+        final entityResult = nlp.extractEntities(fullText);
+        
+        // Create entity nodes from top entities
+        for (final entity in entityResult.byImportance.take(3)) {
+          final key = entity.text.toLowerCase();
+          
+          if (!entityNodes.containsKey(key)) {
+            final nodeType = entity.type == EntityType.emotion
+                ? NodeType.emotion
+                : entity.type == EntityType.properNoun
+                    ? NodeType.person
+                    : NodeType.fact;
+
+            final entityNode = KnowledgeNode(
+              id: '${nodeType.toString().split('.').last}_${key.replaceAll(' ', '_')}',
+              label: entity.text,
+              type: nodeType,
               timestamp: timestamp,
-            ));
+              importance: entity.importance,
+              metadata: {'mentionCount': 1, 'firstSeen': timestamp.toIso8601String()},
+            );
+            entityNodes[key] = entityNode;
+            nodes.add(entityNode);
           } else {
-            entityMap[entity.label.toLowerCase()] = entity;
-            
-            // Create edge from conversation to entity
+            // Increase mention count for existing entity
+            final existing = entityNodes[key]!;
+            existing.metadata['mentionCount'] = 
+              (existing.metadata['mentionCount'] as int? ?? 1) + 1;
+            existing.metadata['importance'] = 
+              min(1.0, (existing.metadata['mentionCount'] as int) * 0.15);
+          }
+        }
+      }
+
+      print('👥 [GRAPH] Extracted ${entityNodes.length} entities');
+
+      // 9. Create relationship edges between concepts based on co-occurrence
+      for (final entry in coOccurrences.entries) {
+        final term1 = entry.key;
+        final relatedTerms = entry.value;
+        
+        if (conceptNodes.containsKey(term1)) {
+          for (final term2 in relatedTerms) {
+            if (conceptNodes.containsKey(term2) && term1 != term2) {
+              // Calculate relationship strength based on frequency
+              final strength = min(1.0, relatedTerms.length * 0.15);
+              
+              edges.add(KnowledgeEdge(
+                fromId: conceptNodes[term1]!.id,
+                toId: conceptNodes[term2]!.id,
+                type: EdgeType.related,
+                strength: strength,
+                timestamp: DateTime.now(),
+              ));
+            }
+          }
+        }
+      }
+
+      // 10. Link concepts to their topics
+      for (final conceptEntry in conceptNodes.entries) {
+        final conceptTerm = conceptEntry.key;
+        final conceptNode = conceptEntry.value;
+        final convIndices = importantTerms[conceptTerm]!;
+        
+        // Find which topics this concept belongs to
+        final conceptTopics = <String>{};
+        for (final idx in convIndices) {
+          for (final topicEntry in topicClusters.entries) {
+            if (topicEntry.value.contains(idx)) {
+              conceptTopics.add(topicEntry.key);
+            }
+          }
+        }
+        
+        // Create edges to all related topics
+        for (final topic in conceptTopics) {
+          if (topicNodes.containsKey(topic)) {
             edges.add(KnowledgeEdge(
-              fromId: convNode.id,
-              toId: entity.id,
-              type: EdgeType.mentioned,
-              strength: 0.6,
-              timestamp: timestamp,
+              fromId: conceptNode.id,
+              toId: topicNodes[topic]!.id,
+              type: EdgeType.categorized,
+              strength: 0.7,
+              timestamp: DateTime.now(),
             ));
           }
         }
       }
 
-      nodes.addAll(conversationNodes);
-      nodes.addAll(entityMap.values);
+      // 11. Link entities to concepts they're mentioned with
+      for (var i = 0; i < convData.length; i++) {
+        final conv = convData[i];
+        final fullText = conv['fullText'] as String;
+        final lowerText = fullText.toLowerCase();
+        
+        // Find which entities and concepts appear in this conversation
+        final convEntities = entityNodes.keys.where((k) => lowerText.contains(k)).toList();
+        final convConcepts = conceptNodes.keys.where((k) => lowerText.contains(k.toLowerCase())).toList();
+        
+        // Link entities to concepts
+        for (final entityKey in convEntities) {
+          for (final conceptKey in convConcepts) {
+            if (entityNodes.containsKey(entityKey) && conceptNodes.containsKey(conceptKey)) {
+              edges.add(KnowledgeEdge(
+                fromId: entityNodes[entityKey]!.id,
+                toId: conceptNodes[conceptKey]!.id,
+                type: EdgeType.mentioned,
+                strength: 0.5,
+                timestamp: DateTime.now(),
+              ));
+            }
+          }
+        }
+      }
 
-      // 3. Create similarity-based edges between entities
-      _createSimilarityEdges(nodes, edges);
-
-      // 4. Create temporal edges between conversations
-      _createTemporalEdges(conversationNodes, edges);
-
-      print('✅ [GRAPH] Built graph: ${nodes.length} nodes, ${edges.length} edges');
+      print('✅ [GRAPH] Built intelligent graph: ${nodes.length} nodes, ${edges.length} edges');
+      print('   📊 Topics: ${topicNodes.length}');
+      print('   💡 Concepts: ${conceptNodes.length}');
+      print('   👤 Entities: ${entityNodes.length}');
+      print('   🔗 Relationships: ${edges.length}');
 
       final graph = KnowledgeGraph(
         nodes: nodes,
@@ -175,131 +341,19 @@ class KnowledgeGraphService {
     }
   }
 
-  /// Simple entity extraction using pattern matching
-  /// TODO: Replace with GPT-based extraction for better accuracy
-  List<KnowledgeNode> _extractEntitiesSimple(String text, DateTime timestamp) {
-    final entities = <KnowledgeNode>[];
-    final words = text.split(RegExp(r'\s+'));
-
-    // Extract capitalized words as potential person/place names
-    final capitalized = words.where((w) =>
-      w.length > 2 &&
-      w[0] == w[0].toUpperCase() &&
-      !_isCommonWord(w)
-    ).toSet();
-
-    for (final name in capitalized) {
-      entities.add(KnowledgeNode(
-        id: 'person_${name.toLowerCase()}',
-        label: name,
-        type: NodeType.person,
-        timestamp: timestamp,
-        importance: 0.5,
-        metadata: {'mentionCount': 1},
-      ));
-    }
-
-    // Extract emotion keywords
-    final emotions = {
-      'happy': '😊', 'sad': '😢', 'angry': '😠', 'excited': '🎉',
-      'stressed': '😰', 'relaxed': '😌', 'worried': '😟', 'grateful': '🙏',
-      'frustrated': '😤', 'proud': '😊', 'anxious': '😰', 'love': '❤️',
+  String _getTopicEmoji(String topic) {
+    const emojis = {
+      'work': '💼',
+      'family': '👨‍👩‍👧',
+      'health': '🏥',
+      'relationships': '❤️',
+      'hobbies': '🎨',
+      'technology': '💻',
+      'food': '🍔',
+      'finance': '💰',
+      'education': '📚',
     };
-
-    for (final emotion in emotions.keys) {
-      if (text.toLowerCase().contains(emotion)) {
-        entities.add(KnowledgeNode(
-          id: 'emotion_$emotion',
-          label: emotion[0].toUpperCase() + emotion.substring(1),
-          type: NodeType.emotion,
-          timestamp: timestamp,
-          importance: 0.6,
-          metadata: {'emoji': emotions[emotion]},
-        ));
-      }
-    }
-
-    // Extract common topics
-    final topics = {
-      'work': '💼', 'family': '👨‍👩‍👧', 'friends': '👥', 'health': '🏥',
-      'hobby': '🎨', 'travel': '✈️', 'food': '🍔', 'music': '🎵',
-      'movie': '🎬', 'book': '📚', 'game': '🎮', 'sport': '⚽',
-      'project': '📊', 'meeting': '📅', 'weekend': '🎉', 'vacation': '🏖️',
-    };
-
-    for (final topic in topics.keys) {
-      if (text.toLowerCase().contains(topic)) {
-        entities.add(KnowledgeNode(
-          id: 'topic_$topic',
-          label: topic[0].toUpperCase() + topic.substring(1),
-          type: NodeType.topic,
-          timestamp: timestamp,
-          importance: 0.5,
-          metadata: {'emoji': topics[topic]},
-        ));
-      }
-    }
-
-    return entities;
-  }
-
-  /// Create edges between similar entities
-  void _createSimilarityEdges(List<KnowledgeNode> nodes, List<KnowledgeEdge> edges) {
-    // Create edges between entities mentioned in close time proximity
-    final entityNodes = nodes.where((n) => n.type != NodeType.conversation).toList();
-    
-    for (var i = 0; i < entityNodes.length; i++) {
-      for (var j = i + 1; j < entityNodes.length; j++) {
-        final node1 = entityNodes[i];
-        final node2 = entityNodes[j];
-        
-        // If mentioned within 1 hour, they're likely related
-        final timeDiff = node1.timestamp.difference(node2.timestamp).abs();
-        if (timeDiff.inHours <= 1) {
-          edges.add(KnowledgeEdge(
-            fromId: node1.id,
-            toId: node2.id,
-            type: EdgeType.related,
-            strength: max(0.3, 1.0 - (timeDiff.inMinutes / 60.0)),
-            timestamp: node1.timestamp,
-          ));
-        }
-      }
-    }
-  }
-
-  /// Create temporal edges between consecutive conversations
-  void _createTemporalEdges(List<KnowledgeNode> conversations, List<KnowledgeEdge> edges) {
-    // Sort by timestamp
-    conversations.sort((a, b) => a.timestamp.compareTo(b.timestamp));
-    
-    for (var i = 0; i < conversations.length - 1; i++) {
-      edges.add(KnowledgeEdge(
-        fromId: conversations[i].id,
-        toId: conversations[i + 1].id,
-        type: EdgeType.temporal,
-        strength: 0.2,
-        timestamp: conversations[i + 1].timestamp,
-        label: 'then',
-      ));
-    }
-  }
-
-  /// Summarize conversation for node label
-  String _summarizeConversation(String userMsg, String aiResponse) {
-    final msg = userMsg.trim();
-    if (msg.length <= 30) return msg;
-    return '${msg.substring(0, 27)}...';
-  }
-
-  /// Check if word is a common word (not an entity)
-  bool _isCommonWord(String word) {
-    final common = {
-      'The', 'This', 'That', 'What', 'When', 'Where', 'How', 'Why',
-      'Can', 'Could', 'Would', 'Should', 'Will', 'I', 'You', 'We',
-      'They', 'He', 'She', 'It', 'And', 'But', 'Or', 'So', 'Because',
-    };
-    return common.contains(word);
+    return emojis[topic] ?? '📌';
   }
 
   /// Clear cache
