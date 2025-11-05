@@ -188,8 +188,8 @@ class KnowledgeGraphService {
 
       print('🧠 [GRAPH] Created ${conceptNodes.length} concept nodes');
 
-      // 8. Extract entities and create entity nodes
-      final entityNodes = <String, KnowledgeNode>{};
+      // 8. Extract entities and create entity nodes (ONLY for recurring entities)
+      final entityCandidates = <String, Map<String, dynamic>>{}; // key -> {node, count, timestamps}
       
       for (var i = 0; i < convData.length; i++) {
         final conv = convData[i];
@@ -199,39 +199,71 @@ class KnowledgeGraphService {
         // Use NLP to extract entities
         final entityResult = nlp.extractEntities(fullText);
         
-        // Create entity nodes from top entities
-        for (final entity in entityResult.byImportance.take(3)) {
+        // Track entity candidates (we'll only keep recurring ones)
+        for (final entity in entityResult.byImportance.take(5)) {
           final key = entity.text.toLowerCase();
           
-          if (!entityNodes.containsKey(key)) {
+          if (!entityCandidates.containsKey(key)) {
             final nodeType = entity.type == EntityType.emotion
                 ? NodeType.emotion
                 : entity.type == EntityType.properNoun
                     ? NodeType.person
                     : NodeType.fact;
 
-            final entityNode = KnowledgeNode(
-              id: '${nodeType.toString().split('.').last}_${key.replaceAll(' ', '_')}',
-              label: entity.text,
-              type: nodeType,
-              timestamp: timestamp,
-              importance: entity.importance,
-              metadata: {'mentionCount': 1, 'firstSeen': timestamp.toIso8601String()},
-            );
-            entityNodes[key] = entityNode;
-            nodes.add(entityNode);
+            entityCandidates[key] = {
+              'text': entity.text,
+              'type': nodeType,
+              'importance': entity.importance,
+              'timestamps': <DateTime>[timestamp],
+              'count': 1,
+            };
           } else {
-            // Increase mention count for existing entity
-            final existing = entityNodes[key]!;
-            existing.metadata['mentionCount'] = 
-              (existing.metadata['mentionCount'] as int? ?? 1) + 1;
-            existing.metadata['importance'] = 
-              min(1.0, (existing.metadata['mentionCount'] as int) * 0.15);
+            // Increase count and track timestamp
+            final existing = entityCandidates[key]!;
+            existing['count'] = (existing['count'] as int) + 1;
+            (existing['timestamps'] as List<DateTime>).add(timestamp);
+            // Update importance based on recurrence
+            existing['importance'] = min(1.0, 
+              (entity.importance + (existing['importance'] as double)) / 2 + 
+              (existing['count'] as int) * 0.1
+            );
           }
         }
       }
 
-      print('👥 [GRAPH] Extracted ${entityNodes.length} entities');
+      // Only create entity nodes for entities mentioned in 2+ conversations OR with very high importance
+      final entityNodes = <String, KnowledgeNode>{};
+      for (final entry in entityCandidates.entries) {
+        final key = entry.key;
+        final data = entry.value;
+        final count = data['count'] as int;
+        final importance = data['importance'] as double;
+        
+        // Filter: must appear 2+ times OR have importance > 0.8
+        if (count >= 2 || importance > 0.8) {
+          final timestamps = data['timestamps'] as List<DateTime>;
+          final entityNode = KnowledgeNode(
+            id: '${data['type'].toString().split('.').last}_${key.replaceAll(' ', '_')}',
+            label: data['text'] as String,
+            type: data['type'] as NodeType,
+            timestamp: timestamps.first,
+            importance: importance,
+            metadata: {
+              'mentionCount': count,
+              'firstSeen': timestamps.first.toIso8601String(),
+              'lastSeen': timestamps.last.toIso8601String(),
+            },
+          );
+          entityNodes[key] = entityNode;
+          nodes.add(entityNode);
+        }
+      }
+
+      print('👥 [GRAPH] Extracted ${entityNodes.length} significant entities (filtered from ${entityCandidates.length} candidates)');
+
+      // 8.5. ADVANCED: Semantic deduplication - merge similar entities
+      final deduplicated = _deduplicateEntities(entityNodes);
+      print('🔗 [GRAPH] Deduplicated to ${deduplicated.length} unique entities');
 
       // 9. Create relationship edges between concepts based on co-occurrence
       for (final entry in coOccurrences.entries) {
@@ -286,22 +318,22 @@ class KnowledgeGraphService {
         }
       }
 
-      // 11. Link entities to concepts they're mentioned with
+      // 11. Link entities to concepts they're mentioned with (use deduplicated entities)
       for (var i = 0; i < convData.length; i++) {
         final conv = convData[i];
         final fullText = conv['fullText'] as String;
         final lowerText = fullText.toLowerCase();
         
         // Find which entities and concepts appear in this conversation
-        final convEntities = entityNodes.keys.where((k) => lowerText.contains(k)).toList();
+        final convEntities = deduplicated.keys.where((k) => lowerText.contains(k)).toList();
         final convConcepts = conceptNodes.keys.where((k) => lowerText.contains(k.toLowerCase())).toList();
         
         // Link entities to concepts
         for (final entityKey in convEntities) {
           for (final conceptKey in convConcepts) {
-            if (entityNodes.containsKey(entityKey) && conceptNodes.containsKey(conceptKey)) {
+            if (deduplicated.containsKey(entityKey) && conceptNodes.containsKey(conceptKey)) {
               edges.add(KnowledgeEdge(
-                fromId: entityNodes[entityKey]!.id,
+                fromId: deduplicated[entityKey]!.id,
                 toId: conceptNodes[conceptKey]!.id,
                 type: EdgeType.mentioned,
                 strength: 0.5,
@@ -315,7 +347,7 @@ class KnowledgeGraphService {
       print('✅ [GRAPH] Built intelligent graph: ${nodes.length} nodes, ${edges.length} edges');
       print('   📊 Topics: ${topicNodes.length}');
       print('   💡 Concepts: ${conceptNodes.length}');
-      print('   👤 Entities: ${entityNodes.length}');
+      print('   👤 Entities: ${deduplicated.length} (deduplicated from ${entityNodes.length})');
       print('   🔗 Relationships: ${edges.length}');
 
       final graph = KnowledgeGraph(
@@ -354,6 +386,117 @@ class KnowledgeGraphService {
       'education': '📚',
     };
     return emojis[topic] ?? '📌';
+  }
+
+  /// ADVANCED: Semantic deduplication - merge similar entities
+  /// Uses string similarity to identify and merge related entities
+  Map<String, KnowledgeNode> _deduplicateEntities(Map<String, KnowledgeNode> entities) {
+    final deduplicated = <String, KnowledgeNode>{};
+    final processed = <String>{};
+    
+    for (final entry in entities.entries) {
+      final key = entry.key;
+      final node = entry.value;
+      
+      if (processed.contains(key)) continue;
+      
+      // Find similar entities
+      final similar = <String>[];
+      for (final otherKey in entities.keys) {
+        if (otherKey == key || processed.contains(otherKey)) continue;
+        
+        // Check string similarity
+        if (_areSimilarStrings(key, otherKey)) {
+          similar.add(otherKey);
+        }
+      }
+      
+      if (similar.isEmpty) {
+        // No duplicates, keep as is
+        deduplicated[key] = node;
+        processed.add(key);
+      } else {
+        // Merge similar entities - use longest/most complete name
+        var bestKey = key;
+        var bestNode = node;
+        var maxLength = key.length;
+        
+        for (final simKey in similar) {
+          if (simKey.length > maxLength) {
+            bestKey = simKey;
+            bestNode = entities[simKey]!;
+            maxLength = simKey.length;
+          }
+          processed.add(simKey);
+        }
+        
+        // Merge metadata
+        var totalMentions = bestNode.metadata['mentionCount'] as int? ?? 1;
+        for (final simKey in similar) {
+          final simNode = entities[simKey]!;
+          totalMentions += simNode.metadata['mentionCount'] as int? ?? 1;
+        }
+        
+        bestNode.metadata['mentionCount'] = totalMentions;
+        bestNode.metadata['importance'] = min(1.0, totalMentions * 0.15);
+        bestNode.metadata['mergedFrom'] = similar;
+        
+        deduplicated[bestKey] = bestNode;
+        processed.add(bestKey);
+        processed.add(key);
+      }
+    }
+    
+    return deduplicated;
+  }
+
+  /// Check if two strings are similar (fuzzy match)
+  bool _areSimilarStrings(String a, String b) {
+    final lowerA = a.toLowerCase();
+    final lowerB = b.toLowerCase();
+    
+    // Exact match
+    if (lowerA == lowerB) return true;
+    
+    // One contains the other (e.g., "John" and "John Smith")
+    if (lowerA.contains(lowerB) || lowerB.contains(lowerA)) return true;
+    
+    // Similar with minor differences (plurals, etc)
+    if ((lowerA == '${lowerB}s') || (lowerB == '${lowerA}s')) return true;
+    if ((lowerA == '${lowerB}es') || (lowerB == '${lowerA}es')) return true;
+    
+    // Levenshtein distance for typos/variations
+    final distance = _levenshteinDistance(lowerA, lowerB);
+    final maxLen = max(lowerA.length, lowerB.length);
+    final similarity = 1.0 - (distance / maxLen);
+    
+    return similarity > 0.85; // 85% similar
+  }
+
+  /// Calculate Levenshtein distance (edit distance)
+  int _levenshteinDistance(String s1, String s2) {
+    final len1 = s1.length;
+    final len2 = s2.length;
+    
+    if (len1 == 0) return len2;
+    if (len2 == 0) return len1;
+    
+    final matrix = List.generate(len1 + 1, (_) => List.filled(len2 + 1, 0));
+    
+    for (var i = 0; i <= len1; i++) matrix[i][0] = i;
+    for (var j = 0; j <= len2; j++) matrix[0][j] = j;
+    
+    for (var i = 1; i <= len1; i++) {
+      for (var j = 1; j <= len2; j++) {
+        final cost = s1[i - 1] == s2[j - 1] ? 0 : 1;
+        matrix[i][j] = min(
+          min(matrix[i - 1][j] + 1, matrix[i][j - 1] + 1),
+          matrix[i - 1][j - 1] + cost,
+        );
+      }
+    }
+    
+    return matrix[len1][len2];
   }
 
   /// Clear cache

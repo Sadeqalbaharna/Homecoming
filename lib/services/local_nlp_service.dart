@@ -49,28 +49,159 @@ class LocalNLPService {
     'education': ['school', 'college', 'university', 'study', 'learn', 'class', 'teacher', 'student', 'exam', 'homework', 'degree'],
   };
 
+  /// ADVANCED: Common sentence starters (NOT proper nouns)
+  static final Set<String> _sentenceStarters = {
+    'I', 'You', 'We', 'They', 'He', 'She', 'It', 'That', 'This', 'There',
+    'What', 'When', 'Where', 'Why', 'How', 'Can', 'Could', 'Would', 'Should',
+    'Will', 'Do', 'Does', 'Did', 'Is', 'Are', 'Was', 'Were', 'Been', 'Being',
+    'Have', 'Has', 'Had', 'Having', 'May', 'Might', 'Must', 'Shall', 'My',
+  };
+
+  /// ADVANCED: Name prefixes/titles (indicate proper nouns follow)
+  static final Set<String> _namePrefixes = {
+    'mr', 'mrs', 'ms', 'miss', 'dr', 'prof', 'professor', 'sir', 'madam',
+  };
+
+  /// ADVANCED: Action verbs (not concepts)
+  static final Set<String> _actionVerbs = {
+    'go', 'going', 'went', 'gone', 'make', 'making', 'made', 'get', 'getting',
+    'got', 'take', 'taking', 'took', 'taken', 'come', 'coming', 'came',
+    'see', 'seeing', 'saw', 'seen', 'want', 'wanting', 'wanted', 'need',
+    'needing', 'needed', 'try', 'trying', 'tried', 'help', 'helping', 'helped',
+    'start', 'starting', 'started', 'stop', 'stopping', 'stopped', 'think',
+    'thinking', 'thought', 'know', 'knowing', 'knew', 'known', 'feel',
+    'feeling', 'felt', 'give', 'giving', 'gave', 'given', 'tell', 'telling',
+  };
+
+  /// ADVANCED: Domain-specific important terms (always concepts)
+  static final Set<String> _domainConcepts = {
+    'project', 'deadline', 'meeting', 'presentation', 'report', 'analysis',
+    'budget', 'schedule', 'plan', 'strategy', 'goal', 'objective', 'task',
+    'issue', 'problem', 'solution', 'idea', 'concept', 'design', 'system',
+    'process', 'method', 'approach', 'framework', 'model', 'algorithm',
+    'data', 'information', 'results', 'findings', 'conclusion', 'decision',
+    'opportunity', 'challenge', 'risk', 'benefit', 'advantage', 'disadvantage',
+  };
+
+  /// ADVANCED: Common entity patterns (name indicators)
+  static final _namePatterns = [
+    RegExp(r'\b[A-Z][a-z]+\s+[A-Z][a-z]+\b'), // John Smith
+    RegExp(r'\b(?:Mr|Mrs|Ms|Dr|Prof)\.?\s+[A-Z][a-z]+\b'), // Dr. Johnson
+  ];
+
+  /// ADVANCED: Time/date patterns (not entities)
+  static final _timePatterns = [
+    RegExp(r'\b(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\b'),
+    RegExp(r'\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\b'),
+    RegExp(r'\b\d{1,2}:\d{2}\s*(?:AM|PM|am|pm)?\b'),
+    RegExp(r'\b(?:today|tomorrow|yesterday|tonight)\b', caseSensitive: false),
+  ];
+
   /// Extract entities from text (people, places, concepts)
+  /// TRIPLE INTELLIGENCE: Advanced NLP with context, patterns, and semantic analysis
   EntityExtractionResult extractEntities(String text) {
     final words = _tokenize(text);
     final entities = <ExtractedEntity>[];
     final seen = <String>{};
 
-    // Extract capitalized sequences (likely proper nouns)
+    // === ADVANCED PHASE 1: Named Entity Recognition with Patterns ===
+    
+    // Check for full name patterns (e.g., "John Smith", "Dr. Johnson")
+    for (final pattern in _namePatterns) {
+      final matches = pattern.allMatches(text);
+      for (final match in matches) {
+        final name = match.group(0)!;
+        final key = name.toLowerCase();
+        if (!seen.contains(key)) {
+          entities.add(ExtractedEntity(
+            text: name,
+            type: EntityType.properNoun,
+            importance: 0.9, // High confidence for pattern-matched names
+            positions: [match.start],
+          ));
+          seen.add(key);
+        }
+      }
+    }
+
+    // === ADVANCED PHASE 2: Intelligent Capitalization Analysis ===
+    
     final capitalizedSequences = _extractCapitalizedSequences(text);
     for (final seq in capitalizedSequences) {
       final key = seq.toLowerCase();
-      if (!seen.contains(key) && !_stopWords.contains(key)) {
+      
+      // FILTER 1: Skip if already seen, too short, or is a stop word
+      if (seen.contains(key) || _stopWords.contains(key) || seq.length <= 2) {
+        continue;
+      }
+      
+      // FILTER 2: Skip common sentence starters
+      if (_sentenceStarters.contains(seq)) {
+        continue;
+      }
+      
+      // FILTER 3: Skip time/date patterns
+      var isTimeDate = false;
+      for (final pattern in _timePatterns) {
+        if (pattern.hasMatch(seq)) {
+          isTimeDate = true;
+          break;
+        }
+      }
+      if (isTimeDate) continue;
+      
+      // FILTER 4: Check if it's preceded by a name prefix
+      final hasPrefixBefore = _namePrefixes.any((prefix) => 
+        text.toLowerCase().contains('$prefix $key') ||
+        text.toLowerCase().contains('$prefix. $key')
+      );
+      
+      // SCORING: Position-based validation
+      final positions = _findPositions(text, seq);
+      var validProperNoun = false;
+      var contextScore = 0.0;
+      
+      for (final pos in positions) {
+        // Check context before the word
+        if (pos > 0) {
+          final charBefore = text[pos - 1];
+          // Valid if not at sentence start or after period
+          if (charBefore != '.' && charBefore != '!' && charBefore != '?') {
+            validProperNoun = true;
+            contextScore += 0.2;
+          }
+          // Extra boost if preceded by name prefix
+          if (hasPrefixBefore) {
+            validProperNoun = true;
+            contextScore += 0.3;
+          }
+        }
+      }
+      
+      // SCORING: Frequency and complexity boost
+      if (positions.length >= 2) {
+        validProperNoun = true;
+        contextScore += positions.length * 0.15;
+      }
+      if (seq.split(' ').length >= 2) {
+        validProperNoun = true;
+        contextScore += 0.25;
+      }
+      
+      if (validProperNoun) {
+        final importance = min(1.0, 0.6 + contextScore);
         entities.add(ExtractedEntity(
           text: seq,
           type: EntityType.properNoun,
-          importance: 0.7,
-          positions: _findPositions(text, seq),
+          importance: importance,
+          positions: positions,
         ));
         seen.add(key);
       }
     }
 
-    // Extract emotion-related entities
+    // === ADVANCED PHASE 3: Emotion Detection ===
+    
     for (final word in words) {
       final lower = word.toLowerCase();
       if (_emotionKeywords.containsKey(lower) && !seen.contains(lower)) {
@@ -84,15 +215,60 @@ class LocalNLPService {
       }
     }
 
-    // Extract important nouns using frequency
+    // === ADVANCED PHASE 4: Intelligent Concept Extraction ===
+    
     final nounCandidates = _extractNounCandidates(words);
     for (final noun in nounCandidates.entries) {
       final key = noun.key.toLowerCase();
-      if (!seen.contains(key) && noun.value >= 2) {
+      
+      // Skip if already seen or is an action verb
+      if (seen.contains(key) || _actionVerbs.contains(key)) {
+        continue;
+      }
+      
+      // SCORING: Multi-factor concept importance
+      var importance = 0.0;
+      var shouldAdd = false;
+      
+      // Factor 1: Domain concept (high value)
+      if (_domainConcepts.contains(key)) {
+        importance += 0.6;
+        shouldAdd = true;
+      }
+      
+      // Factor 2: Topic keyword (high value)
+      final isTopicKeyword = _topicKeywords.values.any((keywords) => 
+        keywords.any((kw) => kw == key)
+      );
+      if (isTopicKeyword) {
+        importance += 0.5;
+        shouldAdd = true;
+      }
+      
+      // Factor 3: Frequency within text
+      if (noun.value >= 2) {
+        importance += noun.value * 0.2;
+        shouldAdd = true;
+      }
+      
+      // Factor 4: Word length (longer = more specific)
+      if (noun.key.length > 6) {
+        importance += 0.1;
+      }
+      
+      // Factor 5: Capitalized mid-sentence (could be important)
+      if (noun.key[0] == noun.key[0].toUpperCase() && 
+          !_sentenceStarters.contains(noun.key)) {
+        importance += 0.2;
+        shouldAdd = true;
+      }
+      
+      if (shouldAdd) {
+        importance = min(1.0, importance);
         entities.add(ExtractedEntity(
           text: noun.key,
           type: EntityType.concept,
-          importance: min(1.0, noun.value * 0.3),
+          importance: importance,
           positions: _findPositions(text, noun.key),
         ));
         seen.add(key);
