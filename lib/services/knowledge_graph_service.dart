@@ -666,4 +666,124 @@ class KnowledgeGraphService {
     _archiveService.scheduleAutoArchive(personaId);
     print('⏰ [GRAPH] Auto-archive scheduled (every 6 hours)');
   }
+
+  /// Cull low-quality, non-sensical nodes from the mind map
+  /// Removes nodes with low importance, single mentions, and poor connections
+  Future<CullResult> cullLowQualityNodes({
+    required String personaId,
+    double minImportance = 0.3,
+    int minMentions = 1,
+    int minConnections = 0,
+  }) async {
+    print('🗑️ [GRAPH] Starting mind map cull...');
+    print('   Filters: importance>=$minImportance, mentions>=$minMentions, connections>=$minConnections');
+    
+    try {
+      // Load current graph
+      final graph = await buildGraph(personaId: personaId);
+      if (graph.nodes.isEmpty) {
+        return CullResult(
+          success: true,
+          nodesRemoved: 0,
+          edgesRemoved: 0,
+          message: 'No nodes to cull',
+        );
+      }
+
+      final originalNodeCount = graph.nodes.length;
+      final originalEdgeCount = graph.edges.length;
+
+      // Identify nodes to remove
+      final nodesToRemove = <String>{};
+      
+      for (final node in graph.nodes) {
+        var shouldRemove = false;
+        final reasons = <String>[];
+
+        // FILTER 1: Importance too low
+        if (node.importance < minImportance) {
+          shouldRemove = true;
+          reasons.add('low importance (${node.importance.toStringAsFixed(2)})');
+        }
+
+        // FILTER 2: Mention count too low
+        final mentionCount = node.metadata['mentionCount'] as int? ?? 1;
+        if (mentionCount < minMentions) {
+          shouldRemove = true;
+          reasons.add('insufficient mentions ($mentionCount)');
+        }
+
+        // FILTER 3: No connections (orphaned node)
+        final connections = graph.getNodeEdges(node.id).length;
+        if (connections < minConnections) {
+          shouldRemove = true;
+          reasons.add('no connections');
+        }
+
+        // FILTER 4: Node type exceptions (always keep topics)
+        if (node.type == NodeType.topic) {
+          shouldRemove = false; // Never remove topic nodes
+        }
+
+        if (shouldRemove) {
+          nodesToRemove.add(node.id);
+          print('   ❌ Removing "${node.label}": ${reasons.join(", ")}');
+        }
+      }
+
+      // Filter nodes and edges
+      final culledNodes = graph.nodes.where((n) => !nodesToRemove.contains(n.id)).toList();
+      final culledEdges = graph.edges.where((e) => 
+        !nodesToRemove.contains(e.fromId) && !nodesToRemove.contains(e.toId)
+      ).toList();
+
+      final nodesRemoved = originalNodeCount - culledNodes.length;
+      final edgesRemoved = originalEdgeCount - culledEdges.length;
+
+      print('🗑️ [GRAPH] Cull complete: removed $nodesRemoved nodes, $edgesRemoved edges');
+
+      // Save culled graph back to Firebase
+      final culledGraph = KnowledgeGraph(
+        nodes: culledNodes,
+        edges: culledEdges,
+        lastUpdated: DateTime.now(),
+      );
+      
+      await _saveGraphToFirebase(personaId, culledGraph);
+      
+      // Clear cache to force reload
+      clearCache();
+
+      return CullResult(
+        success: true,
+        nodesRemoved: nodesRemoved,
+        edgesRemoved: edgesRemoved,
+        message: 'Removed $nodesRemoved low-quality nodes',
+      );
+    } catch (e, stackTrace) {
+      print('❌ [GRAPH] Cull error: $e');
+      print('❌ [GRAPH] Stack trace: $stackTrace');
+      return CullResult(
+        success: false,
+        nodesRemoved: 0,
+        edgesRemoved: 0,
+        message: 'Error: $e',
+      );
+    }
+  }
+}
+
+/// Result of culling operation
+class CullResult {
+  final bool success;
+  final int nodesRemoved;
+  final int edgesRemoved;
+  final String message;
+
+  CullResult({
+    required this.success,
+    required this.nodesRemoved,
+    required this.edgesRemoved,
+    required this.message,
+  });
 }

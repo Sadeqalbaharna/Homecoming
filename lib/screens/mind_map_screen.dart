@@ -320,6 +320,43 @@ class _MindMapScreenState extends State<MindMapScreen> with TickerProviderStateM
               });
             },
           ),
+          // More menu (Archive, Cull, etc)
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert),
+            tooltip: 'More options',
+            onSelected: (value) {
+              switch (value) {
+                case 'archive':
+                  _showArchiveDialog();
+                  break;
+                case 'cull':
+                  _showCullDialog();
+                  break;
+              }
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem(
+                value: 'archive',
+                child: Row(
+                  children: [
+                    Icon(Icons.archive, size: 20),
+                    SizedBox(width: 8),
+                    Text('Archive Conversations'),
+                  ],
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'cull',
+                child: Row(
+                  children: [
+                    Icon(Icons.cleaning_services, size: 20, color: Colors.orange),
+                    SizedBox(width: 8),
+                    Text('Cull Mind Map'),
+                  ],
+                ),
+              ),
+            ],
+          ),
           // Close button
           IconButton(
             icon: const Icon(Icons.close),
@@ -772,6 +809,142 @@ class _MindMapScreenState extends State<MindMapScreen> with TickerProviderStateM
     if (diff.inDays < 7) return '${diff.inDays}d ago';
     
     return '${dt.month}/${dt.day}/${dt.year}';
+  }
+
+  void _showCullDialog() async {
+    // Show confirmation dialog first
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.cleaning_services, color: Colors.orange),
+            SizedBox(width: 8),
+            Text('Cull Mind Map'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'This will remove low-quality nodes from your mind map:',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 12),
+            const Text('• Low importance nodes (< 0.3)'),
+            const Text('• Single mentions'),
+            const Text('• Orphaned nodes with no connections'),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.orange.withOpacity(0.1),
+                border: Border.all(color: Colors.orange),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: const Text(
+                '⚠️ Topic nodes will always be preserved',
+                style: TextStyle(fontSize: 12),
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'This action cannot be undone. Continue?',
+              style: TextStyle(fontWeight: FontWeight.bold, color: Colors.orange),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.orange,
+            ),
+            child: const Text('Cull Now'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    // Show loading dialog
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const AlertDialog(
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 16),
+            Text('Culling low-quality nodes...'),
+            SizedBox(height: 8),
+            Text(
+              'Analyzing node quality...',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    try {
+      final result = await _graphService.cullLowQualityNodes(
+        personaId: widget.personaId,
+        minImportance: 0.3,
+        minMentions: 1,
+        minConnections: 0,
+      );
+
+      if (!mounted) return;
+      Navigator.of(context).pop(); // Close loading dialog
+
+      if (result.success && result.nodesRemoved > 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Culled ${result.nodesRemoved} nodes and ${result.edgesRemoved} edges\n'
+              'Mind map is now cleaner!',
+            ),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+
+        // Reload graph to show cleaned data
+        _loadGraph();
+      } else if (result.success && result.nodesRemoved == 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No low-quality nodes found. Mind map is clean!'),
+            backgroundColor: Colors.blue,
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Cull failed: ${result.message}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.of(context).pop(); // Close loading dialog
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Cull failed: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   void _showFilterDialog() {
