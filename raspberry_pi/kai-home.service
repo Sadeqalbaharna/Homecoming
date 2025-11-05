@@ -1,0 +1,16 @@
+[Unit]
+Description=Kai Home Automation Service
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/kai-home
+ExecStart=/usr/bin/python3 /home/pi/kai-home/kai_home_service.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
