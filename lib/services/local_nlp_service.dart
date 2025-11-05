@@ -22,6 +22,16 @@ class LocalNLPService {
     'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only',
     'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 'just', 'now',
     'im', 'ive', 'dont', 'didnt', 'doesnt', 'cant', 'wont', 'wouldnt',
+    // GREETINGS AND CONVERSATIONAL FILLERS (NEW!)
+    'hey', 'hi', 'hello', 'hola', 'yo', 'sup', 'wassup', 'whats', 'whatsup',
+    'good', 'morning', 'afternoon', 'evening', 'night', 'day',
+    'bye', 'goodbye', 'later', 'see', 'ya', 'cya', 'peace',
+    'thanks', 'thank', 'thx', 'ty', 'please', 'pls', 'plz',
+    'yeah', 'yep', 'yup', 'nope', 'nah', 'uh', 'um', 'hmm', 'hm', 'er',
+    'okay', 'ok', 'alright', 'cool', 'nice', 'sure', 'fine', 'great',
+    'oh', 'ah', 'wow', 'well', 'like', 'literally', 'basically', 'actually',
+    'really', 'quite', 'pretty', 'kinda', 'sorta', 'gonna', 'wanna', 'gotta',
+    'kai', 'kais', // The AI's name - should never be an entity!
   };
 
   /// Emotion keywords and their intensities
@@ -97,6 +107,24 @@ class LocalNLPService {
     RegExp(r'\b(?:today|tomorrow|yesterday|tonight)\b', caseSensitive: false),
   ];
 
+  /// ADVANCED: Greeting patterns to filter out (NOT entities!)
+  static final _greetingPatterns = [
+    RegExp(r'\bhey\s+kai\b', caseSensitive: false),
+    RegExp(r'\bhi\s+kai\b', caseSensitive: false),
+    RegExp(r'\bhello\s+kai\b', caseSensitive: false),
+    RegExp(r'\bgood\s+morning\b', caseSensitive: false),
+    RegExp(r'\bgood\s+afternoon\b', caseSensitive: false),
+    RegExp(r'\bgood\s+evening\b', caseSensitive: false),
+    RegExp(r'\bgood\s+night\b', caseSensitive: false),
+    RegExp(r'\bhow\s+are\s+you\b', caseSensitive: false),
+    RegExp(r'\bwhats\s+up\b', caseSensitive: false),
+    RegExp(r'\bthanks?\s+you\b', caseSensitive: false),
+    RegExp(r'\bthank\s+kai\b', caseSensitive: false),
+    RegExp(r'\bbye\s+kai\b', caseSensitive: false),
+    RegExp(r'\bsee\s+you\b', caseSensitive: false),
+    RegExp(r'\btalk\s+to\s+you\b', caseSensitive: false),
+  ];
+
   /// Extract entities from text (people, places, concepts)
   /// TRIPLE INTELLIGENCE: Advanced NLP with context, patterns, and semantic analysis
   EntityExtractionResult extractEntities(String text) {
@@ -104,11 +132,17 @@ class LocalNLPService {
     final entities = <ExtractedEntity>[];
     final seen = <String>{};
 
+    // === PRE-FILTER: Remove greeting phrases from text ===
+    var cleanedText = text;
+    for (final pattern in _greetingPatterns) {
+      cleanedText = cleanedText.replaceAll(pattern, ' ');
+    }
+
     // === ADVANCED PHASE 1: Named Entity Recognition with Patterns ===
     
     // Check for full name patterns (e.g., "John Smith", "Dr. Johnson")
     for (final pattern in _namePatterns) {
-      final matches = pattern.allMatches(text);
+      final matches = pattern.allMatches(cleanedText);
       for (final match in matches) {
         final name = match.group(0)!;
         final key = name.toLowerCase();
@@ -126,7 +160,7 @@ class LocalNLPService {
 
     // === ADVANCED PHASE 2: Intelligent Capitalization Analysis ===
     
-    final capitalizedSequences = _extractCapitalizedSequences(text);
+    final capitalizedSequences = _extractCapitalizedSequences(cleanedText);
     for (final seq in capitalizedSequences) {
       final key = seq.toLowerCase();
       
@@ -149,22 +183,32 @@ class LocalNLPService {
         }
       }
       if (isTimeDate) continue;
+
+      // FILTER 3.5: Skip if matches greeting patterns
+      var isGreeting = false;
+      for (final pattern in _greetingPatterns) {
+        if (pattern.hasMatch(seq)) {
+          isGreeting = true;
+          break;
+        }
+      }
+      if (isGreeting) continue;
       
       // FILTER 4: Check if it's preceded by a name prefix
       final hasPrefixBefore = _namePrefixes.any((prefix) => 
-        text.toLowerCase().contains('$prefix $key') ||
-        text.toLowerCase().contains('$prefix. $key')
+        cleanedText.toLowerCase().contains('$prefix $key') ||
+        cleanedText.toLowerCase().contains('$prefix. $key')
       );
       
       // SCORING: Position-based validation
-      final positions = _findPositions(text, seq);
+      final positions = _findPositions(cleanedText, seq);
       var validProperNoun = false;
       var contextScore = 0.0;
       
       for (final pos in positions) {
         // Check context before the word
         if (pos > 0) {
-          final charBefore = text[pos - 1];
+          final charBefore = cleanedText[pos - 1];
           // Valid if not at sentence start or after period
           if (charBefore != '.' && charBefore != '!' && charBefore != '?') {
             validProperNoun = true;
@@ -221,10 +265,20 @@ class LocalNLPService {
     for (final noun in nounCandidates.entries) {
       final key = noun.key.toLowerCase();
       
-      // Skip if already seen or is an action verb
-      if (seen.contains(key) || _actionVerbs.contains(key)) {
+      // Skip if already seen, is an action verb, or is a stop word (double check)
+      if (seen.contains(key) || _actionVerbs.contains(key) || _stopWords.contains(key)) {
         continue;
       }
+
+      // Skip if it matches greeting patterns
+      var isGreetingWord = false;
+      for (final pattern in _greetingPatterns) {
+        if (pattern.hasMatch(noun.key)) {
+          isGreetingWord = true;
+          break;
+        }
+      }
+      if (isGreetingWord) continue;
       
       // SCORING: Multi-factor concept importance
       var importance = 0.0;
