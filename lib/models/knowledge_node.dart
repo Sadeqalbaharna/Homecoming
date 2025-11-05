@@ -13,6 +13,7 @@ enum NodeType {
   date,         // Important dates (purple)
   fact,         // Extracted facts (cyan)
   conversation, // Conversation sessions (white)
+  concept,      // Important concepts/terms (orange)
 }
 
 class KnowledgeNode {
@@ -71,6 +72,8 @@ class KnowledgeNode {
         return Colors.cyan.shade400;
       case NodeType.conversation:
         return Colors.white70;
+      case NodeType.concept:
+        return Colors.orange.shade400;
     }
   }
   
@@ -93,6 +96,8 @@ class KnowledgeNode {
         return '💡';
       case NodeType.conversation:
         return '💬';
+      case NodeType.concept:
+        return '🧠';
     }
   }
   
@@ -203,6 +208,8 @@ class KnowledgeEdge {
         return Colors.green.withOpacity(0.3);
       case EdgeType.temporal:
         return Colors.purple.withOpacity(0.2);
+      case EdgeType.categorized:
+        return Colors.cyan.withOpacity(0.4);
     }
   }
   
@@ -238,11 +245,12 @@ class KnowledgeEdge {
 }
 
 enum EdgeType {
-  mentioned,  // A was mentioned in B
-  related,    // A is related to B (via similarity)
-  caused,     // A caused B (e.g., event → emotion)
-  contains,   // A contains B (conversation → facts)
-  temporal,   // A happened before/after B
+  mentioned,   // A was mentioned in B
+  related,     // A is related to B (via similarity)
+  caused,      // A caused B (e.g., event → emotion)
+  contains,    // A contains B (conversation → facts)
+  temporal,    // A happened before/after B
+  categorized, // A belongs to category B
 }
 
 /// Complete knowledge graph

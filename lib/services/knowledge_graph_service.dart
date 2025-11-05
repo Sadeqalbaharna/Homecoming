@@ -8,6 +8,7 @@ import 'package:firebase_database/firebase_database.dart';
 import '../models/knowledge_node.dart';
 import 'firebase_service.dart';
 import 'graph_archive_service.dart';
+import 'local_nlp_service.dart';
 
 class KnowledgeGraphService {
   static final KnowledgeGraphService _instance = KnowledgeGraphService._internal();
