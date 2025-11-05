@@ -15,6 +15,7 @@ import 'package:firebase_core/firebase_core.dart';
 
 import 'services/ai_service.dart';
 import 'services/firebase_service.dart';
+import 'services/voice_activation_service.dart';
 import 'firebase_options.dart';
 import 'widgets/debug_button.dart';
 
@@ -224,6 +225,16 @@ class _MobileKaiState extends State<_MobileKai>
 
     _stateSub = _player.onPlayerStateChanged.listen((s) {
       _currentState = s;
+      
+      // Pause voice activation when Kai is speaking to avoid self-activation
+      if (s == PlayerState.playing) {
+        print('🔇 [MAIN_MOBILE] Audio playing - PAUSING voice activation');
+        VoiceActivationService().pause();
+      } else if (s == PlayerState.stopped || s == PlayerState.completed) {
+        print('🔊 [MAIN_MOBILE] Audio stopped/completed - RESUMING voice activation (with buffer)');
+        VoiceActivationService().resume();
+      }
+      
       if (mounted) setState(() {});
     });
 
