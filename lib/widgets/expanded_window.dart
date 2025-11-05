@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:audioplayers/audioplayers.dart';
 import '../services/ai_service.dart';
+import '../services/voice_activation_service.dart';
 import '../screens/usage_stats_screen.dart';
 import '../screens/mind_map_screen.dart';
 import 'debug_button.dart';
@@ -63,6 +64,15 @@ class _ExpandedWindowState extends State<ExpandedWindow> with SingleTickerProvid
     _audioPlayer.onPlayerStateChanged.listen((state) {
       if (mounted) {
         setState(() => _playerState = state);
+        
+        // Pause voice activation when replaying Kai's audio to avoid self-listening
+        if (state == PlayerState.playing) {
+          print('🔇 [ExpandedWindow] Audio playing - PAUSING voice activation');
+          VoiceActivationService().pause();
+        } else if (state == PlayerState.stopped || state == PlayerState.completed) {
+          print('🔊 [ExpandedWindow] Audio stopped - RESUMING voice activation');
+          VoiceActivationService().resume();
+        }
       }
     });
   }

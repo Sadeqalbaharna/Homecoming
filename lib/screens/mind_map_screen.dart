@@ -328,7 +328,26 @@ class _MindMapScreenState extends State<MindMapScreen> with TickerProviderStateM
           ),
         ],
       ),
-      body: _buildBody(),
+      body: Stack(
+        children: [
+          _buildBody(),
+          // Floating exit button - always visible for emergency exits
+          Positioned(
+            bottom: 16,
+            right: 16,
+            child: FloatingActionButton(
+              heroTag: 'exit_button',
+              onPressed: () {
+                print('🚪 [MindMap] Emergency exit button pressed');
+                Navigator.of(context).pop();
+              },
+              backgroundColor: Colors.red.withOpacity(0.8),
+              child: const Icon(Icons.close, color: Colors.white),
+              tooltip: 'Close Mind Map',
+            ),
+          ),
+        ],
+      ),
     );
   }
 
