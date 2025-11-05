@@ -208,6 +208,12 @@ class _MindMapScreenState extends State<MindMapScreen> with TickerProviderStateM
         title: const Text('Knowledge Graph'),
         backgroundColor: const Color(0xFF2D2D2D),
         actions: [
+          // Archive status
+          IconButton(
+            icon: const Icon(Icons.archive_outlined),
+            onPressed: () => _showArchiveDialog(),
+            tooltip: 'Archive Status',
+          ),
           // Search
           IconButton(
             icon: const Icon(Icons.search),
@@ -385,6 +391,198 @@ class _MindMapScreenState extends State<MindMapScreen> with TickerProviderStateM
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Search coming soon!')),
     );
+  }
+  
+  void _showArchiveDialog() async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const AlertDialog(
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 16),
+            Text('Loading archive status...'),
+          ],
+        ),
+      ),
+    );
+    
+    try {
+      final stats = await _graphService.getArchiveStats(widget.personaId);
+      
+      if (!mounted) return;
+      Navigator.of(context).pop(); // Close loading dialog
+      
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.archive, color: Colors.blue),
+              SizedBox(width: 8),
+              Text('Archive Status'),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Last Archived: ${_formatDateTime(stats.lastArchivedTime)}'),
+              const SizedBox(height: 8),
+              Text('Total Conversations: ${stats.totalConversations}'),
+              Text('Archived: ${stats.totalArchived}'),
+              Text('Unarchived: ${stats.unarchivedCount}'),
+              const SizedBox(height: 8),
+              LinearProgressIndicator(
+                value: stats.completionPercentage / 100,
+                backgroundColor: Colors.grey[300],
+                color: stats.isUpToDate ? Colors.green : Colors.orange,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '${stats.completionPercentage.toStringAsFixed(1)}% complete',
+                style: const TextStyle(fontSize: 12, color: Colors.grey),
+              ),
+              if (!stats.isUpToDate) ...[
+                const SizedBox(height: 16),
+                Text(
+                  '${stats.unarchivedCount} conversations need archiving',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.orange,
+                  ),
+                ),
+              ] else ...[
+                const SizedBox(height: 16),
+                const Row(
+                  children: [
+                    Icon(Icons.check_circle, color: Colors.green, size: 16),
+                    SizedBox(width: 4),
+                    Text(
+                      'Everything is archived!',
+                      style: TextStyle(color: Colors.green),
+                    ),
+                  ],
+                ),
+              ],
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Close'),
+            ),
+            if (!stats.isUpToDate)
+              ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  _archiveNow();
+                },
+                icon: const Icon(Icons.download),
+                label: const Text('Archive Now'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blue,
+                  foregroundColor: Colors.white,
+                ),
+              ),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.of(context).pop(); // Close loading dialog
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error loading archive stats: $e')),
+      );
+    }
+  }
+  
+  void _archiveNow() async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const AlertDialog(
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 16),
+            Text('Archiving conversations...'),
+            SizedBox(height: 8),
+            Text(
+              'This may take a moment',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+          ],
+        ),
+      ),
+    );
+    
+    try {
+      final result = await _graphService.archiveUnprocessedData(
+        personaId: widget.personaId,
+      );
+      
+      if (!mounted) return;
+      Navigator.of(context).pop(); // Close loading dialog
+      
+      if (result.success) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Archived ${result.conversationsArchived} conversations\n'
+              'Created ${result.nodesCreated} nodes, ${result.edgesCreated} edges',
+            ),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+        
+        // Reload graph to show new data
+        _loadGraph();
+      } else if (result.nothingToArchive) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Everything is already archived!'),
+            backgroundColor: Colors.blue,
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Archive completed with errors:\n${result.errors.join("\n")}'),
+            backgroundColor: Colors.orange,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.of(context).pop(); // Close loading dialog
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Archive failed: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+  
+  String _formatDateTime(DateTime dt) {
+    if (dt.year == 1970) return 'Never';
+    final now = DateTime.now();
+    final diff = now.difference(dt);
+    
+    if (diff.inMinutes < 1) return 'Just now';
+    if (diff.inHours < 1) return '${diff.inMinutes}m ago';
+    if (diff.inDays < 1) return '${diff.inHours}h ago';
+    if (diff.inDays < 7) return '${diff.inDays}d ago';
+    
+    return '${dt.month}/${dt.day}/${dt.year}';
   }
 
   void _showFilterDialog() {

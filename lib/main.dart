@@ -17,6 +17,7 @@ import 'package:firebase_core/firebase_core.dart';
 
 import 'services/ai_service.dart';
 import 'services/firebase_service.dart';
+import 'services/knowledge_graph_service.dart';
 import 'firebase_options.dart';
 
 /// ===== Layout / Window =====
@@ -287,6 +288,9 @@ class _FloatingKaiState extends State<_FloatingKai>
         precacheImage(AssetImage(p), context);
       }
       unawaited(aiService.bootstrapPersona(_personaId));
+      
+      // Schedule automatic knowledge graph archiving
+      KnowledgeGraphService().scheduleAutoArchive(_personaId);
     });
   }
 

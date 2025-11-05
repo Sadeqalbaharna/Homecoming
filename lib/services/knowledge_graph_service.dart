@@ -6,6 +6,7 @@ import 'dart:async';
 import 'dart:math';
 import '../models/knowledge_node.dart';
 import 'firebase_service.dart';
+import 'graph_archive_service.dart';
 
 class KnowledgeGraphService {
   static final KnowledgeGraphService _instance = KnowledgeGraphService._internal();
@@ -15,6 +16,8 @@ class KnowledgeGraphService {
   KnowledgeGraph? _cachedGraph;
   DateTime? _lastBuildTime;
   static const Duration _cacheValidDuration = Duration(minutes: 5);
+  
+  final GraphArchiveService _archiveService = GraphArchiveService();
 
   /// Build knowledge graph from memories and conversations
   Future<KnowledgeGraph> buildGraph({
@@ -272,5 +275,36 @@ class KnowledgeGraphService {
     _cachedGraph = null;
     _lastBuildTime = null;
     print('🗑️ [GRAPH] Cache cleared');
+  }
+  
+  /// Archive unprocessed conversations to the graph
+  /// This ensures all Firebase data is visualized
+  Future<ArchiveResult> archiveUnprocessedData({
+    required String personaId,
+  }) async {
+    print('🔄 [GRAPH] Triggering archive process...');
+    final result = await _archiveService.archiveUnprocessedData(
+      personaId: personaId,
+    );
+    
+    if (result.success) {
+      // Clear cache to force rebuild with new data
+      clearCache();
+      print('✅ [GRAPH] Archived ${result.conversationsArchived} conversations');
+      print('📊 [GRAPH] Created ${result.nodesCreated} nodes, ${result.edgesCreated} edges');
+    }
+    
+    return result;
+  }
+  
+  /// Get archive statistics
+  Future<ArchiveStats> getArchiveStats(String personaId) async {
+    return await _archiveService.getArchiveStats(personaId);
+  }
+  
+  /// Schedule automatic archiving (call on app start)
+  void scheduleAutoArchive(String personaId) {
+    _archiveService.scheduleAutoArchive(personaId);
+    print('⏰ [GRAPH] Auto-archive scheduled (every 6 hours)');
   }
 }
