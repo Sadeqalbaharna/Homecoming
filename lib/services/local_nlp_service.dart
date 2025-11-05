@@ -23,15 +23,23 @@ class LocalNLPService {
     'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 'just', 'now',
     'im', 'ive', 'dont', 'didnt', 'doesnt', 'cant', 'wont', 'wouldnt',
     // GREETINGS AND CONVERSATIONAL FILLERS (NEW!)
-    'hey', 'hi', 'hello', 'hola', 'yo', 'sup', 'wassup', 'whats', 'whatsup',
+    'hey', 'hi', 'hello', 'hola', 'yo', 'sup', 'wassup', 'whats', 'whatsup', 'howdy', 'hiya',
     'good', 'morning', 'afternoon', 'evening', 'night', 'day',
-    'bye', 'goodbye', 'later', 'see', 'ya', 'cya', 'peace',
+    'bye', 'goodbye', 'later', 'see', 'ya', 'cya', 'peace', 'adios', 'farewell',
     'thanks', 'thank', 'thx', 'ty', 'please', 'pls', 'plz',
     'yeah', 'yep', 'yup', 'nope', 'nah', 'uh', 'um', 'hmm', 'hm', 'er',
     'okay', 'ok', 'alright', 'cool', 'nice', 'sure', 'fine', 'great',
     'oh', 'ah', 'wow', 'well', 'like', 'literally', 'basically', 'actually',
     'really', 'quite', 'pretty', 'kinda', 'sorta', 'gonna', 'wanna', 'gotta',
-    'kai', 'kais', // The AI's name - should never be an entity!
+    // Acknowledgments and confirmations
+    'yes', 'right', 'wrong', 'correct', 'exactly', 'absolutely', 'definitely',
+    'probably', 'maybe', 'perhaps', 'possibly',
+    // Questions and prompts
+    'huh', 'eh', 'pardon', 'sorry', 'excuse',
+    // Intensifiers and qualifiers
+    'much', 'many', 'little', 'bit', 'lot', 'lots', 'ton', 'bunch',
+    // AI references
+    'kai', 'kais', 'assistant', 'bot', 'ai',
   };
 
   /// Emotion keywords and their intensities
@@ -112,17 +120,39 @@ class LocalNLPService {
     RegExp(r'\bhey\s+kai\b', caseSensitive: false),
     RegExp(r'\bhi\s+kai\b', caseSensitive: false),
     RegExp(r'\bhello\s+kai\b', caseSensitive: false),
+    RegExp(r'\bye?s\s+kai\b', caseSensitive: false),
+    RegExp(r'\bno\s+kai\b', caseSensitive: false),
     RegExp(r'\bgood\s+morning\b', caseSensitive: false),
     RegExp(r'\bgood\s+afternoon\b', caseSensitive: false),
     RegExp(r'\bgood\s+evening\b', caseSensitive: false),
     RegExp(r'\bgood\s+night\b', caseSensitive: false),
     RegExp(r'\bhow\s+are\s+you\b', caseSensitive: false),
+    RegExp(r'\bhows\s+it\s+going\b', caseSensitive: false),
     RegExp(r'\bwhats\s+up\b', caseSensitive: false),
+    RegExp(r'\bnice\s+to\s+(see|meet|talk)\b', caseSensitive: false),
     RegExp(r'\bthanks?\s+you\b', caseSensitive: false),
     RegExp(r'\bthank\s+kai\b', caseSensitive: false),
+    RegExp(r'\bappreciate\s+it\b', caseSensitive: false),
+    RegExp(r'\bmuch\s+appreciated\b', caseSensitive: false),
     RegExp(r'\bbye\s+kai\b', caseSensitive: false),
-    RegExp(r'\bsee\s+you\b', caseSensitive: false),
-    RegExp(r'\btalk\s+to\s+you\b', caseSensitive: false),
+    RegExp(r'\bsee\s+you(\s+later|\s+soon)?\b', caseSensitive: false),
+    RegExp(r'\btalk\s+to\s+you(\s+later|\s+soon)?\b', caseSensitive: false),
+    RegExp(r'\bcatch\s+you\b', caseSensitive: false),
+    RegExp(r'\btake\s+care\b', caseSensitive: false),
+    RegExp(r'\bhave\s+a\s+(good|great|nice)\s+(day|night|one)\b', caseSensitive: false),
+    RegExp(r'\bgot\s+it\b', caseSensitive: false),
+    RegExp(r'\bi\s+see\b', caseSensitive: false),
+    RegExp(r'\bmakes\s+sense\b', caseSensitive: false),
+    RegExp(r'\bno\s+problem\b', caseSensitive: false),
+    RegExp(r'\bno\s+worries\b', caseSensitive: false),
+    RegExp(r'\byou(\s*re|\s+are)\s+welcome\b', caseSensitive: false),
+    RegExp(r'\bmy\s+pleasure\b', caseSensitive: false),
+    RegExp(r'\byou\s+know\b', caseSensitive: false),
+    RegExp(r'\bi\s+mean\b', caseSensitive: false),
+    RegExp(r'\bi\s+think\b', caseSensitive: false),
+    RegExp(r'\bi\s+guess\b', caseSensitive: false),
+    RegExp(r'\bkinda\s+like\b', caseSensitive: false),
+    RegExp(r'\bsorta\s+like\b', caseSensitive: false),
   ];
 
   /// Extract entities from text (people, places, concepts)
@@ -329,7 +359,42 @@ class LocalNLPService {
       }
     }
 
-    return EntityExtractionResult(entities: entities);
+    // === PHASE 5: INTELLIGENT POST-FILTERING ===
+    // Remove entities that are too short, too generic, or conversational
+    final filtered = entities.where((entity) {
+      final text = entity.text.toLowerCase();
+      
+      // Filter 1: Minimum length (except emotions which can be short)
+      if (entity.type != EntityType.emotion && text.length < 3) {
+        return false;
+      }
+      
+      // Filter 2: No single letters or numbers
+      if (text.length == 1) {
+        return false;
+      }
+      
+      // Filter 3: Check against conversational patterns
+      for (final pattern in _greetingPatterns) {
+        if (pattern.hasMatch(text)) {
+          return false;
+        }
+      }
+      
+      // Filter 4: No pure numbers or dates
+      if (RegExp(r'^\d+$').hasMatch(text)) {
+        return false;
+      }
+      
+      // Filter 5: Require minimum importance threshold
+      if (entity.importance < 0.25) {
+        return false;
+      }
+      
+      return true;
+    }).toList();
+
+    return EntityExtractionResult(entities: filtered);
   }
 
   /// Identify topics in text

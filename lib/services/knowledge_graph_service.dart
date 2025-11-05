@@ -239,24 +239,34 @@ class KnowledgeGraphService {
         final count = data['count'] as int;
         final importance = data['importance'] as double;
         
-        // Filter: must appear 2+ times OR have importance > 0.8
-        if (count >= 2 || importance > 0.8) {
-          final timestamps = data['timestamps'] as List<DateTime>;
-          final entityNode = KnowledgeNode(
-            id: '${data['type'].toString().split('.').last}_${key.replaceAll(' ', '_')}',
-            label: data['text'] as String,
-            type: data['type'] as NodeType,
-            timestamp: timestamps.first,
-            importance: importance,
-            metadata: {
-              'mentionCount': count,
-              'firstSeen': timestamps.first.toIso8601String(),
-              'lastSeen': timestamps.last.toIso8601String(),
-            },
-          );
-          entityNodes[key] = entityNode;
-          nodes.add(entityNode);
-        }
+        // DOUBLE INTELLIGENCE: More stringent filtering
+        // Filter 1: Must appear 2+ times OR have importance > 0.8
+        if (count < 2 && importance <= 0.8) continue;
+        
+        // Filter 2: If only 2 mentions, must have importance > 0.4
+        if (count == 2 && importance <= 0.4) continue;
+        
+        // Filter 3: Single character entities need very high importance
+        if (key.length <= 1 && importance < 0.9) continue;
+        
+        // Filter 4: Two character entities need high importance
+        if (key.length == 2 && importance < 0.7) continue;
+        
+        final timestamps = data['timestamps'] as List<DateTime>;
+        final entityNode = KnowledgeNode(
+          id: '${data['type'].toString().split('.').last}_${key.replaceAll(' ', '_')}',
+          label: data['text'] as String,
+          type: data['type'] as NodeType,
+          timestamp: timestamps.first,
+          importance: importance,
+          metadata: {
+            'mentionCount': count,
+            'firstSeen': timestamps.first.toIso8601String(),
+            'lastSeen': timestamps.last.toIso8601String(),
+          },
+        );
+        entityNodes[key] = entityNode;
+        nodes.add(entityNode);
       }
 
       print('👥 [GRAPH] Extracted ${entityNodes.length} significant entities (filtered from ${entityCandidates.length} candidates)');
@@ -461,9 +471,20 @@ class KnowledgeGraphService {
     // One contains the other (e.g., "John" and "John Smith")
     if (lowerA.contains(lowerB) || lowerB.contains(lowerA)) return true;
     
-    // Similar with minor differences (plurals, etc)
+    // Similar with minor differences (plurals, possessives, verb forms)
     if ((lowerA == '${lowerB}s') || (lowerB == '${lowerA}s')) return true;
     if ((lowerA == '${lowerB}es') || (lowerB == '${lowerA}es')) return true;
+    if ((lowerA == '${lowerB}ing') || (lowerB == '${lowerA}ing')) return true;
+    if ((lowerA == '${lowerB}ed') || (lowerB == '${lowerA}ed')) return true;
+    if ((lowerA == "${lowerB}'s") || (lowerB == "${lowerA}'s")) return true;
+    
+    // Remove common articles and check again
+    final cleanA = lowerA.replaceAll(RegExp(r'\b(the|a|an)\s+'), '');
+    final cleanB = lowerB.replaceAll(RegExp(r'\b(the|a|an)\s+'), '');
+    if (cleanA == cleanB) return true;
+    
+    // Acronym matching (e.g., "AI" matches "Artificial Intelligence")
+    if (_isAcronymMatch(lowerA, lowerB)) return true;
     
     // Levenshtein distance for typos/variations
     final distance = _levenshteinDistance(lowerA, lowerB);
@@ -471,6 +492,18 @@ class KnowledgeGraphService {
     final similarity = 1.0 - (distance / maxLen);
     
     return similarity > 0.85; // 85% similar
+  }
+  
+  /// Check if one string is an acronym of another
+  bool _isAcronymMatch(String short, String long) {
+    if (short.length >= long.length) return false;
+    if (short.length < 2) return false;
+    
+    final words = long.split(' ');
+    if (words.length < 2) return false;
+    
+    final acronym = words.map((w) => w.isNotEmpty ? w[0] : '').join('');
+    return acronym.toLowerCase() == short.toLowerCase();
   }
 
   /// Calculate Levenshtein distance (edit distance)
