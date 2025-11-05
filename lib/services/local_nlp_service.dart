@@ -101,6 +101,34 @@ class LocalNLPService {
     'opportunity', 'challenge', 'risk', 'benefit', 'advantage', 'disadvantage',
   };
 
+  /// RADICAL FILTER: Questions that indicate requests, not meaningful content
+  static final _questionIndicators = [
+    RegExp(r'\bcan\s+you\b', caseSensitive: false),
+    RegExp(r'\bcould\s+you\b', caseSensitive: false),
+    RegExp(r'\bwould\s+you\b', caseSensitive: false),
+    RegExp(r'\bwill\s+you\b', caseSensitive: false),
+    RegExp(r'\bwhat\s+(is|are|was|were)\b', caseSensitive: false),
+    RegExp(r'\bhow\s+(do|does|can|should)\b', caseSensitive: false),
+    RegExp(r'\bwhy\s+(is|are|do|does)\b', caseSensitive: false),
+    RegExp(r'\bshould\s+i\b', caseSensitive: false),
+    RegExp(r'\bdo\s+you\b', caseSensitive: false),
+    RegExp(r'\bdid\s+you\b', caseSensitive: false),
+  ];
+
+  /// RADICAL FILTER: Meta-conversational phrases (talking about talking)
+  static final _metaConversational = [
+    RegExp(r'\btell\s+me\b', caseSensitive: false),
+    RegExp(r'\bshow\s+me\b', caseSensitive: false),
+    RegExp(r'\bexplain\b', caseSensitive: false),
+    RegExp(r'\bdescribe\b', caseSensitive: false),
+    RegExp(r'\bhelp\s+me\b', caseSensitive: false),
+    RegExp(r'\blet\s+me\s+know\b', caseSensitive: false),
+    RegExp(r'\bi\s+want\s+to\s+know\b', caseSensitive: false),
+    RegExp(r'\bi\s+need\s+to\s+know\b', caseSensitive: false),
+    RegExp(r'\bwhat\s+about\b', caseSensitive: false),
+    RegExp(r'\bhow\s+about\b', caseSensitive: false),
+  ];
+
   /// ADVANCED: Common entity patterns (name indicators)
   static final _namePatterns = [
     RegExp(r'\b[A-Z][a-z]+\s+[A-Z][a-z]+\b'), // John Smith
@@ -162,11 +190,32 @@ class LocalNLPService {
     final entities = <ExtractedEntity>[];
     final seen = <String>{};
 
-    // === PRE-FILTER: Remove greeting phrases from text ===
+    // === PRE-FILTER STAGE 1: Remove greeting phrases from text ===
     var cleanedText = text;
     for (final pattern in _greetingPatterns) {
       cleanedText = cleanedText.replaceAll(pattern, ' ');
     }
+    
+    // === PRE-FILTER STAGE 2: Check if this is a question/request ===
+    var isQuestionRequest = false;
+    for (final pattern in _questionIndicators) {
+      if (pattern.hasMatch(cleanedText)) {
+        isQuestionRequest = true;
+        break;
+      }
+    }
+    
+    // === PRE-FILTER STAGE 3: Check if meta-conversational ===
+    var isMetaConversational = false;
+    for (final pattern in _metaConversational) {
+      if (pattern.hasMatch(cleanedText)) {
+        isMetaConversational = true;
+        break;
+      }
+    }
+    
+    // RADICAL: If this is just a question/request with no substance, reduce extraction quality
+    final qualityMultiplier = (isQuestionRequest || isMetaConversational) ? 0.3 : 1.0;
 
     // === ADVANCED PHASE 1: Named Entity Recognition with Patterns ===
     
@@ -180,7 +229,7 @@ class LocalNLPService {
           entities.add(ExtractedEntity(
             text: name,
             type: EntityType.properNoun,
-            importance: 0.9, // High confidence for pattern-matched names
+            importance: 0.9 * qualityMultiplier, // Reduced if low-quality text
             positions: [match.start],
           ));
           seen.add(key);
@@ -263,7 +312,7 @@ class LocalNLPService {
       }
       
       if (validProperNoun) {
-        final importance = min(1.0, 0.6 + contextScore);
+        final importance = min(1.0, (0.6 + contextScore) * qualityMultiplier);
         entities.add(ExtractedEntity(
           text: seq,
           type: EntityType.properNoun,
@@ -275,17 +324,19 @@ class LocalNLPService {
     }
 
     // === ADVANCED PHASE 3: Emotion Detection ===
-    
-    for (final word in words) {
-      final lower = word.toLowerCase();
-      if (_emotionKeywords.containsKey(lower) && !seen.contains(lower)) {
-        entities.add(ExtractedEntity(
-          text: word,
-          type: EntityType.emotion,
-          importance: _emotionKeywords[lower]!,
-          positions: _findPositions(text, word),
-        ));
-        seen.add(lower);
+    // RADICAL: Skip emotions from low-quality text (questions/requests don't convey real emotions)
+    if (qualityMultiplier > 0.5) {
+      for (final word in words) {
+        final lower = word.toLowerCase();
+        if (_emotionKeywords.containsKey(lower) && !seen.contains(lower)) {
+          entities.add(ExtractedEntity(
+            text: word,
+            type: EntityType.emotion,
+            importance: _emotionKeywords[lower]! * qualityMultiplier,
+            positions: _findPositions(text, word),
+          ));
+          seen.add(lower);
+        }
       }
     }
 
@@ -347,8 +398,9 @@ class LocalNLPService {
         shouldAdd = true;
       }
       
+      // RADICAL: Apply quality multiplier to all concepts
       if (shouldAdd) {
-        importance = min(1.0, importance);
+        importance = min(1.0, importance * qualityMultiplier);
         entities.add(ExtractedEntity(
           text: noun.key,
           type: EntityType.concept,

@@ -105,7 +105,7 @@ class KnowledgeGraphService {
       print('🔍 [GRAPH] Running TF-IDF analysis...');
       final tfidf = nlp.calculateTFIDF(convTexts);
       
-      // Extract top terms from each conversation
+      // Extract top terms from each conversation - RADICAL: Only top 3 most important
       final importantTerms = <String, Set<int>>{}; // term -> conversation indices
       for (var i = 0; i < convTexts.length; i++) {
         final docKey = 'doc_$i';
@@ -113,16 +113,21 @@ class KnowledgeGraphService {
           final scores = tfidf[docKey]!.entries.toList()
             ..sort((a, b) => b.value.compareTo(a.value));
           
-          // Take top 5 most important terms from each conversation
-          for (var j = 0; j < min(5, scores.length); j++) {
+          // RADICAL: Only take top 3 MOST important terms, skip if score too low
+          for (var j = 0; j < min(3, scores.length); j++) {
             final term = scores[j].key;
-            importantTerms[term] ??= {};
-            importantTerms[term]!.add(i);
+            final score = scores[j].value;
+            
+            // RADICAL: Only include if TF-IDF score is substantial (> 0.15)
+            if (score > 0.15) {
+              importantTerms[term] ??= {};
+              importantTerms[term]!.add(i);
+            }
           }
         }
       }
 
-      print('💡 [GRAPH] Found ${importantTerms.length} important terms');
+      print('💡 [GRAPH] Found ${importantTerms.length} important terms (TF-IDF > 0.15)');
 
       // 4. Find co-occurring terms to establish relationships
       print('🔗 [GRAPH] Analyzing term relationships...');
@@ -141,41 +146,46 @@ class KnowledgeGraphService {
 
       print('📂 [GRAPH] Identified ${topicClusters.length} topic clusters');
 
-      // 6. Create topic nodes (high-level categories)
+      // 6. Create topic nodes (high-level categories) - RADICAL: Require 3+ conversations
       final topicNodes = <String, KnowledgeNode>{};
       for (final entry in topicClusters.entries) {
         final topic = entry.key;
         final convIndices = entry.value;
         
-        final topicNode = KnowledgeNode(
-          id: 'topic_$topic',
-          label: topic[0].toUpperCase() + topic.substring(1),
-          type: NodeType.topic,
-          timestamp: DateTime.now(),
-          importance: min(1.0, convIndices.length * 0.15),
-          metadata: {
-            'conversationCount': convIndices.length,
-            'emoji': _getTopicEmoji(topic),
-          },
-        );
-        topicNodes[topic] = topicNode;
-        nodes.add(topicNode);
+        // RADICAL: Only create topic if it appears in 3+ conversations
+        if (convIndices.length >= 3) {
+          final topicNode = KnowledgeNode(
+            id: 'topic_$topic',
+            label: topic[0].toUpperCase() + topic.substring(1),
+            type: NodeType.topic,
+            timestamp: DateTime.now(),
+            importance: min(1.0, convIndices.length * 0.15),
+            metadata: {
+              'conversationCount': convIndices.length,
+              'emoji': _getTopicEmoji(topic),
+            },
+          );
+          topicNodes[topic] = topicNode;
+          nodes.add(topicNode);
+        }
       }
 
-      // 7. Create concept nodes from important terms (mentioned multiple times)
+      print('📂 [GRAPH] Created ${topicNodes.length} topic nodes (3+ conversations each)');
+
+      // 7. Create concept nodes from important terms - RADICAL: Require 3+ mentions
       final conceptNodes = <String, KnowledgeNode>{};
       for (final entry in importantTerms.entries) {
         final term = entry.key;
         final convIndices = entry.value;
         
-        // Only create concept nodes for terms mentioned in 2+ conversations
-        if (convIndices.length >= 2) {
+        // RADICAL: Only create concept if mentioned in 3+ conversations with high importance
+        if (convIndices.length >= 3) {
           final conceptNode = KnowledgeNode(
             id: 'concept_${term.toLowerCase().replaceAll(' ', '_')}',
             label: term,
             type: NodeType.concept,
             timestamp: DateTime.now(),
-            importance: min(1.0, convIndices.length * 0.2),
+            importance: min(1.0, convIndices.length * 0.25), // Higher multiplier for rarity
             metadata: {
               'mentionCount': convIndices.length,
               'conversations': convIndices.toList(),
@@ -186,7 +196,7 @@ class KnowledgeGraphService {
         }
       }
 
-      print('🧠 [GRAPH] Created ${conceptNodes.length} concept nodes');
+      print('🧠 [GRAPH] Created ${conceptNodes.length} concept nodes (3+ mentions each)');
 
       // 8. Extract entities and create entity nodes (ONLY for recurring entities)
       final entityCandidates = <String, Map<String, dynamic>>{}; // key -> {node, count, timestamps}
@@ -239,18 +249,21 @@ class KnowledgeGraphService {
         final count = data['count'] as int;
         final importance = data['importance'] as double;
         
-        // DOUBLE INTELLIGENCE: More stringent filtering
-        // Filter 1: Must appear 2+ times OR have importance > 0.8
-        if (count < 2 && importance <= 0.8) continue;
+        // RADICAL INTELLIGENCE: Ultra-stringent filtering
+        // Filter 1: Must appear 3+ times OR have exceptional importance (> 0.9)
+        if (count < 3 && importance <= 0.9) continue;
         
-        // Filter 2: If only 2 mentions, must have importance > 0.4
-        if (count == 2 && importance <= 0.4) continue;
+        // Filter 2: If 3 mentions, must have importance > 0.5
+        if (count == 3 && importance <= 0.5) continue;
         
-        // Filter 3: Single character entities need very high importance
-        if (key.length <= 1 && importance < 0.9) continue;
+        // Filter 3: Single character entities are almost never valid
+        if (key.length <= 1) continue;
         
-        // Filter 4: Two character entities need high importance
-        if (key.length == 2 && importance < 0.7) continue;
+        // Filter 4: Two character entities need very high importance
+        if (key.length == 2 && importance < 0.8) continue;
+        
+        // Filter 5: Three character entities need high importance (likely abbreviations)
+        if (key.length == 3 && importance < 0.7) continue;
         
         final timestamps = data['timestamps'] as List<DateTime>;
         final entityNode = KnowledgeNode(
@@ -269,7 +282,7 @@ class KnowledgeGraphService {
         nodes.add(entityNode);
       }
 
-      print('👥 [GRAPH] Extracted ${entityNodes.length} significant entities (filtered from ${entityCandidates.length} candidates)');
+      print('👥 [GRAPH] Extracted ${entityNodes.length} high-quality entities (from ${entityCandidates.length} candidates, requiring 3+ mentions)');
 
       // 8.5. ADVANCED: Semantic deduplication - merge similar entities
       final deduplicated = _deduplicateEntities(entityNodes);
@@ -283,16 +296,19 @@ class KnowledgeGraphService {
         if (conceptNodes.containsKey(term1)) {
           for (final term2 in relatedTerms) {
             if (conceptNodes.containsKey(term2) && term1 != term2) {
-              // Calculate relationship strength based on frequency
-              final strength = min(1.0, relatedTerms.length * 0.15);
+              // RADICAL: Calculate relationship strength, only keep strong relationships
+              final strength = min(1.0, relatedTerms.length * 0.20);
               
-              edges.add(KnowledgeEdge(
-                fromId: conceptNodes[term1]!.id,
-                toId: conceptNodes[term2]!.id,
-                type: EdgeType.related,
-                strength: strength,
-                timestamp: DateTime.now(),
-              ));
+              // RADICAL: Only create edge if relationship is meaningful (strength > 0.3)
+              if (strength > 0.3) {
+                edges.add(KnowledgeEdge(
+                  fromId: conceptNodes[term1]!.id,
+                  toId: conceptNodes[term2]!.id,
+                  type: EdgeType.related,
+                  strength: strength,
+                  timestamp: DateTime.now(),
+                ));
+              }
             }
           }
         }
