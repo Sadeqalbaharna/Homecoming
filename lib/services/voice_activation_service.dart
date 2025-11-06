@@ -3,10 +3,12 @@
 library;
 
 import 'dart:async';
+import 'dart:io';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'native_audio_recorder.dart';
 import 'voice_service.dart';
+import 'voice_training_service.dart';
 
 /// Voice activation service for "Hey Kai" wake word detection
 class VoiceActivationService {
@@ -16,6 +18,7 @@ class VoiceActivationService {
 
   final NativeAudioRecorder _recorder = NativeAudioRecorder();
   final VoiceService _voiceService = VoiceService();
+  final VoiceTrainingService _trainingService = VoiceTrainingService();
   
   bool _isListening = false;
   bool _isEnabled = false;
@@ -33,7 +36,7 @@ class VoiceActivationService {
   static const Duration _conversationTimeout = Duration(seconds: 15); // End conversation after 15s of silence
   static const Duration _resumeBufferDelay = Duration(milliseconds: 2000); // Wait 2s after TTS stops before resuming
   static const Duration _minPauseDuration = Duration(milliseconds: 500); // Minimum pause duration
-  static const List<String> _wakeWords = [
+  static const List<String> _defaultWakeWords = [
     'hey kai',
     'hey kay',
     'hey key',
@@ -41,6 +44,8 @@ class VoiceActivationService {
     'okay kai',
     'ok kai',
   ];
+  
+  List<String> _wakeWords = [..._defaultWakeWords];
 
   /// Stream of detected wake words
   Stream<String> get onWakeWordDetected {
@@ -52,6 +57,17 @@ class VoiceActivationService {
   Future<void> initialize() async {
     final prefs = await SharedPreferences.getInstance();
     _isEnabled = prefs.getBool('voice_activation_enabled') ?? false;
+    
+    // Initialize voice training service
+    await _trainingService.initialize();
+    
+    // Add custom wake words from training
+    final customWakeWords = _trainingService.getCustomWakeWords();
+    _wakeWords.addAll(customWakeWords);
+    
+    if (customWakeWords.isNotEmpty) {
+      print('🎤 [VoiceActivation] Loaded ${customWakeWords.length} custom wake words');
+    }
     
     if (_isEnabled) {
       await start();
@@ -141,19 +157,43 @@ class VoiceActivationService {
         return;
       }
       
-      // Transcribe the chunk
-      final transcription = await _voiceService.transcribeAudio(recordingFile.path);
+      // PRE-WHISPER: Check if audio file has enough content to transcribe
+      if (!await _hasValidAudio(recordingFile.path)) {
+        print('🔇 [VoiceActivation] Audio too short/quiet - skipping Whisper');
+        return;
+      }
       
-      if (transcription == null || transcription.isEmpty) {
+      // Transcribe the chunk
+      final rawTranscription = await _voiceService.transcribeAudio(recordingFile.path);
+      
+      if (rawTranscription == null || rawTranscription.isEmpty) {
         // No speech detected - if in conversation, this counts as silence
         return;
       }
       
-      final lowerTranscription = transcription.toLowerCase().trim();
+      // ADAPTIVE LAYER: Apply learned corrections
+      final correctedTranscription = _trainingService.applyPersonalCorrections(rawTranscription);
+      final lowerTranscription = correctedTranscription.toLowerCase().trim();
       
-      // Filter out noise and very short utterances
+      // POST-WHISPER Layer 1: Filter obvious noise/hallucinations
       if (!_isValidSpeech(lowerTranscription)) {
-        print('🔇 [VoiceActivation] Filtered noise/silence: "$lowerTranscription"');
+        print('🔇 [VoiceActivation] Filtered noise/hallucination: "$lowerTranscription"');
+        // Learn that this pattern should be rejected
+        await _trainingService.learnSuccess(lowerTranscription, 0.0);
+        return;
+      }
+      
+      // POST-WHISPER Layer 2: Semantic validation - does this make sense?
+      if (!_makesSemanticsense(lowerTranscription)) {
+        print('🧠 [VoiceActivation] Filtered nonsense/gibberish: "$lowerTranscription"');
+        // Learn that this pattern should be rejected
+        await _trainingService.learnSuccess(lowerTranscription, 0.0);
+        return;
+      }
+      
+      // CONFIDENCE LAYER: Check personalized confidence threshold
+      if (!_trainingService.meetsUserConfidence(lowerTranscription, null)) {
+        print('🎯 [VoiceActivation] Below user confidence threshold: "$lowerTranscription"');
         return;
       }
       
@@ -162,6 +202,9 @@ class VoiceActivationService {
       // If we're in conversation mode, any speech continues the conversation
       if (_isInConversation) {
         print('💬 [VoiceActivation] Conversation continues: "$lowerTranscription"');
+        
+        // Learn successful transcription
+        await _trainingService.learnSuccess(lowerTranscription, 0.9);
         
         // Reset conversation timer
         _resetConversationTimer();
@@ -179,6 +222,9 @@ class VoiceActivationService {
       
       if (wakeWordDetected) {
         print('🎯 [VoiceActivation] WAKE WORD DETECTED!');
+        
+        // Learn successful wake word detection
+        await _trainingService.learnSuccess(lowerTranscription, 1.0);
         
         // Enter conversation mode
         _enterConversationMode();
@@ -442,6 +488,161 @@ class VoiceActivationService {
     
     return true;
   }
+
+  /// PRE-WHISPER: Check if audio file has sufficient content to transcribe
+  Future<bool> _hasValidAudio(String audioPath) async {
+    try {
+      final file = File(audioPath);
+      if (!await file.exists()) return false;
+      
+      // Check file size - very small files are likely silence
+      final fileSizeBytes = await file.length();
+      const minFileSizeBytes = 1024; // 1KB minimum
+      
+      if (fileSizeBytes < minFileSizeBytes) {
+        return false;
+      }
+      
+      // For now, just use file size. Could add actual audio analysis later
+      return true;
+      
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /// POST-WHISPER: Semantic validation - does this text make sense?
+  bool _makesSemanticsense(String text) {
+    final cleanText = text.replaceAll(RegExp(r'[^\w\s]'), '').trim();
+    
+    // Must have reasonable length
+    if (cleanText.length < 2) return false;
+    
+    // Check for common Whisper artifacts that slip through
+    final nonsensePatterns = [
+      // Repeated characters/sounds
+      RegExp(r'^(.)\1{3,}$'), // aaaaa, mmmmm, etc
+      RegExp(r'^(..)\1{2,}$'), // lalala, hahaha, etc
+      
+      // Random letter combinations
+      RegExp(r'^[bcdfghjklmnpqrstvwxyz]{3,}$'), // consonant clusters
+      RegExp(r'^[aeiou]{3,}$'), // vowel clusters
+      
+      // Single syllable repeated
+      RegExp(r'^(\w{1,3})\s\1\s\1'), // "la la la", "no no no"
+      
+      // Very fragmented speech
+      RegExp(r'^\w\s\w\s\w'), // "a b c", "i o u"
+    ];
+    
+    for (final pattern in nonsensePatterns) {
+      if (pattern.hasMatch(cleanText.toLowerCase())) {
+        return false;
+      }
+    }
+    
+    // Check word patterns - real speech has varied word lengths
+    final words = cleanText.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+    
+    if (words.isEmpty) return false;
+    
+    // Single word validation
+    if (words.length == 1) {
+      final word = words[0].toLowerCase();
+      
+      // Very short single words are suspicious unless they're commands
+      if (word.length <= 2) {
+        final validShortWords = ['hi', 'no', 'go', 'ok', 'on', 'up'];
+        return validShortWords.contains(word) || word.contains('kai');
+      }
+      
+      // Very long single "words" are usually gibberish
+      if (word.length > 20) {
+        return false;
+      }
+      
+      // Check if it's a real word pattern (has vowels and consonants)
+      final hasVowels = word.contains(RegExp(r'[aeiou]'));
+      final hasConsonants = word.contains(RegExp(r'[bcdfghjklmnpqrstvwxyz]'));
+      
+      if (!hasVowels || !hasConsonants) {
+        return false;
+      }
+    }
+    
+    // Multiple words validation
+    if (words.length > 1) {
+      // Check for excessive repetition
+      final uniqueWords = words.toSet();
+      if (uniqueWords.length == 1 && words.length > 2) {
+        // Same word repeated 3+ times is usually noise
+        return false;
+      }
+      
+      // Very short words in sequence are suspicious
+      final avgWordLength = words.map((w) => w.length).reduce((a, b) => a + b) / words.length;
+      if (avgWordLength < 2.0 && words.length > 3) {
+        return false;
+      }
+    }
+    
+    // Check for common sense patterns
+    // Real speech usually has function words (the, a, is, to, etc.)
+    if (cleanText.length > 15 && words.length > 3) {
+      final functionWords = ['the', 'a', 'an', 'to', 'of', 'and', 'or', 'but', 'in', 'on', 'at', 'is', 'are', 'was', 'were', 'i', 'you', 'he', 'she', 'it', 'we', 'they'];
+      final hasFunctionWords = words.any((word) => functionWords.contains(word.toLowerCase()));
+      
+      // Long sentences without function words are often gibberish
+      if (!hasFunctionWords && !cleanText.toLowerCase().contains('kai')) {
+        return false;
+      }
+    }
+    
+    return true;
+  }
+
+  // Voice Training Interface Methods
+  
+  /// Teach a correction for a misheard transcription
+  Future<void> teachCorrection(String wrongTranscription, String correctTranscription) async {
+    await _trainingService.learnCorrection(wrongTranscription, correctTranscription);
+  }
+  
+  /// Add a custom wake word variation
+  Future<void> addWakeWordVariation(String variation) async {
+    await _trainingService.addWakeWordVariation(variation);
+    // Update local wake words list
+    if (!_wakeWords.contains(variation.toLowerCase())) {
+      _wakeWords.add(variation.toLowerCase());
+    }
+  }
+  
+  /// Add a command synonym
+  Future<void> addCommandSynonym(String standardCommand, String userSynonym) async {
+    await _trainingService.addCommandSynonym(standardCommand, userSynonym);
+  }
+  
+  /// Get training statistics
+  Map<String, dynamic> getTrainingStats() {
+    return _trainingService.getTrainingStats();
+  }
+  
+  /// Reset all training data
+  Future<void> resetVoiceTraining() async {
+    await _trainingService.resetTraining();
+    // Reset to original wake words
+    _wakeWords = List.from(_originalWakeWords);
+  }
+  
+  // Store original wake words for reset
+  static const List<String> _originalWakeWords = [
+    'hey kai',
+    'hey kay',
+    'hey key',
+    'a kai',
+    'okay kai',
+    'ok kai',
+  ];
 
   /// Clean up resources
   Future<void> dispose() async {
