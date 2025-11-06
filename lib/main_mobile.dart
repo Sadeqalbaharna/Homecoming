@@ -15,7 +15,11 @@ import 'package:firebase_core/firebase_core.dart';
 
 import 'services/ai_service.dart';
 import 'services/firebase_service.dart';
-import 'services/voice_activation_service.dart';
+import '../services/proactive_service.dart';
+import '../services/voice_activation_service.dart';
+import '../services/voice_training_service.dart';
+import '../services/home_automation_service.dart';
+import '../widgets/voice_setup_dialog.dart';
 import 'firebase_options.dart';
 import 'widgets/debug_button.dart';
 
@@ -436,6 +440,33 @@ class _MobileKaiState extends State<_MobileKai>
     }
   }
 
+  Future<void> _toggleLight() async {
+    try {
+      // Test toggle LED 1 (Living Room Light)
+      final success = await HomeAutomationService().toggle(
+        'truekai',
+        'raspberry_pi_home',
+        'led_1',
+      );
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(success ? '💡 Living Room light toggled!' : '❌ Light control failed'),
+          duration: const Duration(seconds: 2),
+          backgroundColor: success ? Colors.green : Colors.red,
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('❌ Light control error: $e'),
+          duration: const Duration(seconds: 2),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
   Future<void> _openPersonaPanel(BuildContext context) async {
     showDialog(
       context: context,
@@ -651,6 +682,11 @@ class _MobileKaiState extends State<_MobileKai>
                     onTap: () => setState(() {
                       _modelId = _modelId == 'gpt-4o' ? 'gpt-5' : 'gpt-4o';
                     }),
+                  ),
+                  _MobileButton(
+                    icon: Icons.lightbulb,
+                    label: 'Lights',
+                    onTap: _toggleLight,
                   ),
                 ],
               ),
