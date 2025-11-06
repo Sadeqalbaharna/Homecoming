@@ -46,11 +46,16 @@ class _VoiceSetupDialogState extends State<VoiceSetupDialog> {
           width: 1,
         ),
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
+      child: Container(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.8,
+          maxWidth: MediaQuery.of(context).size.width * 0.9,
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
             // Header
             Row(
               children: [
@@ -95,11 +100,10 @@ class _VoiceSetupDialogState extends State<VoiceSetupDialog> {
                     ],
                   ),
                 ),
-                if (!widget.isFirstSetup)
-                  IconButton(
-                    icon: const Icon(Icons.close, color: Colors.white70),
-                    onPressed: () => Navigator.of(context).pop(),
-                  ),
+                IconButton(
+                  icon: const Icon(Icons.close, color: Colors.white70),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
               ],
             ),
             
@@ -112,8 +116,13 @@ class _VoiceSetupDialogState extends State<VoiceSetupDialog> {
                 ),
               )
             else
-              _buildContent(),
+              Flexible(
+                child: SingleChildScrollView(
+                  child: _buildContent(),
+                ),
+              ),
           ],
+        ),
         ),
       ),
     );
