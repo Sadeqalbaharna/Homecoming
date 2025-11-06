@@ -18,7 +18,7 @@ class VoiceTrainingService {
   Map<String, List<double>> _confidenceHistory = {};
   
   // User's adaptive confidence threshold
-  double _userConfidenceThreshold = 0.75; // Start conservative
+  double _userConfidenceThreshold = 0.4; // Start more permissive to fix gibberish issue
   
   // Environmental noise patterns
   Map<String, int> _noisePatterns = {};

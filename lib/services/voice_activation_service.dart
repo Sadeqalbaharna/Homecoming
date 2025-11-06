@@ -175,27 +175,27 @@ class VoiceActivationService {
       final correctedTranscription = _trainingService.applyPersonalCorrections(rawTranscription);
       final lowerTranscription = correctedTranscription.toLowerCase().trim();
       
-      // POST-WHISPER Layer 1: Filter obvious noise/hallucinations
-      if (!_isValidSpeech(lowerTranscription)) {
-        print('🔇 [VoiceActivation] Filtered noise/hallucination: "$lowerTranscription"');
-        // Learn that this pattern should be rejected
-        await _trainingService.learnSuccess(lowerTranscription, 0.0);
+      // POST-WHISPER Layer 1: Filter obvious noise/hallucinations (REDUCED FILTERING)
+      if (!_isValidSpeechBasic(lowerTranscription)) {
+        print('🔇 [VoiceActivation] Filtered obvious noise: "$lowerTranscription"');
         return;
       }
       
+      // TEMPORARILY DISABLED - Too aggressive filtering
       // POST-WHISPER Layer 2: Semantic validation - does this make sense?
-      if (!_makesSemanticsense(lowerTranscription)) {
-        print('🧠 [VoiceActivation] Filtered nonsense/gibberish: "$lowerTranscription"');
-        // Learn that this pattern should be rejected
-        await _trainingService.learnSuccess(lowerTranscription, 0.0);
-        return;
-      }
+      // if (!_makesSemanticsense(lowerTranscription)) {
+      //   print('🧠 [VoiceActivation] Filtered nonsense/gibberish: "$lowerTranscription"');
+      //   // Learn that this pattern should be rejected
+      //   await _trainingService.learnSuccess(lowerTranscription, 0.0);
+      //   return;
+      // }
       
+      // TEMPORARILY DISABLED - Confidence filtering too strict
       // CONFIDENCE LAYER: Check personalized confidence threshold
-      if (!_trainingService.meetsUserConfidence(lowerTranscription, null)) {
-        print('🎯 [VoiceActivation] Below user confidence threshold: "$lowerTranscription"');
-        return;
-      }
+      // if (!_trainingService.meetsUserConfidence(lowerTranscription, null)) {
+      //   print('🎯 [VoiceActivation] Below user confidence threshold: "$lowerTranscription"');
+      //   return;
+      // }
       
       print('🎤 [VoiceActivation] Heard: "$lowerTranscription"');
       
@@ -359,7 +359,38 @@ class VoiceActivationService {
     }
   }
 
-  /// Validate if transcription is actual speech vs noise/silence
+  /// Basic speech validation - only filter obvious noise
+  bool _isValidSpeechBasic(String text) {
+    // Must have minimum length (at least 2 characters)
+    if (text.length < 2) {
+      return false;
+    }
+    
+    // Only filter very obvious noise patterns
+    final obviousNoisePatterns = [
+      'silence',
+      '[music]',
+      '[silence]',
+      '(music)',
+      '(silence)',
+      '[applause]',
+      '(applause)',
+      '...',
+    ];
+    
+    // Check if text is exactly an obvious noise pattern
+    final cleanText = text.replaceAll(RegExp(r'[^\w\s]'), '').trim();
+    for (final pattern in obviousNoisePatterns) {
+      final cleanPattern = pattern.replaceAll(RegExp(r'[^\w\s]'), '').trim();
+      if (cleanText.toLowerCase() == cleanPattern.toLowerCase()) {
+        return false;
+      }
+    }
+    
+    return true;
+  }
+
+  /// Validate if transcription is actual speech vs noise/silence (ORIGINAL - MORE AGGRESSIVE)
   bool _isValidSpeech(String text) {
     // Must have minimum length (at least 2 characters)
     if (text.length < 2) {
