@@ -9,6 +9,7 @@ import '../models/knowledge_node.dart';
 import 'firebase_service.dart';
 import 'graph_archive_service.dart';
 import 'local_nlp_service.dart';
+import 'consciousness_service.dart';
 
 class KnowledgeGraphService {
   static final KnowledgeGraphService _instance = KnowledgeGraphService._internal();
@@ -21,12 +22,16 @@ class KnowledgeGraphService {
   
   // Use lazy getter to avoid circular dependency
   GraphArchiveService get _archiveService => GraphArchiveService();
+  
+  // NEW: Consciousness service for building Kai's mind
+  final _consciousness = ConsciousnessService();
 
   /// Build knowledge graph from memories and conversations
-  /// First tries to load from Firebase, then builds from conversations if needed
+  /// NEW: Now builds Kai's CONSCIOUSNESS - not just filtered chat archive!
   Future<KnowledgeGraph> buildGraph({
     required String personaId,
     bool forceRebuild = false,
+    bool useConsciousness = true, // NEW: Toggle between old and new approach
   }) async {
     // Return cached graph if still valid
     if (!forceRebuild &&
@@ -50,8 +55,10 @@ class KnowledgeGraphService {
       }
     }
 
-    // Build from conversations if no saved graph
-    final graph = await _buildGraphFromConversations(personaId);
+    // NEW: Build Kai's consciousness instead of filtering conversations!
+    final graph = useConsciousness
+        ? await _consciousness.buildConsciousness(personaId)
+        : await _buildGraphFromConversations(personaId);
     
     // Save to Firebase for next time
     if (FirebaseService.isAvailable) {

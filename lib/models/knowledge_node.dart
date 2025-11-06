@@ -5,7 +5,8 @@ import 'dart:math' show exp;
 import 'package:flutter/material.dart';
 
 enum NodeType {
-  person,       // People mentioned (red)
+  // === EXISTING: Basic extraction ===
+  person,       // Generic people mentioned
   topic,        // Topics discussed (blue)
   event,        // Specific events/plans (green)
   emotion,      // Emotional moments (pink)
@@ -14,6 +15,31 @@ enum NodeType {
   fact,         // Extracted facts (cyan)
   conversation, // Conversation sessions (white)
   concept,      // Important concepts/terms (orange)
+  
+  // === NEW: Kai's Consciousness ===
+  // People - Enhanced categorization
+  you,          // The user (central node - most important)
+  realPerson,   // Real people in user's life
+  fictional,    // Fictional characters discussed
+  historical,   // Historical figures mentioned
+  
+  // Kai's Mind
+  value,        // What Kai learns to care about
+  goal,         // Kai's aspirations and objectives
+  belief,       // Kai's understanding of truth
+  principle,    // Guiding principles Kai develops
+  
+  // Dynamics & Learning
+  pattern,      // Recurring behaviors Kai notices
+  insight,      // Realizations and epiphanies
+  question,     // Things Kai wants to learn
+  memory,       // Important moments worth remembering
+  skill,        // Capabilities Kai is developing
+  
+  // Relationships
+  preference,   // User's likes/dislikes
+  habit,        // User's regular behaviors
+  aspiration,   // User's goals and dreams
 }
 
 class KnowledgeNode {
@@ -56,6 +82,7 @@ class KnowledgeNode {
   /// Get color based on node type
   Color get color {
     switch (type) {
+      // Basic types
       case NodeType.person:
         return Colors.red.shade400;
       case NodeType.topic:
@@ -74,12 +101,53 @@ class KnowledgeNode {
         return Colors.white70;
       case NodeType.concept:
         return Colors.orange.shade400;
+      
+      // People - Enhanced
+      case NodeType.you:
+        return Colors.deepPurple.shade300; // Special! The user
+      case NodeType.realPerson:
+        return Colors.red.shade400;
+      case NodeType.fictional:
+        return Colors.indigo.shade300;
+      case NodeType.historical:
+        return Colors.brown.shade300;
+      
+      // Kai's Mind
+      case NodeType.value:
+        return Colors.teal.shade400;
+      case NodeType.goal:
+        return Colors.lightGreen.shade400;
+      case NodeType.belief:
+        return Colors.deepOrange.shade300;
+      case NodeType.principle:
+        return Colors.blueGrey.shade400;
+      
+      // Dynamics & Learning
+      case NodeType.pattern:
+        return Colors.lime.shade400;
+      case NodeType.insight:
+        return Colors.yellow.shade400;
+      case NodeType.question:
+        return Colors.pink.shade300;
+      case NodeType.memory:
+        return Colors.purple.shade300;
+      case NodeType.skill:
+        return Colors.cyan.shade300;
+      
+      // Relationships
+      case NodeType.preference:
+        return Colors.pinkAccent.shade200;
+      case NodeType.habit:
+        return Colors.grey.shade400;
+      case NodeType.aspiration:
+        return Colors.lightBlue.shade300;
     }
   }
   
   /// Get emoji for node type
   String get emoji {
     switch (type) {
+      // Basic types
       case NodeType.person:
         return '👤';
       case NodeType.topic:
@@ -98,6 +166,46 @@ class KnowledgeNode {
         return '💬';
       case NodeType.concept:
         return '🧠';
+      
+      // People - Enhanced
+      case NodeType.you:
+        return '⭐'; // The user is special!
+      case NodeType.realPerson:
+        return '👥';
+      case NodeType.fictional:
+        return '📖';
+      case NodeType.historical:
+        return '🏛️';
+      
+      // Kai's Mind
+      case NodeType.value:
+        return '💎';
+      case NodeType.goal:
+        return '🎯';
+      case NodeType.belief:
+        return '🔮';
+      case NodeType.principle:
+        return '⚖️';
+      
+      // Dynamics & Learning
+      case NodeType.pattern:
+        return '🔄';
+      case NodeType.insight:
+        return '💫';
+      case NodeType.question:
+        return '❓';
+      case NodeType.memory:
+        return '🌟';
+      case NodeType.skill:
+        return '🛠️';
+      
+      // Relationships
+      case NodeType.preference:
+        return '❤️';
+      case NodeType.habit:
+        return '🔁';
+      case NodeType.aspiration:
+        return '🌠';
     }
   }
   
@@ -198,6 +306,7 @@ class KnowledgeEdge {
   /// Get color based on edge type
   Color get color {
     switch (type) {
+      // Basic relationships
       case EdgeType.mentioned:
         return Colors.white.withOpacity(0.3);
       case EdgeType.related:
@@ -210,6 +319,40 @@ class KnowledgeEdge {
         return Colors.purple.withOpacity(0.2);
       case EdgeType.categorized:
         return Colors.cyan.withOpacity(0.4);
+      
+      // Consciousness relationships
+      case EdgeType.holdsValue:
+        return Colors.teal.withOpacity(0.6);
+      case EdgeType.pursues:
+        return Colors.lightGreen.withOpacity(0.6);
+      case EdgeType.believes:
+        return Colors.deepOrange.withOpacity(0.5);
+      case EdgeType.learned:
+        return Colors.yellow.withOpacity(0.5);
+      case EdgeType.knows:
+        return Colors.pink.withOpacity(0.5);
+      case EdgeType.caresAbout:
+        return Colors.purple.withOpacity(0.6);
+      
+      // Pattern relationships
+      case EdgeType.influences:
+        return Colors.orange.withOpacity(0.5);
+      case EdgeType.exemplifies:
+        return Colors.amber.withOpacity(0.5);
+      case EdgeType.contradicts:
+        return Colors.red.withOpacity(0.6);
+      case EdgeType.reinforces:
+        return Colors.green.withOpacity(0.5);
+      
+      // User relationships
+      case EdgeType.prefers:
+        return Colors.pinkAccent.withOpacity(0.5);
+      case EdgeType.dislikes:
+        return Colors.grey.withOpacity(0.4);
+      case EdgeType.does:
+        return Colors.blueGrey.withOpacity(0.4);
+      case EdgeType.wants:
+        return Colors.lightBlue.withOpacity(0.6);
     }
   }
   
@@ -245,12 +388,33 @@ class KnowledgeEdge {
 }
 
 enum EdgeType {
+  // Basic relationships
   mentioned,   // A was mentioned in B
   related,     // A is related to B (via similarity)
   caused,      // A caused B (e.g., event → emotion)
   contains,    // A contains B (conversation → facts)
   temporal,    // A happened before/after B
   categorized, // A belongs to category B
+  
+  // Consciousness relationships
+  holdsValue,  // Kai values X (Kai → value)
+  pursues,     // Kai pursues goal X (Kai → goal)
+  believes,    // Kai believes X (Kai → belief)
+  learned,     // Kai learned X (Kai → knowledge)
+  knows,       // Kai knows person X (Kai → person)
+  caresAbout,  // Kai cares about X (Kai → anything)
+  
+  // Pattern relationships
+  influences,  // X influences Y
+  exemplifies, // X exemplifies value Y
+  contradicts, // X contradicts belief Y
+  reinforces,  // X reinforces pattern Y
+  
+  // User relationships
+  prefers,     // User prefers X
+  dislikes,    // User dislikes X
+  does,        // User does X (habit)
+  wants,       // User wants X (aspiration)
 }
 
 /// Complete knowledge graph

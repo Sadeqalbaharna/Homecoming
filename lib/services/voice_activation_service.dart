@@ -150,6 +150,13 @@ class VoiceActivationService {
       }
       
       final lowerTranscription = transcription.toLowerCase().trim();
+      
+      // Filter out noise and very short utterances
+      if (!_isValidSpeech(lowerTranscription)) {
+        print('🔇 [VoiceActivation] Filtered noise/silence: "$lowerTranscription"');
+        return;
+      }
+      
       print('🎤 [VoiceActivation] Heard: "$lowerTranscription"');
       
       // If we're in conversation mode, any speech continues the conversation
@@ -304,6 +311,60 @@ class VoiceActivationService {
     } else {
       print('▶️ [VoiceActivation] Resumed listening');
     }
+  }
+
+  /// Validate if transcription is actual speech vs noise/silence
+  bool _isValidSpeech(String text) {
+    // Must have minimum length (at least 2 characters)
+    if (text.length < 2) {
+      return false;
+    }
+    
+    // Filter common noise patterns that Whisper produces
+    final noisePatterns = [
+      'you',          // Common silence/noise artifact
+      'thank you',    // Background noise
+      'thanks',       // Background noise
+      'bye',          // Background noise
+      'uh',           // Filler
+      'um',           // Filler
+      'hmm',          // Filler
+      'mhm',          // Filler
+      'huh',          // Filler
+      '...',          // Silence
+      'music',        // Background music detection
+      'silence',      // Explicit silence
+      '[music]',      // Whisper music tag
+      '[silence]',    // Whisper silence tag
+      '(music)',      // Alternative music tag
+      '(silence)',    // Alternative silence tag
+    ];
+    
+    // Check if text is exactly a noise pattern (case insensitive)
+    for (final pattern in noisePatterns) {
+      if (text == pattern || text == '$pattern.' || text == '$pattern!') {
+        return false;
+      }
+    }
+    
+    // Check if text is ONLY punctuation or whitespace
+    if (text.replaceAll(RegExp(r'[^\w\s]'), '').trim().isEmpty) {
+      return false;
+    }
+    
+    // Must contain at least one alphabetic character
+    if (!text.contains(RegExp(r'[a-zA-Z]'))) {
+      return false;
+    }
+    
+    // If very short (2-4 chars), must be a real word attempt
+    if (text.length <= 4) {
+      // Allow common short words
+      final validShortWords = ['hi', 'hey', 'kai', 'yes', 'no', 'ok', 'what', 'why', 'how'];
+      return validShortWords.any((word) => text.contains(word));
+    }
+    
+    return true;
   }
 
   /// Clean up resources
