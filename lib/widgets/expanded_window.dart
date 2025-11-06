@@ -4,6 +4,7 @@ import '../services/ai_service.dart';
 import '../services/voice_activation_service.dart';
 import '../screens/usage_stats_screen.dart';
 import '../screens/mind_map_screen.dart';
+import '../screens/voice_training_screen.dart';
 import 'debug_button.dart';
 import 'memory_chips.dart';
 
@@ -52,7 +53,7 @@ class _ExpandedWindowState extends State<ExpandedWindow> with SingleTickerProvid
   void initState() {
     super.initState();
     _tabController = TabController(
-      length: 3,
+      length: 4,
       vsync: this,
       initialIndex: widget.initialTab, // Start at specified tab
     );
@@ -134,6 +135,7 @@ class _ExpandedWindowState extends State<ExpandedWindow> with SingleTickerProvid
                 _buildChatTab(),
                 _buildPersonalityTab(),
                 _buildAnalyticsTab(),
+                _buildVoiceTrainingTab(),
               ],
             ),
           ),
@@ -209,6 +211,10 @@ class _ExpandedWindowState extends State<ExpandedWindow> with SingleTickerProvid
           Tab(
             icon: Icon(Icons.analytics_outlined),
             text: 'Analytics',
+          ),
+          Tab(
+            icon: Icon(Icons.record_voice_over),
+            text: 'Voice',
           ),
         ],
       ),
@@ -733,5 +739,80 @@ class _ExpandedWindowState extends State<ExpandedWindow> with SingleTickerProvid
   Widget _buildAnalyticsTab() {
     // Use the full UsageStatsScreen for complete analytics
     return const UsageStatsScreen();
+  }
+
+  Widget _buildVoiceTrainingTab() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        children: [
+          // Header
+          Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: RadialGradient(
+                    colors: [
+                      const Color(0xFFD4AF37).withOpacity(0.3),
+                      const Color(0xFFD4AF37).withOpacity(0.1),
+                    ],
+                  ),
+                ),
+                child: const Icon(
+                  Icons.record_voice_over,
+                  color: Color(0xFFD4AF37),
+                  size: 24,
+                ),
+              ),
+              const SizedBox(width: 16),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Voice Recognition Training',
+                      style: TextStyle(
+                        color: Color(0xFFD4AF37),
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    Text(
+                      'Enhance voice recognition accuracy',
+                      style: TextStyle(
+                        color: Colors.white70,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          
+          const SizedBox(height: 24),
+          
+          // Voice training content - embed the full screen
+          Expanded(
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.3),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: const Color(0xFFD4AF37).withOpacity(0.2),
+                ),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: const VoiceTrainingScreen(),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

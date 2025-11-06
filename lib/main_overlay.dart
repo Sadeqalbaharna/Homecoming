@@ -28,7 +28,7 @@ import 'widgets/memory_chips.dart';
 import 'widgets/expanded_window.dart';
 import 'widgets/curiosity_indicator.dart';
 import 'widgets/animation_preloading_screen.dart';
-import 'widgets/voice_setup_dialog.dart';
+
 import 'package:permission_handler/permission_handler.dart';
 
 // API KEYS - Read from build-time environment (--dart-define)
@@ -1538,23 +1538,13 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
   Future<void> _openVoiceTrainingSetup() async {
     HapticFeedback.mediumImpact();
     
-    // Show the enhanced voice training dialog
-    final result = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      barrierColor: Colors.black87,
-      builder: (context) => const VoiceSetupDialog(isFirstSetup: false),
-    );
+    // Open expanded window with Voice Training tab (tab 3)
+    setState(() {
+      _expandedWindowInitialTab = 3; // Voice Training tab
+      _showExpandedWindow = true;
+    });
     
-    if (result == true) {
-      // Training completed successfully
-      print('✅ [VOICE TRAINING] Completed successfully');
-      
-      // Show success feedback
-      setState(() {
-        _reply = "Voice training completed! Kai can now better recognize your voice and wake words.";
-      });
-    }
+    print('✅ [VOICE TRAINING] Opened in expanded window');
   }
 
   @override
