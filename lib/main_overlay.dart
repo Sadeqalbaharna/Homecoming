@@ -20,7 +20,6 @@ import 'services/firebase_service.dart';
 import 'services/curiosity_service.dart';
 import 'services/proactive_service.dart';
 import 'services/voice_activation_service.dart';
-import 'services/animation_preloader_service.dart';
 import 'screens/personality_screen.dart';
 import 'screens/usage_stats_screen.dart';
 import 'api_key_setup_screen.dart';
@@ -29,6 +28,7 @@ import 'widgets/memory_chips.dart';
 import 'widgets/expanded_window.dart';
 import 'widgets/curiosity_indicator.dart';
 import 'widgets/animation_preloading_screen.dart';
+import 'widgets/voice_setup_dialog.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 // API KEYS - Read from build-time environment (--dart-define)
@@ -1533,6 +1533,29 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
     
     setState(() {}); // Refresh UI
   }
+  
+  /// Open comprehensive voice training setup
+  Future<void> _openVoiceTrainingSetup() async {
+    HapticFeedback.mediumImpact();
+    
+    // Show the enhanced voice training dialog
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      barrierColor: Colors.black87,
+      builder: (context) => const VoiceSetupDialog(isFirstSetup: false),
+    );
+    
+    if (result == true) {
+      // Training completed successfully
+      print('✅ [VOICE TRAINING] Completed successfully');
+      
+      // Show success feedback
+      setState(() {
+        _reply = "Voice training completed! Kai can now better recognize your voice and wake words.";
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1717,14 +1740,16 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
                       },
                     ),
                     
-                    // Voice toggle button (top-left) - cycles between voices
+                    // Voice Training Setup button (top-left) - opens comprehensive training
                     _buildCircularButton(
                       angle: -135,
                       radius: 68, // Wrapped tightly around avatar
-                      icon: Icons.record_voice_over,
+                      icon: Icons.school,
+                      backgroundColor: const Color(0xFFD4AF37), // Gold background for prominence
+                      iconColor: Colors.black, // Dark icon on gold background
                       onTap: () async {
                         setState(() => _showMenu = false);
-                        await _toggleVoice();
+                        await _openVoiceTrainingSetup();
                       },
                     ),
                   ],

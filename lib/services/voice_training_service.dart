@@ -205,6 +205,29 @@ class VoiceTrainingService {
     _voiceSamples.add(sample);
     print('🎤 [VoiceTraining] Added voice sample: Phase $phase, ${(similarity * 100).toInt()}% match');
     
+    // For wake word phases (0-1), add variations to custom wake words
+    if (phase <= 1 && similarity > 0.6) {
+      final lowerTranscription = transcription.toLowerCase().trim();
+      
+      // Extract wake word patterns
+      if (lowerTranscription.contains('kai')) {
+        if (!_customWakeWords.contains(lowerTranscription)) {
+          _customWakeWords.add(lowerTranscription);
+          print('🎯 [VoiceTraining] Added wake word variation: "$lowerTranscription"');
+        }
+      }
+      
+      // Extract just the wake word part for variations like "hey kai, what time"
+      final wakeWordMatch = RegExp(r'(hey )?kai').firstMatch(lowerTranscription);
+      if (wakeWordMatch != null) {
+        final wakeWordOnly = wakeWordMatch.group(0)!;
+        if (!_customWakeWords.contains(wakeWordOnly)) {
+          _customWakeWords.add(wakeWordOnly);
+          print('🎯 [VoiceTraining] Added wake word pattern: "$wakeWordOnly"');
+        }
+      }
+    }
+    
     // Auto-save after each sample
     await _saveUserProfile();
   }
@@ -228,6 +251,12 @@ class VoiceTrainingService {
       phaseConfidences[phase]!.add(similarity);
     }
     
+    // Calculate wake word specific confidence (phases 0-1)
+    final wakeWordSamples = _voiceSamples.where((s) => (s['phase'] as int) <= 1).toList();
+    final wakeWordConfidence = wakeWordSamples.isNotEmpty
+        ? wakeWordSamples.map((s) => s['similarity'] as double).reduce((a, b) => a + b) / wakeWordSamples.length
+        : 0.0;
+    
     // Build profile
     _voiceProfile = {
       'sampleCount': _voiceSamples.length,
@@ -236,6 +265,8 @@ class VoiceTrainingService {
       'overallConfidence': _voiceSamples
           .map((s) => s['similarity'] as double)
           .reduce((a, b) => a + b) / _voiceSamples.length,
+      'wakeWordConfidence': wakeWordConfidence,
+      'customWakeWordsCount': _customWakeWords.length,
       'createdAt': DateTime.now().millisecondsSinceEpoch,
     };
     

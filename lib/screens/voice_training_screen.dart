@@ -28,22 +28,59 @@ class _VoiceTrainingScreenState extends State<VoiceTrainingScreen> with TickerPr
   String _feedbackMessage = '';
   double _confidence = 0.0;
   
-  final List<String> _trainingPhrases = [
-    "Hey Kai",
-    "Hello Kai, how are you?",
-    "Kai, what time is it?",
-    "Hey Kai, tell me a joke",
-    "Kai, what's the weather like?",
-    "Hey Kai, help me with something",
-    "Kai, set a timer for five minutes",
-    "Hey Kai, good morning"
+  // Enhanced training phrases organized by phase
+  final List<List<String>> _trainingPhases = [
+    // Phase 1: Core Wake Words
+    [
+      "Hey Kai",
+      "Hey Kai", 
+      "Kai",
+      "Kai",
+      "Hello Kai",
+      "Hi Kai"
+    ],
+    
+    // Phase 2: Wake Word with Commands
+    [
+      "Hey Kai, what time is it?",
+      "Kai, tell me a joke",
+      "Hey Kai, help me",
+      "Kai, what's the weather?",
+      "Hey Kai, good morning",
+      "Kai, set a timer"
+    ],
+    
+    // Phase 3: Natural Conversation Patterns
+    [
+      "Hello Kai, how are you today?",
+      "Hey Kai, I have a question",
+      "Kai, can you help me with something?",
+      "Hey Kai, what do you think about this?",
+      "Kai, I need some advice",
+      "Hey Kai, tell me something interesting"
+    ],
+    
+    // Phase 4: Background Noise Testing
+    [
+      "Hey Kai", // Test with intentional background sounds
+      "Kai",     // Test distinguishing from similar sounds
+      "Hey Kai, are you there?",
+      "Kai, wake up"
+    ]
   ];
   
   final List<String> _phaseNames = [
-    "Wake Word Training",
-    "Natural Speech Training", 
-    "Voice Pattern Analysis",
-    "Confirmation & Testing"
+    "Wake Word Foundation",
+    "Command Recognition", 
+    "Conversational Patterns",
+    "Noise Filtering Test"
+  ];
+  
+  final List<String> _phaseDescriptions = [
+    "Train Kai to recognize your basic wake words",
+    "Learn how you naturally start conversations",
+    "Understand your speaking patterns and style", 
+    "Test recognition with background noise"
   ];
   
   @override
@@ -131,7 +168,7 @@ class _VoiceTrainingScreenState extends State<VoiceTrainingScreen> with TickerPr
     try {
       // Get transcription
       final transcription = await _voiceService.transcribeAudio(audioPath);
-      final expectedPhrase = _trainingPhrases[_currentSample];
+      final expectedPhrase = _trainingPhases[_currentPhase][_currentSample];
       
       // Calculate similarity
       final similarity = _calculateSimilarity(transcription.toLowerCase(), expectedPhrase.toLowerCase());
@@ -184,13 +221,10 @@ class _VoiceTrainingScreenState extends State<VoiceTrainingScreen> with TickerPr
   }
   
   int _getSamplesForPhase(int phase) {
-    switch (phase) {
-      case 0: return 3; // Wake word samples
-      case 1: return 4; // Natural speech samples  
-      case 2: return 1; // Analysis phase
-      case 3: return 1; // Testing phase
-      default: return 2;
+    if (phase >= 0 && phase < _trainingPhases.length) {
+      return _trainingPhases[phase].length;
     }
+    return 2; // Fallback
   }
   
   Future<void> _completePhase() async {
@@ -441,6 +475,7 @@ class _VoiceTrainingScreenState extends State<VoiceTrainingScreen> with TickerPr
   Widget _buildProgressIndicator(double progress) {
     return Column(
       children: [
+        // Overall progress
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
@@ -460,6 +495,52 @@ class _VoiceTrainingScreenState extends State<VoiceTrainingScreen> with TickerPr
               ),
             ),
           ],
+        ),
+        
+        const SizedBox(height: 8),
+        
+        // Phase indicators
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: List.generate(4, (index) {
+            Color color;
+            if (index < _currentPhase) {
+              color = Colors.green; // Completed
+            } else if (index == _currentPhase) {
+              color = const Color(0xFFD4AF37); // Current
+            } else {
+              color = Colors.grey; // Not started
+            }
+            
+            return Container(
+              width: 60,
+              height: 4,
+              decoration: BoxDecoration(
+                color: color,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            );
+          }),
+        ),
+        
+        const SizedBox(height: 4),
+        
+        // Phase labels
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: List.generate(4, (index) {
+            return SizedBox(
+              width: 60,
+              child: Text(
+                '${index + 1}',
+                style: TextStyle(
+                  color: index <= _currentPhase ? Colors.white70 : Colors.grey,
+                  fontSize: 12,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            );
+          }),
         ),
         
         const SizedBox(height: 12),
@@ -506,6 +587,17 @@ class _VoiceTrainingScreenState extends State<VoiceTrainingScreen> with TickerPr
               fontSize: 20,
               fontWeight: FontWeight.bold,
             ),
+          ),
+          
+          const SizedBox(height: 8),
+          
+          Text(
+            _phaseDescriptions[_currentPhase],
+            style: const TextStyle(
+              color: Colors.white60,
+              fontSize: 14,
+            ),
+            textAlign: TextAlign.center,
           ),
           
           const SizedBox(height: 8),
@@ -614,12 +706,49 @@ class _VoiceTrainingScreenState extends State<VoiceTrainingScreen> with TickerPr
       decoration: BoxDecoration(
         color: Colors.grey[900]?.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: _currentPhase == 3 ? Colors.orange.withValues(alpha: 0.5) : 
+                 Color(0xFFD4AF37).withValues(alpha: 0.3),
+        ),
       ),
       child: Column(
         children: [
-          if (_currentSample < _trainingPhrases.length)
+          // Phase-specific instructions
+          if (_currentPhase == 3) ...[
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.orange.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Column(
+                children: [
+                  Text(
+                    '⚠️ Background Noise Test',
+                    style: TextStyle(
+                      color: Colors.orange,
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    'For this phase, try speaking with some background noise (TV, music, etc.) to test noise filtering.',
+                    style: TextStyle(
+                      color: Colors.white70,
+                      fontSize: 14,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+          
+          if (_currentSample < _trainingPhases[_currentPhase].length)
             Text(
-              'Say: "${_trainingPhrases[_currentSample]}"',
+              'Say: "${_trainingPhases[_currentPhase][_currentSample]}"',
               style: const TextStyle(
                 color: Color(0xFFD4AF37),
                 fontSize: 18,
