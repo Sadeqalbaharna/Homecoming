@@ -1,9 +1,13 @@
 import 'dart:math';
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 // For kDebugMode
 import 'package:window_manager/window_manager.dart';
 import 'package:lottie/lottie.dart';
+
+// Voice training imports
+import 'widgets/voice_setup_dialog.dart';
 
 class KaiOverlay extends StatelessWidget {
   const KaiOverlay({super.key});
@@ -190,6 +194,7 @@ class _FloatingKaiState extends State<_FloatingKai> with TickerProviderStateMixi
             onPanStart: _startDrag,
             onPanUpdate: _drag,
             onPanEnd: _endDrag,
+            onLongPress: _openVoiceTraining,
             child: Center(
               child: AnimatedBuilder(
                 animation: Listenable.merge([_glow, _blink]),
@@ -224,6 +229,32 @@ class _FloatingKaiState extends State<_FloatingKai> with TickerProviderStateMixi
                     ],
                   );
                 },
+              ),
+            ),
+          ),
+          
+          // Voice training indicator (small icon in top-right)
+          Positioned(
+            top: 10,
+            right: 10,
+            child: GestureDetector(
+              onTap: _openVoiceTraining,
+              child: Container(
+                width: 30,
+                height: 30,
+                decoration: BoxDecoration(
+                  color: Colors.black54,
+                  borderRadius: BorderRadius.circular(15),
+                  border: Border.all(
+                    color: const Color(0xFFD4AF37).withOpacity(0.6),
+                    width: 1,
+                  ),
+                ),
+                child: const Icon(
+                  Icons.mic_rounded,
+                  color: Color(0xFFD4AF37),
+                  size: 16,
+                ),
               ),
             ),
           ),
@@ -348,6 +379,17 @@ class _FloatingKaiState extends State<_FloatingKai> with TickerProviderStateMixi
           ),
         ),
       ),
+    );
+  }
+
+  /// Open voice training setup
+  void _openVoiceTraining() {
+    HapticFeedback.mediumImpact();
+    
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const VoiceSetupDialog(),
     );
   }
 }

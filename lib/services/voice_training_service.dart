@@ -29,6 +29,10 @@ class VoiceTrainingService {
   // Command synonyms learned from user
   Map<String, List<String>> _commandSynonyms = {};
   
+  // Voice training data for advanced recognition
+  List<Map<String, dynamic>> _voiceSamples = [];
+  Map<String, dynamic>? _voiceProfile;
+  
   bool _isInitialized = false;
 
   /// Initialize the training service
@@ -186,12 +190,120 @@ class VoiceTrainingService {
     };
   }
 
+  /// Add voice sample during training
+  Future<void> addVoiceSample(String audioPath, String transcription, int phase, double similarity) async {
+    if (!_isInitialized) await initialize();
+    
+    final sample = {
+      'audioPath': audioPath,
+      'transcription': transcription,
+      'phase': phase,
+      'similarity': similarity,
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    };
+    
+    _voiceSamples.add(sample);
+    print('🎤 [VoiceTraining] Added voice sample: Phase $phase, ${(similarity * 100).toInt()}% match');
+    
+    // Auto-save after each sample
+    await _saveUserProfile();
+  }
+
+  /// Build voice profile from collected samples
+  Future<void> buildVoiceProfile() async {
+    if (_voiceSamples.isEmpty) {
+      print('⚠️ [VoiceTraining] No samples to build profile from');
+      return;
+    }
+    
+    // Calculate average confidence per phase
+    final Map<int, List<double>> phaseConfidences = {};
+    for (final sample in _voiceSamples) {
+      final phase = sample['phase'] as int;
+      final similarity = sample['similarity'] as double;
+      
+      if (!phaseConfidences.containsKey(phase)) {
+        phaseConfidences[phase] = [];
+      }
+      phaseConfidences[phase]!.add(similarity);
+    }
+    
+    // Build profile
+    _voiceProfile = {
+      'sampleCount': _voiceSamples.length,
+      'phaseConfidences': phaseConfidences.map((phase, confidences) => 
+        MapEntry(phase.toString(), confidences.reduce((a, b) => a + b) / confidences.length)),
+      'overallConfidence': _voiceSamples
+          .map((s) => s['similarity'] as double)
+          .reduce((a, b) => a + b) / _voiceSamples.length,
+      'createdAt': DateTime.now().millisecondsSinceEpoch,
+    };
+    
+    print('🧠 [VoiceTraining] Voice profile built with ${(_voiceProfile!['overallConfidence'] * 100).toInt()}% confidence');
+    await _saveUserProfile();
+  }
+
+  /// Finalize training and return profile
+  Future<Map<String, dynamic>> finalizeTraining() async {
+    if (_voiceProfile == null) {
+      await buildVoiceProfile();
+    }
+    
+    // Update user confidence threshold based on training results
+    if (_voiceProfile != null) {
+      final overallConfidence = _voiceProfile!['overallConfidence'] as double;
+      _userConfidenceThreshold = max(0.6, overallConfidence * 0.8);
+    }
+    
+    await _saveUserProfile();
+    
+    return _voiceProfile ?? {
+      'confidence': 0.5,
+      'sampleCount': 0,
+    };
+  }
+
+  /// Get current voice profile
+  Future<Map<String, dynamic>?> getCurrentProfile() async {
+    if (!_isInitialized) await initialize();
+    return _voiceProfile;
+  }
+
+  /// Clear voice profile and samples
+  Future<void> clearProfile() async {
+    _voiceSamples.clear();
+    _voiceProfile = null;
+    _userConfidenceThreshold = 0.75;
+    await _saveUserProfile();
+    print('🔄 [VoiceTraining] Voice profile cleared');
+  }
+
+  /// Check if user voice matches trained profile
+  bool matchesVoiceProfile(String transcription, double? confidence) {
+    if (_voiceProfile == null) return true; // No profile yet, accept all
+    
+    final profileConfidence = _voiceProfile!['overallConfidence'] as double;
+    final inputConfidence = confidence ?? 0.5;
+    
+    // Compare with some tolerance
+    final confidenceDiff = (profileConfidence - inputConfidence).abs();
+    final matches = confidenceDiff < 0.3; // Allow 30% variance
+    
+    if (!matches) {
+      print('🔍 [VoiceTraining] Voice mismatch: Profile ${(profileConfidence * 100).toInt()}%, Input ${(inputConfidence * 100).toInt()}%');
+    }
+    
+    return matches;
+  }
+
   /// Reset all learning data
   Future<void> resetTraining() async {
     _personalCorrections.clear();
     _confidenceHistory.clear();
     _customWakeWords.clear();
     _commandSynonyms.clear();
+    _voiceSamples.clear();
+    _voiceProfile = null;
     _userConfidenceThreshold = 0.75;
     
     await _saveUserProfile();
@@ -298,6 +410,16 @@ class VoiceTrainingService {
       _confidenceHistory = historyMap.map((key, value) => 
         MapEntry(key, List<double>.from(value as List)));
       
+      // Load voice samples
+      final samplesJson = prefs.getString('voice_samples') ?? '[]';
+      _voiceSamples = List<Map<String, dynamic>>.from(json.decode(samplesJson));
+      
+      // Load voice profile
+      final profileJson = prefs.getString('voice_profile');
+      if (profileJson != null) {
+        _voiceProfile = Map<String, dynamic>.from(json.decode(profileJson));
+      }
+      
     } catch (e) {
       print('⚠️ [VoiceTraining] Error loading profile: $e');
       // Continue with empty profile
@@ -323,6 +445,14 @@ class VoiceTrainingService {
       
       // Save confidence history
       await prefs.setString('confidence_history', json.encode(_confidenceHistory));
+      
+      // Save voice samples
+      await prefs.setString('voice_samples', json.encode(_voiceSamples));
+      
+      // Save voice profile
+      if (_voiceProfile != null) {
+        await prefs.setString('voice_profile', json.encode(_voiceProfile));
+      }
       
     } catch (e) {
       print('❌ [VoiceTraining] Error saving profile: $e');

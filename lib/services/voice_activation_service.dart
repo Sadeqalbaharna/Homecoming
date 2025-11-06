@@ -175,9 +175,15 @@ class VoiceActivationService {
       final correctedTranscription = _trainingService.applyPersonalCorrections(rawTranscription);
       final lowerTranscription = correctedTranscription.toLowerCase().trim();
       
-      // POST-WHISPER Layer 1: Filter obvious noise/hallucinations (REDUCED FILTERING)
+      // POST-WHISPER Layer 1: Filter obvious noise/hallucinations 
       if (!_isValidSpeechBasic(lowerTranscription)) {
         print('🔇 [VoiceActivation] Filtered obvious noise: "$lowerTranscription"');
+        return;
+      }
+      
+      // POST-WHISPER Layer 2: Intelligent voice filtering
+      if (!await _isDirectUserSpeech(lowerTranscription, recordingFile)) {
+        print('🎭 [VoiceActivation] Filtered indirect/ambient audio: "$lowerTranscription"');
         return;
       }
       
@@ -387,140 +393,184 @@ class VoiceActivationService {
       }
     }
     
-    return true;
-  }
-
-  /// Validate if transcription is actual speech vs noise/silence (ORIGINAL - MORE AGGRESSIVE)
-  bool _isValidSpeech(String text) {
-    // Must have minimum length (at least 2 characters)
-    if (text.length < 2) {
+    // Check if this matches the user's trained voice profile
+    if (!_trainingService.matchesVoiceProfile(text, null)) {
+      print('🔍 [VoiceActivation] Rejected: Voice doesn\'t match trained profile');
       return false;
-    }
-    
-    // Filter Whisper hallucinations - common phrases it generates from silence
-    final hallucinationPatterns = [
-      // Common silence artifacts
-      'you',
-      'thank you',
-      'thank you for watching',
-      'thanks for watching',
-      'thanks',
-      'bye',
-      'goodbye',
-      
-      // Video/stream closings (Whisper trained on YouTube)
-      'see you next time',
-      'see you later',
-      'see you soon',
-      'until next time',
-      'catch you later',
-      'take care',
-      
-      // Subscription prompts (YouTube training data)
-      'subscribe',
-      'like and subscribe',
-      'hit the like button',
-      'smash that like button',
-      'leave a comment',
-      
-      // Music/audio detection
-      'music',
-      'silence',
-      '[music]',
-      '[silence]',
-      '(music)',
-      '(silence)',
-      '[applause]',
-      '(applause)',
-      
-      // Filler sounds
-      'uh',
-      'um',
-      'hmm',
-      'mhm',
-      'mm',
-      'huh',
-      'ah',
-      'oh',
-      'er',
-      
-      // Empty/meaningless
-      '...',
-      'okay',
-      'alright',
-      'right',
-      'yeah',
-      'yep',
-      'nope',
-      'well',
-      'so',
-      'and',
-      'but',
-      'the',
-      'a',
-      'i',
-    ];
-    
-    // Check if text is exactly a hallucination pattern (case insensitive, with/without punctuation)
-    final cleanText = text.replaceAll(RegExp(r'[^\w\s]'), '').trim();
-    for (final pattern in hallucinationPatterns) {
-      final cleanPattern = pattern.replaceAll(RegExp(r'[^\w\s]'), '').trim();
-      if (cleanText.toLowerCase() == cleanPattern.toLowerCase()) {
-        return false;
-      }
-    }
-    
-    // Check if text CONTAINS common hallucination phrases (not just equals)
-    final lowerText = text.toLowerCase();
-    final containsHallucination = [
-      'thank you for watching',
-      'thanks for watching',
-      'like and subscribe',
-      'hit the like button',
-      'smash that',
-      'see you next time',
-      'until next time',
-    ];
-    
-    for (final phrase in containsHallucination) {
-      if (lowerText.contains(phrase)) {
-        return false;
-      }
-    }
-    
-    // Check if text is ONLY punctuation or whitespace
-    if (cleanText.isEmpty) {
-      return false;
-    }
-    
-    // Must contain at least one alphabetic character
-    if (!text.contains(RegExp(r'[a-zA-Z]'))) {
-      return false;
-    }
-    
-    // If very short (2-4 chars), must be a real word attempt
-    if (cleanText.length <= 4) {
-      // Allow common short words that indicate actual speech
-      final validShortWords = ['hi', 'hey', 'kai', 'yes', 'no', 'stop', 'go', 'help', 'what', 'why', 'how', 'who', 'when'];
-      final hasValidWord = validShortWords.any((word) => cleanText.toLowerCase().contains(word));
-      if (!hasValidWord) {
-        return false;
-      }
-    }
-    
-    // Require minimum word count for very generic text
-    final wordCount = cleanText.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length;
-    if (wordCount < 2 && cleanText.length < 8) {
-      // Single short words are likely noise unless they're wake word related
-      if (!cleanText.toLowerCase().contains('kai')) {
-        return false;
-      }
     }
     
     return true;
   }
 
-  /// PRE-WHISPER: Check if audio file has sufficient content to transcribe
+  /// Intelligent filtering to distinguish direct user speech from ambient audio
+  Future<bool> _isDirectUserSpeech(String transcription, File audioFile) async {
+    // Skip filtering for wake words - we want to catch all wake word attempts
+    final containsWakeWord = _wakeWords.any((wakeWord) => 
+      transcription.contains(wakeWord)
+    );
+    if (containsWakeWord) {
+      return true; // Always allow wake words through
+    }
+    
+    // Check for patterns that suggest ambient/indirect speech
+    if (await _isAmbientAudio(transcription, audioFile)) {
+      return false;
+    }
+    
+    // Check for TV/media content patterns
+    if (_isMediaContent(transcription)) {
+      return false;
+    }
+    
+    // Check for conversational context (if in conversation, be more permissive)
+    if (_isInConversation) {
+      return _isLikelyDirectResponse(transcription);
+    }
+    
+    return true; // Allow through by default
+  }
+
+  /// Detect if audio is likely ambient/background rather than direct speech
+  Future<bool> _isAmbientAudio(String transcription, File audioFile) async {
+    // Get audio file size for quality assessment
+    final fileSizeBytes = await audioFile.length();
+    
+    // Very large files might be picking up extended ambient audio
+    if (fileSizeBytes > 100000) { // 100KB+ suggests longer background audio
+      // Check for patterns that suggest background conversation
+      final ambientPatterns = [
+        'in the', 'at the', 'on the', 'from the',
+        'there was', 'there is', 'there are',
+        'and then', 'so then', 'after that',
+        'i think', 'i believe', 'i feel',
+        'you know', 'you see', 'you understand',
+      ];
+      
+      final lowerText = transcription.toLowerCase();
+      final hasAmbientPattern = ambientPatterns.any((pattern) => 
+        lowerText.contains(pattern)
+      );
+      
+      if (hasAmbientPattern) {
+        return true; // Likely ambient conversation
+      }
+    }
+    
+    // Check for fragmentary speech (often from distant audio)
+    final words = transcription.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+    if (words.length >= 4) {
+      // Long transcriptions from ambient audio often have incomplete thoughts
+      final hasCompleteThought = 
+        transcription.contains('?') || // Question
+        transcription.contains('!') || // Exclamation  
+        transcription.endsWith('.') || // Statement
+        transcription.contains(' and ') || // Connected thoughts
+        transcription.contains(' so ') ||
+        transcription.contains(' but ') ||
+        transcription.contains(' because ');
+        
+      if (!hasCompleteThought && words.length > 6) {
+        return true; // Long fragmented speech is likely ambient
+      }
+    }
+    
+    return false;
+  }
+
+  /// Detect TV, radio, or streaming media content patterns
+  bool _isMediaContent(String transcription) {
+    final lowerText = transcription.toLowerCase();
+    
+    // Common media/entertainment phrases
+    final mediaPatterns = [
+      // TV show patterns
+      'previously on', 'next time on', 'coming up', 'stay tuned',
+      'we\'ll be right back', 'after the break', 'this episode',
+      
+      // Movie/show dialogue patterns  
+      'fade in', 'fade out', 'cut to', 'voice over',
+      'interior', 'exterior', 'day', 'night',
+      
+      // News patterns
+      'breaking news', 'this just in', 'reporting live',
+      'back to you', 'more on this story', 'developing story',
+      
+      // Music/entertainment
+      'ladies and gentlemen', 'thank you for listening',
+      'don\'t forget to subscribe', 'like this video',
+      'hit that notification bell', 'check out our',
+      
+      // Streaming/gaming
+      'what\'s up guys', 'hope you enjoyed', 'let me know in the comments',
+      'smash that like button', 'ring that bell',
+      
+      // Commercial patterns
+      'call now', 'limited time offer', 'act fast',
+      'but wait there\'s more', 'satisfaction guaranteed',
+    ];
+    
+    for (final pattern in mediaPatterns) {
+      if (lowerText.contains(pattern)) {
+        return true;
+      }
+    }
+    
+    // Check for movie/show quotes (often start with character names)
+    // Pattern: "Character: dialogue" or "Character said"
+    if (RegExp(r'\b[A-Z][a-z]+\s*:\s*').hasMatch(transcription) ||
+        lowerText.contains(' said ') ||
+        lowerText.contains(' says ')) {
+      return true;
+    }
+    
+    return false;
+  }
+
+  /// Check if transcription is likely a direct response in conversation
+  bool _isLikelyDirectResponse(String transcription) {
+    final lowerText = transcription.toLowerCase();
+    
+    // Direct response patterns
+    final responsePatterns = [
+      // Affirmative responses
+      'yes', 'yeah', 'yep', 'sure', 'okay', 'ok', 'alright',
+      
+      // Negative responses  
+      'no', 'nope', 'not really', 'i don\'t think so',
+      
+      // Question responses
+      'what', 'when', 'where', 'why', 'how', 'who',
+      
+      // Commands
+      'stop', 'pause', 'continue', 'help', 'repeat',
+      'turn on', 'turn off', 'set', 'play', 'show',
+      
+      // Polite conversation
+      'please', 'thank you', 'thanks', 'excuse me',
+      
+      // Direct address (to Kai)
+      'kai', 'you', 'your', 'can you', 'would you', 'will you',
+    ];
+    
+    // If text contains any response pattern, it's likely direct
+    for (final pattern in responsePatterns) {
+      if (lowerText.contains(pattern)) {
+        return true;
+      }
+    }
+    
+    // Short responses are more likely direct
+    final wordCount = transcription.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length;
+    if (wordCount <= 3) {
+      return true; // Short phrases are usually direct
+    }
+    
+    return false; // Longer text without response patterns might be ambient
+  }
+
+
+
+  /// PRE-WHISPER: Advanced voice activity detection and quality analysis
   Future<bool> _hasValidAudio(String audioPath) async {
     try {
       final file = File(audioPath);
@@ -528,109 +578,66 @@ class VoiceActivationService {
       
       // Check file size - very small files are likely silence
       final fileSizeBytes = await file.length();
-      const minFileSizeBytes = 1024; // 1KB minimum
+      const minFileSizeBytes = 2048; // 2KB minimum for voice
+      const maxFileSizeBytes = 1024 * 1024; // 1MB maximum (prevent huge files)
       
       if (fileSizeBytes < minFileSizeBytes) {
+        print('🔇 [VoiceActivation] Audio too small: ${fileSizeBytes} bytes');
         return false;
       }
       
-      // For now, just use file size. Could add actual audio analysis later
+      if (fileSizeBytes > maxFileSizeBytes) {
+        print('⚠️ [VoiceActivation] Audio too large: ${fileSizeBytes} bytes');
+        return false;
+      }
+      
+      // Check if file has reasonable audio characteristics for voice
+      // Files that are exactly the same size repeatedly might be silence
+      if (await _isProbablySilence(fileSizeBytes)) {
+        print('🔇 [VoiceActivation] Detected silence pattern');
+        return false;
+      }
+      
       return true;
       
     } catch (e) {
+      print('❌ [VoiceActivation] Audio validation error: $e');
       return false;
     }
   }
 
-  /// POST-WHISPER: Semantic validation - does this text make sense?
-  bool _makesSemanticsense(String text) {
-    final cleanText = text.replaceAll(RegExp(r'[^\w\s]'), '').trim();
+  /// Track recent file sizes to detect silence patterns
+  final List<int> _recentFileSizes = [];
+  
+  /// Check if audio file is probably just silence/noise
+  Future<bool> _isProbablySilence(int fileSize) async {
+    _recentFileSizes.add(fileSize);
     
-    // Must have reasonable length
-    if (cleanText.length < 2) return false;
+    // Keep only last 5 recordings for pattern analysis
+    if (_recentFileSizes.length > 5) {
+      _recentFileSizes.removeAt(0);
+    }
     
-    // Check for common Whisper artifacts that slip through
-    final nonsensePatterns = [
-      // Repeated characters/sounds
-      RegExp(r'^(.)\1{3,}$'), // aaaaa, mmmmm, etc
-      RegExp(r'^(..)\1{2,}$'), // lalala, hahaha, etc
+    // If we have multiple recordings of exactly the same size, likely silence
+    if (_recentFileSizes.length >= 3) {
+      final uniqueSizes = _recentFileSizes.toSet();
+      if (uniqueSizes.length == 1) {
+        // All recordings are identical size - probably silence
+        return true;
+      }
       
-      // Random letter combinations
-      RegExp(r'^[bcdfghjklmnpqrstvwxyz]{3,}$'), // consonant clusters
-      RegExp(r'^[aeiou]{3,}$'), // vowel clusters
-      
-      // Single syllable repeated
-      RegExp(r'^(\w{1,3})\s\1\s\1'), // "la la la", "no no no"
-      
-      // Very fragmented speech
-      RegExp(r'^\w\s\w\s\w'), // "a b c", "i o u"
-    ];
-    
-    for (final pattern in nonsensePatterns) {
-      if (pattern.hasMatch(cleanText.toLowerCase())) {
-        return false;
+      // Check for very similar sizes (within 100 bytes) - also likely silence
+      final minSize = _recentFileSizes.reduce((a, b) => a < b ? a : b);
+      final maxSize = _recentFileSizes.reduce((a, b) => a > b ? a : b);
+      if (maxSize - minSize < 100) {
+        return true;
       }
     }
     
-    // Check word patterns - real speech has varied word lengths
-    final words = cleanText.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
-    
-    if (words.isEmpty) return false;
-    
-    // Single word validation
-    if (words.length == 1) {
-      final word = words[0].toLowerCase();
-      
-      // Very short single words are suspicious unless they're commands
-      if (word.length <= 2) {
-        final validShortWords = ['hi', 'no', 'go', 'ok', 'on', 'up'];
-        return validShortWords.contains(word) || word.contains('kai');
-      }
-      
-      // Very long single "words" are usually gibberish
-      if (word.length > 20) {
-        return false;
-      }
-      
-      // Check if it's a real word pattern (has vowels and consonants)
-      final hasVowels = word.contains(RegExp(r'[aeiou]'));
-      final hasConsonants = word.contains(RegExp(r'[bcdfghjklmnpqrstvwxyz]'));
-      
-      if (!hasVowels || !hasConsonants) {
-        return false;
-      }
-    }
-    
-    // Multiple words validation
-    if (words.length > 1) {
-      // Check for excessive repetition
-      final uniqueWords = words.toSet();
-      if (uniqueWords.length == 1 && words.length > 2) {
-        // Same word repeated 3+ times is usually noise
-        return false;
-      }
-      
-      // Very short words in sequence are suspicious
-      final avgWordLength = words.map((w) => w.length).reduce((a, b) => a + b) / words.length;
-      if (avgWordLength < 2.0 && words.length > 3) {
-        return false;
-      }
-    }
-    
-    // Check for common sense patterns
-    // Real speech usually has function words (the, a, is, to, etc.)
-    if (cleanText.length > 15 && words.length > 3) {
-      final functionWords = ['the', 'a', 'an', 'to', 'of', 'and', 'or', 'but', 'in', 'on', 'at', 'is', 'are', 'was', 'were', 'i', 'you', 'he', 'she', 'it', 'we', 'they'];
-      final hasFunctionWords = words.any((word) => functionWords.contains(word.toLowerCase()));
-      
-      // Long sentences without function words are often gibberish
-      if (!hasFunctionWords && !cleanText.toLowerCase().contains('kai')) {
-        return false;
-      }
-    }
-    
-    return true;
+    return false;
   }
+
+
 
   // Voice Training Interface Methods
   

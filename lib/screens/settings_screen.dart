@@ -5,6 +5,8 @@ library;
 import 'package:flutter/material.dart';
 import '../services/proactive_service.dart';
 import '../services/voice_activation_service.dart';
+import '../services/voice_training_service.dart';
+import '../widgets/voice_setup_dialog.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -120,6 +122,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 _buildSectionTitle('🎤 Voice Controls'),
                 const SizedBox(height: 8),
                 _buildVoiceActivationToggle(),
+                const SizedBox(height: 12),
+                _buildVoiceTrainingOption(),
                 const SizedBox(height: 24),
                 
                 _buildSectionTitle('🤖 AI Behavior'),
@@ -408,6 +412,91 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         );
       },
+    );
+  }
+
+  Widget _buildVoiceTrainingOption() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E2C4C),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: const Color(0xFFFFE7B0).withOpacity(0.3),
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: const Color(0xFFFFE7B0).withOpacity(0.2),
+            ),
+            child: const Icon(
+              Icons.record_voice_over,
+              color: Color(0xFFFFE7B0),
+              size: 24,
+            ),
+          ),
+          const SizedBox(width: 16),
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Voice Training',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                Text(
+                  'Train Kai to recognize your voice',
+                  style: TextStyle(
+                    color: Colors.white70,
+                    fontSize: 14,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          GestureDetector(
+            onTap: _openVoiceTraining,
+            child: Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 8,
+              ),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFE7B0).withOpacity(0.2),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: const Color(0xFFFFE7B0),
+                ),
+              ),
+              child: const Text(
+                'Setup',
+                style: TextStyle(
+                  color: Color(0xFFFFE7B0),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _openVoiceTraining() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const VoiceSetupDialog(),
     );
   }
 

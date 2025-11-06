@@ -115,11 +115,11 @@ class AudioRecordingService : Service() {
             }
             
             mediaRecorder?.apply {
-                setAudioSource(MediaRecorder.AudioSource.MIC)
+                setAudioSource(MediaRecorder.AudioSource.VOICE_RECOGNITION)
                 setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
                 setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-                setAudioEncodingBitRate(128000)
-                setAudioSamplingRate(44100)
+                setAudioEncodingBitRate(64000)
+                setAudioSamplingRate(16000)
                 setOutputFile(recordingFile?.absolutePath)
                 
                 prepare()
