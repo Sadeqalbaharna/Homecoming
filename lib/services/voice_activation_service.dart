@@ -320,35 +320,99 @@ class VoiceActivationService {
       return false;
     }
     
-    // Filter common noise patterns that Whisper produces
-    final noisePatterns = [
-      'you',          // Common silence/noise artifact
-      'thank you',    // Background noise
-      'thanks',       // Background noise
-      'bye',          // Background noise
-      'uh',           // Filler
-      'um',           // Filler
-      'hmm',          // Filler
-      'mhm',          // Filler
-      'huh',          // Filler
-      '...',          // Silence
-      'music',        // Background music detection
-      'silence',      // Explicit silence
-      '[music]',      // Whisper music tag
-      '[silence]',    // Whisper silence tag
-      '(music)',      // Alternative music tag
-      '(silence)',    // Alternative silence tag
+    // Filter Whisper hallucinations - common phrases it generates from silence
+    final hallucinationPatterns = [
+      // Common silence artifacts
+      'you',
+      'thank you',
+      'thank you for watching',
+      'thanks for watching',
+      'thanks',
+      'bye',
+      'goodbye',
+      
+      // Video/stream closings (Whisper trained on YouTube)
+      'see you next time',
+      'see you later',
+      'see you soon',
+      'until next time',
+      'catch you later',
+      'take care',
+      
+      // Subscription prompts (YouTube training data)
+      'subscribe',
+      'like and subscribe',
+      'hit the like button',
+      'smash that like button',
+      'leave a comment',
+      
+      // Music/audio detection
+      'music',
+      'silence',
+      '[music]',
+      '[silence]',
+      '(music)',
+      '(silence)',
+      '[applause]',
+      '(applause)',
+      
+      // Filler sounds
+      'uh',
+      'um',
+      'hmm',
+      'mhm',
+      'mm',
+      'huh',
+      'ah',
+      'oh',
+      'er',
+      
+      // Empty/meaningless
+      '...',
+      'okay',
+      'alright',
+      'right',
+      'yeah',
+      'yep',
+      'nope',
+      'well',
+      'so',
+      'and',
+      'but',
+      'the',
+      'a',
+      'i',
     ];
     
-    // Check if text is exactly a noise pattern (case insensitive)
-    for (final pattern in noisePatterns) {
-      if (text == pattern || text == '$pattern.' || text == '$pattern!') {
+    // Check if text is exactly a hallucination pattern (case insensitive, with/without punctuation)
+    final cleanText = text.replaceAll(RegExp(r'[^\w\s]'), '').trim();
+    for (final pattern in hallucinationPatterns) {
+      final cleanPattern = pattern.replaceAll(RegExp(r'[^\w\s]'), '').trim();
+      if (cleanText.toLowerCase() == cleanPattern.toLowerCase()) {
+        return false;
+      }
+    }
+    
+    // Check if text CONTAINS common hallucination phrases (not just equals)
+    final lowerText = text.toLowerCase();
+    final containsHallucination = [
+      'thank you for watching',
+      'thanks for watching',
+      'like and subscribe',
+      'hit the like button',
+      'smash that',
+      'see you next time',
+      'until next time',
+    ];
+    
+    for (final phrase in containsHallucination) {
+      if (lowerText.contains(phrase)) {
         return false;
       }
     }
     
     // Check if text is ONLY punctuation or whitespace
-    if (text.replaceAll(RegExp(r'[^\w\s]'), '').trim().isEmpty) {
+    if (cleanText.isEmpty) {
       return false;
     }
     
@@ -358,10 +422,22 @@ class VoiceActivationService {
     }
     
     // If very short (2-4 chars), must be a real word attempt
-    if (text.length <= 4) {
-      // Allow common short words
-      final validShortWords = ['hi', 'hey', 'kai', 'yes', 'no', 'ok', 'what', 'why', 'how'];
-      return validShortWords.any((word) => text.contains(word));
+    if (cleanText.length <= 4) {
+      // Allow common short words that indicate actual speech
+      final validShortWords = ['hi', 'hey', 'kai', 'yes', 'no', 'stop', 'go', 'help', 'what', 'why', 'how', 'who', 'when'];
+      final hasValidWord = validShortWords.any((word) => cleanText.toLowerCase().contains(word));
+      if (!hasValidWord) {
+        return false;
+      }
+    }
+    
+    // Require minimum word count for very generic text
+    final wordCount = cleanText.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length;
+    if (wordCount < 2 && cleanText.length < 8) {
+      // Single short words are likely noise unless they're wake word related
+      if (!cleanText.toLowerCase().contains('kai')) {
+        return false;
+      }
     }
     
     return true;
