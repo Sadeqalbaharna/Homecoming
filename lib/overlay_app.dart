@@ -246,7 +246,7 @@ class _FloatingKaiState extends State<_FloatingKai> with TickerProviderStateMixi
                   color: Colors.black54,
                   borderRadius: BorderRadius.circular(15),
                   border: Border.all(
-                    color: const Color(0xFFD4AF37).withOpacity(0.6),
+                    color: const Color(0xFFD4AF37).withValues(alpha: 0.6),
                     width: 1,
                   ),
                 ),
@@ -366,7 +366,7 @@ class _FloatingKaiState extends State<_FloatingKai> with TickerProviderStateMixi
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
           decoration: BoxDecoration(
-            color: isActive ? Colors.greenAccent.withOpacity(0.3) : Colors.transparent,
+            color: isActive ? Colors.greenAccent.withValues(alpha: 0.3) : Colors.transparent,
             borderRadius: BorderRadius.circular(12),
           ),
           child: Text(
@@ -409,14 +409,14 @@ class _GlowRingPainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = 10
       ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 12)
-      ..color = const Color(0xFFFFE7B0).withOpacity(0.25 * intensity);
+      ..color = const Color(0xFFFFE7B0).withValues(alpha: 0.25 * intensity);
     canvas.drawCircle(c, r - 6, halo);
 
     // inner, very subtle ring
     final ring = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2
-      ..color = const Color(0xFFFFD38A).withOpacity(0.6 * (0.6 + 0.4 * intensity));
+      ..color = const Color(0xFFFFD38A).withValues(alpha: 0.6 * (0.6 + 0.4 * intensity));
     canvas.drawCircle(c, r - 10, ring);
   }
 
@@ -440,7 +440,7 @@ class _BlinkPainter extends CustomPainter {
     final h = size.height * 0.16;
 
     final eyeRect = Rect.fromLTWH(left, top, w, h);
-    final paint = Paint()..color = const Color(0xFF3A2B1E).withOpacity(0.85);
+    final paint = Paint()..color = const Color(0xFF3A2B1E).withValues(alpha: 0.85);
 
     // draw a rounded eyelid that slides from top to bottom as it closes
     final closedHeight = eyeRect.height;

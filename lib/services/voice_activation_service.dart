@@ -665,7 +665,44 @@ class VoiceActivationService {
     return _trainingService.getTrainingStats();
   }
   
-  /// Reset all training data
+  /// Start recording audio for voice training
+  Future<String?> startRecording() async {
+    try {
+      await _recorder.startRecording();
+      print('🎤 [VoiceActivation] Training recording started');
+      return 'recording_started'; // Return a placeholder path
+    } catch (e) {
+      print('❌ [VoiceActivation] Error starting training recording: $e');
+      return null;
+    }
+  }
+
+  /// Stop recording audio for voice training
+  Future<String?> stopRecording() async {
+    try {
+      final audioFile = await _recorder.stopRecording();
+      final audioPath = audioFile?.path;
+      print('🛑 [VoiceActivation] Training recording stopped: $audioPath');
+      return audioPath;
+    } catch (e) {
+      print('❌ [VoiceActivation] Error stopping training recording: $e');
+      return null;
+    }
+  }
+
+  /// Transcribe audio file to text for voice training
+  Future<String> transcribeAudio(String audioPath) async {
+    try {
+      final transcription = await _voiceService.transcribeAudio(audioPath);
+      print('📝 [VoiceActivation] Training transcription: "$transcription"');
+      return transcription ?? '';
+    } catch (e) {
+      print('❌ [VoiceActivation] Error transcribing training audio: $e');
+      return '';
+    }
+  }
+
+  /// Reset voice training data
   Future<void> resetVoiceTraining() async {
     await _trainingService.resetTraining();
     // Reset to original wake words

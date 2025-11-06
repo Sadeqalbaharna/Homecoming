@@ -42,7 +42,7 @@ class _VoiceSetupDialogState extends State<VoiceSetupDialog> {
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(20),
         side: BorderSide(
-          color: Color(0xFFD4AF37).withOpacity(0.3),
+          color: Color(0xFFD4AF37).withValues(alpha: 0.3),
           width: 1,
         ),
       ),
@@ -61,8 +61,8 @@ class _VoiceSetupDialogState extends State<VoiceSetupDialog> {
                     shape: BoxShape.circle,
                     gradient: RadialGradient(
                       colors: [
-                        Color(0xFFD4AF37).withOpacity(0.3),
-                        Color(0xFFD4AF37).withOpacity(0.1),
+                        Color(0xFFD4AF37).withValues(alpha: 0.3),
+                        Color(0xFFD4AF37).withValues(alpha: 0.1),
                       ],
                     ),
                   ),
@@ -138,8 +138,8 @@ class _VoiceSetupDialogState extends State<VoiceSetupDialog> {
             shape: BoxShape.circle,
             gradient: RadialGradient(
               colors: [
-                Color(0xFFD4AF37).withOpacity(0.2),
-                Color(0xFFD4AF37).withOpacity(0.05),
+                Color(0xFFD4AF37).withValues(alpha: 0.3),
+                Color(0xFFD4AF37).withValues(alpha: 0.1),
               ],
             ),
           ),
@@ -236,8 +236,8 @@ class _VoiceSetupDialogState extends State<VoiceSetupDialog> {
             shape: BoxShape.circle,
             gradient: RadialGradient(
               colors: [
-                Color(0xFF4CAF50).withOpacity(0.3),
-                Color(0xFF4CAF50).withOpacity(0.1),
+                Color(0xFFD4AF37).withValues(alpha: 0.2),
+                Color(0xFFD4AF37).withValues(alpha: 0.05),
               ],
             ),
           ),
@@ -365,10 +365,10 @@ class _VoiceSetupDialogState extends State<VoiceSetupDialog> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.grey[900]?.withOpacity(0.5),
+        color: Colors.grey[900]?.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: Color(0xFFD4AF37).withOpacity(0.2),
+          color: Color(0xFFD4AF37).withValues(alpha: 0.2),
         ),
       ),
       child: Column(

@@ -422,7 +422,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         color: const Color(0xFF1E2C4C),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: const Color(0xFFFFE7B0).withOpacity(0.3),
+          color: const Color(0xFFFFE7B0).withValues(alpha: 0.3),
         ),
       ),
       child: Row(
@@ -432,7 +432,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             height: 40,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: const Color(0xFFFFE7B0).withOpacity(0.2),
+              color: const Color(0xFFFFE7B0).withValues(alpha: 0.2),
             ),
             child: const Icon(
               Icons.record_voice_over,
@@ -471,7 +471,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 vertical: 8,
               ),
               decoration: BoxDecoration(
-                color: const Color(0xFFFFE7B0).withOpacity(0.2),
+                color: const Color(0xFFFFE7B0).withValues(alpha: 0.2),
                 borderRadius: BorderRadius.circular(20),
                 border: Border.all(
                   color: const Color(0xFFFFE7B0),

@@ -18,7 +18,7 @@ class _VoiceTrainingScreenState extends State<VoiceTrainingScreen> with TickerPr
   late AnimationController _pulseController;
   late AnimationController _progressController;
   late Animation<double> _pulseAnimation;
-  late Animation<double> _progressAnimation;
+
   
   int _currentPhase = 0;
   int _currentSample = 0;
@@ -72,13 +72,7 @@ class _VoiceTrainingScreenState extends State<VoiceTrainingScreen> with TickerPr
       curve: Curves.easeInOut,
     ));
     
-    _progressAnimation = Tween<double>(
-      begin: 0.0,
-      end: 1.0,
-    ).animate(CurvedAnimation(
-      parent: _progressController,
-      curve: Curves.easeInOut,
-    ));
+
   }
   
   void _loadExistingProfile() async {
@@ -259,7 +253,7 @@ class _VoiceTrainingScreenState extends State<VoiceTrainingScreen> with TickerPr
       _feedbackMessage = 'Voice training complete! Kai now recognizes your voice.';
     });
     
-    HapticFeedback.successNotification();
+    HapticFeedback.heavyImpact();
     
     // Auto-dismiss after celebration
     await Future.delayed(const Duration(seconds: 3));
@@ -367,8 +361,8 @@ class _VoiceTrainingScreenState extends State<VoiceTrainingScreen> with TickerPr
             shape: BoxShape.circle,
             gradient: RadialGradient(
               colors: [
-                Color(0xFFD4AF37).withOpacity(0.3),
-                Color(0xFFD4AF37).withOpacity(0.1),
+                Color(0xFFD4AF37).withValues(alpha: 0.3),
+                Color(0xFFD4AF37).withValues(alpha: 0.1),
               ],
             ),
           ),
@@ -500,7 +494,7 @@ class _VoiceTrainingScreenState extends State<VoiceTrainingScreen> with TickerPr
         color: Colors.grey[900],
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: Color(0xFFD4AF37).withOpacity(0.3),
+          color: Color(0xFFD4AF37).withValues(alpha: 0.3),
         ),
       ),
       child: Column(
@@ -558,7 +552,7 @@ class _VoiceTrainingScreenState extends State<VoiceTrainingScreen> with TickerPr
                     boxShadow: [
                       BoxShadow(
                         color: (_isRecording ? Colors.red : Color(0xFFD4AF37))
-                            .withOpacity(0.4),
+                            .withValues(alpha: 0.4),
                         blurRadius: 20,
                         spreadRadius: 4,
                       ),
@@ -592,7 +586,7 @@ class _VoiceTrainingScreenState extends State<VoiceTrainingScreen> with TickerPr
           const Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              SizedBox(
+              const SizedBox(
                 width: 20,
                 height: 20,
                 child: CircularProgressIndicator(
@@ -600,7 +594,7 @@ class _VoiceTrainingScreenState extends State<VoiceTrainingScreen> with TickerPr
                   strokeWidth: 2,
                 ),
               ),
-              SizedBox(width: 12),
+              const SizedBox(width: 12),
               Text(
                 'Processing...',
                 style: TextStyle(
@@ -618,7 +612,7 @@ class _VoiceTrainingScreenState extends State<VoiceTrainingScreen> with TickerPr
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.grey[900]?.withOpacity(0.5),
+        color: Colors.grey[900]?.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
