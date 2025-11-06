@@ -243,6 +243,7 @@ class _MobileKaiState extends State<_MobileKai>
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
+      // Precache GIF animations (mobile uses GIFs, not frame sequences)
       for (final p in [
         kAvatarIdleGif,
         kAvatarAttentionGif,
@@ -251,6 +252,10 @@ class _MobileKaiState extends State<_MobileKai>
       ]) {
         precacheImage(AssetImage(p), context);
       }
+      
+      // If using frame-based animations, preload them
+      // (Currently mobile uses static images as fallback)
+      
       unawaited(aiService.bootstrapPersona(_personaId));
     });
   }

@@ -20,6 +20,7 @@ import 'services/firebase_service.dart';
 import 'services/curiosity_service.dart';
 import 'services/proactive_service.dart';
 import 'services/voice_activation_service.dart';
+import 'services/animation_preloader_service.dart';
 import 'screens/personality_screen.dart';
 import 'screens/usage_stats_screen.dart';
 import 'api_key_setup_screen.dart';
@@ -27,6 +28,7 @@ import 'widgets/debug_button.dart';
 import 'widgets/memory_chips.dart';
 import 'widgets/expanded_window.dart';
 import 'widgets/curiosity_indicator.dart';
+import 'widgets/animation_preloading_screen.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 // API KEYS - Read from build-time environment (--dart-define)
@@ -407,6 +409,9 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
   int _currentFrame = 0;
   AnimationController? _frameAnimController;
   
+  // Animation preloading state
+  bool _animationsPreloaded = false;
+  
   // Helper to get current frame count based on animation
   int _getFrameCount(String animType) {
     switch (animType) {
@@ -483,27 +488,8 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
     }
   }
   
-  // Precache animation frames to prevent glitchy first load
-  Future<void> _precacheAnimationFrames() async {
-    if (!mounted) return;
-    
-    // Precache first few frames of each animation
-    final animations = [
-      (kIdleFrameCount, kAvatarIdleFrameDir),
-      (kAttentionFrameCount, kAvatarAttentionFrameDir),
-      (kThinkingFrameCount, kAvatarThinkingFrameDir),
-      (kSpeakingFrameCount, kAvatarSpeakingFrameDir),
-    ];
-    
-    for (final (frameCount, frameDir) in animations) {
-      // Precache first 10 frames of each animation
-      final framesToCache = frameCount < 10 ? frameCount : 10;
-      for (int i = 0; i < framesToCache; i++) {
-        final framePath = '${frameDir}frame_${i.toString().padLeft(4, '0')}.png';
-        precacheImage(AssetImage(framePath), context);
-      }
-    }
-  }
+  // Animation frames are now preloaded by AnimationPreloaderService
+  // during the preloading screen phase, no need for partial precaching
 
   // Start auto-movement - moves the entire window programmatically
   void _startAutoMovement() async {
@@ -870,8 +856,7 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
     // Initialize Firebase and test connection
     _initializeFirebase();
     
-    // Precache animation frames to prevent glitchy first load
-    _precacheAnimationFrames();
+    // Animation frames are preloaded by AnimationPreloaderService during startup
     
     // Start idle animation immediately
     _switchToAnimation('idle');
@@ -1551,6 +1536,19 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
 
   @override
   Widget build(BuildContext context) {
+    // Show preloading screen if animations haven't been preloaded yet
+    if (!_animationsPreloaded) {
+      return AnimationPreloadingScreen(
+        onComplete: () {
+          if (mounted) {
+            setState(() {
+              _animationsPreloaded = true;
+            });
+          }
+        },
+      );
+    }
+    
     return Stack(
       fit: StackFit.expand,
       children: [
