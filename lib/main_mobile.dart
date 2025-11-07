@@ -450,9 +450,14 @@ class _MobileKaiState extends State<_MobileKai>
         'led_1',
       );
       
+      // Send audio feedback request to Pi via Firebase
+      if (success) {
+        await _sendAudioFeedback('I\'ve toggled the living room light for you! The LED strip should now be responding.');
+      }
+      
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(success ? '💡 Living Room light toggled!' : '❌ Light control failed'),
+          content: Text(success ? '💡 Living Room light toggled! 🔊 Audio sent' : '❌ Light control failed'),
           duration: const Duration(seconds: 2),
           backgroundColor: success ? Colors.green : Colors.red,
         ),
@@ -468,6 +473,26 @@ class _MobileKaiState extends State<_MobileKai>
     }
   }
 
+  Future<void> _sendAudioFeedback(String message) async {
+    try {
+      // Send audio feedback request to Pi via Firebase
+      await HomeAutomationService().sendCommand(
+        personaId: 'truekai',
+        deviceId: 'raspberry_pi_home',
+        target: 'audio',
+        action: 'speak',
+        params: {
+          'text': message,
+          'voice': 'en',
+          'timestamp': DateTime.now().millisecondsSinceEpoch,
+        },
+      );
+      print('🔊 Audio feedback sent to Pi: $message');
+    } catch (e) {
+      print('❌ Failed to send audio feedback: $e');
+    }
+  }
+
   Future<void> _testRainbow() async {
     try {
       // Test rainbow effect on all lights
@@ -479,9 +504,14 @@ class _MobileKaiState extends State<_MobileKai>
         params: {'duration': 10},
       );
       
+      // Send audio feedback
+      if (success) {
+        await _sendAudioFeedback('Rainbow mode activated! Enjoy the beautiful cascade of colors flowing across your LED strip.');
+      }
+      
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(success ? '🌈 Rainbow effect started!' : '❌ Rainbow failed'),
+          content: Text(success ? '🌈 Rainbow effect started! 🔊 Audio sent' : '❌ Rainbow failed'),
           duration: const Duration(seconds: 2),
           backgroundColor: success ? Colors.green : Colors.red,
         ),
@@ -508,9 +538,14 @@ class _MobileKaiState extends State<_MobileKai>
         params: {'color': 'blue', 'duration': 5},
       );
       
+      // Send audio feedback
+      if (success) {
+        await _sendAudioFeedback('Blue pulse effect activated! Watch as the gentle blue waves flow through your lighting system.');
+      }
+      
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(success ? '💙 Blue pulse started!' : '❌ Pulse failed'),
+          content: Text(success ? '💙 Blue pulse started! 🔊 Audio sent' : '❌ Pulse failed'),
           duration: const Duration(seconds: 2),
           backgroundColor: success ? Colors.green : Colors.red,
         ),
@@ -562,34 +597,7 @@ class _MobileKaiState extends State<_MobileKai>
     }
   }
 
-  Future<void> _testBeep() async {
-    try {
-      // Test audio/beep command
-      final success = await HomeAutomationService().sendCommand(
-        personaId: 'truekai',
-        deviceId: 'raspberry_pi_home',
-        target: 'speaker',
-        action: 'beep',
-        params: {'tone': 'notification'},
-      );
-      
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(success ? '🔊 Beep sent to Pi!' : '❌ Beep failed'),
-          duration: const Duration(seconds: 2),
-          backgroundColor: success ? Colors.green : Colors.red,
-        ),
-      );
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('❌ Beep error: $e'),
-          duration: const Duration(seconds: 2),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
-  }
+
 }  /// Open voice training interface
   void _openVoiceTraining(BuildContext context) {
     showDialog(
@@ -813,11 +821,7 @@ class _MobileKaiState extends State<_MobileKai>
                     label: 'Pulse',
                     onTap: _testPulse,
                   ),
-                  _MobileButton(
-                    icon: Icons.music_note,
-                    label: 'Beep',
-                    onTap: _testBeep,
-                  ),
+
                 ],
               ),
 
