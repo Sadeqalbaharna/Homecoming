@@ -235,23 +235,9 @@ class VoiceActivationService {
         // Enter conversation mode
         _enterConversationMode();
         
-        // Extract any text after the wake word
-        String? followUpText;
-        for (final wakeWord in _wakeWords) {
-          final index = lowerTranscription.indexOf(wakeWord);
-          if (index >= 0) {
-            final afterWakeWord = lowerTranscription
-                .substring(index + wakeWord.length)
-                .trim();
-            if (afterWakeWord.isNotEmpty) {
-              followUpText = afterWakeWord;
-              break;
-            }
-          }
-        }
-        
-        // Notify listeners
-        _wakeWordController?.add(followUpText ?? '');
+        // Send the complete transcription including the wake word
+        // This ensures Kai receives the full message including "hey kai"
+        _wakeWordController?.add(lowerTranscription.trim());
       }
       
     } catch (e) {
