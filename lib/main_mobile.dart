@@ -468,6 +468,64 @@ class _MobileKaiState extends State<_MobileKai>
     }
   }
 
+  Future<void> _testRainbow() async {
+    try {
+      // Test rainbow effect on all lights
+      final success = await HomeAutomationService().sendCommand(
+        personaId: 'truekai',
+        deviceId: 'raspberry_pi_home',
+        target: 'all',
+        action: 'rainbow',
+        params: {'duration': 10},
+      );
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(success ? '🌈 Rainbow effect started!' : '❌ Rainbow failed'),
+          duration: const Duration(seconds: 2),
+          backgroundColor: success ? Colors.green : Colors.red,
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('❌ Rainbow error: $e'),
+          duration: const Duration(seconds: 2),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Future<void> _testPulse() async {
+    try {
+      // Test pulse effect with blue color
+      final success = await HomeAutomationService().sendCommand(
+        personaId: 'truekai',
+        deviceId: 'raspberry_pi_home',
+        target: 'living_room',
+        action: 'pulse',
+        params: {'color': 'blue', 'duration': 5},
+      );
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(success ? '💙 Blue pulse started!' : '❌ Pulse failed'),
+          duration: const Duration(seconds: 2),
+          backgroundColor: success ? Colors.green : Colors.red,
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('❌ Pulse error: $e'),
+          duration: const Duration(seconds: 2),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
   Future<void> _openPersonaPanel(BuildContext context) async {
     showDialog(
       context: context,
@@ -500,12 +558,39 @@ class _MobileKaiState extends State<_MobileKai>
         Navigator.of(context).pop();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Failed to load persona: $e')),
-        );
-      }
+      );
     }
   }
 
-  /// Open voice training interface
+  Future<void> _testBeep() async {
+    try {
+      // Test audio/beep command
+      final success = await HomeAutomationService().sendCommand(
+        personaId: 'truekai',
+        deviceId: 'raspberry_pi_home',
+        target: 'speaker',
+        action: 'beep',
+        params: {'tone': 'notification'},
+      );
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(success ? '🔊 Beep sent to Pi!' : '❌ Beep failed'),
+          duration: const Duration(seconds: 2),
+          backgroundColor: success ? Colors.green : Colors.red,
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('❌ Beep error: $e'),
+          duration: const Duration(seconds: 2),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+}  /// Open voice training interface
   void _openVoiceTraining(BuildContext context) {
     showDialog(
       context: context,
@@ -717,6 +802,21 @@ class _MobileKaiState extends State<_MobileKai>
                     icon: Icons.lightbulb,
                     label: 'Lights',
                     onTap: _toggleLight,
+                  ),
+                  _MobileButton(
+                    icon: Icons.color_lens,
+                    label: 'Rainbow',
+                    onTap: _testRainbow,
+                  ),
+                  _MobileButton(
+                    icon: Icons.favorite,
+                    label: 'Pulse',
+                    onTap: _testPulse,
+                  ),
+                  _MobileButton(
+                    icon: Icons.music_note,
+                    label: 'Beep',
+                    onTap: _testBeep,
                   ),
                 ],
               ),

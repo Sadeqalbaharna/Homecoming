@@ -346,9 +346,19 @@ class _VoiceTrainingScreenState extends State<VoiceTrainingScreen> with TickerPr
         centerTitle: true,
       ),
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: _trainingComplete ? _buildCompletedUI() : _buildTrainingUI(),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return SingleChildScrollView(
+              physics: const BouncingScrollPhysics(),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                child: Padding(
+                  padding: const EdgeInsets.all(24.0),
+                  child: _trainingComplete ? _buildCompletedUI() : _buildTrainingUI(),
+                ),
+              ),
+            );
+          },
         ),
       ),
     );
