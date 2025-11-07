@@ -617,6 +617,47 @@ class _VoiceTrainingScreenState extends State<VoiceTrainingScreen> with TickerPr
   Widget _buildRecordingInterface() {
     return Column(
       children: [
+        // Current phrase to say - prominently displayed
+        if (_currentSample < _trainingPhases[_currentPhase].length) ...[
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(20),
+            margin: const EdgeInsets.only(bottom: 30),
+            decoration: BoxDecoration(
+              color: const Color(0xFFD4AF37).withOpacity(0.1),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: const Color(0xFFD4AF37).withOpacity(0.3),
+                width: 1,
+              ),
+            ),
+            child: Column(
+              children: [
+                const Text(
+                  'SAY THIS PHRASE:',
+                  style: TextStyle(
+                    color: Color(0xFFD4AF37),
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1.2,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '"${_trainingPhases[_currentPhase][_currentSample]}"',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w600,
+                    height: 1.3,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
+          ),
+        ],
+        
         // Microphone button
         AnimatedBuilder(
           animation: _pulseAnimation,
@@ -745,17 +786,6 @@ class _VoiceTrainingScreenState extends State<VoiceTrainingScreen> with TickerPr
             ),
             const SizedBox(height: 16),
           ],
-          
-          if (_currentSample < _trainingPhases[_currentPhase].length)
-            Text(
-              'Say: "${_trainingPhases[_currentPhase][_currentSample]}"',
-              style: const TextStyle(
-                color: Color(0xFFD4AF37),
-                fontSize: 18,
-                fontWeight: FontWeight.w600,
-              ),
-              textAlign: TextAlign.center,
-            ),
           
           if (_feedbackMessage.isNotEmpty) ...[
             const SizedBox(height: 12),
