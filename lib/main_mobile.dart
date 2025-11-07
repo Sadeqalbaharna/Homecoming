@@ -20,6 +20,7 @@ import '../services/voice_activation_service.dart';
 import '../services/voice_training_service.dart';
 import '../services/home_automation_service.dart';
 import '../widgets/voice_setup_dialog.dart';
+import '../screens/voice_training_screen.dart';
 import 'firebase_options.dart';
 import 'widgets/debug_button.dart';
 
@@ -504,6 +505,30 @@ class _MobileKaiState extends State<_MobileKai>
     }
   }
 
+  /// Open voice training interface
+  void _openVoiceTraining(BuildContext context) {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (context) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: Container(
+          width: MediaQuery.of(context).size.width * 0.9,
+          height: MediaQuery.of(context).size.height * 0.8,
+          decoration: BoxDecoration(
+            color: const Color(0xFF0D0A07),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: const Color(0xFFD4AF37).withOpacity(0.3),
+              width: 2,
+            ),
+          ),
+          child: const VoiceTrainingScreen(),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final avatarState = _resolveAvatarState();
@@ -664,6 +689,11 @@ class _MobileKaiState extends State<_MobileKai>
                     icon: Icons.volume_up,
                     label: 'Voice',
                     onTap: _toggleVoice,
+                  ),
+                  _MobileButton(
+                    icon: Icons.school,
+                    label: 'Training',
+                    onTap: () => _openVoiceTraining(context),
                   ),
                   if (!_isClone)
                     _MobileButton(

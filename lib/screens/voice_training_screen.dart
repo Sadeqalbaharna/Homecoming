@@ -360,6 +360,78 @@ class _VoiceTrainingScreenState extends State<VoiceTrainingScreen> with TickerPr
     
     return Column(
       children: [
+        // How to use instructions - very prominent
+        if (_currentSample == 0 && _currentPhase == 0) ...[
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(20),
+            margin: const EdgeInsets.only(bottom: 30),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Colors.blue.withOpacity(0.2),
+                  Colors.purple.withOpacity(0.1),
+                ],
+              ),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: Colors.blue.withOpacity(0.5),
+                width: 2,
+              ),
+            ),
+            child: const Column(
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.info_outline,
+                      color: Colors.blue,
+                      size: 24,
+                    ),
+                    SizedBox(width: 8),
+                    Text(
+                      'HOW VOICE TRAINING WORKS',
+                      style: TextStyle(
+                        color: Colors.blue,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1.2,
+                      ),
+                    ),
+                  ],
+                ),
+                SizedBox(height: 16),
+                Text(
+                  '1. Read the phrase shown in the GOLD BOX\n'
+                  '2. Tap the microphone to start recording\n'
+                  '3. Speak the phrase clearly and naturally\n'
+                  '4. The app will analyze your voice patterns\n'
+                  '5. Progress through 4 phases of training',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    height: 1.4,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                SizedBox(height: 12),
+                Text(
+                  'Each phase teaches Kai to recognize different types of speech patterns',
+                  style: TextStyle(
+                    color: Colors.white70,
+                    fontSize: 14,
+                    fontStyle: FontStyle.italic,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
+          ),
+        ],
+        
         // Progress indicator
         _buildProgressIndicator(progress),
         
@@ -617,45 +689,179 @@ class _VoiceTrainingScreenState extends State<VoiceTrainingScreen> with TickerPr
   Widget _buildRecordingInterface() {
     return Column(
       children: [
-        // Current phrase to say - prominently displayed
+        // Current phrase to say - SUPER PROMINENTLY displayed
         if (_currentSample < _trainingPhases[_currentPhase].length) ...[
+          // Main phrase display - very large and prominent
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.all(20),
-            margin: const EdgeInsets.only(bottom: 30),
+            padding: const EdgeInsets.all(24),
+            margin: const EdgeInsets.only(bottom: 20),
             decoration: BoxDecoration(
-              color: const Color(0xFFD4AF37).withOpacity(0.1),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                color: const Color(0xFFD4AF37).withOpacity(0.3),
-                width: 1,
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  const Color(0xFFD4AF37).withOpacity(0.2),
+                  const Color(0xFFFFD700).withOpacity(0.1),
+                ],
               ),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: const Color(0xFFD4AF37),
+                width: 2,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFFD4AF37).withOpacity(0.3),
+                  blurRadius: 15,
+                  spreadRadius: 2,
+                ),
+              ],
             ),
             child: Column(
               children: [
-                const Text(
-                  'SAY THIS PHRASE:',
-                  style: TextStyle(
-                    color: Color(0xFFD4AF37),
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 1.2,
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(
+                      Icons.record_voice_over,
+                      color: Color(0xFFD4AF37),
+                      size: 24,
+                    ),
+                    const SizedBox(width: 8),
+                    const Text(
+                      'SAY THIS PHRASE CLEARLY:',
+                      style: TextStyle(
+                        color: Color(0xFFD4AF37),
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1.5,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.3),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    '"${_trainingPhases[_currentPhase][_currentSample]}"',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 28,
+                      fontWeight: FontWeight.w700,
+                      height: 1.2,
+                      letterSpacing: 0.5,
+                    ),
+                    textAlign: TextAlign.center,
                   ),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 12),
                 Text(
-                  '"${_trainingPhases[_currentPhase][_currentSample]}"',
+                  'Sample ${_currentSample + 1} of ${_getSamplesForPhase(_currentPhase)} • Phase ${_currentPhase + 1}: ${_phaseNames[_currentPhase]}',
                   style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 22,
-                    fontWeight: FontWeight.w600,
-                    height: 1.3,
+                    color: Colors.white70,
+                    fontSize: 12,
+                    fontStyle: FontStyle.italic,
                   ),
                   textAlign: TextAlign.center,
                 ),
               ],
             ),
           ),
+          
+          // Preview of next phrases
+          if (_currentSample + 1 < _trainingPhases[_currentPhase].length || _currentPhase < _trainingPhases.length - 1) ...[
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              margin: const EdgeInsets.only(bottom: 20),
+              decoration: BoxDecoration(
+                color: Colors.grey[900]?.withOpacity(0.5),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: Colors.white24,
+                ),
+              ),
+              child: Column(
+                children: [
+                  const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.preview,
+                        color: Colors.white54,
+                        size: 16,
+                      ),
+                      SizedBox(width: 6),
+                      Text(
+                        'COMING UP NEXT:',
+                        style: TextStyle(
+                          color: Colors.white54,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1.0,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  // Show next 2-3 phrases
+                  ...(() {
+                    List<Widget> nextPhrases = [];
+                    int phaseIndex = _currentPhase;
+                    int sampleIndex = _currentSample + 1;
+                    int count = 0;
+                    
+                    while (count < 3 && phaseIndex < _trainingPhases.length) {
+                      if (sampleIndex < _trainingPhases[phaseIndex].length) {
+                        nextPhrases.add(
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 2),
+                            child: Text(
+                              '"${_trainingPhases[phaseIndex][sampleIndex]}"',
+                              style: const TextStyle(
+                                color: Colors.white60,
+                                fontSize: 14,
+                                fontStyle: FontStyle.italic,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                        );
+                        sampleIndex++;
+                        count++;
+                      } else {
+                        // Move to next phase
+                        phaseIndex++;
+                        sampleIndex = 0;
+                        if (phaseIndex < _trainingPhases.length) {
+                          nextPhrases.add(
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 4),
+                              child: Text(
+                                '• Phase ${phaseIndex + 1}: ${_phaseNames[phaseIndex]} •',
+                                style: const TextStyle(
+                                  color: Color(0xFFD4AF37),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                            ),
+                          );
+                        }
+                      }
+                    }
+                    return nextPhrases;
+                  })(),
+                ],
+              ),
+            ),
+          ],
         ],
         
         // Microphone button
