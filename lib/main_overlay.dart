@@ -1546,6 +1546,112 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
     print('✅ [VOICE TRAINING] Opened in expanded window');
   }
 
+  /// Open Pi music controls
+  Future<void> _openMusicControls() async {
+    HapticFeedback.mediumImpact();
+    
+    // Show music control dialog
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        backgroundColor: Colors.black.withOpacity(0.9),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: Container(
+          width: 300,
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Header
+              Row(
+                children: [
+                  const Icon(Icons.music_note, color: Colors.purple, size: 24),
+                  const SizedBox(width: 8),
+                  const Text(
+                    '🎵 Pi Music Controls',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close, color: Colors.white70),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                '🎧 Bluetooth audio ready!',
+                style: TextStyle(color: Colors.white70, fontSize: 14),
+              ),
+              const SizedBox(height: 20),
+              // Quick controls
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: () async {
+                        Navigator.of(context).pop();
+                        await _playMusicCommand('energetic');
+                      },
+                      icon: const Icon(Icons.bolt),
+                      label: const Text('Energetic'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.orange,
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: () async {
+                        Navigator.of(context).pop();
+                        await _stopMusicCommand();
+                      },
+                      icon: const Icon(Icons.stop),
+                      label: const Text('Stop'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red,
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    
+    print('🎵 [MUSIC] Opened controls dialog');
+  }
+
+  /// Play music command
+  Future<void> _playMusicCommand(String mood) async {
+    try {
+      // You can add HomeAutomationService call here
+      print('🎵 [MUSIC] Playing $mood playlist');
+      // TODO: Add actual Pi communication
+    } catch (e) {
+      print('❌ [MUSIC] Error: $e');
+    }
+  }
+
+  /// Stop music command  
+  Future<void> _stopMusicCommand() async {
+    try {
+      print('🛑 [MUSIC] Stopping playback');
+      // TODO: Add actual Pi communication  
+    } catch (e) {
+      print('❌ [MUSIC] Stop error: $e');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     // Show preloading screen if animations haven't been preloaded yet
@@ -1729,16 +1835,16 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
                       },
                     ),
                     
-                    // Voice Training Setup button (top-left) - opens comprehensive training
+                    // Pi Music Controls button (top-left) - opens music dialog
                     _buildCircularButton(
                       angle: -135,
                       radius: 68, // Wrapped tightly around avatar
-                      icon: Icons.school,
-                      backgroundColor: const Color(0xFFD4AF37), // Gold background for prominence
-                      iconColor: Colors.black, // Dark icon on gold background
+                      icon: Icons.music_note,
+                      backgroundColor: const Color(0xFF9C27B0), // Purple background for music
+                      iconColor: Colors.white, // White icon on purple background
                       onTap: () async {
                         setState(() => _showMenu = false);
-                        await _openVoiceTrainingSetup();
+                        await _openMusicControls();
                       },
                     ),
                   ],
