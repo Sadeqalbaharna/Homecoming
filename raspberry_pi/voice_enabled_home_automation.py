@@ -14,10 +14,12 @@ from typing import Dict, Any, Optional
 try:
     from ws2812b_service import WS2812BService
     from bluetooth_audio_manager import BluetoothAudioManager
+    from music_player_service import MusicPlayerService
 except ImportError as e:
     print(f"Warning: Could not import services: {e}")
     WS2812BService = None
     BluetoothAudioManager = None
+    MusicPlayerService = None
 
 class VoiceEnabledHomeAutomation:
     def __init__(self):
@@ -26,6 +28,7 @@ class VoiceEnabledHomeAutomation:
         # Initialize services
         self.led_service = WS2812BService() if WS2812BService else None
         self.audio_service = BluetoothAudioManager() if BluetoothAudioManager else None
+        self.music_service = MusicPlayerService() if MusicPlayerService else None
         
         # Voice responses for different actions
         self.responses = {
@@ -73,6 +76,21 @@ class VoiceEnabledHomeAutomation:
                 "Romantic mood set. Soft, warm lighting for a perfect ambiance.",
                 "Creating a romantic atmosphere with gentle, warm colors.",
                 "Love is in the air! Romantic lighting activated."
+            ],
+            'music_playing': [
+                "Now playing your music! Enjoy the tunes.",
+                "Music started! Let the melodies flow through your space.",
+                "Your soundtrack is now active. Perfect vibes incoming!"
+            ],
+            'music_stopped': [
+                "Music stopped. Silence restored.",
+                "Playback ended. Hope you enjoyed the music!",
+                "Music paused. Ready for your next request."
+            ],
+            'playlist_started': [
+                "Playlist activated! Multiple songs queued for your enjoyment.",
+                "Starting your curated playlist. Sit back and enjoy!",
+                "Playlist mode engaged. Great music selection coming up!"
             ],
             'error': [
                 "Sorry, I encountered an issue with the lighting system.",
@@ -259,12 +277,34 @@ class VoiceEnabledHomeAutomation:
             self._speak_response(response)
             return {'success': True, 'message': response}
         
+        # Music commands
+        elif any(word in command_lower for word in ['music', 'song', 'play', 'playlist']):
+            if self.music_service:
+                result = self.music_service.handle_voice_command(command_text)
+                if result['success']:
+                    # Don't double-speak if music service already announced
+                    if 'Now playing' not in result.get('message', ''):
+                        if 'playlist' in result.get('message', '').lower():
+                            response = self._get_response('playlist_started')
+                        elif 'stopped' in result.get('message', '').lower():
+                            response = self._get_response('music_stopped')
+                        else:
+                            response = self._get_response('music_playing')
+                        self._speak_response(response)
+                return result
+            else:
+                response = "Sorry, music service is not available right now."
+                self._speak_response(response)
+                return {'success': False, 'message': response}
+
         # Joke command
         elif 'joke' in command_lower:
             jokes = [
                 "Why did the LED strip go to therapy? It had too many issues with its connections!",
                 "What do you call a smart home that tells jokes? A house with a sense of humor!",
-                "Why don't robots ever get tired? They have great battery life!"
+                "Why don't robots ever get tired? They have great battery life!",
+                "What's a DJ's favorite type of LED? A disco light that never stops spinning!",
+                "Why did the Bluetooth speaker break up with the phone? It said the connection was too unstable!"
             ]
             import random
             joke = random.choice(jokes)
@@ -273,7 +313,7 @@ class VoiceEnabledHomeAutomation:
         
         # Default response
         else:
-            response = f"I heard '{command_text}'. I can control lights, set moods, tell time and jokes. What would you like me to do?"
+            response = f"I heard '{command_text}'. I can control lights, set moods, play music, tell time and jokes. What would you like me to do?"
             self._speak_response(response)
             return {'success': True, 'message': response}
 
