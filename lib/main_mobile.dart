@@ -1034,8 +1034,11 @@ class _MobileKaiState extends State<_MobileKai>
                   ),
                   _MobileButton(
                     icon: Icons.music_note,
-                    label: 'Music',
-                    onTap: _playMusic,
+                    label: '🎵 MUSIC',
+                    onTap: () {
+                      print('🎵 MUSIC BUTTON TAPPED!');
+                      _playMusic();
+                    },
                   ),
                   if (!_isClone)
                     _MobileButton(
