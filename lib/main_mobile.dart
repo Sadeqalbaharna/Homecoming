@@ -15,12 +15,9 @@ import 'package:firebase_core/firebase_core.dart';
 
 import 'services/ai_service.dart';
 import 'services/firebase_service.dart';
-import '../services/proactive_service.dart';
 import '../services/voice_activation_service.dart';
-import '../services/voice_training_service.dart';
 import '../services/home_automation_service.dart';
-import '../widgets/voice_setup_dialog.dart';
-import '../screens/voice_training_screen.dart';
+import '../screens/home_remote_screen.dart';
 import 'firebase_options.dart';
 import 'widgets/debug_button.dart';
 
@@ -845,8 +842,8 @@ class _MobileKaiState extends State<_MobileKai>
   }
 
 
-}  /// Open voice training interface
-  void _openVoiceTraining(BuildContext context) {
+}  /// Open home remote control interface
+  void _openHomeRemote(BuildContext context) {
     showDialog(
       context: context,
       barrierDismissible: true,
@@ -863,7 +860,7 @@ class _MobileKaiState extends State<_MobileKai>
               width: 2,
             ),
           ),
-          child: const VoiceTrainingScreen(),
+          child: const HomeRemoteScreen(),
         ),
       ),
     );
@@ -1031,9 +1028,9 @@ class _MobileKaiState extends State<_MobileKai>
                     onTap: _toggleVoice,
                   ),
                   _MobileButton(
-                    icon: Icons.school,
-                    label: 'Training',
-                    onTap: () => _openVoiceTraining(context),
+                    icon: Icons.home_outlined,
+                    label: 'Remote',
+                    onTap: () => _openHomeRemote(context),
                   ),
                   if (!_isClone)
                     _MobileButton(
