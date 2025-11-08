@@ -8,6 +8,8 @@ import 'package:lottie/lottie.dart';
 
 // Voice training imports
 import 'widgets/voice_setup_dialog.dart';
+// Home automation service for Pi control
+import 'services/home_automation_service.dart';
 
 class KaiOverlay extends StatelessWidget {
   const KaiOverlay({super.key});
@@ -233,29 +235,57 @@ class _FloatingKaiState extends State<_FloatingKai> with TickerProviderStateMixi
             ),
           ),
           
-          // Voice training indicator (small icon in top-right)
+          // Control buttons row (top-right)
           Positioned(
             top: 10,
             right: 10,
-            child: GestureDetector(
-              onTap: _openVoiceTraining,
-              child: Container(
-                width: 30,
-                height: 30,
-                decoration: BoxDecoration(
-                  color: Colors.black54,
-                  borderRadius: BorderRadius.circular(15),
-                  border: Border.all(
-                    color: const Color(0xFFD4AF37).withValues(alpha: 0.6),
-                    width: 1,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Music control button
+                GestureDetector(
+                  onTap: _openMusicControls,
+                  child: Container(
+                    width: 30,
+                    height: 30,
+                    decoration: BoxDecoration(
+                      color: Colors.black54,
+                      borderRadius: BorderRadius.circular(15),
+                      border: Border.all(
+                        color: Colors.purple.withValues(alpha: 0.6),
+                        width: 1,
+                      ),
+                    ),
+                    child: const Icon(
+                      Icons.music_note,
+                      color: Colors.purple,
+                      size: 16,
+                    ),
                   ),
                 ),
-                child: const Icon(
-                  Icons.mic_rounded,
-                  color: Color(0xFFD4AF37),
-                  size: 16,
+                const SizedBox(width: 8),
+                // Voice training button
+                GestureDetector(
+                  onTap: _openVoiceTraining,
+                  child: Container(
+                    width: 30,
+                    height: 30,
+                    decoration: BoxDecoration(
+                      color: Colors.black54,
+                      borderRadius: BorderRadius.circular(15),
+                      border: Border.all(
+                        color: const Color(0xFFD4AF37).withValues(alpha: 0.6),
+                        width: 1,
+                      ),
+                    ),
+                    child: const Icon(
+                      Icons.mic_rounded,
+                      color: Color(0xFFD4AF37),
+                      size: 16,
+                    ),
+                  ),
                 ),
-              ),
+              ],
             ),
           ),
           
@@ -382,6 +412,16 @@ class _FloatingKaiState extends State<_FloatingKai> with TickerProviderStateMixi
     );
   }
 
+  /// Open music controls
+  void _openMusicControls() {
+    HapticFeedback.mediumImpact();
+    
+    showDialog(
+      context: context,
+      builder: (context) => _MusicControlDialog(),
+    );
+  }
+
   /// Open voice training setup
   void _openVoiceTraining() {
     HapticFeedback.mediumImpact();
@@ -390,6 +430,308 @@ class _FloatingKaiState extends State<_FloatingKai> with TickerProviderStateMixi
       context: context,
       barrierDismissible: false,
       builder: (context) => const VoiceSetupDialog(),
+    );
+  }
+}
+
+/// Music Control Dialog for Pi Music System
+class _MusicControlDialog extends StatefulWidget {
+  @override
+  _MusicControlDialogState createState() => _MusicControlDialogState();
+}
+
+class _MusicControlDialogState extends State<_MusicControlDialog> {
+  bool _isLoading = false;
+
+  Future<void> _playSpecificSong(String songId) async {
+    setState(() => _isLoading = true);
+    
+    try {
+      final success = await HomeAutomationService().sendCommand(
+        personaId: 'truekai',
+        deviceId: 'raspberry_pi_home',
+        target: 'music',
+        action: 'play_song',
+        params: {'song': songId},
+      );
+      
+      if (mounted) {
+        Navigator.of(context).pop();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(success ? '🎵 Song started! 🔊' : '❌ Song command failed'),
+            duration: const Duration(seconds: 2),
+            backgroundColor: success ? Colors.green : Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ Song error: $e'),
+            duration: const Duration(seconds: 3),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _playMoodPlaylist(String mood) async {
+    setState(() => _isLoading = true);
+    
+    try {
+      final success = await HomeAutomationService().sendCommand(
+        personaId: 'truekai',
+        deviceId: 'raspberry_pi_home',
+        target: 'music',
+        action: 'play_mood',
+        params: {'mood': mood, 'shuffle': true},
+      );
+      
+      if (mounted) {
+        Navigator.of(context).pop();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(success ? '🎭 $mood playlist started! 🔊' : '❌ Playlist command failed'),
+            duration: const Duration(seconds: 2),
+            backgroundColor: success ? Colors.green : Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ Playlist error: $e'),
+            duration: const Duration(seconds: 3),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _stopMusic() async {
+    setState(() => _isLoading = true);
+    
+    try {
+      final success = await HomeAutomationService().sendCommand(
+        personaId: 'truekai',
+        deviceId: 'raspberry_pi_home',
+        target: 'music',
+        action: 'stop',
+        params: {},
+      );
+      
+      if (mounted) {
+        Navigator.of(context).pop();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(success ? '🛑 Music stopped' : '❌ Stop command failed'),
+            duration: const Duration(seconds: 2),
+            backgroundColor: success ? Colors.orange : Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ Stop error: $e'),
+            duration: const Duration(seconds: 3),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Colors.black.withValues(alpha: 0.9),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Container(
+        width: 300,
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Header
+            Row(
+              children: [
+                const Icon(Icons.music_note, color: Colors.purple, size: 24),
+                const SizedBox(width: 8),
+                const Text(
+                  '🎵 Pi Music Library',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const Spacer(),
+                IconButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: const Icon(Icons.close, color: Colors.white70),
+                ),
+              ],
+            ),
+            
+            const SizedBox(height: 16),
+            
+            if (_isLoading)
+              const Center(
+                child: CircularProgressIndicator(color: Colors.purple),
+              )
+            else ...[
+              // Quick Actions
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: () => _playMoodPlaylist('energetic'),
+                      icon: const Icon(Icons.bolt),
+                      label: const Text('Energetic'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.orange,
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: _stopMusic,
+                      icon: const Icon(Icons.stop),
+                      label: const Text('Stop'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red,
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              
+              const SizedBox(height: 16),
+              
+              // Mood Playlists
+              const Text(
+                '🎭 Mood Playlists',
+                style: TextStyle(color: Colors.green, fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 8),
+              
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _moodChip('Relaxing', 'relaxing', '🧘'),
+                  _moodChip('Focused', 'focused', '🎯'),
+                  _moodChip('Party', 'party', '🎉'),
+                  _moodChip('Sleep', 'sleep', '😴'),
+                ],
+              ),
+              
+              const SizedBox(height: 16),
+              
+              // Individual Songs
+              const Text(
+                '🎶 Individual Songs',
+                style: TextStyle(color: Colors.blue, fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 8),
+              
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  _songChip('Electronic Beat', 'electronic_beat'),
+                  _songChip('Ambient Space', 'ambient_space'),
+                  _songChip('Chiptune', 'chiptune_adventure'),
+                  _songChip('Nature Sounds', 'nature_sounds'),
+                  _songChip('Piano', 'piano_meditation'),
+                  _songChip('Lo-Fi Study', 'lofi_study'),
+                ],
+              ),
+            ],
+            
+            const SizedBox(height: 16),
+            
+            // Status
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.purple.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.bluetooth, color: Colors.blue, size: 16),
+                  SizedBox(width: 8),
+                  Text(
+                    '🎧 Bluetooth Ready',
+                    style: TextStyle(color: Colors.white70, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _moodChip(String name, String id, String icon) {
+    return GestureDetector(
+      onTap: () => _playMoodPlaylist(id),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: Colors.blue.withValues(alpha: 0.3),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.blue.withValues(alpha: 0.5)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(icon, style: const TextStyle(fontSize: 14)),
+            const SizedBox(width: 4),
+            Text(
+              name,
+              style: const TextStyle(color: Colors.white, fontSize: 12),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _songChip(String name, String id) {
+    return GestureDetector(
+      onTap: () => _playSpecificSong(id),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: Colors.grey.withValues(alpha: 0.3),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.grey.withValues(alpha: 0.5)),
+        ),
+        child: Text(
+          name,
+          style: const TextStyle(color: Colors.white, fontSize: 11),
+        ),
+      ),
     );
   }
 }
