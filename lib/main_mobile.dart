@@ -1032,6 +1032,11 @@ class _MobileKaiState extends State<_MobileKai>
                     label: 'Remote',
                     onTap: () => _openHomeRemote(context),
                   ),
+                  _MobileButton(
+                    icon: Icons.music_note,
+                    label: 'Music',
+                    onTap: _playMusic,
+                  ),
                   if (!_isClone)
                     _MobileButton(
                       icon: _adaptToUser ? Icons.favorite : Icons.favorite_border,
@@ -1064,11 +1069,6 @@ class _MobileKaiState extends State<_MobileKai>
                     icon: Icons.favorite,
                     label: 'Pulse',
                     onTap: _testPulse,
-                  ),
-                  _MobileButton(
-                    icon: Icons.music_note,
-                    label: 'Music',
-                    onTap: _playMusic,
                   ),
 
                 ],
