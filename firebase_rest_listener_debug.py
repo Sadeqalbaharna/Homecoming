@@ -12,14 +12,367 @@ import subprocess
 import logging
 import random
 import os
+import colorsys
+import threading
 from typing import Dict, List, Optional, Tuple
 
-# Configure logging with more detail
+# Configure logging with more detail FIRST
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# WS2812B LED Strip Control
+try:
+    from rpi_ws281x import PixelStrip, Color
+    WS281X_AVAILABLE = True
+    logger.info("✅ rpi_ws281x library available for WS2812B control")
+except ImportError:
+    WS281X_AVAILABLE = False
+    logger.warning("⚠️ rpi_ws281x not available - LED control will be simulated")
+
+class WS2812BController:
+    """Advanced WS2812B RGB LED Strip Controller with multiple strip support"""
+    
+    def __init__(self):
+        # LED Strip Configuration
+        self.strips = {
+            "main": {
+                "led_count": 150,      # Number of LEDs on main strip
+                "gpio_pin": 18,        # GPIO pin (must support PWM)
+                "led_freq_hz": 800000, # LED signal frequency (800kHz)
+                "led_dma": 10,         # DMA channel
+                "led_brightness": 255, # Max brightness (0-255)
+                "led_invert": False,   # Invert signal
+                "led_channel": 0,      # PWM channel
+            },
+            "accent": {
+                "led_count": 60,       # Smaller accent strip
+                "gpio_pin": 13,        # Different GPIO pin
+                "led_freq_hz": 800000,
+                "led_dma": 11,         # Different DMA channel
+                "led_brightness": 200, # Slightly dimmer max
+                "led_invert": False,
+                "led_channel": 1,      # Different PWM channel
+            },
+            "ambient": {
+                "led_count": 30,       # Small ambient strip
+                "gpio_pin": 12,
+                "led_freq_hz": 800000,
+                "led_dma": 12,
+                "led_brightness": 150, # Dimmer for ambient lighting
+                "led_invert": False,
+                "led_channel": 0,      # Can share channel if different pins
+            }
+        }
+        
+        # Initialize pixel strip objects
+        self.pixel_strips = {}
+        self.current_effects = {}
+        self.effect_threads = {}
+        self.stop_effects = {}
+        
+        if WS281X_AVAILABLE:
+            self._initialize_strips()
+        else:
+            logger.warning("⚠️ WS2812B initialization skipped - library not available")
+    
+    def _initialize_strips(self):
+        """Initialize all configured LED strips"""
+        for strip_name, config in self.strips.items():
+            try:
+                strip = PixelStrip(
+                    config["led_count"],
+                    config["gpio_pin"],
+                    config["led_freq_hz"],
+                    config["led_dma"],
+                    config["led_invert"],
+                    config["led_brightness"],
+                    config["led_channel"]
+                )
+                strip.begin()
+                self.pixel_strips[strip_name] = strip
+                self.stop_effects[strip_name] = threading.Event()
+                logger.info(f"✅ Initialized {strip_name} strip: {config['led_count']} LEDs on GPIO {config['gpio_pin']}")
+            except Exception as e:
+                logger.error(f"❌ Failed to initialize {strip_name} strip: {e}")
+    
+    def set_lighting(self, lighting_config: Dict, strips: List[str] = None):
+        """Set coordinated lighting across multiple strips"""
+        if not WS281X_AVAILABLE:
+            return self._simulate_lighting(lighting_config, strips)
+        
+        if strips is None:
+            strips = list(self.pixel_strips.keys())
+        
+        try:
+            color = lighting_config.get("color", "warm_white")
+            brightness = lighting_config.get("brightness", 50)
+            effect = lighting_config.get("effect", "solid")
+            
+            logger.info(f"🌈 Setting WS2812B lighting: {color} at {brightness}% with {effect} effect")
+            logger.info(f"🎯 Target strips: {strips}")
+            
+            # Stop any running effects
+            self._stop_all_effects(strips)
+            
+            # Get RGB color values
+            rgb_color = self._get_rgb_color(color, brightness)
+            
+            # Apply effect to all specified strips
+            if effect == "solid":
+                self._set_solid_color(strips, rgb_color)
+            elif effect == "gentle_pulse":
+                self._start_pulse_effect(strips, rgb_color, speed=0.5)
+            elif effect == "wave":
+                self._start_wave_effect(strips, rgb_color, speed=1.0)
+            elif effect == "slow_fade":
+                self._start_fade_effect(strips, rgb_color, speed=0.3)
+            elif effect == "candle_flicker":
+                self._start_flicker_effect(strips, rgb_color)
+            elif effect == "color_cycle":
+                self._start_rainbow_effect(strips, brightness, speed=0.5)
+            elif effect == "rain_drops":
+                self._start_rain_effect(strips, rgb_color)
+            elif effect == "sunrise":
+                self._start_sunrise_effect(strips, brightness)
+            elif effect == "leaf_fall":
+                self._start_leaf_fall_effect(strips)
+            else:
+                # Default to solid color for unknown effects
+                self._set_solid_color(strips, rgb_color)
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Error setting WS2812B lighting: {e}")
+            return False
+    
+    def _get_rgb_color(self, color_name: str, brightness: int) -> Tuple[int, int, int]:
+        """Convert color name to RGB values with brightness adjustment"""
+        color_map = {
+            "red": (255, 0, 0),
+            "green": (0, 255, 0),
+            "blue": (0, 0, 255),
+            "orange": (255, 165, 0),
+            "purple": (128, 0, 128),
+            "yellow": (255, 255, 0),
+            "white": (255, 255, 255),
+            "warm_white": (255, 230, 180),
+            "light_green": (144, 238, 144),
+            "deep_blue": (0, 0, 139),
+            "gray_blue": (70, 130, 180),
+            "amber": (255, 191, 0),
+            "pink": (255, 192, 203),
+            "cyan": (0, 255, 255),
+            "magenta": (255, 0, 255),
+            "lime": (50, 205, 50),
+            "indigo": (75, 0, 130),
+            "violet": (238, 130, 238),
+        }
+        
+        base_rgb = color_map.get(color_name.lower(), (255, 255, 255))
+        
+        # Apply brightness scaling
+        brightness_factor = brightness / 100.0
+        return tuple(int(c * brightness_factor) for c in base_rgb)
+    
+    def _set_solid_color(self, strips: List[str], rgb_color: Tuple[int, int, int]):
+        """Set solid color across specified strips"""
+        r, g, b = rgb_color
+        color = Color(r, g, b)
+        
+        for strip_name in strips:
+            if strip_name in self.pixel_strips:
+                strip = self.pixel_strips[strip_name]
+                for i in range(strip.numPixels()):
+                    strip.setPixelColor(i, color)
+                strip.show()
+                logger.info(f"🎨 Set {strip_name} to solid RGB({r}, {g}, {b})")
+    
+    def _start_pulse_effect(self, strips: List[str], rgb_color: Tuple[int, int, int], speed: float = 0.5):
+        """Start gentle pulse effect"""
+        for strip_name in strips:
+            if strip_name in self.pixel_strips:
+                self.stop_effects[strip_name].clear()
+                thread = threading.Thread(target=self._pulse_worker, args=(strip_name, rgb_color, speed))
+                thread.daemon = True
+                thread.start()
+                self.effect_threads[strip_name] = thread
+                logger.info(f"💫 Started pulse effect on {strip_name}")
+    
+    def _pulse_worker(self, strip_name: str, rgb_color: Tuple[int, int, int], speed: float):
+        """Worker thread for pulse effect"""
+        strip = self.pixel_strips[strip_name]
+        base_r, base_g, base_b = rgb_color
+        
+        while not self.stop_effects[strip_name].is_set():
+            # Fade up
+            for brightness in range(20, 101, 2):
+                if self.stop_effects[strip_name].is_set():
+                    break
+                factor = brightness / 100.0
+                r, g, b = int(base_r * factor), int(base_g * factor), int(base_b * factor)
+                color = Color(r, g, b)
+                
+                for i in range(strip.numPixels()):
+                    strip.setPixelColor(i, color)
+                strip.show()
+                time.sleep(speed * 0.05)
+            
+            # Fade down
+            for brightness in range(100, 19, -2):
+                if self.stop_effects[strip_name].is_set():
+                    break
+                factor = brightness / 100.0
+                r, g, b = int(base_r * factor), int(base_g * factor), int(base_b * factor)
+                color = Color(r, g, b)
+                
+                for i in range(strip.numPixels()):
+                    strip.setPixelColor(i, color)
+                strip.show()
+                time.sleep(speed * 0.05)
+    
+    def _start_wave_effect(self, strips: List[str], rgb_color: Tuple[int, int, int], speed: float = 1.0):
+        """Start wave effect flowing across strips"""
+        for strip_name in strips:
+            if strip_name in self.pixel_strips:
+                self.stop_effects[strip_name].clear()
+                thread = threading.Thread(target=self._wave_worker, args=(strip_name, rgb_color, speed))
+                thread.daemon = True
+                thread.start()
+                self.effect_threads[strip_name] = thread
+                logger.info(f"🌊 Started wave effect on {strip_name}")
+    
+    def _wave_worker(self, strip_name: str, rgb_color: Tuple[int, int, int], speed: float):
+        """Worker thread for wave effect"""
+        strip = self.pixel_strips[strip_name]
+        base_r, base_g, base_b = rgb_color
+        wave_pos = 0
+        
+        while not self.stop_effects[strip_name].is_set():
+            for i in range(strip.numPixels()):
+                # Calculate brightness based on sine wave
+                distance = abs(i - wave_pos)
+                brightness = max(0.1, 1.0 - (distance / 20.0))
+                
+                r = int(base_r * brightness)
+                g = int(base_g * brightness)
+                b = int(base_b * brightness)
+                
+                strip.setPixelColor(i, Color(r, g, b))
+            
+            strip.show()
+            wave_pos = (wave_pos + 1) % strip.numPixels()
+            time.sleep(0.1 / speed)
+    
+    def _start_rainbow_effect(self, strips: List[str], brightness: int, speed: float = 0.5):
+        """Start rainbow color cycle effect"""
+        for strip_name in strips:
+            if strip_name in self.pixel_strips:
+                self.stop_effects[strip_name].clear()
+                thread = threading.Thread(target=self._rainbow_worker, args=(strip_name, brightness, speed))
+                thread.daemon = True
+                thread.start()
+                self.effect_threads[strip_name] = thread
+                logger.info(f"🌈 Started rainbow effect on {strip_name}")
+    
+    def _rainbow_worker(self, strip_name: str, brightness: int, speed: float):
+        """Worker thread for rainbow effect"""
+        strip = self.pixel_strips[strip_name]
+        hue_offset = 0
+        
+        while not self.stop_effects[strip_name].is_set():
+            for i in range(strip.numPixels()):
+                hue = (i / strip.numPixels() + hue_offset) % 1.0
+                rgb = colorsys.hsv_to_rgb(hue, 1.0, brightness / 100.0)
+                r, g, b = [int(c * 255) for c in rgb]
+                strip.setPixelColor(i, Color(r, g, b))
+            
+            strip.show()
+            hue_offset = (hue_offset + 0.01) % 1.0
+            time.sleep(0.1 / speed)
+    
+    def _start_flicker_effect(self, strips: List[str], rgb_color: Tuple[int, int, int]):
+        """Start candle flicker effect"""
+        for strip_name in strips:
+            if strip_name in self.pixel_strips:
+                self.stop_effects[strip_name].clear()
+                thread = threading.Thread(target=self._flicker_worker, args=(strip_name, rgb_color))
+                thread.daemon = True
+                thread.start()
+                self.effect_threads[strip_name] = thread
+                logger.info(f"🕯️ Started flicker effect on {strip_name}")
+    
+    def _flicker_worker(self, strip_name: str, rgb_color: Tuple[int, int, int]):
+        """Worker thread for flicker effect"""
+        strip = self.pixel_strips[strip_name]
+        base_r, base_g, base_b = rgb_color
+        
+        while not self.stop_effects[strip_name].is_set():
+            for i in range(strip.numPixels()):
+                # Random flicker intensity
+                flicker = random.uniform(0.3, 1.0)
+                r = int(base_r * flicker)
+                g = int(base_g * flicker)
+                b = int(base_b * flicker)
+                strip.setPixelColor(i, Color(r, g, b))
+            
+            strip.show()
+            time.sleep(random.uniform(0.05, 0.2))
+    
+    def _stop_all_effects(self, strips: List[str]):
+        """Stop all running effects on specified strips"""
+        for strip_name in strips:
+            if strip_name in self.stop_effects:
+                self.stop_effects[strip_name].set()
+                if strip_name in self.effect_threads:
+                    self.effect_threads[strip_name].join(timeout=1.0)
+    
+    def _simulate_lighting(self, lighting_config: Dict, strips: List[str] = None):
+        """Simulate lighting when WS2812B library not available"""
+        color = lighting_config.get("color", "warm_white")
+        brightness = lighting_config.get("brightness", 50)
+        effect = lighting_config.get("effect", "solid")
+        
+        if strips is None:
+            strips = list(self.strips.keys())
+        
+        logger.info(f"🎭 [SIMULATION] WS2812B Lighting Control:")
+        logger.info(f"   Strips: {strips}")
+        logger.info(f"   Color: {color}")
+        logger.info(f"   Brightness: {brightness}%")
+        logger.info(f"   Effect: {effect}")
+        
+        # Simulate strip configurations
+        for strip_name in strips:
+            if strip_name in self.strips:
+                config = self.strips[strip_name]
+                rgb = self._get_rgb_color(color, brightness)
+                logger.info(f"   {strip_name}: {config['led_count']} LEDs on GPIO {config['gpio_pin']} -> RGB{rgb}")
+        
+        return True
+    
+    def turn_off_all(self):
+        """Turn off all LED strips"""
+        logger.info("🔌 Turning off all LED strips")
+        
+        # Stop all effects
+        for strip_name in self.pixel_strips.keys():
+            self.stop_effects[strip_name].set()
+        
+        if WS281X_AVAILABLE:
+            # Set all pixels to black (off)
+            for strip_name, strip in self.pixel_strips.items():
+                for i in range(strip.numPixels()):
+                    strip.setPixelColor(i, Color(0, 0, 0))
+                strip.show()
+                logger.info(f"⚫ Turned off {strip_name} strip")
+        else:
+            logger.info("🎭 [SIMULATION] All LED strips turned off")
+        
+        return True
 
 class IntelligentProfileMatcher:
     """Intelligent profile matching system for coordinated music and lighting"""
@@ -247,16 +600,56 @@ class FirebaseRestListener:
         self.device_id = "raspberry_pi_home"
         self.processed_commands = set()
         
-        # Updated Bluetooth audio device
-        self.bluetooth_device = "pulse/bluez_output.FA_B0_2C_56_4E_72.1"
+        # Audio device - will auto-detect best available device
+        self.bluetooth_device = self._detect_audio_device()
         
         # Initialize intelligent profile matcher
         self.profile_matcher = IntelligentProfileMatcher()
         
+        # Initialize WS2812B LED controller
+        self.led_controller = WS2812BController()
+        
         logger.info("🔥 Firebase REST listener initialized with intelligent profile matching")
         logger.info(f"🎧 Polling for commands at: {self.firebase_url}/home_automation/{self.persona_id}/commands.json")
-        logger.info(f"🔊 Bluetooth device: {self.bluetooth_device}")
+        logger.info(f"🔊 Audio device: {self.bluetooth_device}")
         logger.info(f"🎯 Intelligent profiles loaded: {len(self.profile_matcher.profiles)}")
+        
+    def _detect_audio_device(self):
+        """Detect best available audio device"""
+        try:
+            # Try to get audio devices using pactl
+            result = subprocess.run(["pactl", "list", "short", "sinks"], 
+                                  capture_output=True, text=True, timeout=5)
+            
+            if result.returncode == 0:
+                sinks = result.stdout.strip().split('\n')
+                
+                # Prefer Bluetooth devices first
+                for sink in sinks:
+                    if 'bluez_output' in sink and 'SUSPENDED' not in sink:
+                        device_name = sink.split()[1]
+                        logger.info(f"🎧 Detected Bluetooth audio device: pulse/{device_name}")
+                        return f"pulse/{device_name}"
+                
+                # Fall back to any available non-suspended device  
+                for sink in sinks:
+                    if sink.strip() and 'SUSPENDED' not in sink:
+                        device_name = sink.split()[1]
+                        logger.info(f"🔊 Using available audio device: pulse/{device_name}")
+                        return f"pulse/{device_name}"
+                
+                # If all devices are suspended, use the first one anyway
+                if sinks and sinks[0].strip():
+                    device_name = sinks[0].split()[1]
+                    logger.info(f"🔊 Using default audio device: pulse/{device_name}")
+                    return f"pulse/{device_name}"
+                        
+        except Exception as e:
+            logger.warning(f"⚠️ Could not detect audio devices: {e}")
+        
+        # Ultimate fallback
+        logger.info("🔊 Using system default audio device")
+        return "pulse"
         
     def get_commands(self):
         """Get pending commands from Firebase"""
@@ -500,14 +893,14 @@ class FirebaseRestListener:
             logger.error(f"❌ Error stopping music: {e}")
             return False
     
-    def set_ambiance_lighting(self, lighting_config, ambiance_analysis=None):
-        """Set intelligent ambiance lighting based on voice analysis"""
+    def set_ambiance_lighting(self, lighting_config, ambiance_analysis=None, target_strips=None):
+        """Set intelligent ambiance lighting using WS2812B LED strips"""
         try:
             color = lighting_config.get("color", "warm_white")
             brightness = lighting_config.get("brightness", 50)
             effect = lighting_config.get("effect", "solid")
             
-            logger.info(f"💡 Setting ambiance lighting:")
+            logger.info(f"💡 Setting WS2812B ambiance lighting:")
             logger.info(f"   Color: {color}")
             logger.info(f"   Brightness: {brightness}%")
             logger.info(f"   Effect: {effect}")
@@ -517,66 +910,81 @@ class FirebaseRestListener:
                 logger.info(f"   Description: {ambiance_analysis.get('description', 'N/A')}")
                 logger.info(f"   Confidence: {ambiance_analysis.get('confidence', 0):.1%}")
             
-            # Map colors to RGB values for smart lights
-            color_map = {
-                "red": (255, 0, 0),
-                "green": (0, 255, 0), 
-                "blue": (0, 0, 255),
-                "orange": (255, 165, 0),
-                "purple": (128, 0, 128),
-                "yellow": (255, 255, 0),
-                "white": (255, 255, 255),
-                "warm_white": (255, 230, 180),
-                "light_green": (144, 238, 144),
-                "deep_blue": (0, 0, 139),
-                "gray_blue": (70, 130, 180),
-                "amber": (255, 191, 0),
-                "rainbow": "cycle"  # Special effect
-            }
+            # Determine which strips to control based on ambiance type
+            if target_strips is None:
+                target_strips = self._get_strips_for_ambiance(ambiance_analysis, effect)
             
-            rgb_color = color_map.get(color, (255, 255, 255))
+            logger.info(f"🎯 Controlling LED strips: {target_strips}")
             
-            # For now, simulate lighting control with logging
-            # In a real setup, this would control smart lights via GPIO, WiFi, or other protocols
-            if rgb_color == "cycle":
-                logger.info(f"🌈 Activating rainbow color cycle effect")
+            # Use WS2812B controller for real LED control
+            success = self.led_controller.set_lighting(lighting_config, target_strips)
+            
+            if success:
+                logger.info("✅ WS2812B ambiance lighting set successfully")
             else:
-                r, g, b = rgb_color
-                logger.info(f"🎨 Setting RGB color: ({r}, {g}, {b})")
+                logger.error("❌ Failed to set WS2812B lighting")
             
-            # Simulate brightness control
-            actual_brightness = int(brightness * 2.55)  # Convert percentage to 0-255
-            logger.info(f"💡 Setting brightness to {actual_brightness}/255")
-            
-            # Simulate effect control
-            effect_commands = {
-                "solid": "Solid color mode",
-                "gentle_pulse": "Gentle pulsing effect", 
-                "wave": "Wave-like flowing effect",
-                "slow_fade": "Slow fade in/out",
-                "candle_flicker": "Candle flicker simulation",
-                "color_cycle": "Cycling through colors",
-                "rain_drops": "Rain drop effect",
-                "sunrise": "Sunrise simulation",
-                "leaf_fall": "Falling leaves effect"
-            }
-            
-            effect_description = effect_commands.get(effect, "Unknown effect")
-            logger.info(f"✨ Activating effect: {effect_description}")
-            
-            # TODO: Implement actual smart lighting control here
-            # Examples:
-            # - Control Philips Hue lights via API
-            # - Control WS2812B LED strips via GPIO
-            # - Control smart bulbs via WiFi/Bluetooth
-            # - Control DMX lighting systems
-            
-            logger.info("✅ Ambiance lighting set successfully")
-            return True
+            return success
             
         except Exception as e:
-            logger.error(f"❌ Error setting ambiance lighting: {e}")
+            logger.error(f"❌ Error setting WS2812B ambiance lighting: {e}")
             return False
+    
+    def _get_strips_for_ambiance(self, ambiance_analysis, effect):
+        """Intelligently select which LED strips to use based on ambiance profile"""
+        # Default to all strips for most effects
+        all_strips = ["main", "accent", "ambient"]
+        
+        if not ambiance_analysis:
+            return all_strips
+        
+        profile = ambiance_analysis.get('profile', '').lower()
+        
+        # Profile-specific strip selection for optimal lighting
+        strip_profiles = {
+            # Focused lighting - use main strip primarily
+            'focus': ["main"],
+            'work': ["main"],
+            'productivity': ["main"],
+            'reading': ["main", "accent"],
+            
+            # Ambient lighting - use accent and ambient strips
+            'ambient': ["accent", "ambient"],
+            'chill': ["accent", "ambient"],
+            'relax': ["accent", "ambient"],
+            'sleep': ["ambient"],
+            
+            # Full room lighting - use all strips
+            'party': all_strips,
+            'celebration': all_strips,
+            'energetic': all_strips,
+            'bright': all_strips,
+            
+            # Intimate lighting - use ambient primarily
+            'romantic': ["ambient", "accent"],
+            'dinner': ["ambient", "accent"],
+            'candle': ["ambient"],
+            
+            # Nature themes - use appropriate combinations
+            'forest': ["main", "ambient"],  # Green nature lighting
+            'ocean': ["main", "accent"],    # Blue wave effects
+            'sunset': all_strips,           # Warm full room
+        }
+        
+        # Check for matching profiles
+        for key, strips in strip_profiles.items():
+            if key in profile:
+                logger.info(f"🎯 Profile '{profile}' matched to strips: {strips}")
+                return strips
+        
+        # Special effect handling
+        if effect in ["wave", "rain_drops", "sunrise"]:
+            return all_strips  # These effects look best across all strips
+        elif effect in ["candle_flicker", "slow_fade"]:
+            return ["accent", "ambient"]  # Subtle effects for ambient strips
+        
+        # Default to all strips
+        return all_strips
     
     def process_command(self, command_id, command_data):
         """Process a single command"""
@@ -734,6 +1142,11 @@ class FirebaseRestListener:
                         "color": "white",
                         "brightness": 0,
                         "effect": "solid"
+                    },
+                    "all_off": {
+                        "color": "white",
+                        "brightness": 0,
+                        "effect": "solid"
                     }
                 }
                 
@@ -741,22 +1154,31 @@ class FirebaseRestListener:
                 
                 logger.info(f"🎨 Setting scene '{scene}' -> {lighting_config}")
                 
-                success = self.set_ambiance_lighting(lighting_config, {
-                    "profile": f"{scene.title()} Scene",
-                    "description": f"Basic {scene} lighting scene",
-                    "confidence": 1.0
-                })
-                
-                if success:
-                    color = lighting_config.get("color", "unknown")
-                    brightness = lighting_config.get("brightness", 50)
-                    message = f"Scene '{scene}' activated: {color} at {brightness}% brightness"
+                # Handle special "off" scenes
+                if scene.lower() in ["off", "all_off"]:
+                    success = self.led_controller.turn_off_all()
+                    if success:
+                        message = f"All LED strips turned off"
+                    else:
+                        message = f"Failed to turn off LED strips"
                 else:
-                    message = f"Failed to activate scene '{scene}'"
+                    success = self.set_ambiance_lighting(lighting_config, {
+                        "profile": f"{scene.title()} Scene",
+                        "description": f"Basic {scene} lighting scene",
+                        "confidence": 1.0
+                    })
+                    
+                    if success:
+                        color = lighting_config.get("color", "unknown")
+                        brightness = lighting_config.get("brightness", 50)
+                        message = f"Scene '{scene}' activated: {color} at {brightness}% brightness"
+                    else:
+                        message = f"Failed to activate scene '{scene}'"
                 
             else:
-                message = f"Unknown action: {action}"
+                message = f"Unknown action: {action} (target: {target})"
                 logger.warning(f"⚠️ {message}")
+                logger.warning(f"🔍 Debug: action='{action}', target='{target}', available actions: play_mood, stop_music, pause_music, set_ambiance_lighting, set_scene")
             
             # Send response
             status = "success" if success else "error"
