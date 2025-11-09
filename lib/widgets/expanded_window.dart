@@ -4,7 +4,7 @@ import '../services/ai_service.dart';
 import '../services/voice_activation_service.dart';
 import '../screens/usage_stats_screen.dart';
 import '../screens/mind_map_screen.dart';
-import '../screens/voice_training_screen.dart';
+import '../screens/overlay_home_remote_screen.dart';
 import 'debug_button.dart';
 import 'memory_chips.dart';
 
@@ -135,7 +135,7 @@ class _ExpandedWindowState extends State<ExpandedWindow> with SingleTickerProvid
                 _buildChatTab(),
                 _buildPersonalityTab(),
                 _buildAnalyticsTab(),
-                _buildVoiceTrainingTab(),
+                _buildHomeRemoteTab(),
               ],
             ),
           ),
@@ -213,8 +213,8 @@ class _ExpandedWindowState extends State<ExpandedWindow> with SingleTickerProvid
             text: 'Analytics',
           ),
           Tab(
-            icon: Icon(Icons.record_voice_over),
-            text: 'Voice',
+            icon: Icon(Icons.home),
+            text: 'Home',
           ),
         ],
       ),
@@ -741,7 +741,7 @@ class _ExpandedWindowState extends State<ExpandedWindow> with SingleTickerProvid
     return const UsageStatsScreen();
   }
 
-  Widget _buildVoiceTrainingTab() {
+  Widget _buildHomeRemoteTab() {
     return Container(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -756,14 +756,14 @@ class _ExpandedWindowState extends State<ExpandedWindow> with SingleTickerProvid
                   shape: BoxShape.circle,
                   gradient: RadialGradient(
                     colors: [
-                      const Color(0xFFD4AF37).withOpacity(0.3),
-                      const Color(0xFFD4AF37).withOpacity(0.1),
+                      const Color(0xFF4CAF50).withOpacity(0.3),
+                      const Color(0xFF4CAF50).withOpacity(0.1),
                     ],
                   ),
                 ),
                 child: const Icon(
-                  Icons.record_voice_over,
-                  color: Color(0xFFD4AF37),
+                  Icons.home,
+                  color: Color(0xFF4CAF50),
                   size: 24,
                 ),
               ),
@@ -773,15 +773,15 @@ class _ExpandedWindowState extends State<ExpandedWindow> with SingleTickerProvid
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Voice Recognition Training',
+                      'Home Remote Control',
                       style: TextStyle(
-                        color: Color(0xFFD4AF37),
+                        color: Color(0xFF4CAF50),
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
                     Text(
-                      'Enhance voice recognition accuracy',
+                      'Control audio, lights and smart home devices',
                       style: TextStyle(
                         color: Colors.white70,
                         fontSize: 14,
@@ -795,19 +795,19 @@ class _ExpandedWindowState extends State<ExpandedWindow> with SingleTickerProvid
           
           const SizedBox(height: 24),
           
-          // Voice training content - embed the full screen
+          // Home Remote Control content - embed the full screen
           Expanded(
             child: Container(
               decoration: BoxDecoration(
                 color: Colors.black.withOpacity(0.3),
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
-                  color: const Color(0xFFD4AF37).withOpacity(0.2),
+                  color: const Color(0xFF4CAF50).withOpacity(0.2),
                 ),
               ),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(12),
-                child: const VoiceTrainingScreen(),
+                child: const OverlayHomeRemoteScreen(),
               ),
             ),
           ),
