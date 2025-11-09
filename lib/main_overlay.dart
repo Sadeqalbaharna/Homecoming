@@ -19,6 +19,7 @@ import 'services/secure_storage_service.dart';
 import 'services/firebase_service.dart';
 import 'services/curiosity_service.dart';
 import 'services/proactive_service.dart';
+import 'screens/voice_training_screen.dart';
 import 'screens/overlay_home_remote_screen.dart';
 import 'services/voice_activation_service.dart';
 import 'screens/personality_screen.dart';
@@ -760,6 +761,23 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
     print('📱 [EXPANDED] Expanded window closed!');
   }
 
+  // Open voice training screen
+  Future<void> _openVoiceTraining() async {
+    print('🎤 [VOICE TRAINING] Opening voice training screen...');
+    
+    // Close overlay menu
+    setState(() {
+      _showMenu = false;
+    });
+    
+    // Navigate to voice training screen
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => const VoiceTrainingScreen(),
+      ),
+    );
+  }
+
   // Initialize Firebase and test connection
   Future<void> _initializeFirebase() async {
     try {
@@ -1437,6 +1455,7 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
     required double radius,
     required IconData icon,
     required VoidCallback onTap,
+    VoidCallback? onLongPress, // Optional long press callback
     Color? backgroundColor, // Optional custom background color
     Color? iconColor, // Optional custom icon color
   }) {
@@ -1467,6 +1486,7 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
         child: GestureDetector(
           behavior: HitTestBehavior.deferToChild, // Only respond to actual pixels
           onTap: onTap,
+          onLongPress: onLongPress,
           child: ClipOval(
             child: Container(
               width: 52, // Original button size
@@ -1689,6 +1709,11 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
                         
                         // Show feedback
                         print('🎤 [VOICE ACTIVATION] ${newState ? "Enabled" : "Disabled"}');
+                      },
+                      onLongPress: () {
+                        // Long press opens voice training
+                        setState(() => _showMenu = false);
+                        _openVoiceTraining();
                       },
                     ),
                     

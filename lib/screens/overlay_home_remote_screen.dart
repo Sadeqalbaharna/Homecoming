@@ -6,7 +6,8 @@ class OverlayHomeRemoteScreen extends StatefulWidget {
   const OverlayHomeRemoteScreen({super.key});
 
   @override
-  State<OverlayHomeRemoteScreen> createState() => _OverlayHomeRemoteScreenState();
+  State<OverlayHomeRemoteScreen> createState() =>
+      _OverlayHomeRemoteScreenState();
 }
 
 class _OverlayHomeRemoteScreenState extends State<OverlayHomeRemoteScreen>
@@ -61,9 +62,10 @@ class _OverlayHomeRemoteScreenState extends State<OverlayHomeRemoteScreen>
     {'id': 'off', 'name': '⚫ Off', 'color': Colors.grey, 'icon': '🌑'},
   ];
 
-  Future<void> _sendCommand(String target, String action, Map<String, dynamic> params) async {
+  Future<void> _sendCommand(
+      String target, String action, Map<String, dynamic> params) async {
     setState(() => _isLoading = true);
-    
+
     try {
       final success = await HomeAutomationService().sendCommand(
         personaId: 'truekai',
@@ -72,14 +74,13 @@ class _OverlayHomeRemoteScreenState extends State<OverlayHomeRemoteScreen>
         action: action,
         params: params,
       );
-      
+
       if (mounted) {
         setState(() {
-          _statusMessage = success 
-            ? '✅ Command sent successfully!'
-            : '❌ Command failed';
+          _statusMessage =
+              success ? '✅ Command sent successfully!' : '❌ Command failed';
         });
-        
+
         HapticFeedback.lightImpact();
       }
     } catch (e) {
@@ -171,7 +172,7 @@ class _OverlayHomeRemoteScreenState extends State<OverlayHomeRemoteScreen>
               ],
             ),
           ),
-          
+
           // Status Bar
           Container(
             width: double.infinity,
@@ -279,9 +280,9 @@ class _OverlayHomeRemoteScreenState extends State<OverlayHomeRemoteScreen>
                   icon: Icons.bolt,
                   label: 'Energetic',
                   color: Colors.orange,
-                  onPressed: _isLoading 
-                    ? null 
-                    : () => _playMoodPlaylist('energetic', 'Energetic'),
+                  onPressed: _isLoading
+                      ? null
+                      : () => _playMoodPlaylist('energetic', 'Energetic'),
                 ),
               ),
               const SizedBox(width: 12),
@@ -295,9 +296,9 @@ class _OverlayHomeRemoteScreenState extends State<OverlayHomeRemoteScreen>
               ),
             ],
           ),
-          
+
           const SizedBox(height: 24),
-          
+
           // Mood Playlists Section
           const Text(
             '🎭 Mood Playlists',
@@ -308,7 +309,7 @@ class _OverlayHomeRemoteScreenState extends State<OverlayHomeRemoteScreen>
             ),
           ),
           const SizedBox(height: 12),
-          
+
           GridView.builder(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
@@ -328,9 +329,9 @@ class _OverlayHomeRemoteScreenState extends State<OverlayHomeRemoteScreen>
               );
             },
           ),
-          
+
           const SizedBox(height: 24),
-          
+
           // Individual Songs Section
           const Text(
             '🎶 Individual Songs',
@@ -341,7 +342,7 @@ class _OverlayHomeRemoteScreenState extends State<OverlayHomeRemoteScreen>
             ),
           ),
           const SizedBox(height: 12),
-          
+
           ...List.generate(_songs.length, (index) {
             final song = _songs[index];
             return Padding(
@@ -372,9 +373,9 @@ class _OverlayHomeRemoteScreenState extends State<OverlayHomeRemoteScreen>
                   icon: Icons.lightbulb,
                   label: 'All On',
                   color: Colors.yellow,
-                  onPressed: _isLoading 
-                    ? null 
-                    : () => _setLightScene('bright', 'Bright'),
+                  onPressed: _isLoading
+                      ? null
+                      : () => _setLightScene('bright', 'Bright'),
                 ),
               ),
               const SizedBox(width: 12),
@@ -383,16 +384,15 @@ class _OverlayHomeRemoteScreenState extends State<OverlayHomeRemoteScreen>
                   icon: Icons.lightbulb_outline,
                   label: 'All Off',
                   color: Colors.grey,
-                  onPressed: _isLoading 
-                    ? null 
-                    : () => _setLightScene('off', 'Off'),
+                  onPressed:
+                      _isLoading ? null : () => _setLightScene('off', 'Off'),
                 ),
               ),
             ],
           ),
-          
+
           const SizedBox(height: 24),
-          
+
           // Light Scenes Section
           const Text(
             '💡 Light Scenes',
@@ -403,7 +403,7 @@ class _OverlayHomeRemoteScreenState extends State<OverlayHomeRemoteScreen>
             ),
           ),
           const SizedBox(height: 12),
-          
+
           GridView.builder(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
@@ -443,7 +443,14 @@ class _OverlayHomeRemoteScreenState extends State<OverlayHomeRemoteScreen>
             ),
           ),
           const SizedBox(height: 20),
-          
+          _FeatureCard(
+            icon: Icons.record_voice_over,
+            title: 'Voice Training',
+            subtitle: 'Train Kai to recognize your voice',
+            isEnabled: true,
+            onTap: () => _openVoiceTraining(context),
+          ),
+          const SizedBox(height: 12),
           _FeatureCard(
             icon: Icons.thermostat,
             title: 'Climate Control',
@@ -451,7 +458,6 @@ class _OverlayHomeRemoteScreenState extends State<OverlayHomeRemoteScreen>
             isEnabled: false,
           ),
           const SizedBox(height: 12),
-          
           _FeatureCard(
             icon: Icons.security,
             title: 'Security System',
@@ -459,7 +465,6 @@ class _OverlayHomeRemoteScreenState extends State<OverlayHomeRemoteScreen>
             isEnabled: false,
           ),
           const SizedBox(height: 12),
-          
           _FeatureCard(
             icon: Icons.tv,
             title: 'Media Center',
@@ -467,7 +472,6 @@ class _OverlayHomeRemoteScreenState extends State<OverlayHomeRemoteScreen>
             isEnabled: false,
           ),
           const SizedBox(height: 12),
-          
           _FeatureCard(
             icon: Icons.power,
             title: 'Smart Outlets',
@@ -592,9 +596,9 @@ class _SongCard extends StatelessWidget {
           children: [
             Icon(
               Icons.music_note,
-              color: isLoading 
-                ? const Color(0xFFD4AF37).withOpacity(0.3)
-                : const Color(0xFFD4AF37),
+              color: isLoading
+                  ? const Color(0xFFD4AF37).withOpacity(0.3)
+                  : const Color(0xFFD4AF37),
               size: 20,
             ),
             const SizedBox(width: 12),
@@ -614,6 +618,32 @@ class _SongCard extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  void _openVoiceTraining(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A1A),
+        title: const Text(
+          'Voice Training',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: const Text(
+          'Voice training will help Kai recognize your voice better. This feature is coming soon!',
+          style: TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text(
+              'OK',
+              style: TextStyle(color: Color(0xFFD4AF37)),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -674,75 +704,80 @@ class _FeatureCard extends StatelessWidget {
   final String title;
   final String subtitle;
   final bool isEnabled;
+  final VoidCallback? onTap;
 
   const _FeatureCard({
     required this.icon,
     required this.title,
     required this.subtitle,
     required this.isEnabled,
+    this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1A1A1A).withOpacity(isEnabled ? 1.0 : 0.5),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: Colors.grey.withOpacity(isEnabled ? 0.3 : 0.1),
+    return GestureDetector(
+      onTap: isEnabled ? onTap : null,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1A1A1A).withOpacity(isEnabled ? 1.0 : 0.5),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: Colors.grey.withOpacity(isEnabled ? 0.3 : 0.1),
+          ),
         ),
-      ),
-      child: Row(
-        children: [
-          Icon(
-            icon,
-            color: isEnabled 
-              ? const Color(0xFFD4AF37)
-              : Colors.grey.withOpacity(0.5),
-            size: 24,
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: TextStyle(
-                    color: isEnabled ? Colors.white : Colors.white38,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  subtitle,
-                  style: TextStyle(
-                    color: isEnabled ? Colors.white70 : Colors.white24,
-                    fontSize: 14,
-                  ),
-                ),
-              ],
+        child: Row(
+          children: [
+            Icon(
+              icon,
+              color: isEnabled
+                  ? const Color(0xFFD4AF37)
+                  : Colors.grey.withOpacity(0.5),
+              size: 24,
             ),
-          ),
-          if (!isEnabled)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: Colors.orange.withOpacity(0.2),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Text(
-                'Soon',
-                style: TextStyle(
-                  color: Colors.orange,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
-                ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      color: isEnabled ? Colors.white : Colors.white38,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      color: isEnabled ? Colors.white70 : Colors.white24,
+                      fontSize: 14,
+                    ),
+                  ),
+                ],
               ),
             ),
-        ],
+            if (!isEnabled)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Text(
+                  'Soon',
+                  style: TextStyle(
+                    color: Colors.orange,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }

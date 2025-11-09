@@ -211,7 +211,7 @@ class _VoiceTrainingScreenState extends State<VoiceTrainingScreen> with TickerPr
         _isProcessing = false;
       });
       
-      await Future.delayed(const Duration(seconds: 2));
+      await Future.delayed(const Duration(seconds: 5));
       if (mounted) {
         setState(() {
           _feedbackMessage = '';
@@ -235,7 +235,7 @@ class _VoiceTrainingScreenState extends State<VoiceTrainingScreen> with TickerPr
         _feedbackMessage = 'Phase ${_currentPhase + 1} complete! Moving to ${_phaseNames[_currentPhase]}';
       });
       
-      await Future.delayed(const Duration(seconds: 2));
+      await Future.delayed(const Duration(seconds: 4));
       
       if (_currentPhase == 2) {
         // Analysis phase
@@ -1005,13 +1005,24 @@ class _VoiceTrainingScreenState extends State<VoiceTrainingScreen> with TickerPr
           
           if (_feedbackMessage.isNotEmpty) ...[
             const SizedBox(height: 12),
-            Text(
-              _feedbackMessage,
-              style: const TextStyle(
-                color: Colors.white70,
-                fontSize: 16,
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: const Color(0xFF2A2A2A),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: const Color(0xFFD4AF37).withOpacity(0.3),
+                ),
               ),
-              textAlign: TextAlign.center,
+              child: Text(
+                _feedbackMessage,
+                style: const TextStyle(
+                  color: Color(0xFFD4AF37),
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+                textAlign: TextAlign.center,
+              ),
             ),
           ],
           
