@@ -1,0 +1,27 @@
+[Unit]
+Description=Firebase REST Listener with WS2812B LED Control
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi
+ExecStart=/usr/bin/python3 /home/pi/firebase_rest_listener_debug.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# Environment variables
+Environment=PYTHONPATH=/home/pi
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# WS2812B requires root access for GPIO
+# If you need root privileges for LED control, uncomment below:
+# User=root
+# Group=root
+
+[Install]
+WantedBy=multi-user.target

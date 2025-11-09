@@ -684,6 +684,76 @@ class FirebaseRestListener:
                 else:
                     message = "Failed to set ambiance lighting"
                 
+            elif action == "set_scene" and target == "lights":
+                logger.info("🎨 Scene lighting command")
+                scene = command_data.get("scene", "default")
+                
+                # Map scenes to lighting configurations
+                scene_configs = {
+                    "bright": {
+                        "color": "white",
+                        "brightness": 90,
+                        "effect": "solid"
+                    },
+                    "dim": {
+                        "color": "warm_white", 
+                        "brightness": 20,
+                        "effect": "solid"
+                    },
+                    "warm": {
+                        "color": "warm_white",
+                        "brightness": 60,
+                        "effect": "solid"
+                    },
+                    "cool": {
+                        "color": "white",
+                        "brightness": 70,
+                        "effect": "solid"
+                    },
+                    "night": {
+                        "color": "red",
+                        "brightness": 10,
+                        "effect": "solid"
+                    },
+                    "reading": {
+                        "color": "white",
+                        "brightness": 85,
+                        "effect": "solid"
+                    },
+                    "relax": {
+                        "color": "amber",
+                        "brightness": 40,
+                        "effect": "slow_fade"
+                    },
+                    "party": {
+                        "color": "rainbow",
+                        "brightness": 80,
+                        "effect": "color_cycle"
+                    },
+                    "off": {
+                        "color": "white",
+                        "brightness": 0,
+                        "effect": "solid"
+                    }
+                }
+                
+                lighting_config = scene_configs.get(scene.lower(), scene_configs["warm"])
+                
+                logger.info(f"🎨 Setting scene '{scene}' -> {lighting_config}")
+                
+                success = self.set_ambiance_lighting(lighting_config, {
+                    "profile": f"{scene.title()} Scene",
+                    "description": f"Basic {scene} lighting scene",
+                    "confidence": 1.0
+                })
+                
+                if success:
+                    color = lighting_config.get("color", "unknown")
+                    brightness = lighting_config.get("brightness", 50)
+                    message = f"Scene '{scene}' activated: {color} at {brightness}% brightness"
+                else:
+                    message = f"Failed to activate scene '{scene}'"
+                
             else:
                 message = f"Unknown action: {action}"
                 logger.warning(f"⚠️ {message}")
