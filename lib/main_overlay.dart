@@ -19,6 +19,7 @@ import 'services/secure_storage_service.dart';
 import 'services/firebase_service.dart';
 import 'services/curiosity_service.dart';
 import 'services/proactive_service.dart';
+import 'screens/overlay_home_remote_screen.dart';
 import 'services/voice_activation_service.dart';
 import 'screens/personality_screen.dart';
 import 'screens/usage_stats_screen.dart';
@@ -1546,111 +1547,30 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
     print('✅ [VOICE TRAINING] Opened in expanded window');
   }
 
-  /// Open Pi music controls
-  Future<void> _openMusicControls() async {
+  /// Open comprehensive home remote control interface
+  Future<void> _openHomeRemoteControls() async {
     HapticFeedback.mediumImpact();
     
-    // Show music control dialog
+    // Open expanded window with home remote screen
+    setState(() {
+      _expandedWindowInitialTab = 0; // Will be overridden by custom screen
+      _showExpandedWindow = true;
+    });
+    
+    // Show full-screen home remote interface
     showDialog(
       context: context,
-      builder: (context) => Dialog(
-        backgroundColor: Colors.black.withOpacity(0.9),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        child: Container(
-          width: 300,
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Header
-              Row(
-                children: [
-                  const Icon(Icons.music_note, color: Colors.purple, size: 24),
-                  const SizedBox(width: 8),
-                  const Text(
-                    '🎵 Pi Music Controls',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const Spacer(),
-                  IconButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    icon: const Icon(Icons.close, color: Colors.white70),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                '🎧 Bluetooth audio ready!',
-                style: TextStyle(color: Colors.white70, fontSize: 14),
-              ),
-              const SizedBox(height: 20),
-              // Quick controls
-              Row(
-                children: [
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: () async {
-                        Navigator.of(context).pop();
-                        await _playMusicCommand('energetic');
-                      },
-                      icon: const Icon(Icons.bolt),
-                      label: const Text('Energetic'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.orange,
-                        foregroundColor: Colors.white,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: () async {
-                        Navigator.of(context).pop();
-                        await _stopMusicCommand();
-                      },
-                      icon: const Icon(Icons.stop),
-                      label: const Text('Stop'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.red,
-                        foregroundColor: Colors.white,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
+      barrierDismissible: false,
+      builder: (context) => Dialog.fullscreen(
+        backgroundColor: Colors.transparent,
+        child: const OverlayHomeRemoteScreen(),
       ),
     );
     
-    print('🎵 [MUSIC] Opened controls dialog');
+    print('� [HOME REMOTE] Opened full interface');
   }
 
-  /// Play music command
-  Future<void> _playMusicCommand(String mood) async {
-    try {
-      // You can add HomeAutomationService call here
-      print('🎵 [MUSIC] Playing $mood playlist');
-      // TODO: Add actual Pi communication
-    } catch (e) {
-      print('❌ [MUSIC] Error: $e');
-    }
-  }
 
-  /// Stop music command  
-  Future<void> _stopMusicCommand() async {
-    try {
-      print('🛑 [MUSIC] Stopping playback');
-      // TODO: Add actual Pi communication  
-    } catch (e) {
-      print('❌ [MUSIC] Stop error: $e');
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -1835,16 +1755,16 @@ class _OverlayWidgetState extends State<OverlayWidget> with TickerProviderStateM
                       },
                     ),
                     
-                    // Pi Music Controls button (top-left) - opens music dialog
+                    // Home Remote Controls button (top-left) - opens full home control interface
                     _buildCircularButton(
                       angle: -135,
                       radius: 68, // Wrapped tightly around avatar
-                      icon: Icons.music_note,
-                      backgroundColor: const Color(0xFF9C27B0), // Purple background for music
-                      iconColor: Colors.white, // White icon on purple background
+                      icon: Icons.home,
+                      backgroundColor: const Color(0xFF4CAF50), // Green background for home
+                      iconColor: Colors.white, // White icon on green background
                       onTap: () async {
                         setState(() => _showMenu = false);
-                        await _openMusicControls();
+                        await _openHomeRemoteControls();
                       },
                     ),
                   ],
