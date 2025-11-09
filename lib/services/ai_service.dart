@@ -886,8 +886,7 @@ Text:
   }) async {
     // 🧠 START BRAIN TRACE
     final debugService = BrainDebugService();
-    final trace = debugService.startTrace(text);
-    final traceTimer = BrainTimer();
+    debugService.startTrace(text);
     
     debugService.addStep(
       BrainPhase.processing,
@@ -1002,9 +1001,92 @@ Text:
       }
     }
     
-    // NEW: Check for ambiance requests and handle them
+    // 🎮 NEW: Check for GM Kai trigger mode first
+    final isGMMode = _isGMKaiTrigger(text);
+    String processedText = text;
+    
+    if (isGMMode) {
+      debugService.addStep(
+        BrainPhase.processing,
+        'GM Kai mode detected - direct house control activated',
+        data: {'original_input': text},
+      );
+      
+      processedText = _extractGMCommand(text);
+      print('🎮 [AI_SERVICE] GM Kai mode activated! Command: "$processedText"');
+      
+      // In GM mode, force ambiance/house control processing
+      final ambianceService = AmbianceService();
+      final gmAmbianceMatch = ambianceService.analyzeVoiceCommand(processedText);
+      
+      if (gmAmbianceMatch != null) {
+        debugService.addStep(
+          BrainPhase.processing,
+          'GM mode ambiance control triggered',
+          data: {
+            'profile': gmAmbianceMatch.profile,
+            'confidence': gmAmbianceMatch.confidence,
+            'command': processedText,
+          },
+        );
+        
+        print('🎮 [AI_SERVICE] GM mode executing ${gmAmbianceMatch.profile} (${(gmAmbianceMatch.confidence * 100).toStringAsFixed(1)}% confidence)');
+        
+        // Execute the ambiance
+        final success = await ambianceService.setAmbiance(
+          profile: gmAmbianceMatch.profile,
+          originalInput: processedText,
+          confidence: gmAmbianceMatch.confidence,
+        );
+        
+        if (success) {
+          // Generate GM Kai response about the control
+          final gmResponse = _generateGMKaiResponse(processedText, gmAmbianceMatch.profile);
+          
+          print('✅ [AI_SERVICE] GM mode control successful, returning response');
+          
+          // Complete trace
+          debugService.completeTrace(gmResponse);
+          
+          // Return the GM control response directly
+          return ChatResponse(
+            reply: gmResponse,
+            raw: {
+              'model': model,
+              'gm_mode': true,
+              'executed_profile': gmAmbianceMatch.profile,
+              'confidence': gmAmbianceMatch.confidence,
+              'original_command': text,
+              'processed_command': processedText,
+            },
+            personalityDelta: <String, int>{},
+            moodDelta: <String, int>{},
+            actualDeltas: <String, int>{},
+            tags: ['gm_mode', 'house_control', gmAmbianceMatch.profile],
+            mbti: personality['mbti']?.toString() ?? 'UNKNOWN',
+            webUsed: false,
+            memoriesUsed: [],
+            debugInfo: {
+              'gm_mode': true,
+              'executed_profile': gmAmbianceMatch.profile,
+              'gm_confidence': gmAmbianceMatch.confidence,
+              'original_command': text,
+              'processed_command': processedText,
+              'processing_time_ms': DateTime.now().millisecondsSinceEpoch,
+              'direct_house_control': true,
+            },
+            webSearchUsed: false,
+            searchResults: [],
+          );
+        } else {
+          print('❌ [AI_SERVICE] GM mode control failed, continuing with enhanced prompt');
+        }
+      }
+    }
+
+    // NEW: Check for ambiance requests and handle them (normal mode)
     final ambianceService = AmbianceService();
-    final ambianceMatch = ambianceService.analyzeVoiceCommand(text);
+    final ambianceMatch = !isGMMode ? ambianceService.analyzeVoiceCommand(processedText) : null;
     
     if (ambianceMatch != null) {
       debugService.addStep(
@@ -1321,11 +1403,34 @@ Don't force it - only ask if the flow of conversation makes it appropriate.''';
       }
     }
     
-    // Build system prompt
+    // Build system prompt - use GM Kai mode if triggered
     final mbti = calculateMBTI(personality);
+    final personalityMoodSummary = generatePersonalityMoodSummary(personality, mood);
     
-    // Base context about the project (temporary until memory system works)
-    const projectContext = '''
+    String systemPrompt;
+    
+    if (isGMMode) {
+      // Use GM Kai system prompt for direct house control
+      systemPrompt = _buildGMKaiSystemPrompt(processedText, personality, mood);
+      
+      // Add any available context in GM mode too
+      if (webContext.isNotEmpty) {
+        systemPrompt += '\n\n🌐 LIVE CONTEXT: $webContext';
+      }
+      if (urlContext.isNotEmpty) {
+        systemPrompt += '\n\n📄 WEB CONTENT: $urlContext';
+      }
+      
+      debugService.addStep(
+        BrainPhase.reasoning,
+        'Using GM Kai system prompt',
+        data: {'prompt_length': systemPrompt.length, 'command': processedText},
+      );
+      
+    } else {
+      // Use normal Kai system prompt
+      // Base context about the project (temporary until memory system works)
+      const projectContext = '''
 
 📱 PROJECT CONTEXT:
 You're integrated into the "Homecoming" app - a Flutter-based conversational AI companion that Sadeq is building. This app features:
@@ -1341,8 +1446,8 @@ You're integrated into the "Homecoming" app - a Flutter-based conversational AI 
 Sadeq is the developer building this system. He's working on enhancing your memory capabilities, personality evolution, and emotional intelligence. When he asks about "the app" or "the project," he's referring to Homecoming - the very app you're running in.
 ''';
 
-    // User preferences and constraints (always included for consistency)
-    const constraintsBlock = '''
+      // User preferences and constraints (always included for consistency)
+      const constraintsBlock = '''
 
 📋 USER PREFERENCES & CONSTRAINTS:
 - Units: Metric system (kg for weight, cm for height, °C for temperature)
@@ -1353,12 +1458,31 @@ Sadeq is the developer building this system. He's working on enhancing your memo
 - Wake word: "Hey Kai" or "Kai"
 ''';
 
-    // Generate personality and mood summary
-    final personalityMoodSummary = generatePersonalityMoodSummary(personality, mood);
-    
-    final systemPrompt = '''
+      // Use the already generated personality and mood summary
+      
+      systemPrompt = '''
 You are Kai: warm, witty, emotionally attuned AI companion.
 Answer concisely and helpfully.${webContext.isNotEmpty ? '\n\nIf WEB CONTEXT is provided, **treat it as the source of truth** for time-sensitive or factual claims and cite as [1], [2], etc. If not relevant, ignore it.' : ''}${urlContext.isNotEmpty ? '\n\nIf WEB PAGE CONTENT is provided, use it to answer questions about the specific pages. Cite sources and summarize key points.' : ''}
+
+🎵 SMART HOME CONTROL CAPABILITIES:
+You can control a Raspberry Pi system for music and lighting! When users request:
+- Music: "play relaxing music", "I need energetic beats", "play something calm"
+- Ambiance: "set forest ambiance", "give me ocean vibes", "romantic lighting"
+- Lighting: "set the mood", "cozy lights please", "party lighting"
+
+Available ambiance profiles with coordinated music + lighting:
+• Forest (green lights + nature sounds) - keywords: forest, nature, trees, woods
+• Ocean (blue lights + wave sounds) - keywords: ocean, sea, waves, beach, water  
+• Romantic (amber lights + classical) - keywords: romantic, intimate, dinner, love
+• Party (rainbow lights + energetic) - keywords: party, celebration, dance, fun
+• Focus (white lights + concentration) - keywords: focus, work, study, productivity
+• Sunset (orange lights + ambient) - keywords: sunset, evening, warm, golden
+• Cozy (warm lights + comfortable) - keywords: cozy, comfortable, relaxing, home
+• Energetic (yellow lights + upbeat) - keywords: energetic, motivated, active
+
+When someone asks for music or ambiance, respond enthusiastically and mention you're setting it up!
+Example: "Perfect! I'm setting up a peaceful forest ambiance with gentle green lighting and nature sounds for you. 🌲"
+
 $projectContext$constraintsBlock
 
 $personalityMoodSummary
@@ -1366,6 +1490,7 @@ ${adaptUser ? '\n💫 AFFINITY: Intimacy level ${affinity['intimacy']}/100, Phys
 
 Recent conversation:
 ${history.join('\n')}$memoryContext$urlContext$webContext$curiosityPrompt''';
+    }
 
     print('📤 [SEND MESSAGE] Calling OpenAI...');
     debugService.addStep(
@@ -1381,10 +1506,11 @@ ${history.join('\n')}$memoryContext$urlContext$webContext$curiosityPrompt''';
       },
     );
     
-    // Get AI response
+    // Get AI response - use processed text for GM mode
+    final userMessage = isGMMode ? processedText : text;
     final reply = await _callOpenAI([
       {"role": "system", "content": systemPrompt},
-      {"role": "user", "content": text}
+      {"role": "user", "content": userMessage}
     ], model);
     print('📥 [SEND MESSAGE] OpenAI response received: ${reply.length} characters');
     
@@ -1396,6 +1522,9 @@ ${history.join('\n')}$memoryContext$urlContext$webContext$curiosityPrompt''';
         'responsePreview': reply.length > 150 ? '${reply.substring(0, 150)}...' : reply,
       },
     );
+
+    // 🎵 NEW: Check if Kai mentioned setting up ambiance and actually trigger it
+    await _detectAndTriggerAmbianceFromReply(reply, processedText, debugService);
 
     // Track if curiosity question was asked
     if (selectedQuestion != null) {
@@ -1494,12 +1623,13 @@ ${history.join('\n')}$memoryContext$urlContext$webContext$curiosityPrompt''';
       data: {
         'personaId': personaId,
         'personalityDeltas': actualDeltas,
+        'gm_mode': isGMMode,
       },
     );
     
     await FirebaseService.saveConversation(
       personaId: personaId,
-      userMessage: text,
+      userMessage: text, // Save original user message for history
       aiResponse: reply,
       personalityDeltas: actualDeltas,
     );
@@ -1611,6 +1741,13 @@ ${history.join('\n')}$memoryContext$urlContext$webContext$curiosityPrompt''';
         'current_intimacy': affinity['intimacy'],
         'current_physicality': affinity['physicality'],
         'adapt_user': adaptUser,
+      },
+      'gm_mode': { // NEW: GM Kai mode debug info
+        'enabled': isGMMode,
+        'original_input': text,
+        'processed_command': processedText,
+        'trigger_detected': isGMMode,
+        'system_prompt_type': isGMMode ? 'GM_Kai_Direct_Control' : 'Standard_Kai',
       },
       'system_prompt': systemPrompt,
       'conversation_history_turns': history.length,
@@ -1780,5 +1917,285 @@ ${history.join('\n')}$memoryContext$urlContext$webContext$curiosityPrompt''';
   /// Clear web fetch cache
   void clearWebCache() {
     _webFetch.clearCache();
+  }
+
+  /// Detect GM Kai trigger for direct house control mode
+  bool _isGMKaiTrigger(String input) {
+    final lowerInput = input.toLowerCase().trim();
+    
+    // Direct GM Kai triggers
+    final gmTriggers = [
+      'gm kai',
+      'game master kai', 
+      'gamemaster kai',
+      'g.m. kai',
+      'gm, kai',
+      'hey gm kai',
+      'gm kai,',
+    ];
+    
+    // Check if input starts with or contains GM triggers
+    for (final trigger in gmTriggers) {
+      if (lowerInput.startsWith(trigger) || lowerInput.contains(trigger)) {
+        return true;
+      }
+    }
+    
+    return false;
+  }
+
+  /// Extract command from GM Kai trigger
+  String _extractGMCommand(String input) {
+    final lowerInput = input.toLowerCase().trim();
+    
+    // Remove GM Kai triggers to get the actual command
+    final gmTriggers = [
+      'gm kai',
+      'game master kai',
+      'gamemaster kai', 
+      'g.m. kai',
+      'gm, kai',
+      'hey gm kai',
+      'gm kai,',
+    ];
+    
+    String command = input;
+    for (final trigger in gmTriggers) {
+      if (lowerInput.startsWith(trigger.toLowerCase())) {
+        // Remove trigger from start
+        command = input.substring(trigger.length).trim();
+        // Remove leading comma or punctuation
+        if (command.startsWith(',') || command.startsWith(':') || command.startsWith('.')) {
+          command = command.substring(1).trim();
+        }
+        break;
+      } else if (lowerInput.contains(trigger.toLowerCase())) {
+        // Replace trigger in middle/end
+        command = input.replaceFirst(RegExp(trigger, caseSensitive: false), '').trim();
+        // Clean up extra spaces
+        command = command.replaceAll(RegExp(r'\s+'), ' ').trim();
+        break;
+      }
+    }
+    
+    return command.isNotEmpty ? command : input;
+  }
+
+  /// Generate GM Kai system prompt for direct house control
+  String _buildGMKaiSystemPrompt(
+    String command,
+    Map<String, int> personality,
+    Map<String, int> mood,
+  ) {
+    final personalityMoodSummary = generatePersonalityMoodSummary(personality, mood);
+    
+    return '''
+🎮 GM KAI MODE - DIRECT HOUSE CONTROL ACTIVATED
+
+You are GM Kai: Game Master of the smart home. The user has triggered direct house control mode.
+When they say "GM Kai" they want immediate, direct control of home automation systems.
+
+🏠 DIRECT CONTROL CAPABILITIES:
+You have IMMEDIATE control over:
+- 🎵 Music System: 7 tracks with intelligent selection
+- 💡 Smart Lighting: Color, brightness, effects for any mood
+- 🎭 Ambiance Profiles: Coordinated music + lighting scenes
+- 🎛️ Environmental Controls: Full home automation access
+
+⚡ GM RESPONSE STYLE:
+- Act like a game master managing the physical environment
+- Be direct and action-oriented 
+- Confirm what you're doing as you do it
+- Use gaming/control terminology ("Activating...", "Setting up...", "Configuring...")
+- Acknowledge your control over the physical space
+
+🎯 CURRENT COMMAND TO EXECUTE:
+"$command"
+
+Available ambiance profiles for instant activation:
+• Forest (green + nature) - "forest", "nature", "trees", "woods"
+• Ocean (blue + waves) - "ocean", "sea", "waves", "water"  
+• Romantic (amber + classical) - "romantic", "intimate", "dinner", "love"
+• Party (rainbow + energetic) - "party", "celebration", "dance", "fun"
+• Focus (white + concentration) - "focus", "work", "study", "productivity"
+• Sunset (orange + ambient) - "sunset", "evening", "warm", "golden"
+• Cozy (warm white + comfort) - "cozy", "comfortable", "relaxing", "home"
+• Energetic (yellow + upbeat) - "energetic", "motivated", "active", "workout"
+
+🎵 Individual Music Tracks:
+• Track 1: Relaxing/Nature sounds
+• Track 2: Energetic/Upbeat music  
+• Track 3: Focus/Concentration music
+• Track 4: Happy/Cheerful music
+• Track 5: Ambient/Background music
+• Track 6: Classical/Romantic music
+• Track 7: Ocean/Water sounds
+
+💡 Lighting Controls:
+• Colors: red, green, blue, orange, purple, yellow, white, warm_white, light_green, deep_blue, amber, rainbow
+• Brightness: 0-100%
+• Effects: solid, gentle_pulse, wave, slow_fade, candle_flicker, color_cycle
+
+🎮 GM MODE COMMANDS:
+- Music: "play [mood/track]", "change music", "stop music"
+- Lights: "set [color] lights", "dim/brighten lights", "party lights"
+- Ambiance: "activate [profile]", "[profile] mode", "set [mood] ambiance"
+- Control: "house status", "reset everything", "gaming mode"
+
+$personalityMoodSummary
+
+Execute the command immediately and report what you're doing as GM of this smart home system.''';
+  }
+
+  /// Generate GM Kai response style
+  String _generateGMKaiResponse(String command, String? executedProfile) {
+    final responses = [
+      "🎮 GM Kai here - I've got control of your environment.",
+      "🎛️ House systems under my command. Executing your request now.",
+      "⚡ GM Kai taking control of the smart home setup.",
+      "🏠 Game Master mode active - managing your space perfectly.",
+      "🎯 Command received, GM Kai is optimizing your environment.",
+    ];
+    
+    String baseResponse = responses[Random().nextInt(responses.length)];
+    
+    if (executedProfile != null) {
+      final profileResponses = {
+        'forest': 'Activating forest sanctuary with green ambiance and nature sounds. 🌲',
+        'ocean': 'Setting up oceanic environment with blue waves and sea sounds. 🌊',
+        'romantic': 'Creating romantic atmosphere with amber candlelight and classical music. 💕',
+        'party': 'Party mode engaged! Rainbow lights and energetic beats activated. 🎉',
+        'focus': 'Productivity zone configured with bright white light and focus music. 💡',
+        'sunset': 'Golden hour ambiance with warm orange glow and peaceful sounds. 🌅',
+        'cozy': 'Cozy home mode set with comfortable lighting and ambient sounds. 🏠',
+        'energetic': 'High-energy environment with bright yellow lights and motivating music. ⚡',
+      };
+      
+      final profileResponse = profileResponses[executedProfile.toLowerCase()];
+      if (profileResponse != null) {
+        baseResponse += '\n\n$profileResponse';
+      }
+    }
+    
+    return baseResponse;
+  }
+
+  /// Detect ambiance mentions in Kai's reply and trigger actual control
+  Future<void> _detectAndTriggerAmbianceFromReply(
+    String reply, 
+    String originalInput, 
+    dynamic debugService
+  ) async {
+    try {
+      final lowerReply = reply.toLowerCase();
+      
+      // Check if Kai mentioned setting up ambiance or music
+      final ambianceIndicators = [
+        'setting up', 'creating', 'activating', 'i\'m setting', 
+        'perfect!', 'ambiance', 'lighting', 'music', 'atmosphere',
+        'environment', 'mood', 'sounds', 'beats'
+      ];
+      
+      bool mentionedAmbiance = ambianceIndicators.any((indicator) => 
+        lowerReply.contains(indicator));
+      
+      if (!mentionedAmbiance) {
+        print('🎭 [AI_SERVICE] No ambiance mention detected in reply');
+        return;
+      }
+      
+      debugService?.addStep(
+        'BrainPhase.processing', // Using string since we can't import the enum
+        'Detected ambiance mention in reply - triggering actual control',
+        data: {'reply_preview': reply.length > 100 ? '${reply.substring(0, 100)}...' : reply},
+      );
+      
+      print('🎭 [AI_SERVICE] Detected ambiance mention in Kai\'s reply - analyzing original request');
+      
+      // Analyze the original user input for ambiance
+      final ambianceService = AmbianceService();
+      final ambianceMatch = ambianceService.analyzeVoiceCommand(originalInput);
+      
+      if (ambianceMatch != null) {
+        print('🎭 [AI_SERVICE] Triggering ${ambianceMatch.profile} ambiance (${(ambianceMatch.confidence * 100).toStringAsFixed(1)}% confidence)');
+        
+        // Trigger the actual ambiance
+        final success = await ambianceService.setAmbiance(
+          profile: ambianceMatch.profile,
+          originalInput: originalInput,
+          confidence: ambianceMatch.confidence,
+        );
+        
+        if (success) {
+          print('✅ [AI_SERVICE] Successfully triggered ${ambianceMatch.profile} ambiance');
+          debugService?.addStep(
+            'BrainPhase.processing',
+            'Ambiance control successful',
+            data: {
+              'profile': ambianceMatch.profile,
+              'confidence': ambianceMatch.confidence,
+            },
+          );
+        } else {
+          print('❌ [AI_SERVICE] Failed to trigger ambiance control');
+          debugService?.addStep(
+            'BrainPhase.processing',
+            'Ambiance control failed',
+          );
+        }
+      } else {
+        // If no specific ambiance match, try to infer from Kai's response
+        print('🎭 [AI_SERVICE] No direct ambiance match - attempting to infer from reply');
+        
+        // Simple profile detection from reply
+        final profileMap = {
+          'forest': ['forest', 'green', 'nature', 'trees'],
+          'ocean': ['ocean', 'blue', 'waves', 'sea'],
+          'romantic': ['romantic', 'amber', 'intimate', 'classical'],
+          'party': ['party', 'rainbow', 'energetic', 'dance'],
+          'focus': ['focus', 'white', 'concentration', 'productivity'],
+          'sunset': ['sunset', 'orange', 'warm', 'evening'],
+          'cozy': ['cozy', 'comfortable', 'relaxing'],
+          'energetic': ['energetic', 'motivated', 'bright', 'upbeat'],
+        };
+        
+        String? inferredProfile;
+        for (final entry in profileMap.entries) {
+          if (entry.value.any((keyword) => lowerReply.contains(keyword))) {
+            inferredProfile = entry.key;
+            break;
+          }
+        }
+        
+        if (inferredProfile != null) {
+          print('🎭 [AI_SERVICE] Inferred profile from reply: $inferredProfile');
+          
+          final success = await ambianceService.setAmbiance(
+            profile: inferredProfile,
+            originalInput: originalInput,
+            confidence: 0.7, // Medium confidence for inferred profiles
+          );
+          
+          if (success) {
+            print('✅ [AI_SERVICE] Successfully triggered inferred $inferredProfile ambiance');
+            debugService?.addStep(
+              'BrainPhase.processing',
+              'Inferred ambiance control successful',
+              data: {'inferred_profile': inferredProfile},
+            );
+          }
+        } else {
+          print('⚠️ [AI_SERVICE] Could not infer specific ambiance profile from reply');
+        }
+      }
+      
+    } catch (e) {
+      print('❌ [AI_SERVICE] Error in ambiance detection/triggering: $e');
+      debugService?.addStep(
+        'BrainPhase.processing',
+        'Ambiance detection failed: $e',
+      );
+      // Continue without failing the entire response
+    }
   }
 }

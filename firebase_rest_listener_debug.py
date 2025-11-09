@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 Firebase REST API listener for Pi home automation with Intelligent Music Selection
-Updated with detailed debug logging, improved error handling, and AI-powered track selection
-Integrates with Kai's voice commands for context-aware music playback
+Updated with comprehensive tagging system and intelligent profile matching
+Integrates with Kai's voice commands for context-aware music and lighting control
 """
 
 import requests
@@ -12,6 +12,7 @@ import subprocess
 import logging
 import random
 import os
+from typing import Dict, List, Optional, Tuple
 
 # Configure logging with more detail
 logging.basicConfig(
@@ -19,6 +20,225 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+class IntelligentProfileMatcher:
+    """Intelligent profile matching system for coordinated music and lighting"""
+    
+    def __init__(self):
+        self.profiles = {
+            # Track 1: Nature/Forest Sounds
+            "nature_forest": {
+                "track": 1,
+                "lighting": {"color": "light_green", "brightness": 70, "effect": "gentle_pulse"},
+                "tags": {
+                    "primary": ["nature", "forest", "relaxing", "woods"],
+                    "secondary": ["trees", "peaceful", "calm", "natural", "green", "outdoor"],
+                    "moods": ["zen", "meditation", "stress-relief", "tranquil"],
+                    "activities": ["reading", "studying", "sleeping", "yoga"],
+                    "aliases": ["forest", "woods", "nature", "trees", "outdoor"]
+                },
+                "confidence_boost": ["forest", "nature", "trees", "green"]
+            },
+            
+            # Track 2: Energetic/Upbeat
+            "energetic_upbeat": {
+                "track": 2,
+                "lighting": {"color": "yellow", "brightness": 85, "effect": "gentle_pulse"},
+                "tags": {
+                    "primary": ["energetic", "upbeat", "active", "motivational"],
+                    "secondary": ["dynamic", "powerful", "intense", "bright", "yellow"],
+                    "moods": ["motivated", "excited", "pumped", "confident", "positive"],
+                    "activities": ["workout", "exercise", "cleaning", "dancing", "gaming"],
+                    "aliases": ["energy", "workout", "pump", "active", "motivated"]
+                },
+                "confidence_boost": ["energetic", "workout", "active", "motivated"]
+            },
+            
+            # Track 3: Focus/Concentration
+            "focus_productivity": {
+                "track": 3,
+                "lighting": {"color": "white", "brightness": 80, "effect": "solid"},
+                "tags": {
+                    "primary": ["focus", "concentration", "productivity", "work"],
+                    "secondary": ["study", "clear", "sharp", "white", "bright"],
+                    "moods": ["concentrated", "alert", "determined", "serious"],
+                    "activities": ["working", "studying", "coding", "writing", "analyzing"],
+                    "aliases": ["focus", "work", "study", "concentration", "productivity"]
+                },
+                "confidence_boost": ["focus", "work", "study", "productivity"]
+            },
+            
+            # Track 4: Happy/Cheerful
+            "happy_cheerful": {
+                "track": 4,
+                "lighting": {"color": "orange", "brightness": 75, "effect": "gentle_pulse"},
+                "tags": {
+                    "primary": ["happy", "cheerful", "joyful", "celebration"],
+                    "secondary": ["uplifting", "positive", "warm", "orange", "bright"],
+                    "moods": ["joyful", "festive", "optimistic", "content", "playful"],
+                    "activities": ["celebrating", "socializing", "cooking", "playing"],
+                    "aliases": ["happy", "joy", "celebration", "cheerful", "positive"]
+                },
+                "confidence_boost": ["happy", "cheerful", "celebration", "joy"]
+            },
+            
+            # Track 5: Ambient/Background
+            "ambient_chill": {
+                "track": 5,
+                "lighting": {"color": "purple", "brightness": 45, "effect": "slow_fade"},
+                "tags": {
+                    "primary": ["ambient", "chill", "atmospheric", "background"],
+                    "secondary": ["subtle", "flowing", "ethereal", "purple", "dreamy"],
+                    "moods": ["relaxed", "contemplative", "creative", "flowing"],
+                    "activities": ["creative-work", "art", "thinking", "lounging"],
+                    "aliases": ["ambient", "chill", "atmospheric", "background", "creative"]
+                },
+                "confidence_boost": ["ambient", "chill", "atmospheric", "creative"]
+            },
+            
+            # Track 6: Classical/Romantic
+            "classical_romantic": {
+                "track": 6,
+                "lighting": {"color": "amber", "brightness": 30, "effect": "candle_flicker"},
+                "tags": {
+                    "primary": ["classical", "romantic", "elegant", "sophisticated"],
+                    "secondary": ["intimate", "warm", "amber", "candlelight", "refined"],
+                    "moods": ["romantic", "elegant", "peaceful", "sophisticated", "intimate"],
+                    "activities": ["dinner", "date-night", "relaxing", "reading"],
+                    "aliases": ["romantic", "classical", "elegant", "dinner", "intimate"]
+                },
+                "confidence_boost": ["romantic", "classical", "elegant", "dinner"]
+            },
+            
+            # Track 7: Ocean/Water Sounds
+            "ocean_water": {
+                "track": 7,
+                "lighting": {"color": "deep_blue", "brightness": 60, "effect": "wave"},
+                "tags": {
+                    "primary": ["ocean", "water", "waves", "sea"],
+                    "secondary": ["blue", "flowing", "rhythmic", "deep", "aquatic"],
+                    "moods": ["calm", "meditative", "peaceful", "flowing", "deep"],
+                    "activities": ["meditation", "sleeping", "spa", "relaxing"],
+                    "aliases": ["ocean", "sea", "waves", "water", "beach"]
+                },
+                "confidence_boost": ["ocean", "sea", "waves", "water"]
+            }
+        }
+    
+    def analyze_request(self, user_input: str) -> Optional[Dict]:
+        """Analyze user input and return best matching profile"""
+        clean_input = user_input.lower().replace(",", " ").replace(".", " ").replace("!", " ")
+        user_words = set(word.strip() for word in clean_input.split() if word.strip())
+        
+        best_match = None
+        best_score = 0.0
+        
+        logger.info(f"🔍 Analyzing: '{user_input}' -> words: {sorted(list(user_words))}")
+        
+        for profile_name, profile_data in self.profiles.items():
+            score = self._calculate_match_score(user_words, profile_data)
+            matched_tags = self._get_matched_tags(user_words, profile_data)
+            
+            logger.info(f"🎯 {profile_name}: {score:.3f} - {matched_tags}")
+            
+            if score > best_score:
+                best_score = score
+                best_match = {
+                    "profile_name": profile_name,
+                    "track": profile_data["track"],
+                    "lighting": profile_data["lighting"],
+                    "confidence": score,
+                    "matched_tags": matched_tags
+                }
+        
+        if best_score >= 0.2:  # 20% confidence threshold
+            logger.info(f"✅ Match: {best_match['profile_name']} ({best_score:.1%})")
+            return best_match
+        else:
+            logger.info(f"❌ No confident match (best: {best_score:.1%})")
+            return None
+    
+    def _calculate_match_score(self, user_words: set, profile_data: Dict) -> float:
+        """Calculate match score with enhanced weighting"""
+        tags = profile_data["tags"]
+        total_score = 0.0
+        total_matches = 0
+        
+        # Check all tag categories with different weights
+        primary_matches = len(user_words.intersection(set(tags["primary"])))
+        total_score += primary_matches * 10.0
+        total_matches += primary_matches
+        
+        secondary_matches = len(user_words.intersection(set(tags["secondary"])))
+        total_score += secondary_matches * 6.0
+        total_matches += secondary_matches
+        
+        mood_matches = len(user_words.intersection(set(tags["moods"])))
+        total_score += mood_matches * 6.0
+        total_matches += mood_matches
+        
+        activity_matches = len(user_words.intersection(set(tags["activities"])))
+        total_score += activity_matches * 4.0
+        total_matches += activity_matches
+        
+        confidence_boost_matches = len(user_words.intersection(set(profile_data["confidence_boost"])))
+        total_score += confidence_boost_matches * 15.0
+        total_matches += confidence_boost_matches
+        
+        alias_matches = len(user_words.intersection(set(tags["aliases"])))
+        total_score += alias_matches * 20.0
+        total_matches += alias_matches
+        
+        if total_matches == 0:
+            return 0.0
+        
+        base_score = min(total_score / 100.0, 1.0)
+        
+        # Bonus for match diversity
+        match_types = sum([
+            primary_matches > 0,
+            secondary_matches > 0, 
+            mood_matches > 0,
+            activity_matches > 0,
+            confidence_boost_matches > 0,
+            alias_matches > 0
+        ])
+        
+        diversity_bonus = match_types * 0.1
+        return min(base_score + diversity_bonus, 1.0)
+    
+    def _get_matched_tags(self, user_words: set, profile_data: Dict) -> List[str]:
+        """Get list of matched tags"""
+        matched = []
+        tags = profile_data["tags"]
+        
+        for category in ["primary", "secondary", "moods", "activities", "aliases"]:
+            matched.extend(user_words.intersection(set(tags[category])))
+        
+        matched.extend(user_words.intersection(set(profile_data["confidence_boost"])))
+        return list(set(matched))
+    
+    def detect_gm_kai_mode(self, user_input: str) -> bool:
+        """Detect if user activated GM Kai direct control mode"""
+        lower_input = user_input.lower().strip()
+        
+        # GM Kai triggers
+        gm_triggers = [
+            'gm kai',
+            'game master kai', 
+            'gamemaster kai',
+            'g.m. kai',
+            'gm, kai',
+            'hey gm kai',
+            'gm kai,',
+        ]
+        
+        # Check if input contains GM triggers
+        for trigger in gm_triggers:
+            if lower_input.startswith(trigger) or trigger in lower_input:
+                return True
+        
+        return False
 
 class FirebaseRestListener:
     def __init__(self):
@@ -30,9 +250,13 @@ class FirebaseRestListener:
         # Updated Bluetooth audio device
         self.bluetooth_device = "pulse/bluez_output.FA_B0_2C_56_4E_72.1"
         
-        logger.info("🔥 Firebase REST listener initialized")
+        # Initialize intelligent profile matcher
+        self.profile_matcher = IntelligentProfileMatcher()
+        
+        logger.info("🔥 Firebase REST listener initialized with intelligent profile matching")
         logger.info(f"🎧 Polling for commands at: {self.firebase_url}/home_automation/{self.persona_id}/commands.json")
         logger.info(f"🔊 Bluetooth device: {self.bluetooth_device}")
+        logger.info(f"🎯 Intelligent profiles loaded: {len(self.profile_matcher.profiles)}")
         
     def get_commands(self):
         """Get pending commands from Firebase"""
@@ -372,16 +596,63 @@ class FirebaseRestListener:
                 voice_analysis = command_data.get("voice_analysis")  # Get Kai's voice analysis
                 
                 logger.info(f"🎵 Play mood command - Mood: {mood}, Shuffle: {shuffle}")
+                
+                # 🎯 NEW: Use intelligent profile matching if we have original input
+                intelligent_match = None
+                if voice_analysis and voice_analysis.get("original_input"):
+                    original_input = voice_analysis["original_input"]
+                    logger.info(f"🧠 Using intelligent matching for: '{original_input}'")
+                    
+                    # 🎮 Check if this is a GM Kai command
+                    is_gm_mode = self.profile_matcher.detect_gm_kai_mode(original_input)
+                    if is_gm_mode:
+                        logger.info(f"🎮 GM Kai mode detected! Processing as direct house control")
+                        voice_analysis["gm_mode"] = True
+                        voice_analysis["control_priority"] = "HIGH"  # Prioritize immediate control
+                    
+                    intelligent_match = self.profile_matcher.analyze_request(original_input)
+                    
+                    if intelligent_match:
+                        # Override voice_analysis with intelligent match data
+                        voice_analysis.update({
+                            "selected_track": intelligent_match["track"],
+                            "confidence": intelligent_match["confidence"],
+                            "matched_keywords": intelligent_match["matched_tags"],
+                            "profile_name": intelligent_match["profile_name"]
+                        })
+                        logger.info(f"🎯 Intelligent match: {intelligent_match['profile_name']} -> Track {intelligent_match['track']}")
+                
                 if voice_analysis:
-                    logger.info(f"🤖 Command includes Kai's voice analysis data")
+                    logger.info(f"🤖 Command includes voice analysis data")
                 
                 success = self.play_music(mood, shuffle, voice_analysis)
                 
+                # 💡 NEW: Automatically trigger coordinated lighting for intelligent matches
+                lighting_success = True
+                if success and intelligent_match:
+                    logger.info(f"💡 Triggering coordinated lighting for {intelligent_match['profile_name']}")
+                    lighting_config = intelligent_match["lighting"]
+                    ambiance_analysis = {
+                        "profile": intelligent_match["profile_name"],
+                        "description": f"Intelligent {intelligent_match['profile_name']} profile",
+                        "confidence": intelligent_match["confidence"],
+                        "matched_tags": intelligent_match["matched_tags"]
+                    }
+                    lighting_success = self.set_ambiance_lighting(lighting_config, ambiance_analysis)
+                
                 if success:
-                    if voice_analysis:
+                    if voice_analysis and intelligent_match:
                         track_num = voice_analysis.get('selected_track', 'unknown')
                         confidence = voice_analysis.get('confidence', 0)
-                        message = f"Playing track {track_num} ({mood}) - Kai's intelligent selection ({confidence:.1%} confidence)"
+                        profile_name = voice_analysis.get('profile_name', mood)
+                        lighting_status = "with coordinated lighting" if lighting_success else "with lighting failed"
+                        gm_mode = voice_analysis.get('gm_mode', False)
+                        control_mode = "🎮 GM Kai direct control" if gm_mode else "Intelligent selection"
+                        message = f"Playing track {track_num} ({profile_name}) {lighting_status} - {control_mode} ({confidence:.1%} confidence)"
+                    elif voice_analysis:
+                        track_num = voice_analysis.get('selected_track', 'unknown')
+                        confidence = voice_analysis.get('confidence', 0)
+                        message = f"Playing track {track_num} ({mood}) - Kai's selection ({confidence:.1%} confidence)"
                     else:
                         message = f"Playing {mood} music"
                 else:
