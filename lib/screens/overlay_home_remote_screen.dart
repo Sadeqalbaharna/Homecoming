@@ -444,14 +444,6 @@ class _OverlayHomeRemoteScreenState extends State<OverlayHomeRemoteScreen>
           ),
           const SizedBox(height: 20),
           _FeatureCard(
-            icon: Icons.record_voice_over,
-            title: 'Voice Training',
-            subtitle: 'Train Kai to recognize your voice',
-            isEnabled: true,
-            onTap: () => _openVoiceTraining(context),
-          ),
-          const SizedBox(height: 12),
-          _FeatureCard(
             icon: Icons.thermostat,
             title: 'Climate Control',
             subtitle: 'Temperature & humidity controls',
@@ -621,32 +613,6 @@ class _SongCard extends StatelessWidget {
       ),
     );
   }
-
-  void _openVoiceTraining(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1A1A1A),
-        title: const Text(
-          'Voice Training',
-          style: TextStyle(color: Colors.white),
-        ),
-        content: const Text(
-          'Voice training will help Kai recognize your voice better. This feature is coming soon!',
-          style: TextStyle(color: Colors.white70),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text(
-              'OK',
-              style: TextStyle(color: Color(0xFFD4AF37)),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 // Light Scene Card Widget
@@ -704,80 +670,75 @@ class _FeatureCard extends StatelessWidget {
   final String title;
   final String subtitle;
   final bool isEnabled;
-  final VoidCallback? onTap;
 
   const _FeatureCard({
     required this.icon,
     required this.title,
     required this.subtitle,
     required this.isEnabled,
-    this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: isEnabled ? onTap : null,
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: const Color(0xFF1A1A1A).withOpacity(isEnabled ? 1.0 : 0.5),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: Colors.grey.withOpacity(isEnabled ? 0.3 : 0.1),
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A1A1A).withOpacity(isEnabled ? 1.0 : 0.5),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: Colors.grey.withOpacity(isEnabled ? 0.3 : 0.1),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            icon,
+            color: isEnabled
+                ? const Color(0xFFD4AF37)
+                : Colors.grey.withOpacity(0.5),
+            size: 24,
           ),
-        ),
-        child: Row(
-          children: [
-            Icon(
-              icon,
-              color: isEnabled
-                  ? const Color(0xFFD4AF37)
-                  : Colors.grey.withOpacity(0.5),
-              size: 24,
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: TextStyle(
-                      color: isEnabled ? Colors.white : Colors.white38,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    subtitle,
-                    style: TextStyle(
-                      color: isEnabled ? Colors.white70 : Colors.white24,
-                      fontSize: 14,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            if (!isEnabled)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.orange.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Text(
-                  'Soon',
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
                   style: TextStyle(
-                    color: Colors.orange,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
+                    color: isEnabled ? Colors.white : Colors.white38,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
+                const SizedBox(height: 4),
+                Text(
+                  subtitle,
+                  style: TextStyle(
+                    color: isEnabled ? Colors.white70 : Colors.white24,
+                    fontSize: 14,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (!isEnabled)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.orange.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(8),
               ),
-          ],
-        ),
+              child: const Text(
+                'Soon',
+                style: TextStyle(
+                  color: Colors.orange,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
