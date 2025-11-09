@@ -15,6 +15,7 @@ import 'curiosity_service.dart';
 import 'google_search_service.dart';
 import 'web_fetch_service.dart';
 import 'brain_debug_service.dart';
+import 'ambiance_service.dart';
 
 /// Configuration class to hold all API keys
 /// Uses secure storage for encrypted key management
@@ -1001,6 +1002,68 @@ Text:
       }
     }
     
+    // NEW: Check for ambiance requests and handle them
+    final ambianceService = AmbianceService();
+    final ambianceMatch = ambianceService.analyzeVoiceCommand(text);
+    
+    if (ambianceMatch != null) {
+      debugService.addStep(
+        BrainPhase.processing,
+        'Detected ambiance request',
+        data: {
+          'profile': ambianceMatch.profile,
+          'confidence': ambianceMatch.confidence,
+          'keywords': ambianceMatch.matchedKeywords,
+        },
+      );
+      
+      print('🎭 [AI_SERVICE] Detected ambiance request: ${ambianceMatch.profile} (${(ambianceMatch.confidence * 100).toStringAsFixed(1)}% confidence)');
+      
+      // Set the ambiance
+      final success = await ambianceService.setAmbiance(
+        profile: ambianceMatch.profile,
+        originalInput: text,
+        confidence: ambianceMatch.confidence,
+      );
+      
+      if (success) {
+        // Generate Kai's response about the ambiance
+        final ambianceResponse = ambianceService.generateKaiResponse(
+          ambianceMatch.profile, 
+          ambianceMatch.confidence
+        );
+        
+        print('✅ [AI_SERVICE] Ambiance set successfully, returning response');
+        
+        // Return the ambiance response directly without full AI processing
+        return ChatResponse(
+          reply: ambianceResponse,
+          raw: {
+            'model': model,
+            'ambiance_profile': ambianceMatch.profile,
+            'confidence': ambianceMatch.confidence,
+          },
+          personalityDelta: <String, int>{},
+          moodDelta: <String, int>{},
+          actualDeltas: <String, int>{},
+          tags: ['ambiance', ambianceMatch.profile],
+          mbti: personality['mbti']?.toString() ?? 'UNKNOWN',
+          webUsed: false,
+          memoriesUsed: [],
+          debugInfo: {
+            'ambiance_profile': ambianceMatch.profile,
+            'ambiance_confidence': ambianceMatch.confidence,
+            'processing_time_ms': DateTime.now().millisecondsSinceEpoch,
+            'bypassed_full_ai': true,
+          },
+          webSearchUsed: false,
+          searchResults: [],
+        );
+      } else {
+        print('❌ [AI_SERVICE] Failed to set ambiance, continuing with normal processing');
+      }
+    }
+
     // NEW: Detect and fetch web pages from URLs in the user's message
     String urlContext = '';
     List<WebPageResult> fetchedPages = [];

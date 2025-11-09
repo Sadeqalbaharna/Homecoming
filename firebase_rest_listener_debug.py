@@ -276,6 +276,84 @@ class FirebaseRestListener:
             logger.error(f"❌ Error stopping music: {e}")
             return False
     
+    def set_ambiance_lighting(self, lighting_config, ambiance_analysis=None):
+        """Set intelligent ambiance lighting based on voice analysis"""
+        try:
+            color = lighting_config.get("color", "warm_white")
+            brightness = lighting_config.get("brightness", 50)
+            effect = lighting_config.get("effect", "solid")
+            
+            logger.info(f"💡 Setting ambiance lighting:")
+            logger.info(f"   Color: {color}")
+            logger.info(f"   Brightness: {brightness}%")
+            logger.info(f"   Effect: {effect}")
+            
+            if ambiance_analysis:
+                logger.info(f"🎭 Ambiance profile: {ambiance_analysis.get('profile', 'Unknown')}")
+                logger.info(f"   Description: {ambiance_analysis.get('description', 'N/A')}")
+                logger.info(f"   Confidence: {ambiance_analysis.get('confidence', 0):.1%}")
+            
+            # Map colors to RGB values for smart lights
+            color_map = {
+                "red": (255, 0, 0),
+                "green": (0, 255, 0), 
+                "blue": (0, 0, 255),
+                "orange": (255, 165, 0),
+                "purple": (128, 0, 128),
+                "yellow": (255, 255, 0),
+                "white": (255, 255, 255),
+                "warm_white": (255, 230, 180),
+                "light_green": (144, 238, 144),
+                "deep_blue": (0, 0, 139),
+                "gray_blue": (70, 130, 180),
+                "amber": (255, 191, 0),
+                "rainbow": "cycle"  # Special effect
+            }
+            
+            rgb_color = color_map.get(color, (255, 255, 255))
+            
+            # For now, simulate lighting control with logging
+            # In a real setup, this would control smart lights via GPIO, WiFi, or other protocols
+            if rgb_color == "cycle":
+                logger.info(f"🌈 Activating rainbow color cycle effect")
+            else:
+                r, g, b = rgb_color
+                logger.info(f"🎨 Setting RGB color: ({r}, {g}, {b})")
+            
+            # Simulate brightness control
+            actual_brightness = int(brightness * 2.55)  # Convert percentage to 0-255
+            logger.info(f"💡 Setting brightness to {actual_brightness}/255")
+            
+            # Simulate effect control
+            effect_commands = {
+                "solid": "Solid color mode",
+                "gentle_pulse": "Gentle pulsing effect", 
+                "wave": "Wave-like flowing effect",
+                "slow_fade": "Slow fade in/out",
+                "candle_flicker": "Candle flicker simulation",
+                "color_cycle": "Cycling through colors",
+                "rain_drops": "Rain drop effect",
+                "sunrise": "Sunrise simulation",
+                "leaf_fall": "Falling leaves effect"
+            }
+            
+            effect_description = effect_commands.get(effect, "Unknown effect")
+            logger.info(f"✨ Activating effect: {effect_description}")
+            
+            # TODO: Implement actual smart lighting control here
+            # Examples:
+            # - Control Philips Hue lights via API
+            # - Control WS2812B LED strips via GPIO
+            # - Control smart bulbs via WiFi/Bluetooth
+            # - Control DMX lighting systems
+            
+            logger.info("✅ Ambiance lighting set successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Error setting ambiance lighting: {e}")
+            return False
+    
     def process_command(self, command_id, command_data):
         """Process a single command"""
         try:
@@ -309,7 +387,7 @@ class FirebaseRestListener:
                 else:
                     message = f"Failed to play {mood} music"
                 
-            elif action == "stop_music":
+            elif action == "stop_music" or action == "stop":
                 logger.info("🛑 Stop music command")
                 success = self.stop_music()
                 message = "Music stopped" if success else "Failed to stop music"
@@ -319,6 +397,21 @@ class FirebaseRestListener:
                 # Send pause signal to mpv (if running with input enabled)
                 success = True
                 message = "Music paused"
+                
+            elif action == "set_ambiance_lighting" and target == "lights":
+                logger.info("💡 Ambiance lighting command")
+                lighting_config = command_data.get("lighting_config", {})
+                ambiance_analysis = command_data.get("ambiance_analysis")
+                
+                success = self.set_ambiance_lighting(lighting_config, ambiance_analysis)
+                
+                if success:
+                    profile = ambiance_analysis.get("profile", "Custom") if ambiance_analysis else "Custom"
+                    color = lighting_config.get("color", "unknown")
+                    brightness = lighting_config.get("brightness", 50)
+                    message = f"Ambiance lighting set: {profile} ({color} at {brightness}%)"
+                else:
+                    message = "Failed to set ambiance lighting"
                 
             else:
                 message = f"Unknown action: {action}"
