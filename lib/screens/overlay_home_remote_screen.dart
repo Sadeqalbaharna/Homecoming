@@ -68,7 +68,7 @@ class _OverlayHomeRemoteScreenState extends State<OverlayHomeRemoteScreen>
 
     try {
       final success = await HomeAutomationService().sendCommand(
-        personaId: 'truekai',
+        personaId: 'kai_persona_1',
         deviceId: 'raspberry_pi_home',
         target: target,
         action: action,
