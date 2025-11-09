@@ -59,20 +59,8 @@
       ".write": true
     },
     "home_automation": {
-      "$personaId": {
-        ".read": true,
-        ".write": true,
-        "commands": {
-          "$commandId": {
-            ".read": true,
-            ".write": true
-          }
-        },
-        "status": {
-          ".read": true,
-          ".write": true
-        }
-      }
+      ".read": true,
+      ".write": true
     }
   }
 }
