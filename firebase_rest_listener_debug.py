@@ -14,6 +14,7 @@ import random
 import os
 import colorsys
 import threading
+import math
 from typing import Dict, List, Optional, Tuple
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -38,34 +39,47 @@ class WS2812BController:
     """Advanced WS2812B RGB LED Strip Controller with multiple strip support"""
     
     def __init__(self):
-        # LED Strip Configuration
+        # LED Strip Configuration - LEGENDARY 300 LED SETUP! 🏆
         self.strips = {
             "main": {
-                "led_count": 150,      # Number of LEDs on main strip
-                "gpio_pin": 18,        # GPIO pin (must support PWM)
+                "led_count": 300,      # LEGENDARY: All 300 LEDs confirmed working!
+                "gpio_pin": 18,        # CONFIRMED: GPIO 18 working perfectly
                 "led_freq_hz": 800000, # LED signal frequency (800kHz)
                 "led_dma": 10,         # DMA channel
-                "led_brightness": 255, # Max brightness (0-255)
+                "led_brightness": 200, # High brightness (you have proper power!)
                 "led_invert": False,   # Invert signal
                 "led_channel": 0,      # PWM channel
             },
-            "accent": {
-                "led_count": 60,       # Smaller accent strip
-                "gpio_pin": 13,        # Different GPIO pin
+            # Optional: You could add zones for different areas
+            "zone1": {
+                "led_count": 100,      # First 100 LEDs as zone 1
+                "gpio_pin": 18,        # Same GPIO, different range
                 "led_freq_hz": 800000,
-                "led_dma": 11,         # Different DMA channel
-                "led_brightness": 200, # Slightly dimmer max
+                "led_dma": 10,
+                "led_brightness": 200,
                 "led_invert": False,
-                "led_channel": 1,      # Different PWM channel
+                "led_channel": 0,
+                "led_offset": 0,       # Start at LED 0
             },
-            "ambient": {
-                "led_count": 30,       # Small ambient strip
-                "gpio_pin": 12,
+            "zone2": {
+                "led_count": 100,      # LEDs 100-199 as zone 2
+                "gpio_pin": 18,
                 "led_freq_hz": 800000,
-                "led_dma": 12,
-                "led_brightness": 150, # Dimmer for ambient lighting
+                "led_dma": 10,
+                "led_brightness": 200,
                 "led_invert": False,
-                "led_channel": 0,      # Can share channel if different pins
+                "led_channel": 0,
+                "led_offset": 100,     # Start at LED 100
+            },
+            "zone3": {
+                "led_count": 100,      # LEDs 200-299 as zone 3
+                "gpio_pin": 18,
+                "led_freq_hz": 800000,
+                "led_dma": 10,
+                "led_brightness": 200,
+                "led_invert": False,
+                "led_channel": 0,
+                "led_offset": 200,     # Start at LED 200
             }
         }
         
@@ -141,6 +155,18 @@ class WS2812BController:
                 self._start_sunrise_effect(strips, brightness)
             elif effect == "leaf_fall":
                 self._start_leaf_fall_effect(strips)
+            elif effect == "lightning":
+                self._start_lightning_effect(strips)
+            elif effect == "aurora":
+                self._start_aurora_effect(strips)
+            elif effect == "meteor":
+                self._start_meteor_effect(strips, rgb_color)
+            elif effect == "fire":
+                self._start_fire_effect(strips)
+            elif effect == "ocean_wave":
+                self._start_ocean_wave_effect(strips)
+            elif effect == "matrix":
+                self._start_matrix_effect(strips)
             else:
                 # Default to solid color for unknown effects
                 self._set_solid_color(strips, rgb_color)
@@ -323,6 +349,299 @@ class WS2812BController:
             
             strip.show()
             time.sleep(random.uniform(0.05, 0.2))
+    
+    def _start_lightning_effect(self, strips: List[str]):
+        """Epic lightning effect for 300 LEDs"""
+        for strip_name in strips:
+            if strip_name in self.pixel_strips:
+                self.stop_effects[strip_name].clear()
+                thread = threading.Thread(target=self._lightning_worker, args=(strip_name,))
+                thread.daemon = True
+                thread.start()
+                self.effect_threads[strip_name] = thread
+                logger.info(f"⚡ Started EPIC lightning effect on {strip_name}")
+    
+    def _lightning_worker(self, strip_name: str):
+        """Epic lightning worker for 300 LEDs"""
+        strip = self.pixel_strips[strip_name]
+        total_leds = strip.numPixels()
+        
+        while not self.stop_effects[strip_name].is_set():
+            # Clear all LEDs
+            for i in range(total_leds):
+                strip.setPixelColor(i, Color(0, 0, 0))
+            strip.show()
+            
+            # Random lightning strikes
+            for strike in range(random.randint(1, 4)):
+                if self.stop_effects[strip_name].is_set():
+                    break
+                
+                # Lightning bolt across random section
+                start_pos = random.randint(0, max(0, total_leds - 50))
+                length = random.randint(20, min(80, total_leds - start_pos))
+                
+                # Bright white lightning
+                for i in range(start_pos, start_pos + length):
+                    intensity = random.randint(200, 255)
+                    strip.setPixelColor(i, Color(intensity, intensity, intensity))
+                strip.show()
+                
+                # Lightning flash duration
+                time.sleep(random.uniform(0.05, 0.15))
+                
+                # Fade out quickly
+                for fade in range(5):
+                    for i in range(start_pos, start_pos + length):
+                        intensity = max(0, 255 - (fade * 50))
+                        strip.setPixelColor(i, Color(intensity, intensity, intensity))
+                    strip.show()
+                    time.sleep(0.02)
+            
+            # Dark pause between lightning
+            time.sleep(random.uniform(2, 8))
+    
+    def _start_aurora_effect(self, strips: List[str]):
+        """Aurora borealis effect for 300 LEDs"""
+        for strip_name in strips:
+            if strip_name in self.pixel_strips:
+                self.stop_effects[strip_name].clear()
+                thread = threading.Thread(target=self._aurora_worker, args=(strip_name,))
+                thread.daemon = True
+                thread.start()
+                self.effect_threads[strip_name] = thread
+                logger.info(f"🌌 Started EPIC aurora effect on {strip_name}")
+    
+    def _aurora_worker(self, strip_name: str):
+        """Aurora borealis worker"""
+        strip = self.pixel_strips[strip_name]
+        total_leds = strip.numPixels()
+        offset = 0
+        
+        while not self.stop_effects[strip_name].is_set():
+            for i in range(total_leds):
+                # Aurora wave calculation
+                wave1 = int(128 + 127 * math.sin((i + offset) * 0.02))
+                wave2 = int(128 + 127 * math.sin((i + offset) * 0.03 + 1))
+                wave3 = int(128 + 127 * math.sin((i + offset) * 0.01 + 2))
+                
+                # Aurora colors (green, blue, purple)
+                green = max(0, min(255, wave1))
+                blue = max(0, min(255, wave2))
+                red = max(0, min(255, wave3 // 4))  # Less red for aurora effect
+                
+                strip.setPixelColor(i, Color(red, green, blue))
+            
+            strip.show()
+            offset += 2
+            time.sleep(0.05)
+    
+    def _start_meteor_effect(self, strips: List[str], rgb_color: Tuple[int, int, int]):
+        """Meteor shower effect for 300 LEDs"""
+        for strip_name in strips:
+            if strip_name in self.pixel_strips:
+                self.stop_effects[strip_name].clear()
+                thread = threading.Thread(target=self._meteor_worker, args=(strip_name, rgb_color))
+                thread.daemon = True
+                thread.start()
+                self.effect_threads[strip_name] = thread
+                logger.info(f"☄️ Started EPIC meteor effect on {strip_name}")
+    
+    def _meteor_worker(self, strip_name: str, rgb_color: Tuple[int, int, int]):
+        """Meteor shower worker"""
+        strip = self.pixel_strips[strip_name]
+        total_leds = strip.numPixels()
+        meteors = []
+        
+        while not self.stop_effects[strip_name].is_set():
+            # Clear strip with fade
+            for i in range(total_leds):
+                current = strip.getPixelColor(i)
+                # Fade existing pixels
+                r = max(0, ((current >> 16) & 0xFF) - 5)
+                g = max(0, ((current >> 8) & 0xFF) - 5) 
+                b = max(0, (current & 0xFF) - 5)
+                strip.setPixelColor(i, Color(r, g, b))
+            
+            # Add new meteors randomly
+            if random.randint(1, 20) == 1 and len(meteors) < 5:
+                meteors.append({
+                    'pos': 0,
+                    'speed': random.uniform(0.8, 2.0),
+                    'color': rgb_color,
+                    'tail_length': random.randint(15, 30)
+                })
+            
+            # Update meteors
+            for meteor in meteors[:]:
+                meteor['pos'] += meteor['speed']
+                
+                # Draw meteor with tail
+                for i in range(meteor['tail_length']):
+                    pos = int(meteor['pos'] - i)
+                    if 0 <= pos < total_leds:
+                        brightness = max(0, 255 - (i * 15))
+                        r = int(meteor['color'][0] * brightness / 255)
+                        g = int(meteor['color'][1] * brightness / 255)
+                        b = int(meteor['color'][2] * brightness / 255)
+                        strip.setPixelColor(pos, Color(r, g, b))
+                
+                # Remove meteors that have passed
+                if meteor['pos'] > total_leds + meteor['tail_length']:
+                    meteors.remove(meteor)
+            
+            strip.show()
+            time.sleep(0.03)
+    
+    def _start_fire_effect(self, strips: List[str]):
+        """Realistic fire effect for 300 LEDs"""
+        for strip_name in strips:
+            if strip_name in self.pixel_strips:
+                self.stop_effects[strip_name].clear()
+                thread = threading.Thread(target=self._fire_worker, args=(strip_name,))
+                thread.daemon = True
+                thread.start()
+                self.effect_threads[strip_name] = thread
+                logger.info(f"🔥 Started EPIC fire effect on {strip_name}")
+    
+    def _fire_worker(self, strip_name: str):
+        """Realistic fire worker"""
+        strip = self.pixel_strips[strip_name]
+        total_leds = strip.numPixels()
+        heat = [0] * total_leds
+        
+        while not self.stop_effects[strip_name].is_set():
+            # Cool down every cell a little
+            for i in range(total_leds):
+                heat[i] = max(0, heat[i] - random.randint(0, ((55 * 10) // total_leds) + 2))
+            
+            # Heat from each cell drifts 'up' and diffuses a little
+            for k in range(total_leds - 1, 2, -1):
+                heat[k] = (heat[k - 1] + heat[k - 2] + heat[k - 2]) // 3
+            
+            # Randomly ignite new 'sparks' near bottom
+            if random.randint(1, 255) < 120:
+                y = random.randint(0, 7)
+                if y < total_leds:
+                    heat[y] = min(255, heat[y] + random.randint(160, 255))
+            
+            # Map heat to LED colors
+            for j in range(total_leds):
+                # Scale heat to 0-191
+                t192 = int((heat[j] / 255.0) * 191)
+                
+                # Calculate ramp up from black to red to yellow to white
+                heatramp = t192 & 0x3F  # 0..63
+                heatramp <<= 2  # scale up to 0..252
+                
+                if t192 > 0x80:  # hottest
+                    r, g, b = 255, 255, heatramp
+                elif t192 > 0x40:  # middle
+                    r, g, b = 255, heatramp, 0
+                else:  # coolest
+                    r, g, b = heatramp, 0, 0
+                
+                strip.setPixelColor(j, Color(r, g, b))
+            
+            strip.show()
+            time.sleep(0.05)
+    
+    def _start_ocean_wave_effect(self, strips: List[str]):
+        """Ocean wave effect for 300 LEDs"""
+        for strip_name in strips:
+            if strip_name in self.pixel_strips:
+                self.stop_effects[strip_name].clear()
+                thread = threading.Thread(target=self._ocean_wave_worker, args=(strip_name,))
+                thread.daemon = True
+                thread.start()
+                self.effect_threads[strip_name] = thread
+                logger.info(f"🌊 Started EPIC ocean wave effect on {strip_name}")
+    
+    def _ocean_wave_worker(self, strip_name: str):
+        """Ocean wave worker"""
+        strip = self.pixel_strips[strip_name]
+        total_leds = strip.numPixels()
+        offset = 0
+        
+        while not self.stop_effects[strip_name].is_set():
+            for i in range(total_leds):
+                # Multiple wave layers
+                wave1 = math.sin((i + offset) * 0.05)
+                wave2 = math.sin((i + offset) * 0.03 + 2)
+                wave3 = math.sin((i + offset) * 0.01 + 1)
+                
+                # Combine waves
+                combined = (wave1 + wave2 + wave3) / 3
+                
+                # Ocean blue colors
+                blue_intensity = int(128 + 127 * combined)
+                green_intensity = int(64 + 64 * combined)
+                
+                # Add white foam on peaks
+                white_foam = max(0, int((combined - 0.7) * 255)) if combined > 0.7 else 0
+                
+                r = white_foam
+                g = green_intensity + white_foam // 2
+                b = blue_intensity + white_foam // 2
+                
+                strip.setPixelColor(i, Color(r, g, b))
+            
+            strip.show()
+            offset += 1
+            time.sleep(0.08)
+    
+    def _start_matrix_effect(self, strips: List[str]):
+        """Matrix digital rain effect for 300 LEDs"""
+        for strip_name in strips:
+            if strip_name in self.pixel_strips:
+                self.stop_effects[strip_name].clear()
+                thread = threading.Thread(target=self._matrix_worker, args=(strip_name,))
+                thread.daemon = True
+                thread.start()
+                self.effect_threads[strip_name] = thread
+                logger.info(f"💻 Started EPIC Matrix effect on {strip_name}")
+    
+    def _matrix_worker(self, strip_name: str):
+        """Matrix digital rain worker"""
+        strip = self.pixel_strips[strip_name]
+        total_leds = strip.numPixels()
+        drops = []
+        
+        while not self.stop_effects[strip_name].is_set():
+            # Fade all LEDs
+            for i in range(total_leds):
+                current = strip.getPixelColor(i)
+                g = max(0, ((current >> 8) & 0xFF) - 8)  # Fade green channel
+                strip.setPixelColor(i, Color(0, g, 0))
+            
+            # Add new drops randomly
+            if random.randint(1, 10) == 1:
+                drops.append({
+                    'pos': 0,
+                    'speed': random.uniform(0.5, 1.5),
+                    'length': random.randint(10, 25)
+                })
+            
+            # Update drops
+            for drop in drops[:]:
+                drop['pos'] += drop['speed']
+                
+                # Draw drop
+                for i in range(drop['length']):
+                    pos = int(drop['pos'] - i)
+                    if 0 <= pos < total_leds:
+                        if i == 0:  # Head of drop
+                            strip.setPixelColor(pos, Color(0, 255, 0))
+                        else:  # Tail fading
+                            intensity = max(0, 255 - (i * 15))
+                            strip.setPixelColor(pos, Color(0, intensity, 0))
+                
+                # Remove drops that have passed
+                if drop['pos'] > total_leds + drop['length']:
+                    drops.remove(drop)
+            
+            strip.show()
+            time.sleep(0.05)
     
     def _stop_all_effects(self, strips: List[str]):
         """Stop all running effects on specified strips"""

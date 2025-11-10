@@ -1,0 +1,162 @@
+```
+🔌 HOMECOMING WS2812B PHYSICAL CONNECTION DIAGRAM
+════════════════════════════════════════════════════════════
+
+                    COMPLETE SYSTEM LAYOUT
+                         (Bird's Eye View)
+
+┌─────────────────────────────────────────────────────────────┐
+│                    HOMECOMING SMART ROOM                    │
+│                                                             │
+│  ┌─Main Strip─────────────────────────────┐                │
+│  │ ████████████████████████████████████████ │ 150 LEDs      │
+│  │ ████████████████████████████████████████ │ (Room Ceiling)│
+│  └─────────────────────────────────────────┘                │
+│                                                             │
+│         ┌─Accent Strip───────────┐                          │
+│         │ ████████████████████████ │ 60 LEDs                │
+│         │                         │ (Behind TV/Monitor)    │
+│         └─────────────────────────┘                          │
+│                                                             │
+│    ┌─Ambient Strip──┐                                       │
+│    │ ████████████████ │ 30 LEDs                             │
+│    │                 │ (Under Desk/Cabinet)                │
+│    └─────────────────┘                                       │
+│                                                             │
+│                         │                                   │
+│                         │ All strips connect to:           │
+│                         ▼                                   │
+│                                                             │
+│  ┌─────────────────┐   ┌─────────────────┐                │
+│  │  POWER SUPPLY   │   │ RASPBERRY PI 4  │                │
+│  │    5V 20A       │   │  (Control Hub)  │                │
+│  │                 │   │                 │                │
+│  │  [●] +5V        │   │ GPIO Pins:      │                │
+│  │  [●] GND        │   │ • 18 → Main     │                │
+│  │                 │   │ • 13 → Accent   │                │
+│  └─────────────────┘   │ • 12 → Ambient  │                │
+│                        └─────────────────┘                │
+└─────────────────────────────────────────────────────────────┘
+
+DETAILED BREADBOARD/TERMINAL BLOCK LAYOUT:
+═════════════════════════════════════════
+
+                Terminal Block / Breadboard Setup
+            ┌─────────────────────────────────────┐
+            │    POWER DISTRIBUTION CENTER        │
+            │                                     │
+   Power    │  +5V ●●●●●●●●●●●●●●●●●●●●●●●●●●●●● │ ◄── 5V 20A Supply
+   Rails    │                                     │
+            │  GND ●●●●●●●●●●●●●●●●●●●●●●●●●●●●● │ ◄── Common Ground
+            │                                     │
+            └─────┬───────────┬──────────┬────────┘
+                  │           │          │
+                  │ Main      │ Accent   │ Ambient
+                  │ Strip     │ Strip    │ Strip
+                  │           │          │
+              ┌───▼───┐   ┌───▼───┐  ┌───▼───┐
+              │ VCC   │   │ VCC   │  │ VCC   │
+              │ DIN   │   │ DIN   │  │ DIN   │  ◄── Data from Pi
+              │ GND   │   │ GND   │  │ GND   │
+              └───────┘   └───────┘  └───────┘
+                  ▲           ▲          ▲
+                  │           │          │
+          ┌───────┴───────────┴──────────┴───────┐
+          │         SIGNAL CONNECTIONS           │
+          │                                      │
+          │  GPIO18 ●─────[330Ω]─────● Main DIN │
+          │  GPIO13 ●─────[330Ω]─────● Accent   │
+          │  GPIO12 ●─────[330Ω]─────● Ambient  │
+          │                                      │
+          │  Raspberry Pi Signal Outputs         │
+          └──────────────────────────────────────┘
+
+PI GPIO CLOSE-UP VIEW:
+════════════════════
+
+    Raspberry Pi 4 - Looking at GPIO Header from Top
+    ┌─────────────────────────────────────────────┐
+    │  1●  2●  4●  6●  8● 10● 12● 14● 16● 18●     │
+    │  3V 5V  5V GND     ... GPIO18 ... ...      │ ← Pin 12 = GPIO18 (Main)
+    │                        ▲                    │
+    │  3● 5●  7●  9● 11● 13● 15● 17● 19● 21●     │
+    │     ...  ... ... ... ... ... ... ... ...   │
+    │                                             │
+    │ 31● 32● 33● 34● 35● 36● 37● 38● 39● 40●    │
+    │    GPIO12 GPIO13 GND                        │ ← Pin 32 = GPIO12 (Ambient)
+    │        ▲     ▲                              │ ← Pin 33 = GPIO13 (Accent)
+    └─────────────────────────────────────────────┘
+
+STEP-BY-STEP WIRING PROCESS:
+══════════════════════════
+
+Step 1: POWER SETUP
+┌─────────────────────────────────────────────────────────┐
+│ 1. Connect 5V 20A supply negative to breadboard GND    │
+│ 2. Connect 5V 20A supply positive to breadboard +5V    │  
+│ 3. Connect Pi GND (Pin 6) to breadboard GND rail       │
+│ 4. DO NOT connect Pi 5V to supply (control only!)      │
+└─────────────────────────────────────────────────────────┘
+
+Step 2: SIGNAL CONNECTIONS  
+┌─────────────────────────────────────────────────────────┐
+│ 1. Pi GPIO 18 (Pin 12) → 330Ω resistor → Main DIN     │
+│ 2. Pi GPIO 13 (Pin 33) → 330Ω resistor → Accent DIN   │
+│ 3. Pi GPIO 12 (Pin 32) → 330Ω resistor → Ambient DIN  │
+└─────────────────────────────────────────────────────────┘
+
+Step 3: LED STRIP CONNECTIONS (For Each Strip)
+┌─────────────────────────────────────────────────────────┐
+│ Red Wire (VCC) → +5V Power Rail                        │
+│ White/Black (GND) → GND Power Rail                      │  
+│ Green Wire (DIN) → Resistor → Pi GPIO Pin              │
+└─────────────────────────────────────────────────────────┘
+
+TROUBLESHOOTING VISUAL GUIDE:
+═══════════════════════════
+
+✅ CORRECT CONNECTION:
+    Pi GPIO ──[330Ω]── Strip DIN
+        │                  │
+        │                  │
+    Pi GND ────────── Strip GND ────── Power GND
+                           │
+                      Strip VCC ────── Power +5V (20A)
+
+❌ WRONG CONNECTION (Will damage Pi):
+    Pi 5V ────────── Strip VCC (DON'T DO THIS!)
+        │                │
+        └── 14.4A ──────┘  ← Pi can't handle this current!
+
+SAFETY CHECKLIST:
+═══════════════
+
+□ External power supply rated 20A+ at 5V
+□ Pi GND connected to power supply GND  
+□ Pi 5V pins NOT connected to LED power
+□ 330Ω resistors on all data lines
+□ All connections secure (no loose wires)
+□ Power supply has adequate ventilation
+□ Test with low LED count first
+
+TESTING PROCEDURE:
+═══════════════
+
+1. Connect only 1 LED strip initially
+2. Set brightness to 25% for testing  
+3. Run: python3 test_led_hardware.py
+4. If successful, add remaining strips
+5. Gradually increase brightness
+6. Test voice commands through Homecoming app
+
+VOICE COMMANDS TO TEST:
+═════════════════════
+
+"Hey Kai, test the main lights"
+"Set accent lighting to blue"  
+"Turn on ambient warm white"
+"Start rainbow effect on all strips"
+"Begin music reactive mode"
+
+Your Homecoming system will create an immersive smart environment! 🏡✨
+```

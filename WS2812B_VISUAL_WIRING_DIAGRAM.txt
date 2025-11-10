@@ -1,0 +1,168 @@
+```
+🏡 HOMECOMING PI WS2812B MULTI-STRIP WIRING DIAGRAM
+═══════════════════════════════════════════════════════════════
+
+┌─────────────────────────────────────────────────────────────┐
+│                    RASPBERRY PI 4 GPIO LAYOUT               │
+│                         (Top View)                          │
+└─────────────────────────────────────────────────────────────┘
+
+     3.3V  5V   5V  GND  GPIO14 GPIO15 GPIO18 GND  GPIO24 GPIO10
+      │    │    │    │      │      │      │     │     │      │
+      1    2    4    6     8      10     12    14    18     19
+      •────•────•────•─────•──────•──────•─────•─────•──────•
+      │    │    │    │     │      │      │     │     │      │
+      •────•────•────•─────•──────•──────•─────•─────•──────•
+      3    5    7    9    11     13     15    17    21     23
+      │    │    │    │     │      │      │     │     │      │
+    GPIO2 GPIO3 GPIO4 GND GPIO17 GPIO27 GPIO22 GPIO23 GPIO5 GPIO6
+
+                            GPIO12 GND  GPIO13 GPIO19 GPIO16 GPIO20
+                              │    │     │      │      │      │  
+                             32   34    33     35     36     38
+                             •────•─────•──────•──────•──────•
+                             │    │     │      │      │      │
+                             •────•─────•──────•──────•──────•
+                             31   33    35     37     39     40
+                             │    │     │      │      │      │
+                           GPIO6 GPIO13 GPIO19 GPIO26 GND  GPIO21
+
+🎯 HOMECOMING LED STRIP ASSIGNMENTS:
+┌─────────────────────────────────────────────────────────────┐
+│ Strip Name │ LEDs │ GPIO Pin │ Physical Pin │ Purpose       │
+├────────────┼──────┼──────────┼──────────────┼───────────────┤
+│ MAIN       │ 150  │ GPIO 18  │ Pin 12       │ Primary Room  │
+│ ACCENT     │  60  │ GPIO 13  │ Pin 33       │ Accent Light  │
+│ AMBIENT    │  30  │ GPIO 12  │ Pin 32       │ Mood Lighting │
+└─────────────────────────────────────────────────────────────┘
+
+⚡ POWER DISTRIBUTION SYSTEM:
+┌─────────────────────────────────────────────────────────────┐
+│                                                             │
+│  ⚠️  CRITICAL: External 5V 20A+ Power Supply Required       │
+│      Pi GPIO cannot handle 14.4A max current draw!         │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+
+     ┌─────────────────┐         ┌─────────────────┐
+     │ 5V 20A+ SUPPLY  │         │ RASPBERRY PI 4  │
+     │                 │         │                 │
+     │ +5V ●───────────┼─────────┼───● 5V (Pin 2)  │
+     │ GND ●───────────┼─────────┼───● GND (Pin 6) │
+     │                 │         │                 │
+     │   POWER BUS     │         │  CONTROL ONLY   │
+     │ (High Current)  │         │ (Signal + GND)  │
+     └─────────────────┘         └─────────────────┘
+              │                           │
+              │                           │
+              ▼                           ▼
+     ┌─────────────────┐         ┌─────────────────┐
+     │ POWER RAILS     │         │ SIGNAL LINES    │
+     │                 │         │                 │
+     │ +5V ●●●●●●●●●●● │         │ GPIO18 ●────────┼───► Main Strip
+     │ GND ●●●●●●●●●●● │         │ GPIO13 ●────────┼───► Accent Strip  
+     │                 │         │ GPIO12 ●────────┼───► Ambient Strip
+     │ (Thick Wires)   │         │                 │
+     │ 14-16 AWG       │         │ (Thin Wires)    │
+     └─────────────────┘         │ 22-24 AWG       │
+                                 └─────────────────┘
+
+🔌 INDIVIDUAL STRIP CONNECTIONS:
+
+MAIN STRIP (150 LEDs) - GPIO 18:
+┌─────────────────┐    330Ω    ┌──────────────────┐
+│ Pi GPIO 18      ├────[≈≈≈]───┤ Strip DIN (Data) │
+│ (Pin 12)        │             │                  │
+└─────────────────┘             └──────────────────┘
+┌─────────────────┐             ┌──────────────────┐
+│ Power Bus +5V   ├─────────────┤ Strip VCC        │
+└─────────────────┘             └──────────────────┘
+┌─────────────────┐             ┌──────────────────┐
+│ Common Ground   ├─────────────┤ Strip GND        │
+└─────────────────┘             └──────────────────┘
+
+ACCENT STRIP (60 LEDs) - GPIO 13:
+┌─────────────────┐    330Ω    ┌──────────────────┐
+│ Pi GPIO 13      ├────[≈≈≈]───┤ Strip DIN (Data) │
+│ (Pin 33)        │             │                  │
+└─────────────────┘             └──────────────────┘
+┌─────────────────┐             ┌──────────────────┐
+│ Power Bus +5V   ├─────────────┤ Strip VCC        │
+└─────────────────┘             └──────────────────┘
+┌─────────────────┐             ┌──────────────────┐
+│ Common Ground   ├─────────────┤ Strip GND        │
+└─────────────────┘             └──────────────────┘
+
+AMBIENT STRIP (30 LEDs) - GPIO 12:
+┌─────────────────┐    330Ω    ┌──────────────────┐
+│ Pi GPIO 12      ├────[≈≈≈]───┤ Strip DIN (Data) │
+│ (Pin 32)        │             │                  │
+└─────────────────┘             └──────────────────┘
+┌─────────────────┐             ┌──────────────────┐
+│ Power Bus +5V   ├─────────────┤ Strip VCC        │
+└─────────────────┘             └──────────────────┘
+┌─────────────────┐             ┌──────────────────┐
+│ Common Ground   ├─────────────┤ Strip GND        │
+└─────────────────┘             └──────────────────┘
+
+🔧 COMPONENT LAYOUT:
+                                    
+    [Pi]───330Ω───[Main Strip 150 LEDs]
+     │             ╲
+     │              ╲ 5V Power Bus (20A+)
+     │               ╲
+     ├───330Ω───[Accent Strip 60 LEDs]
+     │               ╱
+     │              ╱ Ground Bus (Common)  
+     │             ╱
+     └───330Ω───[Ambient Strip 30 LEDs]
+
+⚠️  SAFETY COMPONENTS:
+┌─────────────────────────────────────────────────────────────┐
+│ Component        │ Purpose                │ Location        │
+├─────────────────┼────────────────────────┼─────────────────┤
+│ 330Ω Resistors  │ Protect GPIO pins      │ Data lines      │
+│ 1000µF Cap      │ Power supply smoothing │ At power supply │
+│ Thick wires      │ Handle high current    │ Power rails     │
+│ Common ground    │ Signal reference       │ All connections │
+└─────────────────────────────────────────────────────────────┘
+
+📊 POWER CALCULATIONS:
+┌─────────────────────────────────────────────────────────────┐
+│ Strip    │ LEDs │ Max Current │ Max Power │ @ 50% Bright   │
+├──────────┼──────┼─────────────┼───────────┼─────────────────┤
+│ Main     │ 150  │ 9.0A        │ 45W       │ 4.5A / 22.5W   │
+│ Accent   │ 60   │ 3.6A        │ 18W       │ 1.8A / 9W      │ 
+│ Ambient  │ 30   │ 1.8A        │ 9W        │ 0.9A / 4.5W    │
+├──────────┼──────┼─────────────┼───────────┼─────────────────┤
+│ TOTAL    │ 240  │ 14.4A       │ 72W       │ 7.2A / 36W     │
+└─────────────────────────────────────────────────────────────┘
+
+🎵 HOMECOMING FEATURES UNLOCKED:
+┌─────────────────────────────────────────────────────────────┐
+│ ✅ Voice Control: "Set main lights red"                    │
+│ ✅ Music Sync: Beat-reactive lighting effects              │  
+│ ✅ Scene Modes: Romantic, Party, Focus, Sleep              │
+│ ✅ Smart Effects: Pulse, Wave, Rainbow, Candle flicker     │
+│ ✅ Kai Consciousness: Context-aware responses               │
+│ ✅ Multi-Zone: Independent or synchronized control         │
+└─────────────────────────────────────────────────────────────┘
+
+🚀 DEPLOYMENT CHECKLIST:
+□ External 5V 20A+ power supply connected
+□ All ground connections to common rail  
+□ 330Ω resistors on all data lines
+□ Thick gauge wires for power (14-16 AWG)
+□ Pi SSH access working (192.168.29.5)
+□ Python libraries installed (rpi_ws281x)
+□ Firebase listener running on Pi
+□ Hardware test passed (test_led_hardware.py)
+□ Voice commands working from Homecoming app
+
+Voice Command Examples:
+"Hey Kai, set the main lights to blue"
+"Turn on ambient warm lighting" 
+"Start music reactive mode"
+"Change all lights to party colors"
+"Begin gentle pulse effect"
+```
