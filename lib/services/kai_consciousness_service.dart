@@ -64,13 +64,13 @@ ${_formatLEDSpecs(hardwareSetup['led_strips'])}
 
 🎵 AUDIO SYSTEM:
 - Music Tracks: ${hardwareSetup['music_tracks']} coordinated profiles
-- Bluetooth: ${capabilities['audio_control']['bluetooth_routing'] ? 'ACTIVE' : 'INACTIVE'}
-- Voice Analysis: ${capabilities['audio_control']['voice_analysis'] ? 'ENABLED' : 'DISABLED'}
+- Bluetooth: ${capabilities['audio_control']['bluetooth_routing'] == true ? 'ACTIVE' : 'INACTIVE'}
+- Voice Analysis: ${capabilities['audio_control']['voice_analysis'] == true ? 'ENABLED' : 'DISABLED'}
 
 🧠 INTELLIGENCE SYSTEMS:
-- Profile Matching: ${capabilities['coordination']['intelligent_matching'] ? 'ACTIVE' : 'INACTIVE'}
-- Scene Automation: ${capabilities['coordination']['scene_automation'] ? 'ENABLED' : 'DISABLED'}
-- GM Kai Mode: ${capabilities['coordination']['gm_kai_mode'] ? 'AVAILABLE' : 'UNAVAILABLE'}
+- Profile Matching: ${capabilities['coordination']['intelligent_matching'] == true ? 'ACTIVE' : 'INACTIVE'}
+- Scene Automation: ${capabilities['coordination']['scene_automation'] == true ? 'ENABLED' : 'DISABLED'}
+- GM Kai Mode: ${capabilities['coordination']['gm_kai_mode'] == true ? 'AVAILABLE' : 'UNAVAILABLE'}
 
 📡 FIREBASE INTEGRATION:
 Endpoint: ${hardwareSetup['firebase_endpoint']}
@@ -111,8 +111,15 @@ ${context['response_instruction']}""";
         },
         'technical_capabilities': {
           'led_control': {'available_strips': ['main', 'accent', 'ambient']},
-          'audio_control': {'bluetooth_routing': true},
-          'coordination': {'intelligent_matching': true, 'scene_automation': true}
+          'audio_control': {
+            'bluetooth_routing': true,
+            'voice_analysis': true
+          },
+          'coordination': {
+            'intelligent_matching': true, 
+            'scene_automation': true,
+            'gm_kai_mode': true
+          }
         }
       },
       'response_instruction': 'Pi offline - respond with cached knowledge of smart home capabilities'
