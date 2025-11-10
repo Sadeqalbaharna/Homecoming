@@ -2219,7 +2219,7 @@ Execute the command immediately and report what you're doing as GM of this smart
       }
       
       debugService?.addStep(
-        'BrainPhase.processing', // Using string since we can't import the enum
+        BrainPhase.processing,
         'Detected ambiance mention in reply - triggering actual control',
         data: {'reply_preview': reply.length > 100 ? '${reply.substring(0, 100)}...' : reply},
       );
@@ -2243,7 +2243,7 @@ Execute the command immediately and report what you're doing as GM of this smart
         if (success) {
           print('✅ [AI_SERVICE] Successfully triggered ${ambianceMatch.profile} ambiance');
           debugService?.addStep(
-            'BrainPhase.processing',
+            BrainPhase.processing,
             'Ambiance control successful',
             data: {
               'profile': ambianceMatch.profile,
@@ -2253,7 +2253,7 @@ Execute the command immediately and report what you're doing as GM of this smart
         } else {
           print('❌ [AI_SERVICE] Failed to trigger ambiance control');
           debugService?.addStep(
-            'BrainPhase.processing',
+            BrainPhase.processing,
             'Ambiance control failed',
           );
         }
@@ -2293,7 +2293,7 @@ Execute the command immediately and report what you're doing as GM of this smart
           if (success) {
             print('✅ [AI_SERVICE] Successfully triggered inferred $inferredProfile ambiance');
             debugService?.addStep(
-              'BrainPhase.processing',
+              BrainPhase.processing,
               'Inferred ambiance control successful',
               data: {'inferred_profile': inferredProfile},
             );
@@ -2306,7 +2306,7 @@ Execute the command immediately and report what you're doing as GM of this smart
     } catch (e) {
       print('❌ [AI_SERVICE] Error in ambiance detection/triggering: $e');
       debugService?.addStep(
-        'BrainPhase.processing',
+        BrainPhase.processing,
         'Ambiance detection failed: $e',
       );
       // Continue without failing the entire response
