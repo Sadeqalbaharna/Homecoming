@@ -104,6 +104,7 @@ ${context['response_instruction']}""";
           },
           'audio_device': 'Bluetooth (cached)',
           'music_tracks': 7,
+          'firebase_endpoint': 'https://homecoming-74f73-default-rtdb.europe-west1.firebasedatabase.app/home_automation/kai_persona_1',
         },
         'current_state': {
           'led_status': 'unknown',
