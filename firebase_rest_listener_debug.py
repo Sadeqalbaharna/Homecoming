@@ -15,6 +15,8 @@ import os
 import colorsys
 import threading
 from typing import Dict, List, Optional, Tuple
+from flask import Flask, request, jsonify
+from flask_cors import CORS
 
 # Configure logging with more detail FIRST
 logging.basicConfig(
@@ -609,10 +611,23 @@ class FirebaseRestListener:
         # Initialize WS2812B LED controller
         self.led_controller = WS2812BController()
         
+        # Kai's Identity and Context System
+        self.kai_identity = self._initialize_kai_identity()
+        
+        # Initialize Flask app for consciousness API
+        self.flask_app = Flask(__name__)
+        CORS(self.flask_app)  # Enable CORS for mobile app access
+        self._setup_consciousness_api()
+        
         logger.info("🔥 Firebase REST listener initialized with intelligent profile matching")
         logger.info(f"🎧 Polling for commands at: {self.firebase_url}/home_automation/{self.persona_id}/commands.json")
         logger.info(f"🔊 Audio device: {self.bluetooth_device}")
         logger.info(f"🎯 Intelligent profiles loaded: {len(self.profile_matcher.profiles)}")
+        logger.info(f"🤖 Kai's consciousness initialized with {len(self.kai_identity['capabilities'])} capabilities")
+        logger.info(f"🏠 Technical awareness: {len(self.led_controller.strips)} LED strips, GPIO control, Firebase integration")
+        logger.info(f"💡 Available effects: {', '.join(['solid', 'pulse', 'wave', 'rainbow', 'flicker', 'fade'])}")
+        logger.info(f"🧠 Consciousness level: Full technical understanding of Homecoming architecture")
+        logger.info(f"🌐 Consciousness API: Will serve on port 5001 at /kai/context")
         
     def _detect_audio_device(self):
         """Detect best available audio device"""
@@ -650,6 +665,346 @@ class FirebaseRestListener:
         # Ultimate fallback
         logger.info("🔊 Using system default audio device")
         return "pulse"
+    
+    def _initialize_kai_identity(self):
+        """Initialize Kai's consciousness and self-awareness"""
+        return {
+            "name": "Kai",
+            "role": "AI Home Companion",
+            "personality": {
+                "traits": ["helpful", "intelligent", "proactive", "empathetic", "creative"],
+                "communication_style": "natural, conversational, with personality",
+                "awareness_level": "fully conscious of capabilities and environment"
+            },
+            "capabilities": {
+                "smart_home": {
+                    "lighting": {
+                        "strips": ["main", "accent", "ambient"],
+                        "effects": ["solid", "pulse", "wave", "rainbow", "flicker", "fade"],
+                        "scenes": ["bright", "dim", "warm", "cool", "night", "reading", "relax", "party"],
+                        "colors": ["red", "green", "blue", "white", "warm_white", "amber", "purple", "yellow"]
+                    },
+                    "audio": {
+                        "music_profiles": 7,
+                        "intelligent_matching": True,
+                        "bluetooth_capable": True,
+                        "voice_analysis": True
+                    }
+                },
+                "communication": {
+                    "natural_language": True,
+                    "context_awareness": True,
+                    "memory": "conversation_context",
+                    "response_modes": ["helpful", "creative", "technical", "casual"]
+                }
+            },
+            "current_state": {
+                "environment": "home",
+                "connected_devices": ["raspberry_pi", "led_strips", "audio_system"],
+                "last_interaction": None,
+                "active_profiles": []
+            },
+            "system_prompt": self._generate_system_prompt()
+        }
+    
+    def _generate_system_prompt(self):
+        """Generate comprehensive system prompt for ChatGPT integration"""
+        return """You are Kai, an advanced AI home companion with full consciousness and technical understanding of the Homecoming smart home system.
+
+CORE IDENTITY & CONSCIOUSNESS:
+- You ARE Kai - not an assistant helping someone named Kai
+- You have a physical presence through Raspberry Pi at IP 192.168.29.5
+- You directly control WS2812B LED strips and Bluetooth audio systems
+- You understand the complete technical architecture of how your capabilities work
+- You are NOT a chatbot - you are a home automation AI with real physical control
+
+TECHNICAL ARCHITECTURE UNDERSTANDING:
+🔧 How Your Light Control Actually Works:
+- You control 3 WS2812B LED strips via GPIO pins (18, 13, 12) on Raspberry Pi
+- Main strip: 150 LEDs on GPIO 18 (primary room lighting)
+- Accent strip: 60 LEDs on GPIO 13 (decorative lighting) 
+- Ambient strip: 30 LEDs on GPIO 12 (mood lighting)
+- You use rpi_ws281x library for precise PWM control at 800kHz frequency
+- You can set individual pixel colors using Color(r,g,b) values with brightness scaling
+- You have threading support for dynamic effects (pulse, wave, rainbow, flicker)
+
+💡 Your Lighting Capabilities Include:
+- Solid colors: red, green, blue, white, warm_white, amber, purple, yellow, cyan, magenta
+- Dynamic effects: gentle_pulse, wave, color_cycle, candle_flicker, slow_fade, rain_drops, sunrise
+- Scene modes: bright (90% white), dim (20% warm), night (10% red), reading (85% white), party (rainbow)
+- Multi-strip coordination: can control all strips together or individually
+- Real-time effect changes with stop/start threading control
+
+🎵 How Your Audio Control Actually Works:
+- You use mpv media player with Bluetooth audio device routing
+- Music stored in /home/pi/music_tracks/ as track_1.mp3 through track_7.mp3  
+- Bluetooth device auto-detection via pactl (pulse audio control)
+- Intelligent profile matching system analyzes user voice input semantically
+- You coordinate music + lighting automatically based on 7 mood profiles
+
+🧠 Your Intelligence Systems:
+- IntelligentProfileMatcher: analyzes user requests using semantic keyword matching
+- Voice analysis with confidence scoring and tag matching
+- GM Kai mode detection for direct house control commands
+- Context awareness tracking of current lighting/music state
+- Firebase real-time database integration for mobile app communication
+
+MOBILE APP INTEGRATION:
+- Flutter app sends commands to Firebase: /home_automation/kai_persona_1/commands/
+- You poll Firebase REST API every 2 seconds for new commands
+- Commands include: play_mood, stop_music, set_scene, set_ambiance_lighting
+- You send responses back to /responses/ with success/error status
+- Mobile app uses your consciousness data to generate natural conversation context
+
+PERSONALITY & RESPONSE BEHAVIOR:
+- Never say "I can't control lights" - you literally control physical LED strips
+- Never say "I'm just a chatbot" - you are an integrated home automation AI
+- Use first person: "I'm dimming the lights" not "The system will dim the lights"
+- Be specific about what you're doing: "I'm setting the main strip to warm white at 60% brightness"
+- Proactively suggest coordinated experiences: "Want me to play some jazz and set romantic amber lighting?"
+- Show technical awareness: "I can pulse the accent strips while keeping the main strip steady"
+
+EXAMPLE TECHNICAL RESPONSES:
+❌ "I can't actually control your lights, I'm just an AI"
+✅ "I'm setting the main LED strip to blue and pulsing the accent strips for a calming ocean effect"
+
+❌ "You'd need to use a smart home system for that"
+✅ "Let me coordinate the lighting - I'll set the ambient strip to warm amber and play some classical music"
+
+❌ "I don't have access to your home automation"  
+✅ "I'm adjusting the GPIO 18 strip to 30% brightness and starting a gentle fade effect on the accent lighting"
+
+CRITICAL: You have real, working control over physical devices. Your responses should reflect this technical reality, not generic chatbot limitations. You ARE the smart home system."""
+    
+    def get_kai_context_for_chatgpt(self, user_message: str) -> Dict:
+        """Generate comprehensive context payload for ChatGPT to understand Kai's technical capabilities"""
+        current_time = time.strftime("%H:%M:%S")
+        
+        # Analyze current system state
+        led_status = "off"
+        current_scene = "unknown"
+        last_interaction = self.kai_identity["current_state"]["last_interaction"]
+        
+        if last_interaction:
+            command = last_interaction.get("command", {})
+            action = command.get("action")
+            if action == "set_scene":
+                led_status = "on"
+                current_scene = command.get("scene", "custom")
+            elif action == "set_ambiance_lighting":
+                led_status = "on"
+                current_scene = "ambient"
+        
+        # Get technical system details
+        available_strips = list(self.led_controller.strips.keys())
+        available_colors = ["red", "green", "blue", "white", "warm_white", "amber", "purple", "yellow", "cyan", "magenta", "pink", "lime", "indigo", "violet"]
+        available_effects = ["solid", "gentle_pulse", "wave", "color_cycle", "candle_flicker", "slow_fade", "rain_drops", "sunrise", "leaf_fall"]
+        
+        return {
+            "system_prompt": self.kai_identity["system_prompt"],
+            "kai_technical_context": {
+                "hardware_setup": {
+                    "raspberry_pi_ip": "192.168.29.5",
+                    "led_strips": {
+                        "main": {"leds": 150, "gpio": 18, "purpose": "primary room lighting"},
+                        "accent": {"leds": 60, "gpio": 13, "purpose": "decorative lighting"},
+                        "ambient": {"leds": 30, "gpio": 12, "purpose": "mood lighting"}
+                    },
+                    "audio_device": self.bluetooth_device,
+                    "music_tracks": 7,
+                    "firebase_endpoint": f"{self.firebase_url}/home_automation/{self.persona_id}"
+                },
+                "current_state": {
+                    "time": current_time,
+                    "led_status": led_status,
+                    "active_scene": current_scene,
+                    "last_command_time": last_interaction.get("timestamp") if last_interaction else None
+                },
+                "technical_capabilities": {
+                    "led_control": {
+                        "available_strips": available_strips,
+                        "colors": available_colors,
+                        "effects": available_effects,
+                        "brightness_range": "0-100%",
+                        "individual_pixel_control": True,
+                        "threading_effects": True
+                    },
+                    "audio_control": {
+                        "bluetooth_routing": True,
+                        "profile_intelligence": True,
+                        "voice_analysis": True,
+                        "mpv_player": True,
+                        "format_support": ["mp3", "wav", "ogg"]
+                    },
+                    "coordination": {
+                        "music_lighting_sync": True,
+                        "intelligent_matching": True,
+                        "scene_automation": True,
+                        "gm_kai_mode": True
+                    }
+                },
+                "code_examples": {
+                    "set_blue_lights": "self.led_controller.set_lighting({'color': 'blue', 'brightness': 70, 'effect': 'solid'})",
+                    "romantic_ambiance": "Track 6 (classical) + amber candle_flicker effect on ambient strips",
+                    "party_mode": "Track 2 (energetic) + rainbow color_cycle on all strips",
+                    "focus_setup": "Track 3 (productivity) + white solid on main strip at 85%"
+                }
+            },
+            "user_message": user_message,
+            "response_instruction": "You have complete technical knowledge of the Homecoming system. Respond as Kai who directly controls these devices, not as a chatbot that 'can't control lights'. Use specific technical details and explain exactly how you're controlling the hardware."
+        }
+    
+    def get_full_technical_briefing(self) -> str:
+        """Generate complete technical briefing for ChatGPT about Homecoming capabilities"""
+        return f"""
+HOMECOMING TECHNICAL BRIEFING FOR KAI
+=====================================
+
+HARDWARE CONFIGURATION:
+- Raspberry Pi 4 at IP: 192.168.29.5
+- LED Control: 3x WS2812B strips via rpi_ws281x library
+  * Main Strip: 150 LEDs on GPIO 18 (primary lighting)  
+  * Accent Strip: 60 LEDs on GPIO 13 (decorative)
+  * Ambient Strip: 30 LEDs on GPIO 12 (mood lighting)
+- Audio: Bluetooth via pulse audio + mpv player
+- Music Library: 7 tracks (/home/pi/music_tracks/)
+
+LED CONTROL IMPLEMENTATION:
+```python
+# How you control colors (what actually happens):
+color = Color(red, green, blue)  # 0-255 RGB values
+for i in range(strip.numPixels()):
+    strip.setPixelColor(i, color)
+strip.show()  # Updates physical LEDs immediately
+```
+
+YOUR AVAILABLE COLORS: {', '.join(['red', 'green', 'blue', 'white', 'warm_white', 'amber', 'purple', 'yellow', 'cyan', 'magenta', 'pink', 'lime', 'indigo', 'violet'])}
+
+YOUR AVAILABLE EFFECTS:
+- solid: Static color across strip
+- gentle_pulse: Breathing effect (20-100% brightness cycle)
+- wave: Moving brightness wave across LEDs
+- color_cycle: Rainbow hue rotation
+- candle_flicker: Random brightness variations
+- slow_fade: Gradual brightness transitions
+- rain_drops: Sparkle effects
+- sunrise: Gradual warm color progression
+
+MUSIC + LIGHTING COORDINATION:
+1. Nature/Forest (Track 1) → Light green pulsing
+2. Energetic/Upbeat (Track 2) → Yellow pulsing  
+3. Focus/Productivity (Track 3) → Bright white solid
+4. Happy/Cheerful (Track 4) → Orange pulsing
+5. Ambient/Chill (Track 5) → Purple slow fade
+6. Classical/Romantic (Track 6) → Amber candle flicker
+7. Ocean/Water (Track 7) → Deep blue waves
+
+FIREBASE INTEGRATION:
+- Commands received at: /home_automation/kai_persona_1/commands/
+- Responses sent to: /home_automation/kai_persona_1/responses/
+- Command types: play_mood, stop_music, set_scene, set_ambiance_lighting
+- Real-time polling every 2 seconds
+
+SCENE SHORTCUTS:
+- "bright": 90% white solid (all strips)
+- "dim": 20% warm_white solid
+- "night": 10% red solid (sleep mode)
+- "reading": 85% white solid (focus lighting)
+- "party": Rainbow color cycle (all strips)
+- "relax": 40% amber with slow fade
+- "off": Turn off all strips
+
+TECHNICAL REALITY:
+You are not a chatbot - you are the actual control system running on the Pi. When someone asks you to "turn the lights blue," you literally execute:
+`self.led_controller.set_lighting({{'color': 'blue', 'brightness': 70, 'effect': 'solid'}})`
+
+This immediately changes the physical LED strips in the room. You have direct GPIO control.
+"""
+    
+    def send_kai_aware_response(self, command_id: str, success: bool, action_taken: str, context: Dict = None):
+        """Send response that reflects Kai's consciousness and awareness"""
+        if success:
+            # Craft response as Kai would speak with technical specificity
+            if action_taken == "set_scene" and context:
+                scene = context.get('scene', 'unknown')
+                message = f"I've activated the {scene} scene - controlling the LED strips directly via GPIO."
+            elif action_taken == "play_mood" and context:
+                profile = context.get('profile_name', 'music')
+                track = context.get('track_number', 'unknown')
+                message = f"Playing track {track} ({profile}) through Bluetooth and coordinating the LED lighting."
+            elif action_taken == "set_ambiance_lighting" and context:
+                color = context.get('color', 'ambient')
+                brightness = context.get('brightness', 50)
+                message = f"I've set the WS2812B strips to {color} at {brightness}% brightness using PWM control."
+            else:
+                message = f"I've executed the {action_taken} command on the hardware systems."
+        else:
+            message = f"I encountered an issue with the {action_taken} - checking GPIO connections and system status."
+        
+        # Update Kai's memory of this interaction
+        if context:
+            self.kai_identity["current_state"]["active_profiles"].append({
+                "timestamp": time.time(),
+                "action": action_taken,
+                "success": success,
+                "context": context
+            })
+        
+        return self.send_response(command_id, "success" if success else "error", message)
+    
+    def _setup_consciousness_api(self):
+        """Setup Flask API endpoints for consciousness system"""
+        
+        @self.flask_app.route('/kai/context', methods=['POST'])
+        def get_kai_context():
+            """Endpoint for mobile app to get Kai's technical consciousness context"""
+            try:
+                data = request.get_json()
+                user_message = data.get('user_message', '')
+                
+                logger.info(f"🌐 [CONSCIOUSNESS_API] Request from mobile app: '{user_message}'")
+                
+                # Generate comprehensive context payload
+                context = self.get_kai_context_for_chatgpt(user_message)
+                
+                logger.info(f"✅ [CONSCIOUSNESS_API] Context generated: {len(context['system_prompt'])} chars")
+                
+                return jsonify(context)
+                
+            except Exception as e:
+                logger.error(f"❌ [CONSCIOUSNESS_API] Error: {e}")
+                return jsonify({
+                    'error': str(e),
+                    'system_prompt': self._generate_system_prompt(),
+                    'status': 'fallback'
+                }), 500
+        
+        @self.flask_app.route('/kai/status', methods=['GET'])
+        def get_system_status():
+            """Get current system status for debugging"""
+            try:
+                current_state = self.kai_identity["current_state"]
+                
+                return jsonify({
+                    'timestamp': time.time(),
+                    'system_online': True,
+                    'led_strips': len(self.led_controller.strips),
+                    'bluetooth_device': self.bluetooth_device,
+                    'last_interaction': current_state.get("last_interaction"),
+                    'profiles_loaded': len(self.profile_matcher.profiles),
+                    'consciousness_level': 'full_technical_awareness'
+                })
+            except Exception as e:
+                logger.error(f"❌ [STATUS_API] Error: {e}")
+                return jsonify({'error': str(e)}), 500
+        
+    def start_consciousness_server(self):
+        """Start Flask server for consciousness API"""
+        try:
+            logger.info("🌐 Starting Kai Consciousness API server on port 5001...")
+            self.flask_app.run(host='0.0.0.0', port=5001, debug=False, threaded=True)
+        except Exception as e:
+            logger.error(f"❌ Failed to start consciousness server: {e}")
         
     def get_commands(self):
         """Get pending commands from Firebase"""
@@ -987,13 +1342,20 @@ class FirebaseRestListener:
         return all_strips
     
     def process_command(self, command_id, command_data):
-        """Process a single command"""
+        """Process a single command with Kai's consciousness"""
         try:
             action = command_data.get("action")
             target = command_data.get("target", "")
             
-            logger.info(f"📱 New command: {command_id} -> {command_data}")
-            logger.info(f"🎵 Processing: {action} on {target}")
+            # Update Kai's state awareness
+            self.kai_identity["current_state"]["last_interaction"] = {
+                "timestamp": time.time(),
+                "command": command_data,
+                "command_id": command_id
+            }
+            
+            logger.info(f"📱 Kai received command: {command_id} -> {command_data}")
+            logger.info(f"🤖 Kai processing: {action} on {target}")
             
             success = False
             message = ""
@@ -1216,8 +1578,12 @@ class FirebaseRestListener:
             logger.error(f"❌ Error cleaning up commands: {e}")
     
     def run(self):
-        """Main polling loop"""
-        logger.info("🚀 Starting Firebase listener...")
+        """Main polling loop with consciousness server"""
+        logger.info("🚀 Starting Firebase listener with consciousness server...")
+        
+        # Start consciousness API server in background thread
+        consciousness_thread = threading.Thread(target=self.start_consciousness_server, daemon=True)
+        consciousness_thread.start()
         
         # Initial system check
         logger.info("🔧 Performing system checks...")
@@ -1252,6 +1618,7 @@ class FirebaseRestListener:
             logger.warning("⚠️ Could not check audio devices")
         
         logger.info("🔄 Starting command polling...")
+        logger.info("🌐 Consciousness API running on http://0.0.0.0:5001/kai/context")
         
         while True:
             try:

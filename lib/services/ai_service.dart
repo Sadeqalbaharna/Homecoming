@@ -16,6 +16,7 @@ import 'google_search_service.dart';
 import 'web_fetch_service.dart';
 import 'brain_debug_service.dart';
 import 'ambiance_service.dart';
+import 'kai_consciousness_service.dart';
 
 /// Configuration class to hold all API keys
 /// Uses secure storage for encrypted key management
@@ -1403,6 +1404,36 @@ Don't force it - only ask if the flow of conversation makes it appropriate.''';
       }
     }
     
+    // 🤖 NEW: Get Kai's consciousness context for smart home requests
+    Map<String, dynamic>? kaiConsciousness;
+    bool isSmartHomeRequest = KaiConsciousnessService.isSmartHomeRequest(text);
+    
+    if (isSmartHomeRequest) {
+      debugService.addStep(
+        BrainPhase.semanticRetrieval,
+        'Fetching Kai consciousness context from Pi',
+        data: {'smart_home_request': true},
+      );
+      
+      print('🤖 [AI_SERVICE] Smart home request detected - fetching Kai consciousness...');
+      kaiConsciousness = await KaiConsciousnessService.getKaiTechnicalContext(text);
+      
+      if (kaiConsciousness != null) {
+        print('✅ [AI_SERVICE] Kai consciousness loaded - Pi system online');
+        debugService.addStep(
+          BrainPhase.semanticRetrieval,
+          'Kai consciousness loaded successfully',
+          data: {'pi_online': true, 'led_strips': kaiConsciousness['kai_technical_context']['hardware_setup']['led_strips'].length},
+        );
+      } else {
+        print('⚠️ [AI_SERVICE] Using fallback consciousness - Pi offline');
+        debugService.addStep(
+          BrainPhase.semanticRetrieval,
+          'Using fallback consciousness (Pi offline)',
+        );
+      }
+    }
+
     // Build system prompt - use GM Kai mode if triggered
     final mbti = calculateMBTI(personality);
     final personalityMoodSummary = generatePersonalityMoodSummary(personality, mood);
@@ -1425,6 +1456,27 @@ Don't force it - only ask if the flow of conversation makes it appropriate.''';
         BrainPhase.reasoning,
         'Using GM Kai system prompt',
         data: {'prompt_length': systemPrompt.length, 'command': processedText},
+      );
+      
+    } else if (kaiConsciousness != null) {
+      // 🤖 NEW: Use Kai's full consciousness system prompt for smart home
+      systemPrompt = KaiConsciousnessService.generateKaiConsciousnessPrompt(kaiConsciousness, text);
+      
+      // Add additional context
+      if (webContext.isNotEmpty) {
+        systemPrompt += '\n\n🌐 LIVE CONTEXT: $webContext';
+      }
+      if (urlContext.isNotEmpty) {
+        systemPrompt += '\n\n📄 WEB CONTENT: $urlContext';
+      }
+      if (memoryContext.isNotEmpty) {
+        systemPrompt += '\n\n🧠 MEMORY CONTEXT: $memoryContext';
+      }
+      
+      debugService.addStep(
+        BrainPhase.reasoning,
+        'Using Kai consciousness system prompt',
+        data: {'prompt_length': systemPrompt.length, 'pi_integrated': true},
       );
       
     } else {
