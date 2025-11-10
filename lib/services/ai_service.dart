@@ -1462,6 +1462,18 @@ Don't force it - only ask if the flow of conversation makes it appropriate.''';
       // 🤖 NEW: Use Kai's full consciousness system prompt for smart home
       systemPrompt = KaiConsciousnessService.generateKaiConsciousnessPrompt(kaiConsciousness, text);
       
+      // Check if Pi is offline and add natural debug message
+      final debugMessage = kaiConsciousness['debug_message'];
+      if (debugMessage != null) {
+        systemPrompt += '\n\n🚨 PRIORITY RESPONSE: Start your response with this exact message: "$debugMessage"';
+        
+        debugService.addStep(
+          BrainPhase.reasoning,
+          'Pi offline - added natural connectivity message',
+          data: {'debug_message': debugMessage},
+        );
+      }
+      
       // Add additional context
       if (webContext.isNotEmpty) {
         systemPrompt += '\n\n🌐 LIVE CONTEXT: $webContext';
@@ -1476,7 +1488,7 @@ Don't force it - only ask if the flow of conversation makes it appropriate.''';
       debugService.addStep(
         BrainPhase.reasoning,
         'Using Kai consciousness system prompt',
-        data: {'prompt_length': systemPrompt.length, 'pi_integrated': true},
+        data: {'prompt_length': systemPrompt.length, 'pi_integrated': true, 'pi_offline': debugMessage != null},
       );
       
     } else {

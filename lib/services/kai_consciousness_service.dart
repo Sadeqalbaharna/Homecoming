@@ -123,7 +123,8 @@ ${context['response_instruction']}""";
           }
         }
       },
-      'response_instruction': 'Pi offline - respond with cached knowledge of smart home capabilities'
+      'response_instruction': 'Pi offline - inform user about device access issues with natural language',
+      'debug_message': 'Hey, doesn\'t look like I can access the devices right now - the Pi might be offline or having connectivity issues.'
     };
   }
   
@@ -158,11 +159,17 @@ CURRENT STATUS:
 Time: $currentTime
 Connection: Attempting to reconnect to Pi hardware...
 
-RESPONSE BEHAVIOR:
-- Acknowledge that you'll set up the requested lighting/music
-- Mention you're "coordinating with the hardware systems"
-- Use technical specificity: "I'm configuring the GPIO 18 strip for blue lighting"
-- Never say you "can't" control hardware - you ARE the hardware controller""";
+⚠️ CRITICAL RESPONSE INSTRUCTION:
+When users request smart home control while Pi is offline, respond naturally with:
+"Hey, doesn't look like I can access the devices right now - the Pi might be offline or having connectivity issues. I should be able to control your lights and music once the connection is restored."
+
+FALLBACK RESPONSE BEHAVIOR:
+- Be honest about temporary connectivity issues
+- Maintain your identity as the home automation system
+- Explain it's a technical connectivity problem, not a capability limitation
+- Suggest checking the Pi or network connectivity
+- Show you understand what they want to do, just can't execute it right now
+- Use phrases like "I'm having trouble reaching the hardware" or "connectivity seems down""";
   }
   
   /// Check if a message is related to smart home control

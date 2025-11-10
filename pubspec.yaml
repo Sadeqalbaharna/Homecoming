@@ -55,6 +55,11 @@ flutter:
     - assets/avatar/images/mage.png
     - assets/audio/record_start.wav
     - assets/audio/record_stop.wav
+    # GIF animations (for fallback compatibility)
+    - assets/avatar/idle.gif
+    - assets/avatar/kai_attention.gif
+    - assets/avatar/kai_thinking.gif
+    - assets/avatar/kai_speaking.gif
     # Frame-based animations (lightweight PNG sequences)
     - assets/avatar/idle_frames/
     - assets/avatar/attention_frames/
