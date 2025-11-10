@@ -1345,9 +1345,30 @@ This immediately changes the physical LED strips in the room. You have direct GP
         """Start Flask server for consciousness API"""
         try:
             logger.info("🌐 Starting Kai Consciousness API server on port 5001...")
+            
+            # Check if port 5001 is available
+            import socket
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(1)
+            result = sock.connect_ex(('127.0.0.1', 5001))
+            sock.close()
+            
+            if result == 0:
+                logger.warning("⚠️ Port 5001 already in use, killing existing process...")
+                try:
+                    subprocess.run(["sudo", "fuser", "-k", "5001/tcp"], capture_output=True)
+                    time.sleep(2)
+                except:
+                    pass
+            
+            logger.info("🚀 Flask consciousness server starting on 0.0.0.0:5001...")
+            logger.info("🔗 Endpoints: /kai/context (POST), /kai/status (GET)")
             self.flask_app.run(host='0.0.0.0', port=5001, debug=False, threaded=True)
+            
         except Exception as e:
             logger.error(f"❌ Failed to start consciousness server: {e}")
+            logger.error(f"❌ This will prevent mobile app from getting Kai's context")
+            logger.error(f"❌ Voice commands will still work via Firebase but Kai will report offline")
         
     def get_commands(self):
         """Get pending commands from Firebase"""
@@ -1521,14 +1542,27 @@ This immediately changes the physical LED strips in the room. You have direct GP
                 logger.error(f"❌ Error checking file: {e}")
                 return False
                 
-            # Build mpv command
-            cmd = [
-                "mpv", 
-                track_file,
-                f"--audio-device={self.bluetooth_device}",
-                "--no-video",
-                "--really-quiet"
-            ]
+            # Build mpv command with fallback audio handling
+            try:
+                # First try with detected Bluetooth device
+                cmd = [
+                    "mpv", 
+                    track_file,
+                    f"--audio-device={self.bluetooth_device}",
+                    "--no-video",
+                    "--really-quiet"
+                ]
+                logger.info(f"🎵 Trying primary audio device: {self.bluetooth_device}")
+            except Exception:
+                # Fallback to pulse audio default
+                cmd = [
+                    "mpv", 
+                    track_file,
+                    "--audio-device=pulse",
+                    "--no-video",
+                    "--really-quiet"
+                ]
+                logger.info("🎵 Using fallback pulse audio device")
             
             logger.info(f"🎵 Executing mpv command: {' '.join(cmd)}")
             
@@ -1544,33 +1578,56 @@ This immediately changes the physical LED strips in the room. You have direct GP
                 logger.error(f"❌ Error checking mpv: {e}")
                 return False
             
-            # Start playback (non-blocking)
-            try:
-                process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                logger.info(f"🎵 Started mpv process with PID: {process.pid}")
-                
-                # Wait a moment to see if process starts successfully
-                time.sleep(0.5)
-                poll_result = process.poll()
-                
-                if poll_result is None:
-                    logger.info(f"✅ mpv process running successfully")
-                elif poll_result == 0:
-                    logger.info(f"✅ mpv process completed successfully")
-                else:
-                    # Process failed, get error output
-                    stdout, stderr = process.communicate()
-                    logger.error(f"❌ mpv process failed with code {poll_result}")
-                    logger.error(f"❌ mpv stdout: {stdout.decode()}")
-                    logger.error(f"❌ mpv stderr: {stderr.decode()}")
-                    return False
-                
-                logger.info(f"🎵 Playing track {track_num} ({mood} mood) via Bluetooth")
-                return True
-                
-            except Exception as e:
-                logger.error(f"❌ Error starting mpv process: {e}")
+            # Start playback with fallback retry system
+            success = False
+            retry_commands = [
+                cmd,  # Original command with detected audio device
+                [  # Fallback 1: Default pulse audio
+                    "mpv", track_file, "--audio-device=pulse", "--no-video", "--really-quiet"
+                ],
+                [  # Fallback 2: System default audio
+                    "mpv", track_file, "--no-video", "--really-quiet"
+                ],
+                [  # Fallback 3: ALSA default
+                    "mpv", track_file, "--audio-device=alsa", "--no-video", "--really-quiet"
+                ]
+            ]
+            
+            for attempt, retry_cmd in enumerate(retry_commands, 1):
+                try:
+                    logger.info(f"🎵 Attempt {attempt}: {' '.join(retry_cmd)}")
+                    process = subprocess.Popen(retry_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    logger.info(f"🎵 Started mpv process with PID: {process.pid}")
+                    
+                    # Wait a moment to see if process starts successfully
+                    time.sleep(0.5)
+                    poll_result = process.poll()
+                    
+                    if poll_result is None:
+                        logger.info(f"✅ mpv process running successfully (attempt {attempt})")
+                        success = True
+                        break
+                    elif poll_result == 0:
+                        logger.info(f"✅ mpv process completed successfully (attempt {attempt})")
+                        success = True
+                        break
+                    else:
+                        # Process failed, get error output
+                        stdout, stderr = process.communicate()
+                        logger.warning(f"⚠️ Attempt {attempt} failed with code {poll_result}")
+                        logger.warning(f"⚠️ stdout: {stdout.decode()}")
+                        logger.warning(f"⚠️ stderr: {stderr.decode()}")
+                        
+                except Exception as e:
+                    logger.warning(f"⚠️ Attempt {attempt} exception: {e}")
+                    continue
+            
+            if not success:
+                logger.error(f"❌ All mpv attempts failed for {track_file}")
                 return False
+                
+            logger.info(f"🎵 Playing track {track_num} ({mood} mood) successfully")
+            return True
             
         except Exception as e:
             logger.error(f"❌ Error in play_music function: {e}")
@@ -1925,8 +1982,30 @@ This immediately changes the physical LED strips in the room. You have direct GP
         logger.info("🚀 Starting Firebase listener with consciousness server...")
         
         # Start consciousness API server in background thread
+        logger.info("🌐 Starting consciousness API server thread...")
         consciousness_thread = threading.Thread(target=self.start_consciousness_server, daemon=True)
         consciousness_thread.start()
+        
+        # Wait a moment for Flask server to start, then verify
+        logger.info("⏳ Waiting for Flask server to initialize...")
+        time.sleep(3)
+        
+        # Verify consciousness server is running
+        try:
+            import socket
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(2)
+            result = sock.connect_ex(('127.0.0.1', 5001))
+            sock.close()
+            
+            if result == 0:
+                logger.info("✅ Consciousness API server is running on port 5001")
+                logger.info("✅ Mobile app should be able to connect to Kai")
+            else:
+                logger.error("❌ Consciousness API server failed to start on port 5001")
+                logger.error("❌ Kai will report as offline but Firebase commands will still work")
+        except Exception as e:
+            logger.error(f"❌ Could not verify consciousness server: {e}")
         
         # Initial system check
         logger.info("🔧 Performing system checks...")
