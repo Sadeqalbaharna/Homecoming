@@ -1416,17 +1416,25 @@ Don't force it - only ask if the flow of conversation makes it appropriate.''';
       );
       
       print('🤖 [AI_SERVICE] Smart home request detected - fetching Kai consciousness...');
-      kaiConsciousness = await KaiConsciousnessService.getKaiTechnicalContext(text);
       
-      if (kaiConsciousness != null) {
-        print('✅ [AI_SERVICE] Kai consciousness loaded - Pi system online');
-        debugService.addStep(
-          BrainPhase.semanticRetrieval,
-          'Kai consciousness loaded successfully',
-          data: {'pi_online': true, 'led_strips': kaiConsciousness['kai_technical_context']['hardware_setup']['led_strips'].length},
-        );
-      } else {
-        print('⚠️ [AI_SERVICE] Using fallback consciousness - Pi offline');
+      try {
+        // Add timeout protection to prevent hanging
+        kaiConsciousness = await KaiConsciousnessService.getKaiTechnicalContext(text)
+            .timeout(Duration(seconds: 3));
+        
+        if (kaiConsciousness != null) {
+          print('✅ [AI_SERVICE] Kai consciousness loaded - Pi system online');
+          debugService.addStep(
+            BrainPhase.semanticRetrieval,
+            'Kai consciousness loaded successfully',
+            data: {'pi_online': true, 'led_strips': kaiConsciousness['kai_technical_context']['hardware_setup']['led_strips'].length},
+          );
+        } else {
+          print('⚠️ [AI_SERVICE] Using fallback consciousness - Pi returned null');
+        }
+      } catch (e) {
+        print('⚠️ [AI_SERVICE] Consciousness service error (continuing with fallback): $e');
+        kaiConsciousness = null; // Ensure fallback is used
         debugService.addStep(
           BrainPhase.semanticRetrieval,
           'Using fallback consciousness (Pi offline)',
@@ -1849,7 +1857,49 @@ ${history.join('\n')}$memoryContext$urlContext$webContext$curiosityPrompt''';
     } catch (e, stackTrace) {
       print('❌ [SEND MESSAGE ERROR] Exception occurred: $e');
       print('❌ [SEND MESSAGE ERROR] Stack trace: $stackTrace');
-      rethrow; // Re-throw so UI can handle it
+      
+      // 🛡️ CRITICAL FIX: Never drop user prompts - always return a response
+      debugService.completeTrace('Error occurred during processing');
+      
+      // Try to get basic personality data for fallback response
+      Map<String, int> fallbackPersonality = _defaultPersonality;
+      
+      try {
+        fallbackPersonality = await getPersonality(personaId);
+      } catch (fallbackError) {
+        print('⚠️ [FALLBACK] Using default personality due to error: $fallbackError');
+      }
+      
+      // Generate a basic error-aware response
+      final errorResponse = '''I'm having a technical issue right now, but I'm still here! 
+      
+Let me try to respond to what you said: "${text.length > 100 ? '${text.substring(0, 100)}...' : text}"
+
+I might be experiencing connectivity issues or system processing problems. Could you try asking again? I want to make sure I can give you the best response possible.
+
+(Technical note: ${e.toString().split('\n').first})''';
+      
+      return ChatResponse(
+        reply: errorResponse,
+        mbti: calculateMBTI(fallbackPersonality),
+        raw: {'error': e.toString(), 'fallback_response': true},
+        personalityDelta: {},
+        moodDelta: {},
+        actualDeltas: {},
+        tags: ['error_recovery', 'system_issue'],
+        memoriesUsed: [],
+        webUsed: false,
+        liveUsed: null,
+        debugInfo: {
+          'error_occurred': true,
+          'error_message': e.toString(),
+          'fallback_response': true,
+          'original_text': text,
+        },
+        webSearchUsed: false,
+        searchResults: [],
+        curiosityQuestion: null,
+      );
     }
   }
 
