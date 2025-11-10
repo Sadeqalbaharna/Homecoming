@@ -2205,9 +2205,12 @@ Execute the command immediately and report what you're doing as GM of this smart
       
       // Check if Kai mentioned setting up ambiance or music
       final ambianceIndicators = [
-        'setting up', 'creating', 'activating', 'i\'m setting', 
-        'perfect!', 'ambiance', 'lighting', 'music', 'atmosphere',
-        'environment', 'mood', 'sounds', 'beats'
+        'setting up', 'creating', 'activating', 'i\'m setting', 'i\'m configuring', 
+        'perfect!', 'let me activate', 'let me set', 'i\'ll create',
+        'ambiance', 'lighting', 'music', 'atmosphere', 'mode activated',
+        'environment', 'mood', 'sounds', 'beats', 'configuring',
+        'party mode', 'focus mode', 'romantic mode', 'ocean atmosphere',
+        'forest ambiance', 'sunset mood', 'cozy lighting'
       ];
       
       bool mentionedAmbiance = ambianceIndicators.any((indicator) => 
