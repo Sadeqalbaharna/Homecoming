@@ -15,6 +15,7 @@ import os
 import colorsys
 import threading
 import math
+import math
 from typing import Dict, List, Optional, Tuple
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -651,6 +652,310 @@ class WS2812BController:
                 self.stop_effects[strip_name].set()
                 if strip_name in self.effect_threads:
                     self.effect_threads[strip_name].join(timeout=1.0)
+    
+    def set_dynamic_lighting(self, dynamic_config: Dict, strips: List[str] = None):
+        """Set dynamic ambient lighting with multiple colors and advanced effects"""
+        if not WS281X_AVAILABLE:
+            return self._simulate_dynamic_lighting(dynamic_config, strips)
+        
+        if strips is None:
+            strips = list(self.pixel_strips.keys())
+        
+        try:
+            primary_color = dynamic_config.get("primary_color", "#4A148C")
+            secondary_color = dynamic_config.get("secondary_color", "#7B1FA2")
+            accent_color = dynamic_config.get("accent_color", "#1A237E")
+            brightness = dynamic_config.get("brightness", 70)
+            effect = dynamic_config.get("effect", "breathe")
+            speed = dynamic_config.get("speed", 1.0)
+            zones = dynamic_config.get("zones", {})
+            
+            logger.info(f"🎆 Setting dynamic lighting: {primary_color} -> {secondary_color} -> {accent_color}")
+            logger.info(f"🎭 Effect: {effect} at speed {speed}, brightness {brightness}%")
+            logger.info(f"🗺️ Zones: {zones}")
+            
+            # Stop any running effects
+            self._stop_all_effects(strips)
+            
+            # Convert hex colors to RGB
+            primary_rgb = self._hex_to_rgb(primary_color, brightness)
+            secondary_rgb = self._hex_to_rgb(secondary_color, brightness)
+            accent_rgb = self._hex_to_rgb(accent_color, brightness)
+            
+            # Apply dynamic effect based on pattern
+            if effect == "breathe":
+                self._start_dynamic_breathe_effect(strips, primary_rgb, secondary_rgb, speed)
+            elif effect == "pulse":
+                self._start_dynamic_pulse_effect(strips, primary_rgb, accent_rgb, speed)
+            elif effect == "strobe":
+                self._start_dynamic_strobe_effect(strips, [primary_rgb, secondary_rgb, accent_rgb], speed)
+            elif effect == "random":
+                self._start_dynamic_random_effect(strips, [primary_rgb, secondary_rgb, accent_rgb], speed)
+            elif effect == "gradient":
+                self._start_dynamic_gradient_effect(strips, primary_rgb, secondary_rgb, accent_rgb, speed)
+            else:
+                # Default to solid primary color
+                self._set_solid_color(strips, primary_rgb)
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Error setting dynamic lighting: {e}")
+            return False
+    
+    def _hex_to_rgb(self, hex_color: str, brightness: int) -> Tuple[int, int, int]:
+        """Convert hex color to RGB with brightness adjustment"""
+        try:
+            # Remove # if present
+            hex_color = hex_color.lstrip('#')
+            
+            # Convert hex to RGB
+            r = int(hex_color[0:2], 16)
+            g = int(hex_color[2:4], 16) 
+            b = int(hex_color[4:6], 16)
+            
+            # Apply brightness
+            brightness_factor = brightness / 100.0
+            return (int(r * brightness_factor), int(g * brightness_factor), int(b * brightness_factor))
+            
+        except (ValueError, IndexError):
+            logger.warning(f"⚠️ Invalid hex color: {hex_color}, using white")
+            brightness_factor = brightness / 100.0
+            return (int(255 * brightness_factor), int(255 * brightness_factor), int(255 * brightness_factor))
+    
+    def _start_dynamic_breathe_effect(self, strips: List[str], color1: Tuple[int, int, int], color2: Tuple[int, int, int], speed: float):
+        """Dynamic breathing effect between two colors"""
+        for strip_name in strips:
+            if strip_name in self.pixel_strips:
+                self.stop_effects[strip_name] = threading.Event()
+                thread = threading.Thread(
+                    target=self._dynamic_breathe_worker,
+                    args=(strip_name, color1, color2, speed)
+                )
+                thread.daemon = True
+                thread.start()
+                self.effect_threads[strip_name] = thread
+    
+    def _dynamic_breathe_worker(self, strip_name: str, color1: Tuple[int, int, int], color2: Tuple[int, int, int], speed: float):
+        """Worker thread for dynamic breathing effect"""
+        strip = self.pixel_strips[strip_name]
+        stop_event = self.stop_effects[strip_name]
+        
+        phase = 0
+        while not stop_event.is_set():
+            # Interpolate between colors based on sine wave
+            t = (math.sin(phase) + 1) / 2  # Normalize to 0-1
+            
+            r = int(color1[0] * (1 - t) + color2[0] * t)
+            g = int(color1[1] * (1 - t) + color2[1] * t)
+            b = int(color1[2] * (1 - t) + color2[2] * t)
+            
+            color = Color(r, g, b)
+            
+            for i in range(strip.numPixels()):
+                strip.setPixelColor(i, color)
+            strip.show()
+            
+            phase += 0.1 * speed
+            time.sleep(0.05)
+    
+    def _start_dynamic_gradient_effect(self, strips: List[str], color1: Tuple[int, int, int], color2: Tuple[int, int, int], color3: Tuple[int, int, int], speed: float):
+        """Dynamic gradient effect with three colors"""
+        for strip_name in strips:
+            if strip_name in self.pixel_strips:
+                self.stop_effects[strip_name] = threading.Event()
+                thread = threading.Thread(
+                    target=self._dynamic_gradient_worker,
+                    args=(strip_name, color1, color2, color3, speed)
+                )
+                thread.daemon = True
+                thread.start()
+                self.effect_threads[strip_name] = thread
+    
+    def _dynamic_gradient_worker(self, strip_name: str, color1: Tuple[int, int, int], color2: Tuple[int, int, int], color3: Tuple[int, int, int], speed: float):
+        """Worker thread for dynamic gradient effect"""
+        strip = self.pixel_strips[strip_name]
+        stop_event = self.stop_effects[strip_name]
+        num_leds = strip.numPixels()
+        
+        offset = 0
+        while not stop_event.is_set():
+            for i in range(num_leds):
+                # Create flowing gradient
+                pos = (i + offset) % (num_leds * 2)
+                
+                if pos < num_leds // 2:
+                    # Transition from color1 to color2
+                    t = pos / (num_leds // 2)
+                    r = int(color1[0] * (1 - t) + color2[0] * t)
+                    g = int(color1[1] * (1 - t) + color2[1] * t)
+                    b = int(color1[2] * (1 - t) + color2[2] * t)
+                elif pos < num_leds:
+                    # Transition from color2 to color3
+                    t = (pos - num_leds // 2) / (num_leds // 2)
+                    r = int(color2[0] * (1 - t) + color3[0] * t)
+                    g = int(color2[1] * (1 - t) + color3[1] * t)
+                    b = int(color2[2] * (1 - t) + color3[2] * t)
+                else:
+                    # Transition from color3 back to color1
+                    t = (pos - num_leds) / num_leds
+                    r = int(color3[0] * (1 - t) + color1[0] * t)
+                    g = int(color3[1] * (1 - t) + color1[1] * t)
+                    b = int(color3[2] * (1 - t) + color1[2] * t)
+                
+                color = Color(r, g, b)
+                strip.setPixelColor(i, color)
+            
+            strip.show()
+            offset += int(speed)
+            time.sleep(0.1)
+    
+    def _start_dynamic_pulse_effect(self, strips: List[str], color1: Tuple[int, int, int], color2: Tuple[int, int, int], speed: float):
+        """Dynamic pulsing effect between two colors"""
+        for strip_name in strips:
+            if strip_name in self.pixel_strips:
+                self.stop_effects[strip_name] = threading.Event()
+                thread = threading.Thread(
+                    target=self._dynamic_pulse_worker,
+                    args=(strip_name, color1, color2, speed)
+                )
+                thread.daemon = True
+                thread.start()
+                self.effect_threads[strip_name] = thread
+    
+    def _dynamic_pulse_worker(self, strip_name: str, color1: Tuple[int, int, int], color2: Tuple[int, int, int], speed: float):
+        """Worker thread for dynamic pulse effect"""
+        strip = self.pixel_strips[strip_name]
+        stop_event = self.stop_effects[strip_name]
+        
+        while not stop_event.is_set():
+            # Pulse to color2, then back to color1
+            for brightness in range(0, 100, int(10 * speed)):
+                if stop_event.is_set():
+                    break
+                    
+                t = brightness / 100.0
+                r = int(color1[0] * (1 - t) + color2[0] * t)
+                g = int(color1[1] * (1 - t) + color2[1] * t)
+                b = int(color1[2] * (1 - t) + color2[2] * t)
+                
+                color = Color(r, g, b)
+                for i in range(strip.numPixels()):
+                    strip.setPixelColor(i, color)
+                strip.show()
+                time.sleep(0.02)
+            
+            # Fade back
+            for brightness in range(100, 0, int(-10 * speed)):
+                if stop_event.is_set():
+                    break
+                    
+                t = brightness / 100.0
+                r = int(color1[0] * (1 - t) + color2[0] * t)
+                g = int(color1[1] * (1 - t) + color2[1] * t)
+                b = int(color1[2] * (1 - t) + color2[2] * t)
+                
+                color = Color(r, g, b)
+                for i in range(strip.numPixels()):
+                    strip.setPixelColor(i, color)
+                strip.show()
+                time.sleep(0.02)
+    
+    def _start_dynamic_strobe_effect(self, strips: List[str], colors: List[Tuple[int, int, int]], speed: float):
+        """Dynamic strobe effect with multiple colors"""
+        for strip_name in strips:
+            if strip_name in self.pixel_strips:
+                self.stop_effects[strip_name] = threading.Event()
+                thread = threading.Thread(
+                    target=self._dynamic_strobe_worker,
+                    args=(strip_name, colors, speed)
+                )
+                thread.daemon = True
+                thread.start()
+                self.effect_threads[strip_name] = thread
+    
+    def _dynamic_strobe_worker(self, strip_name: str, colors: List[Tuple[int, int, int]], speed: float):
+        """Worker thread for dynamic strobe effect"""
+        strip = self.pixel_strips[strip_name]
+        stop_event = self.stop_effects[strip_name]
+        color_index = 0
+        
+        while not stop_event.is_set():
+            # Flash current color
+            current_color = colors[color_index % len(colors)]
+            color = Color(*current_color)
+            
+            for i in range(strip.numPixels()):
+                strip.setPixelColor(i, color)
+            strip.show()
+            time.sleep(0.1 / speed)
+            
+            # Turn off
+            for i in range(strip.numPixels()):
+                strip.setPixelColor(i, Color(0, 0, 0))
+            strip.show()
+            time.sleep(0.1 / speed)
+            
+            color_index += 1
+    
+    def _start_dynamic_random_effect(self, strips: List[str], colors: List[Tuple[int, int, int]], speed: float):
+        """Dynamic random effect with multiple colors"""
+        for strip_name in strips:
+            if strip_name in self.pixel_strips:
+                self.stop_effects[strip_name] = threading.Event()
+                thread = threading.Thread(
+                    target=self._dynamic_random_worker,
+                    args=(strip_name, colors, speed)
+                )
+                thread.daemon = True
+                thread.start()
+                self.effect_threads[strip_name] = thread
+    
+    def _dynamic_random_worker(self, strip_name: str, colors: List[Tuple[int, int, int]], speed: float):
+        """Worker thread for dynamic random effect"""
+        strip = self.pixel_strips[strip_name]
+        stop_event = self.stop_effects[strip_name]
+        import random
+        
+        while not stop_event.is_set():
+            for i in range(strip.numPixels()):
+                # Random color from the palette
+                color_rgb = random.choice(colors)
+                # Random brightness variation
+                brightness = random.uniform(0.3, 1.0)
+                r = int(color_rgb[0] * brightness)
+                g = int(color_rgb[1] * brightness)
+                b = int(color_rgb[2] * brightness)
+                
+                color = Color(r, g, b)
+                strip.setPixelColor(i, color)
+            
+            strip.show()
+            time.sleep(0.2 / speed)
+    
+    def _simulate_dynamic_lighting(self, dynamic_config: Dict, strips: List[str] = None):
+        """Simulate dynamic lighting when WS2812B library not available"""
+        primary_color = dynamic_config.get("primary_color", "#4A148C")
+        secondary_color = dynamic_config.get("secondary_color", "#7B1FA2")
+        accent_color = dynamic_config.get("accent_color", "#1A237E")
+        brightness = dynamic_config.get("brightness", 70)
+        effect = dynamic_config.get("effect", "breathe")
+        speed = dynamic_config.get("speed", 1.0)
+        zones = dynamic_config.get("zones", {})
+        
+        if strips is None:
+            strips = ["main_strip", "accent_strip"]
+        
+        logger.info(f"🎭 [SIMULATION] Dynamic WS2812B Lighting Control:")
+        logger.info(f"  🎨 Primary Color: {primary_color}")
+        logger.info(f"  🎨 Secondary Color: {secondary_color}")
+        logger.info(f"  🎨 Accent Color: {accent_color}")
+        logger.info(f"  💡 Brightness: {brightness}%")
+        logger.info(f"  🎭 Effect: {effect}")
+        logger.info(f"  ⚡ Speed: {speed}")
+        logger.info(f"  🗺️ Zones: {zones}")
+        logger.info(f"  🎯 Target Strips: {strips}")
+        return True
     
     def _simulate_lighting(self, lighting_config: Dict, strips: List[str] = None):
         """Simulate lighting when WS2812B library not available"""
@@ -2291,10 +2596,65 @@ This immediately changes the physical LED strips in the room. You have direct GP
                     else:
                         message = f"Failed to activate scene '{scene}'"
                 
+            elif action == "dynamic_ambient" and target == "lighting":
+                logger.info("🎆 Dynamic ambient lighting command")
+                params = command_data.get("params", {})
+                
+                # Extract dynamic lighting parameters
+                primary_color = params.get("primary_color", "#4A148C")
+                secondary_color = params.get("secondary_color", "#7B1FA2") 
+                accent_color = params.get("accent_color", "#1A237E")
+                brightness = params.get("brightness", 0.7)
+                pattern = params.get("pattern", "breathe")
+                speed = params.get("speed", 1.0)
+                zones = params.get("zones", {})
+                
+                logger.info(f"🎨 Dynamic lighting: {primary_color} -> {secondary_color} -> {accent_color}")
+                logger.info(f"🎭 Pattern: {pattern} at speed {speed}, brightness {brightness}")
+                
+                success = self.set_dynamic_lighting({
+                    "primary_color": primary_color,
+                    "secondary_color": secondary_color, 
+                    "accent_color": accent_color,
+                    "brightness": int(brightness * 100),
+                    "effect": pattern,
+                    "speed": speed,
+                    "zones": zones
+                })
+                
+                if success:
+                    message = f"Dynamic ambient lighting activated: {pattern} pattern with {primary_color} colors"
+                else:
+                    message = "Failed to set dynamic ambient lighting"
+                
+            elif action == "play_ambient_video" and target == "audio":
+                logger.info("🎵 Ambient video command")
+                params = command_data.get("params", {})
+                
+                search_query = params.get("search_query", "")
+                video_title = params.get("video_title", "")
+                volume = params.get("volume", 0.3)
+                loop = params.get("loop", True)
+                
+                logger.info(f"🎬 Playing ambient video: '{video_title}' (Query: '{search_query}')")
+                logger.info(f"🔊 Volume: {volume}, Loop: {loop}")
+                
+                if search_query:
+                    success = self.play_youtube_audio(search_query, volume=volume, loop=loop)
+                    
+                    if success:
+                        message = f"Ambient video started: {video_title or search_query}"
+                    else:
+                        message = f"Failed to play ambient video: {search_query}"
+                else:
+                    logger.error("❌ No search query provided for ambient video")
+                    success = False
+                    message = "No search query provided for ambient video"
+                
             else:
                 message = f"Unknown action: {action} (target: {target})"
                 logger.warning(f"⚠️ {message}")
-                logger.warning(f"🔍 Debug: action='{action}', target='{target}', available actions: play_mood, stop_music, pause_music, set_ambiance_lighting, set_scene")
+                logger.warning(f"🔍 Debug: action='{action}', target='{target}', available actions: play_mood, stop_music, pause_music, set_ambiance_lighting, set_scene, dynamic_ambient, play_ambient_video")
             
             # Send response
             status = "success" if success else "error"

@@ -2,34 +2,42 @@ import 'dart:io';
 import 'dart:typed_data';
 
 class WakeOnLanService {
-  // Pi's MAC address (you'll need to get this)
-  static const String piMacAddress = "dc:a6:32:xx:xx:xx"; // Replace with actual MAC
-  static const String piIpAddress = "192.168.29.5";
+  // Pi's actual MAC address (WoL not supported on this Pi model)
+  static const String piMacAddress = "d8:3a:dd:f2:2d:f5";
+  static const String piIpAddress = "192.168.26.5";
   
-  /// Send Wake-on-LAN magic packet to wake up the Pi
+  /// Attempt Pi wake-up (WoL not supported on this Pi model)
   Future<bool> wakePi() async {
     try {
-      print('🌅 [WOL] Sending Wake-on-LAN packet to Pi...');
+      print('🌅 [WAKE] Pi Wake-on-LAN not supported on this hardware');
+      print('💡 [WAKE] Using alternative detection strategy...');
       
-      // Create magic packet
-      final magicPacket = _createMagicPacket(piMacAddress);
+      // Check if Pi is already online
+      if (await _checkPiOnline()) {
+        print('✅ [WAKE] Pi is already online!');
+        return true;
+      }
       
-      // Send UDP broadcast packet on port 9
-      final socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
-      socket.broadcastEnabled = true;
+      print('⚠️ [WAKE] Pi appears offline - traditional WoL not available');
+      print('📱 [WAKE] User intervention may be required for Pi power-on');
       
-      final broadcastAddress = InternetAddress('255.255.255.255');
-      socket.send(magicPacket, broadcastAddress, 9);
-      socket.close();
+      // Try sending magic packet anyway (some routers may support it)
+      try {
+        final magicPacket = _createMagicPacket(piMacAddress);
+        final socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
+        socket.broadcastEnabled = true;
+        final broadcastAddress = InternetAddress('255.255.255.255');
+        socket.send(magicPacket, broadcastAddress, 9);
+        socket.close();
+        print('📡 [WAKE] Magic packet sent (router-level WoL attempt)');
+      } catch (e) {
+        print('📡 [WAKE] Magic packet failed: $e');
+      }
       
-      print('✅ [WOL] Magic packet sent successfully');
-      
-      // Wait a moment, then check if Pi responds
-      await Future.delayed(Duration(seconds: 5));
-      return await _checkPiOnline();
+      return false;
       
     } catch (e) {
-      print('❌ [WOL] Error sending wake packet: $e');
+      print('❌ [WAKE] Error during wake attempt: $e');
       return false;
     }
   }

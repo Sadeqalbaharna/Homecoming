@@ -498,9 +498,9 @@ class _MobileKaiState extends State<_MobileKai>
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('⚠️ Pi woke up but Kai may still be starting...'),
-            duration: Duration(seconds: 3),
-            backgroundColor: Colors.amber,
+            content: Text('📱 Pi needs manual power-on (WoL not supported on this model)'),
+            duration: Duration(seconds: 5),
+            backgroundColor: Colors.orange,
           ),
         );
       }

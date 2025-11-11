@@ -19,6 +19,7 @@ import 'ambiance_service.dart';
 import 'kai_consciousness_service.dart';
 import 'home_automation_service.dart';
 import 'wake_on_lan_service.dart';
+import 'dynamic_ambient_service.dart';
 
 /// Configuration class to hold all API keys
 /// Uses secure storage for encrypted key management
@@ -2291,7 +2292,18 @@ Execute the command immediately and report what you're doing as GM of this smart
       
       print('🎭 [AI_SERVICE] Detected ambiance mention in Kai\'s reply - analyzing original request');
       
-      // Analyze the original user input for ambiance
+      // ✨ NEW: Try Dynamic Ambient AI System first (intelligent analysis)
+      print('🧠 [AI_SERVICE] Attempting Dynamic Ambient AI analysis...');
+      final dynamicExperience = await DynamicAmbientService.generateDynamicAmbience(originalInput);
+      
+      if (dynamicExperience != null && dynamicExperience.confidence > 0.6) {
+        print('🎆 [AI_SERVICE] Generated dynamic experience: ${dynamicExperience.name}');
+        await _triggerDynamicAmbientExperience(dynamicExperience, debugService);
+        return;
+      }
+      
+      // Fallback to traditional ambiance profiles
+      print('🎭 [AI_SERVICE] Using traditional ambiance profiles...');
       final ambianceService = AmbianceService();
       final ambianceMatch = ambianceService.analyzeVoiceCommand(originalInput);
       
@@ -2632,6 +2644,107 @@ Execute the command immediately and report what you're doing as GM of this smart
         .trim();
     
     return cleanInput.isNotEmpty ? cleanInput : input;
+  }
+
+  /// Trigger Dynamic Ambient Experience (lighting + video)
+  Future<void> _triggerDynamicAmbientExperience(
+    AmbientExperience experience, 
+    BrainDebugService? debugService
+  ) async {
+    try {
+      print('🎆 [DYNAMIC_AMBIENT] Triggering experience: ${experience.name}');
+      
+      debugService?.addStep(
+        BrainPhase.processing,
+        'Triggering dynamic ambient experience',
+        data: {
+          'experience_name': experience.name,
+          'confidence': experience.confidence,
+          'has_video': experience.videoContent != null,
+          'lighting_pattern': experience.lighting.pattern,
+        },
+      );
+      
+      // Step 1: Apply dynamic lighting
+      await _applyDynamicLighting(experience.lighting);
+      
+      // Step 2: Start matching YouTube video (if available)
+      if (experience.videoContent != null) {
+        await _startAmbientVideo(experience.videoContent!);
+      }
+      
+      print('✅ [DYNAMIC_AMBIENT] Experience activated successfully');
+      
+    } catch (e) {
+      print('❌ [DYNAMIC_AMBIENT] Error triggering experience: $e');
+      debugService?.addStep(
+        BrainPhase.processing,
+        'Dynamic ambient experience failed',
+        data: {'error': e.toString()},
+      );
+    }
+  }
+  
+  /// Apply dynamic lighting configuration
+  Future<void> _applyDynamicLighting(DynamicLighting lighting) async {
+    try {
+      final homeService = HomeAutomationService();
+      
+      // Generate Firebase lighting command with dynamic parameters
+      final command = {
+        'type': 'dynamic_lighting',
+        'primary_color': lighting.primaryColor,
+        'secondary_color': lighting.secondaryColor,
+        'accent_color': lighting.accentColor,
+        'brightness': lighting.brightness,
+        'pattern': lighting.pattern,
+        'speed': lighting.speed,
+        'zones': lighting.zones,
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+      };
+      
+      await homeService.sendCommand(
+        personaId: 'kai',
+        deviceId: 'led_strip_main',
+        target: 'lighting',
+        action: 'dynamic_ambient',
+        params: command,
+      );
+      print('🎨 [DYNAMIC_AMBIENT] Applied dynamic lighting: ${lighting.pattern}');
+      
+    } catch (e) {
+      print('❌ [DYNAMIC_AMBIENT] Error applying lighting: $e');
+    }
+  }
+  
+  /// Start ambient video content
+  Future<void> _startAmbientVideo(VideoContent video) async {
+    try {
+      final homeService = HomeAutomationService();
+      
+      // Send YouTube play command to Pi
+      final command = {
+        'type': 'youtube_ambient',
+        'video_title': video.title,
+        'search_query': video.searchQuery,
+        'duration': video.duration,
+        'volume': 0.3, // Lower volume for ambient
+        'loop': true,   // Loop ambient videos
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+      };
+      
+      await homeService.sendCommand(
+        personaId: 'kai',
+        deviceId: 'pi_audio_system',
+        target: 'audio',
+        action: 'play_ambient_video',
+        params: command,
+      );
+      print('🎵 [DYNAMIC_AMBIENT] Started ambient video: ${video.title}');
+      
+    } catch (e) {
+      print('❌ [DYNAMIC_AMBIENT] Error starting video: $e');
+    }
   }
 
   /// Attempt to wake up Pi when it's detected as offline

@@ -4,7 +4,7 @@ import 'package:http/http.dart' as http;
 /// Kai Consciousness Service - Integrates with Pi's consciousness system
 /// Provides technical awareness and context for ChatGPT integration
 class KaiConsciousnessService {
-  static const String PI_IP = "192.168.29.5";
+  static const String PI_IP = "192.168.26.5";
   static const String CONSCIOUSNESS_ENDPOINT = "http://$PI_IP:5001/kai/context";
   
   /// Get comprehensive technical context from Kai's Pi system
