@@ -2296,7 +2296,7 @@ Execute the command immediately and report what you're doing as GM of this smart
       print('🧠 [AI_SERVICE] Attempting Dynamic Ambient AI analysis...');
       final dynamicExperience = await DynamicAmbientService.generateDynamicAmbience(originalInput);
       
-      if (dynamicExperience != null && dynamicExperience.confidence > 0.3) {
+      if (dynamicExperience != null && dynamicExperience.confidence >= 0.3) {
         print('🎆 [AI_SERVICE] Generated dynamic experience: ${dynamicExperience.name} (confidence: ${dynamicExperience.confidence})');
         await _triggerDynamicAmbientExperience(dynamicExperience, debugService);
         return;

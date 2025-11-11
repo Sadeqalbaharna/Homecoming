@@ -51,6 +51,10 @@ class DynamicAmbientService {
         description: analysisData['description'] ?? '',
         mood: analysisData['mood'] ?? 'neutral',
         setting: analysisData['setting'] ?? 'abstract',
+        environment: analysisData['environment'] ?? 'abstract',
+        atmosphere: analysisData['atmosphere'] ?? 'neutral',
+        action: analysisData['action'] ?? 'none',
+        ledEffect: analysisData['led_effect'] ?? 'static',
         timeOfDay: analysisData['time_of_day'],
         weather: analysisData['weather'],
         intensity: (analysisData['intensity'] ?? 5).toDouble(),
@@ -69,17 +73,27 @@ class DynamicAmbientService {
   
   /// Generate dynamic lighting configuration
   static DynamicLighting _generateDynamicLighting(PromptAnalysis analysis) {
-    // Convert mood and setting to lighting parameters
-    final baseColors = _moodToColors(analysis.mood, analysis.colors);
-    final pattern = _movementToPattern(analysis.movement);
+    // 🎨 ENHANCED LIGHTING GENERATION FOR D&D SCENARIOS
+    // Use advanced scene analysis for immersive effects
+    
+    // Use enhanced colors from scene analysis
+    final sceneColors = analysis.colors.isNotEmpty ? analysis.colors : _moodToColors(analysis.mood, []);
+    
+    // Use advanced LED effect patterns
+    final pattern = analysis.ledEffect.isNotEmpty ? analysis.ledEffect : _movementToPattern(analysis.movement);
+    
+    // Enhanced brightness calculation
     final brightness = _intensityToBrightness(analysis.intensity);
     
-    // Apply time of day and weather modifiers
+    // Apply environmental modifiers for time/weather
     final modifiedColors = _applyEnvironmentalModifiers(
-      baseColors, 
+      sceneColors, 
       analysis.timeOfDay, 
       analysis.weather
     );
+    
+    // Generate zone mapping based on environment
+    final zones = _generateAdvancedZoneMapping(analysis.environment, analysis.atmosphere, analysis.action);
     
     return DynamicLighting(
       primaryColor: modifiedColors[0],
@@ -88,7 +102,7 @@ class DynamicAmbientService {
       brightness: brightness,
       pattern: pattern,
       speed: _intensityToSpeed(analysis.intensity),
-      zones: _generateZoneMapping(analysis.setting),
+      zones: zones,
     );
   }
   
@@ -135,25 +149,58 @@ class DynamicAmbientService {
   static Map<String, dynamic> _intelligentKeywordAnalysis(String prompt) {
     final lowerPrompt = prompt.toLowerCase();
     
-    // Enhanced pattern matching for different aspects
-    final moodKeywords = {
-      'mysterious': ['mystery', 'mysterious', 'dark', 'shadow', 'secret', 'hidden', 'unknown'],
-      'energetic': ['energy', 'energetic', 'vibrant', 'active', 'dynamic', 'power', 'intense'],
-      'calm': ['calm', 'peaceful', 'serene', 'quiet', 'tranquil', 'relaxed', 'gentle'],
-      'dramatic': ['dramatic', 'epic', 'grand', 'powerful', 'intense', 'climax', 'tension'],
-      'magical': ['magic', 'magical', 'mystical', 'enchanted', 'fantasy', 'spell', 'wizard'],
-      'cyberpunk': ['cyber', 'neon', 'digital', 'tech', 'futuristic', 'matrix', 'virtual'],
-      'medieval': ['medieval', 'castle', 'knight', 'dragon', 'kingdom', 'sword', 'armor'],
-      'space': ['space', 'galaxy', 'star', 'cosmic', 'universe', 'planet', 'nebula'],
+    // 🎭 ENHANCED D&D/NARRATIVE SCENE ANALYSIS
+    // Comprehensive scene detection for immersive roleplay
+    
+    // D&D Environments & Locations
+    final environmentKeywords = {
+      'dungeon': ['dungeon', 'dungeon room', 'chamber', 'underground', 'stone walls', 'crypt', 'tomb', 'labyrinth', 'maze'],
+      'forest': ['forest', 'woods', 'trees', 'jungle', 'grove', 'woodland', 'canopy', 'leaves', 'branches', 'wilderness'],
+      'tavern': ['tavern', 'inn', 'bar', 'pub', 'alehouse', 'common room', 'hearth', 'fireplace'],
+      'ship': ['ship', 'vessel', 'boat', 'deck', 'cabin', 'sailing', 'ocean voyage', 'nautical'],
+      'cave': ['cave', 'cavern', 'grotto', 'underground', 'stalactite', 'crystal cave', 'mineral'],
+      'castle': ['castle', 'fortress', 'keep', 'tower', 'throne room', 'great hall', 'courtyard'],
+      'battlefield': ['battlefield', 'war zone', 'combat', 'fighting', 'battle', 'skirmish'],
+      'magical_realm': ['magical realm', 'enchanted', 'fey realm', 'otherworld', 'mystical plane'],
+      'swamp': ['swamp', 'marsh', 'bog', 'wetland', 'murky water', 'mist'],
+      'mountain': ['mountain', 'peak', 'summit', 'cliff', 'alpine', 'rocky'],
+      'desert': ['desert', 'sand dunes', 'oasis', 'arid', 'wasteland'],
+      'city': ['city', 'town', 'village', 'streets', 'marketplace', 'urban'],
     };
     
-    final settingKeywords = {
-      'forest': ['forest', 'trees', 'woods', 'jungle', 'nature', 'leaves', 'wilderness'],
-      'underwater': ['underwater', 'ocean', 'sea', 'deep', 'aquatic', 'marine', 'coral'],
-      'cave': ['cave', 'cavern', 'underground', 'stone', 'crystal', 'mineral'],
-      'city': ['city', 'urban', 'street', 'building', 'metropolis', 'downtown'],
-      'desert': ['desert', 'sand', 'dune', 'arid', 'oasis', 'mirage'],
-      'mountain': ['mountain', 'peak', 'summit', 'cliff', 'valley', 'alpine'],
+    // Atmospheric Conditions & Weather
+    final atmosphereKeywords = {
+      'thunderstorm': ['thunderstorm', 'storm', 'thunder', 'lightning', 'heavy rain', 'tempest', 'electrical storm'],
+      'foggy': ['fog', 'mist', 'haze', 'cloudy', 'murky', 'shrouded', 'veiled'],
+      'fire': ['fire', 'flames', 'burning', 'inferno', 'blaze', 'conflagration', 'ember', 'smoke'],
+      'magical_energy': ['magical energy', 'arcane', 'spell', 'enchantment', 'mystical aura', 'otherworldly'],
+      'eerie': ['eerie', 'haunting', 'ghostly', 'spectral', 'supernatural', 'chilling'],
+      'peaceful': ['peaceful', 'serene', 'calm', 'tranquil', 'gentle', 'soothing'],
+      'tense': ['tense', 'suspenseful', 'ominous', 'foreboding', 'threatening'],
+      'chaotic': ['chaotic', 'frenzied', 'wild', 'turbulent', 'explosive'],
+    };
+    
+    // D&D Actions & Spells
+    final actionKeywords = {
+      'fireball': ['fireball', 'fire spell', 'flame burst', 'fire magic'],
+      'lightning': ['lightning bolt', 'shock', 'electrical', 'thunder spell'],
+      'healing': ['healing', 'restore', 'cure', 'mend', 'recovery'],
+      'stealth': ['stealth', 'sneak', 'hide', 'invisible', 'shadow'],
+      'combat': ['attack', 'fight', 'battle', 'strike', 'combat', 'weapon'],
+      'exploration': ['enter', 'approach', 'discover', 'find', 'explore'],
+      'magic_casting': ['cast', 'spell', 'incantation', 'summon', 'conjure'],
+    };
+    
+    // Mood & Emotional Atmosphere
+    final moodKeywords = {
+      'spooky': ['spooky', 'scary', 'frightening', 'creepy', 'horror', 'terrifying', 'sinister'],
+      'mysterious': ['mysterious', 'enigmatic', 'cryptic', 'puzzling', 'secretive'],
+      'epic': ['epic', 'heroic', 'legendary', 'grand', 'majestic', 'triumphant'],
+      'dramatic': ['dramatic', 'intense', 'climactic', 'powerful', 'overwhelming'],
+      'magical': ['magical', 'mystical', 'enchanted', 'otherworldly', 'supernatural'],
+      'dark': ['dark', 'grim', 'shadow', 'noir', 'brooding', 'somber'],
+      'bright': ['bright', 'radiant', 'luminous', 'gleaming', 'brilliant'],
+      'cozy': ['cozy', 'warm', 'comfortable', 'intimate', 'welcoming'],
     };
     
     final timeKeywords = {
@@ -168,6 +215,16 @@ class DynamicAmbientService {
       'foggy': ['fog', 'mist', 'haze', 'cloudy', 'murky'],
     };
     
+    // Check for direct lighting/color commands first
+    final directColorKeywords = ['blue', 'red', 'green', 'purple', 'yellow', 'orange', 'pink', 'white'];
+    final lightingKeywords = ['light', 'lights', 'lighting', 'illumination', 'glow', 'brightness'];
+    
+    bool isDirectColorCommand = directColorKeywords.any((color) => lowerPrompt.contains(color)) &&
+                               (lightingKeywords.any((light) => lowerPrompt.contains(light)) ||
+                                lowerPrompt.contains('switch') || 
+                                lowerPrompt.contains('change') ||
+                                lowerPrompt.contains('set'));
+    
     // Analyze and score matches
     String detectedMood = 'neutral';
     String detectedSetting = 'abstract';
@@ -175,6 +232,44 @@ class DynamicAmbientService {
     String? detectedWeather;
     double maxMoodScore = 0.0;
     double maxSettingScore = 0.0;
+    
+    // 🎯 ENHANCED ANALYSIS: Multi-layered scene detection
+    
+    // Analyze Environment/Location
+    String detectedEnvironment = 'abstract';
+    double maxEnvironmentScore = 0.0;
+    for (final env in environmentKeywords.keys) {
+      final keywords = environmentKeywords[env]!;
+      final score = keywords.where((k) => lowerPrompt.contains(k)).length / keywords.length;
+      if (score > maxEnvironmentScore) {
+        maxEnvironmentScore = score;
+        detectedEnvironment = env;
+      }
+    }
+    
+    // Analyze Atmosphere/Weather
+    String detectedAtmosphere = 'neutral';
+    double maxAtmosphereScore = 0.0;
+    for (final atm in atmosphereKeywords.keys) {
+      final keywords = atmosphereKeywords[atm]!;
+      final score = keywords.where((k) => lowerPrompt.contains(k)).length / keywords.length;
+      if (score > maxAtmosphereScore) {
+        maxAtmosphereScore = score;
+        detectedAtmosphere = atm;
+      }
+    }
+    
+    // Analyze Actions/Spells
+    String detectedAction = 'none';
+    double maxActionScore = 0.0;
+    for (final action in actionKeywords.keys) {
+      final keywords = actionKeywords[action]!;
+      final score = keywords.where((k) => lowerPrompt.contains(k)).length / keywords.length;
+      if (score > maxActionScore) {
+        maxActionScore = score;
+        detectedAction = action;
+      }
+    }
     
     // Find best mood match
     for (final mood in moodKeywords.keys) {
@@ -186,14 +281,10 @@ class DynamicAmbientService {
       }
     }
     
-    // Find best setting match
-    for (final setting in settingKeywords.keys) {
-      final keywords = settingKeywords[setting]!;
-      final score = keywords.where((k) => lowerPrompt.contains(k)).length / keywords.length;
-      if (score > maxSettingScore) {
-        maxSettingScore = score;
-        detectedSetting = setting;
-      }
+    // Override setting with environment if better match
+    if (maxEnvironmentScore > maxSettingScore) {
+      detectedSetting = detectedEnvironment;
+      maxSettingScore = maxEnvironmentScore;
     }
     
     // Detect time and weather
@@ -211,32 +302,60 @@ class DynamicAmbientService {
       }
     }
     
-    // Calculate intensity based on keywords
-    final intensityKeywords = ['intense', 'dramatic', 'powerful', 'strong', 'vibrant'];
-    final subtleKeywords = ['subtle', 'gentle', 'soft', 'quiet', 'calm'];
-    double intensity = 5.0; // Default
+    // 🎨 ADVANCED SCENE ANALYSIS
+    String ledEffect = _determineLedEffect(detectedEnvironment, detectedAtmosphere, detectedAction, detectedMood);
+    List<String> primaryColors = _determineSceneColors(detectedEnvironment, detectedAtmosphere, detectedAction, detectedMood);
+    double intensity = _calculateSceneIntensity(detectedAtmosphere, detectedAction, lowerPrompt);
     
-    if (intensityKeywords.any((k) => lowerPrompt.contains(k))) {
-      intensity = 8.0;
-    } else if (subtleKeywords.any((k) => lowerPrompt.contains(k))) {
-      intensity = 3.0;
+    // Generate enhanced YouTube search terms
+    String youtubeKeywords = _generateYoutubeKeywords(detectedEnvironment, detectedAtmosphere, detectedAction, detectedMood, detectedTime, detectedWeather);
+    
+    // 🎯 ENHANCED CONFIDENCE CALCULATION
+    // Multi-factor confidence based on scene complexity
+    double baseConfidence = (maxMoodScore + maxSettingScore + maxEnvironmentScore + maxAtmosphereScore + maxActionScore) / 5.0;
+    
+    // Boost for specific scenarios
+    if (isDirectColorCommand) {
+      baseConfidence = (baseConfidence + 0.6).clamp(0.6, 0.9); // Direct color commands
+    } else if (detectedAction != 'none' && maxActionScore > 0.3) {
+      baseConfidence = (baseConfidence + 0.4).clamp(0.5, 0.9); // D&D action scenarios
+    } else if (detectedAtmosphere != 'neutral' && maxAtmosphereScore > 0.3) {
+      baseConfidence = (baseConfidence + 0.3).clamp(0.4, 0.9); // Strong atmospheric scenarios
+    } else if (detectedEnvironment != 'abstract' && maxEnvironmentScore > 0.3) {
+      baseConfidence = (baseConfidence + 0.2).clamp(0.4, 0.9); // Clear environment detection
     }
     
-    // Generate YouTube search terms
-    final youtubeKeywords = '$detectedSetting $detectedMood ambient soundscape ${detectedTime ?? ""} ${detectedWeather ?? ""}';
+    final confidence = baseConfidence.clamp(0.3, 0.9);
     
-    // Calculate confidence based on matches
-    final confidence = ((maxMoodScore + maxSettingScore) / 2.0).clamp(0.3, 0.9);
+    // Generate scene name (enhanced for D&D scenarios)
+    String sceneName;
+    String description;
+    if (isDirectColorCommand) {
+      final detectedColor = directColorKeywords.firstWhere((color) => lowerPrompt.contains(color), orElse: () => 'colorful');
+      sceneName = '${detectedColor.replaceFirst(detectedColor[0], detectedColor[0].toUpperCase())} Lighting';
+      description = 'Direct lighting control: $detectedColor illumination';
+    } else if (detectedAction != 'none' && detectedAtmosphere != 'neutral') {
+      // D&D/Narrative scenarios
+      sceneName = '${detectedAction.replaceAll('_', ' ').split(' ').map((w) => w[0].toUpperCase() + w.substring(1)).join(' ')}: ${detectedAtmosphere.replaceFirst(detectedAtmosphere[0], detectedAtmosphere[0].toUpperCase())} ${detectedSetting.replaceFirst(detectedSetting[0], detectedSetting[0].toUpperCase())}';
+      description = 'Immersive scene: $detectedAction in $detectedAtmosphere $detectedSetting with $detectedMood atmosphere';
+    } else {
+      sceneName = '${detectedSetting.replaceFirst(detectedSetting[0], detectedSetting[0].toUpperCase())} ${detectedMood.replaceFirst(detectedMood[0], detectedMood[0].toUpperCase())}';
+      description = 'Dynamic ambient experience: $detectedMood mood in a $detectedSetting setting';
+    }
     
     return {
-      'scene_name': '${detectedSetting.replaceFirst(detectedSetting[0], detectedSetting[0].toUpperCase())} ${detectedMood.replaceFirst(detectedMood[0], detectedMood[0].toUpperCase())}',
-      'description': 'Dynamic ambient experience: $detectedMood mood in a $detectedSetting setting',
+      'scene_name': sceneName,
+      'description': description,
       'mood': detectedMood,
       'setting': detectedSetting,
+      'environment': detectedEnvironment,
+      'atmosphere': detectedAtmosphere, 
+      'action': detectedAction,
       'time_of_day': detectedTime,
       'weather': detectedWeather,
       'intensity': intensity,
-      'colors': ['blue', 'purple'], // Will be enhanced by _moodToColors
+      'colors': primaryColors,
+      'led_effect': ledEffect,
       'movement': intensity > 6 ? 'dramatic' : 'gentle',
       'youtube_keywords': youtubeKeywords,
       'confidence': confidence,
@@ -348,6 +467,220 @@ class DynamicAmbientService {
     
     return zoneMap[setting.toLowerCase()] ?? {'main': 'dynamic', 'accent': 'dynamic'};
   }
+
+  /// 🎨 ADVANCED LED EFFECT DETERMINATION  
+  /// Maps narrative scenarios to specific LED patterns
+  static String _determineLedEffect(String environment, String atmosphere, String action, String mood) {
+    // Fire/Flame Effects
+    if (action == 'fireball' || atmosphere == 'fire' || action.contains('fire')) {
+      return 'flickering'; // Realistic fire flickering
+    }
+    
+    // Lightning/Thunder Effects  
+    if (atmosphere == 'thunderstorm' || action == 'lightning' || action.contains('lightning')) {
+      return 'strobe'; // Lightning flash pattern
+    }
+    
+    // Magic/Spell Effects
+    if (action == 'magic_casting' || atmosphere == 'magical_energy' || mood == 'magical') {
+      return 'pulsing'; // Rhythmic magical pulsing
+    }
+    
+    // Dungeon/Spooky Effects
+    if (environment == 'dungeon' && mood == 'spooky') {
+      return 'breathing'; // Slow ominous breathing pattern
+    }
+    
+    // Ocean/Water Effects
+    if (environment == 'ship' && atmosphere == 'thunderstorm') {
+      return 'wave'; // Rolling wave pattern with storm intensity
+    }
+    
+    // Forest/Nature Effects
+    if (environment == 'forest' && mood == 'peaceful') {
+      return 'shimmer'; // Gentle light filtering through leaves
+    }
+    
+    // Combat/Action Effects
+    if (action == 'combat' || environment == 'battlefield') {
+      return 'pulse'; // Intense battle rhythm
+    }
+    
+    // Healing/Recovery Effects
+    if (action == 'healing') {
+      return 'glow'; // Gentle healing glow
+    }
+    
+    // Default based on mood
+    switch (mood) {
+      case 'dramatic': return 'pulse';
+      case 'mysterious': return 'fade';
+      case 'epic': return 'wave';
+      case 'spooky': return 'flicker';
+      default: return 'static'; // Steady light
+    }
+  }
+  
+  /// 🌈 ADVANCED COLOR DETERMINATION  
+  /// Maps scenarios to immersive color palettes
+  static List<String> _determineSceneColors(String environment, String atmosphere, String action, String mood) {
+    // Fire/Flame Scenarios
+    if (action == 'fireball' || atmosphere == 'fire') {
+      return ['#FF4500', '#FF6347', '#FFD700']; // Orange, red, yellow flames
+    }
+    
+    // Lightning/Storm Scenarios
+    if (atmosphere == 'thunderstorm' || action == 'lightning') {
+      return ['#4B0082', '#FFFFFF', '#1E90FF']; // Deep purple, white flash, electric blue
+    }
+    
+    // Dungeon/Spooky Scenarios
+    if (environment == 'dungeon' && mood == 'spooky') {
+      return ['#800080', '#2F4F4F', '#000000']; // Dark purple, dark gray, black
+    }
+    
+    // Forest/Nature Scenarios
+    if (environment == 'forest') {
+      if (mood == 'peaceful') {
+        return ['#228B22', '#32CD32', '#FFFF00']; // Forest green, lime, sunlight yellow
+      } else {
+        return ['#006400', '#2E8B57', '#8FBC8F']; // Dark green variations
+      }
+    }
+    
+    // Ocean/Ship Scenarios
+    if (environment == 'ship' || environment.contains('ocean')) {
+      if (atmosphere == 'thunderstorm') {
+        return ['#191970', '#000080', '#708090']; // Midnight blue, navy, slate gray
+      } else {
+        return ['#0000FF', '#00CED1', '#87CEEB']; // Blue, turquoise, sky blue
+      }
+    }
+    
+    // Magic/Mystical Scenarios
+    if (action == 'magic_casting' || atmosphere == 'magical_energy') {
+      return ['#9400D3', '#8A2BE2', '#DA70D6']; // Violet, blue violet, orchid
+    }
+    
+    // Healing Scenarios
+    if (action == 'healing') {
+      return ['#FFFFFF', '#F0F8FF', '#E0FFFF']; // Pure white, alice blue, light cyan
+    }
+    
+    // Tavern/Cozy Scenarios  
+    if (environment == 'tavern' || mood == 'cozy') {
+      return ['#FF8C00', '#DAA520', '#B8860B']; // Dark orange, goldenrod, dark goldenrod
+    }
+    
+    // Default mood-based colors
+    switch (mood) {
+      case 'spooky': return ['#800080', '#4B0082', '#2F4F4F'];
+      case 'epic': return ['#FFD700', '#FFA500', '#FF4500'];
+      case 'mysterious': return ['#483D8B', '#2F4F4F', '#696969'];
+      case 'magical': return ['#9400D3', '#8A2BE2', '#DA70D6'];
+      case 'dark': return ['#000000', '#2F4F4F', '#696969'];
+      case 'bright': return ['#FFFFFF', '#FFFF00', '#FFD700'];
+      default: return ['#4169E1', '#6495ED', '#87CEEB']; // Default blue palette
+    }
+  }
+  
+  /// ⚡ ADVANCED INTENSITY CALCULATION
+  /// Maps narrative intensity to LED brightness/speed
+  static double _calculateSceneIntensity(String atmosphere, String action, String prompt) {
+    double intensity = 5.0; // Base intensity
+    
+    // High intensity scenarios
+    if (atmosphere == 'thunderstorm' || action == 'fireball' || action == 'combat') {
+      intensity = 9.0;
+    }
+    // Medium-high intensity
+    else if (atmosphere == 'fire' || action == 'magic_casting' || atmosphere == 'chaotic') {
+      intensity = 7.5;
+    }
+    // Medium intensity  
+    else if (atmosphere == 'tense' || action == 'exploration') {
+      intensity = 6.0;
+    }
+    // Low intensity
+    else if (atmosphere == 'peaceful' || action == 'healing') {
+      intensity = 3.0;
+    }
+    
+    // Boost based on intensity keywords
+    if (prompt.contains('massive') || prompt.contains('overwhelming')) {
+      intensity = (intensity * 1.2).clamp(1.0, 10.0);
+    }
+    if (prompt.contains('gentle') || prompt.contains('subtle')) {
+      intensity = (intensity * 0.7).clamp(1.0, 10.0);
+    }
+    
+    return intensity;
+  }
+  
+  /// 🎵 ENHANCED YOUTUBE SEARCH GENERATION
+  /// Creates targeted search terms for narrative scenarios
+  static String _generateYoutubeKeywords(String environment, String atmosphere, String action, String mood, String? time, String? weather) {
+    List<String> keywords = [];
+    
+    // Core environment
+    keywords.add(environment);
+    
+    // Atmospheric conditions
+    if (atmosphere != 'neutral') {
+      keywords.add(atmosphere);
+    }
+    
+    // Specific action-based sounds
+    switch (action) {
+      case 'fireball':
+        keywords.addAll(['fire crackling', 'flame', 'burning']);
+        break;
+      case 'lightning':
+        keywords.addAll(['thunder', 'storm', 'rain']);
+        break;
+      case 'combat':
+        keywords.addAll(['battle', 'tension', 'epic']);
+        break;
+      case 'magic_casting':
+        keywords.addAll(['mystical', 'ethereal', 'magical']);
+        break;
+      case 'healing':
+        keywords.addAll(['peaceful', 'restoration', 'calm']);
+        break;
+    }
+    
+    // Mood enhancement
+    keywords.add(mood);
+    
+    // Time and weather context
+    if (time != null) keywords.add(time);
+    if (weather != null) keywords.add(weather);
+    
+    // Add base terms
+    keywords.addAll(['ambient', 'soundscape', 'atmosphere', 'background']);
+    
+    return keywords.join(' ');
+  }
+
+  /// 🎯 ADVANCED ZONE MAPPING FOR D&D SCENARIOS
+  static Map<String, String> _generateAdvancedZoneMapping(String environment, String atmosphere, String action) {
+    // Special mappings for D&D scenarios
+    if (environment == 'dungeon' && atmosphere == 'spooky') {
+      return {'main': 'dungeon_shadows', 'zone1': 'torch_flicker', 'zone2': 'eerie_glow'};
+    }
+    if (action == 'fireball') {
+      return {'main': 'fire_explosion', 'zone1': 'flame_spread', 'zone2': 'ember_glow'};
+    }
+    if (environment == 'ship' && atmosphere == 'thunderstorm') {
+      return {'main': 'storm_chaos', 'zone1': 'lightning_flash', 'zone2': 'wave_crash'};
+    }
+    if (environment == 'forest') {
+      return {'main': 'canopy_filter', 'zone1': 'leaf_shimmer', 'zone2': 'forest_depth'};
+    }
+    
+    // Default mapping
+    return {'main': 'dynamic', 'zone1': 'dynamic', 'zone2': 'dynamic'};
+  }
 }
 
 /// Data classes for the dynamic ambient system
@@ -356,6 +689,11 @@ class PromptAnalysis {
   final String description;
   final String mood;
   final String setting;
+  // 🎭 ENHANCED D&D FIELDS
+  final String environment;
+  final String atmosphere; 
+  final String action;
+  final String ledEffect;
   final String? timeOfDay;
   final String? weather;
   final double intensity;
@@ -370,6 +708,10 @@ class PromptAnalysis {
     required this.description,
     required this.mood,
     required this.setting,
+    required this.environment,
+    required this.atmosphere,
+    required this.action,
+    required this.ledEffect,
     this.timeOfDay,
     this.weather,
     required this.intensity,
@@ -379,6 +721,230 @@ class PromptAnalysis {
     required this.confidence,
     required this.tags,
   });
+}
+
+class DynamicLighting {
+  final String primaryColor;
+  final String secondaryColor;
+  final String accentColor;
+  final int brightness;
+  final String pattern;
+  final double speed;
+  final Map<String, String> zones;
+  
+  DynamicLighting({
+    required this.primaryColor,
+    required this.secondaryColor,
+    required this.accentColor,
+    required this.brightness,
+    required this.pattern,
+    required this.speed,
+    required this.zones,
+  });
+}
+
+class VideoContent {
+  final String title;
+  final String videoId;
+  final int duration;
+  final String searchQuery;
+  
+  VideoContent({
+    required this.title,
+    required this.videoId,
+    required this.duration,
+    required this.searchQuery,
+  });
+}
+
+class AmbientExperience {
+  final String name;
+  final String description;
+  final DynamicLighting lighting;
+  final VideoContent? videoContent;
+  final double confidence;
+  final List<String> tags;
+  
+  AmbientExperience({
+    required this.name,
+    required this.description,
+    required this.lighting,
+    this.videoContent,
+    required this.confidence,
+    required this.tags,
+  });
+}
+    
+    // Ocean/Water Effects
+    if (environment == 'ship' && atmosphere == 'thunderstorm') {
+      return 'wave'; // Rolling wave pattern with storm intensity
+    }
+    
+    // Forest/Nature Effects
+    if (environment == 'forest' && mood == 'peaceful') {
+      return 'shimmer'; // Gentle light filtering through leaves
+    }
+    
+    // Combat/Action Effects
+    if (action == 'combat' || environment == 'battlefield') {
+      return 'pulse'; // Intense battle rhythm
+    }
+    
+    // Healing/Recovery Effects
+    if (action == 'healing') {
+      return 'glow'; // Gentle healing glow
+    }
+    
+    // Default based on mood
+    switch (mood) {
+      case 'dramatic': return 'pulse';
+      case 'mysterious': return 'fade';
+      case 'epic': return 'wave';
+      case 'spooky': return 'flicker';
+      default: return 'static'; // Steady light
+    }
+  }
+  
+  /// 🌈 ADVANCED COLOR DETERMINATION  
+  /// Maps scenarios to immersive color palettes
+  static List<String> _determineSceneColors(String environment, String atmosphere, String action, String mood) {
+    // Fire/Flame Scenarios
+    if (action == 'fireball' || atmosphere == 'fire') {
+      return ['#FF4500', '#FF6347', '#FFD700']; // Orange, red, yellow flames
+    }
+    
+    // Lightning/Storm Scenarios
+    if (atmosphere == 'thunderstorm' || action == 'lightning') {
+      return ['#4B0082', '#FFFFFF', '#1E90FF']; // Deep purple, white flash, electric blue
+    }
+    
+    // Dungeon/Spooky Scenarios
+    if (environment == 'dungeon' && mood == 'spooky') {
+      return ['#800080', '#2F4F4F', '#000000']; // Dark purple, dark gray, black
+    }
+    
+    // Forest/Nature Scenarios
+    if (environment == 'forest') {
+      if (mood == 'peaceful') {
+        return ['#228B22', '#32CD32', '#FFFF00']; // Forest green, lime, sunlight yellow
+      } else {
+        return ['#006400', '#2E8B57', '#8FBC8F']; // Dark green variations
+      }
+    }
+    
+    // Ocean/Ship Scenarios
+    if (environment == 'ship' || environment.contains('ocean')) {
+      if (atmosphere == 'thunderstorm') {
+        return ['#191970', '#000080', '#708090']; // Midnight blue, navy, slate gray
+      } else {
+        return ['#0000FF', '#00CED1', '#87CEEB']; // Blue, turquoise, sky blue
+      }
+    }
+    
+    // Magic/Mystical Scenarios
+    if (action == 'magic_casting' || atmosphere == 'magical_energy') {
+      return ['#9400D3', '#8A2BE2', '#DA70D6']; // Violet, blue violet, orchid
+    }
+    
+    // Healing Scenarios
+    if (action == 'healing') {
+      return ['#FFFFFF', '#F0F8FF', '#E0FFFF']; // Pure white, alice blue, light cyan
+    }
+    
+    // Tavern/Cozy Scenarios  
+    if (environment == 'tavern' || mood == 'cozy') {
+      return ['#FF8C00', '#DAA520', '#B8860B']; // Dark orange, goldenrod, dark goldenrod
+    }
+    
+    // Default mood-based colors
+    switch (mood) {
+      case 'spooky': return ['#800080', '#4B0082', '#2F4F4F'];
+      case 'epic': return ['#FFD700', '#FFA500', '#FF4500'];
+      case 'mysterious': return ['#483D8B', '#2F4F4F', '#696969'];
+      case 'magical': return ['#9400D3', '#8A2BE2', '#DA70D6'];
+      case 'dark': return ['#000000', '#2F4F4F', '#696969'];
+      case 'bright': return ['#FFFFFF', '#FFFF00', '#FFD700'];
+      default: return ['#4169E1', '#6495ED', '#87CEEB']; // Default blue palette
+    }
+  }
+  
+  /// ⚡ ADVANCED INTENSITY CALCULATION
+  /// Maps narrative intensity to LED brightness/speed
+  static double _calculateSceneIntensity(String atmosphere, String action, String prompt) {
+    double intensity = 5.0; // Base intensity
+    
+    // High intensity scenarios
+    if (atmosphere == 'thunderstorm' || action == 'fireball' || action == 'combat') {
+      intensity = 9.0;
+    }
+    // Medium-high intensity
+    else if (atmosphere == 'fire' || action == 'magic_casting' || atmosphere == 'chaotic') {
+      intensity = 7.5;
+    }
+    // Medium intensity  
+    else if (atmosphere == 'tense' || action == 'exploration') {
+      intensity = 6.0;
+    }
+    // Low intensity
+    else if (atmosphere == 'peaceful' || action == 'healing') {
+      intensity = 3.0;
+    }
+    
+    // Boost based on intensity keywords
+    if (prompt.contains('massive') || prompt.contains('overwhelming')) {
+      intensity = (intensity * 1.2).clamp(1.0, 10.0);
+    }
+    if (prompt.contains('gentle') || prompt.contains('subtle')) {
+      intensity = (intensity * 0.7).clamp(1.0, 10.0);
+    }
+    
+    return intensity;
+  }
+  
+  /// 🎵 ENHANCED YOUTUBE SEARCH GENERATION
+  /// Creates targeted search terms for narrative scenarios
+  static String _generateYoutubeKeywords(String environment, String atmosphere, String action, String mood, String? time, String? weather) {
+    List<String> keywords = [];
+    
+    // Core environment
+    keywords.add(environment);
+    
+    // Atmospheric conditions
+    if (atmosphere != 'neutral') {
+      keywords.add(atmosphere);
+    }
+    
+    // Specific action-based sounds
+    switch (action) {
+      case 'fireball':
+        keywords.addAll(['fire crackling', 'flame', 'burning']);
+        break;
+      case 'lightning':
+        keywords.addAll(['thunder', 'storm', 'rain']);
+        break;
+      case 'combat':
+        keywords.addAll(['battle', 'tension', 'epic']);
+        break;
+      case 'magic_casting':
+        keywords.addAll(['mystical', 'ethereal', 'magical']);
+        break;
+      case 'healing':
+        keywords.addAll(['peaceful', 'restoration', 'calm']);
+        break;
+    }
+    
+    // Mood enhancement
+    keywords.add(mood);
+    
+    // Time and weather context
+    if (time != null) keywords.add(time);
+    if (weather != null) keywords.add(weather);
+    
+    // Add base terms
+    keywords.addAll(['ambient', 'soundscape', 'atmosphere', 'background']);
+    
+    return keywords.join(' ');
+  }
 }
 
 class DynamicLighting {
