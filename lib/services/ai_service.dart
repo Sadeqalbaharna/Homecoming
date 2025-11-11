@@ -2688,62 +2688,180 @@ Execute the command immediately and report what you're doing as GM of this smart
   /// Apply dynamic lighting configuration
   Future<void> _applyDynamicLighting(DynamicLighting lighting) async {
     try {
-      final homeService = HomeAutomationService();
+      final dio = Dio();
       
-      // Generate Firebase lighting command with dynamic parameters
-      final command = {
-        'type': 'dynamic_lighting',
-        'primary_color': lighting.primaryColor,
-        'secondary_color': lighting.secondaryColor,
-        'accent_color': lighting.accentColor,
-        'brightness': lighting.brightness,
-        'pattern': lighting.pattern,
-        'speed': lighting.speed,
-        'zones': lighting.zones,
-        'timestamp': DateTime.now().millisecondsSinceEpoch,
-      };
+      // Create dynamic ambient prompt from lighting configuration
+      String prompt = _generateAmbientPrompt(lighting);
       
-      await homeService.sendCommand(
-        personaId: 'kai',
-        deviceId: 'led_strip_main',
-        target: 'lighting',
-        action: 'dynamic_ambient',
-        params: command,
+      // Send direct HTTP POST to Pi (like your working curl commands)
+      final response = await dio.post(
+        'http://192.168.26.5:5001/command',
+        data: {
+          'command': 'dynamic_ambient',
+          'prompt': prompt,
+        },
+        options: Options(
+          headers: {'Content-Type': 'application/json'},
+          sendTimeout: const Duration(seconds: 10),
+          receiveTimeout: const Duration(seconds: 10),
+        ),
       );
-      print('🎨 [DYNAMIC_AMBIENT] Applied dynamic lighting: ${lighting.pattern}');
+      
+      if (response.statusCode == 200) {
+        print('🎨 [DYNAMIC_AMBIENT] Applied via HTTP POST: $prompt');
+        print('✅ Pi Response: ${response.data}');
+      } else {
+        print('❌ Pi HTTP Error: ${response.statusCode}');
+      }
       
     } catch (e) {
-      print('❌ [DYNAMIC_AMBIENT] Error applying lighting: $e');
+      print('❌ [DYNAMIC_AMBIENT] Error sending HTTP command to Pi: $e');
+      
+      // Fallback to Firebase method if HTTP fails
+      try {
+        final homeService = HomeAutomationService();
+        final command = {
+          'type': 'dynamic_lighting',
+          'primary_color': lighting.primaryColor,
+          'secondary_color': lighting.secondaryColor,
+          'accent_color': lighting.accentColor,
+          'brightness': lighting.brightness,
+          'pattern': lighting.pattern,
+          'speed': lighting.speed,
+          'zones': lighting.zones,
+          'timestamp': DateTime.now().millisecondsSinceEpoch,
+        };
+        
+        await homeService.sendCommand(
+          personaId: 'kai',
+          deviceId: 'led_strip_main',
+          target: 'lighting',
+          action: 'dynamic_ambient',
+          params: command,
+        );
+        print('🔄 [DYNAMIC_AMBIENT] Fallback to Firebase completed');
+      } catch (fallbackError) {
+        print('❌ Firebase fallback also failed: $fallbackError');
+      }
     }
+  }
+  
+  /// Generate ambient prompt from lighting configuration for Pi processing
+  String _generateAmbientPrompt(DynamicLighting lighting) {
+    // Convert technical lighting parameters to natural language prompts
+    String basePrompt = '';
+    
+    // Analyze primary color and pattern to generate descriptive prompt
+    switch (lighting.primaryColor.toLowerCase()) {
+      case '#00ff00':
+      case 'green':
+      case 'light_green':
+        basePrompt = lighting.pattern == 'gentle_pulse' 
+          ? 'mysterious forest atmosphere with gentle breathing lights'
+          : 'peaceful forest environment';
+        break;
+      case '#ff6500':
+      case 'orange':
+      case 'amber':
+        basePrompt = lighting.pattern == 'candle_flicker'
+          ? 'cozy fireplace with flickering flames'
+          : 'warm fireplace evening';
+        break;
+      case '#0066cc':
+      case 'blue':
+      case 'deep_blue':
+        basePrompt = lighting.pattern == 'wave'
+          ? 'ocean waves with flowing movement'
+          : 'peaceful ocean atmosphere';
+        break;
+      case '#800080':
+      case 'purple':
+      case 'indigo':
+        basePrompt = 'mystical evening with purple ambiance';
+        break;
+      case '#ffff00':
+      case 'yellow':
+      case 'warm_white':
+        basePrompt = 'warm sunlit afternoon atmosphere';
+        break;
+      default:
+        basePrompt = 'ambient lighting atmosphere';
+    }
+    
+    // Add pattern-specific details
+    switch (lighting.pattern.toLowerCase()) {
+      case 'color_cycle':
+      case 'rainbow':
+        basePrompt += ' with rainbow color transitions';
+        break;
+      case 'lightning':
+        basePrompt += ' with dramatic lightning effects';
+        break;
+      case 'aurora':
+        basePrompt += ' with northern lights effect';
+        break;
+      case 'rain_drops':
+        basePrompt += ' with rain drop patterns';
+        break;
+    }
+    
+    return basePrompt;
   }
   
   /// Start ambient video content
   Future<void> _startAmbientVideo(VideoContent video) async {
     try {
-      final homeService = HomeAutomationService();
+      final dio = Dio();
       
-      // Send YouTube play command to Pi
-      final command = {
-        'type': 'youtube_ambient',
-        'video_title': video.title,
-        'search_query': video.searchQuery,
-        'duration': video.duration,
-        'volume': 0.3, // Lower volume for ambient
-        'loop': true,   // Loop ambient videos
-        'timestamp': DateTime.now().millisecondsSinceEpoch,
-      };
-      
-      await homeService.sendCommand(
-        personaId: 'kai',
-        deviceId: 'pi_audio_system',
-        target: 'audio',
-        action: 'play_ambient_video',
-        params: command,
+      // Send direct HTTP POST to Pi for audio streaming
+      final response = await dio.post(
+        'http://192.168.26.5:5001/command',
+        data: {
+          'command': 'play_ambient_video',
+          'query': video.searchQuery,
+          'title': video.title,
+        },
+        options: Options(
+          headers: {'Content-Type': 'application/json'},
+          sendTimeout: const Duration(seconds: 10),
+          receiveTimeout: const Duration(seconds: 10),
+        ),
       );
-      print('🎵 [DYNAMIC_AMBIENT] Started ambient video: ${video.title}');
+      
+      if (response.statusCode == 200) {
+        print('🎵 [DYNAMIC_AMBIENT] Started ambient video via HTTP: ${video.title}');
+        print('✅ Pi Audio Response: ${response.data}');
+      } else {
+        print('❌ Pi Audio HTTP Error: ${response.statusCode}');
+      }
       
     } catch (e) {
-      print('❌ [DYNAMIC_AMBIENT] Error starting video: $e');
+      print('❌ [DYNAMIC_AMBIENT] Error sending audio HTTP command to Pi: $e');
+      
+      // Fallback to Firebase method if HTTP fails
+      try {
+        final homeService = HomeAutomationService();
+        final command = {
+          'type': 'youtube_ambient',
+          'video_title': video.title,
+          'search_query': video.searchQuery,
+          'duration': video.duration,
+          'volume': 0.3,
+          'loop': true,
+          'timestamp': DateTime.now().millisecondsSinceEpoch,
+        };
+        
+        await homeService.sendCommand(
+          personaId: 'kai',
+          deviceId: 'pi_audio_system',
+          target: 'audio',
+          action: 'play_ambient_video',
+          params: command,
+        );
+        print('🔄 [DYNAMIC_AMBIENT] Audio fallback to Firebase completed');
+      } catch (fallbackError) {
+        print('❌ Audio Firebase fallback also failed: $fallbackError');
+      }
     }
   }
 
