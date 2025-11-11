@@ -21,6 +21,34 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import yt_dlp
 
+def run_sudo_led_command(r, g, b, brightness=80):
+    """Run LED command with sudo to bypass permission issues"""
+    try:
+        led_script_content = f"""#!/usr/bin/env python3
+try:
+    from rpi_ws281x import PixelStrip, Color
+    strip = PixelStrip(60, 18, 800000, 10, False, {brightness}, 0)
+    strip.begin()
+    color = Color({r}, {g}, {b})
+    for i in range(60):
+        strip.setPixelColor(i, color)
+    strip.show()
+    print("LEDs set successfully")
+except Exception as e:
+    print(f"LED Error: {{e}}")
+"""
+        with open('/tmp/led_set.py', 'w') as f:
+            f.write(led_script_content)
+        import os
+        os.chmod('/tmp/led_set.py', 0o755)
+        import subprocess
+        result = subprocess.run(['sudo', 'python3', '/tmp/led_set.py'], capture_output=True, text=True, timeout=10)
+        print(f"✅ Sudo LED control: RGB({r},{g},{b}) at {brightness}%")
+        return result.returncode == 0
+    except Exception as e:
+        print(f"⚠️ Sudo LED error: {e}")
+        return False
+
 # Configure logging with more detail FIRST
 logging.basicConfig(
     level=logging.INFO,
@@ -115,7 +143,31 @@ class WS2812BController:
                 logger.info(f"✅ Initialized {strip_name} strip: {config['led_count']} LEDs on GPIO {config['gpio_pin']}")
             except Exception as e:
                 logger.error(f"❌ Failed to initialize {strip_name} strip: {e}")
+                # Enable sudo LED fallback mode
+                logger.info(f"💡 Enabling sudo LED control for {strip_name}")
+                self.pixel_strips[strip_name] = "sudo_mode"
     
+    def _has_sudo_mode_strips(self, strips: List[str]) -> bool:
+        """Check if any of the target strips are in sudo mode"""
+        return any(self.pixel_strips.get(strip_name) == "sudo_mode" for strip_name in strips if strip_name in self.pixel_strips)
+    
+    def _apply_sudo_lighting(self, strips: List[str], rgb_color: Tuple[int, int, int], effect: str) -> bool:
+        """Apply lighting via sudo for strips in sudo mode"""
+        r, g, b = rgb_color
+        success = True
+        
+        for strip_name in strips:
+            if strip_name in self.pixel_strips and self.pixel_strips[strip_name] == "sudo_mode":
+                logger.info(f"💡 Using sudo LED control for {strip_name} ({effect} effect)")
+                if run_sudo_led_command(r, g, b, brightness=80):
+                    logger.info(f"✅ Set {strip_name} to RGB({r}, {g}, {b}) via sudo ({effect} simplified to solid)")
+                else:
+                    logger.warning(f"⚠️ Sudo LED control failed for {strip_name}, simulating")
+                    logger.info(f"🎨 SIMULATED: {effect} effect on {strip_name}")
+                    success = False
+        
+        return success
+
     def set_lighting(self, lighting_config: Dict, strips: List[str] = None):
         """Set coordinated lighting across multiple strips"""
         if not WS281X_AVAILABLE:
@@ -132,46 +184,57 @@ class WS2812BController:
             logger.info(f"🌈 Setting WS2812B lighting: {color} at {brightness}% with {effect} effect")
             logger.info(f"🎯 Target strips: {strips}")
             
-            # Stop any running effects
-            self._stop_all_effects(strips)
-            
             # Get RGB color values
             rgb_color = self._get_rgb_color(color, brightness)
             
-            # Apply effect to all specified strips
+            # Check if we have sudo mode strips
+            if self._has_sudo_mode_strips(strips):
+                logger.info("💡 Detected sudo mode strips, using simplified lighting")
+                return self._apply_sudo_lighting(strips, rgb_color, effect)
+            
+            # Stop any running effects for normal strips
+            self._stop_all_effects(strips)
+            
+            # Apply effect to normal strips only
+            normal_strips = [s for s in strips if s in self.pixel_strips and self.pixel_strips[s] != "sudo_mode"]
+            
+            if not normal_strips:
+                return True  # All strips handled by sudo
+            
+            # Apply effect to normal strips
             if effect == "solid":
-                self._set_solid_color(strips, rgb_color)
+                self._set_solid_color(normal_strips, rgb_color)
             elif effect == "gentle_pulse":
-                self._start_pulse_effect(strips, rgb_color, speed=0.5)
+                self._start_pulse_effect(normal_strips, rgb_color, speed=0.5)
             elif effect == "wave":
-                self._start_wave_effect(strips, rgb_color, speed=1.0)
+                self._start_wave_effect(normal_strips, rgb_color, speed=1.0)
             elif effect == "slow_fade":
-                self._start_fade_effect(strips, rgb_color, speed=0.3)
+                self._start_fade_effect(normal_strips, rgb_color, speed=0.3)
             elif effect == "candle_flicker":
-                self._start_flicker_effect(strips, rgb_color)
+                self._start_flicker_effect(normal_strips, rgb_color)
             elif effect == "color_cycle":
-                self._start_rainbow_effect(strips, brightness, speed=0.5)
+                self._start_rainbow_effect(normal_strips, brightness, speed=0.5)
             elif effect == "rain_drops":
-                self._start_rain_effect(strips, rgb_color)
+                self._start_rain_effect(normal_strips, rgb_color)
             elif effect == "sunrise":
-                self._start_sunrise_effect(strips, brightness)
+                self._start_sunrise_effect(normal_strips, brightness)
             elif effect == "leaf_fall":
-                self._start_leaf_fall_effect(strips)
+                self._start_leaf_fall_effect(normal_strips)
             elif effect == "lightning":
-                self._start_lightning_effect(strips)
+                self._start_lightning_effect(normal_strips)
             elif effect == "aurora":
-                self._start_aurora_effect(strips)
+                self._start_aurora_effect(normal_strips)
             elif effect == "meteor":
-                self._start_meteor_effect(strips, rgb_color)
+                self._start_meteor_effect(normal_strips, rgb_color)
             elif effect == "fire":
-                self._start_fire_effect(strips)
+                self._start_fire_effect(normal_strips)
             elif effect == "ocean_wave":
-                self._start_ocean_wave_effect(strips)
+                self._start_ocean_wave_effect(normal_strips)
             elif effect == "matrix":
-                self._start_matrix_effect(strips)
+                self._start_matrix_effect(normal_strips)
             else:
                 # Default to solid color for unknown effects
-                self._set_solid_color(strips, rgb_color)
+                self._set_solid_color(normal_strips, rgb_color)
             
             return True
             
@@ -211,20 +274,44 @@ class WS2812BController:
     def _set_solid_color(self, strips: List[str], rgb_color: Tuple[int, int, int]):
         """Set solid color across specified strips"""
         r, g, b = rgb_color
-        color = Color(r, g, b)
         
         for strip_name in strips:
             if strip_name in self.pixel_strips:
                 strip = self.pixel_strips[strip_name]
-                for i in range(strip.numPixels()):
-                    strip.setPixelColor(i, color)
-                strip.show()
-                logger.info(f"🎨 Set {strip_name} to solid RGB({r}, {g}, {b})")
+                
+                # Check if this strip is in sudo mode
+                if strip == "sudo_mode":
+                    logger.info(f"💡 Using sudo LED control for {strip_name}")
+                    if run_sudo_led_command(r, g, b, brightness=80):
+                        logger.info(f"🎨 Set {strip_name} to solid RGB({r}, {g}, {b}) via sudo")
+                    else:
+                        logger.warning(f"⚠️ Sudo LED control failed for {strip_name}, simulating")
+                        logger.info(f"🎨 SIMULATED: Set {strip_name} to solid RGB({r}, {g}, {b})")
+                else:
+                    # Normal strip operation
+                    color = Color(r, g, b)
+                    for i in range(strip.numPixels()):
+                        strip.setPixelColor(i, color)
+                    strip.show()
+                    logger.info(f"🎨 Set {strip_name} to solid RGB({r}, {g}, {b})")
     
     def _start_pulse_effect(self, strips: List[str], rgb_color: Tuple[int, int, int], speed: float = 0.5):
         """Start gentle pulse effect"""
-        for strip_name in strips:
-            if strip_name in self.pixel_strips:
+    for strip_name in strips:
+        if strip_name in self.pixel_strips:
+            strip = self.pixel_strips[strip_name]
+            
+            # Check if this strip is in sudo mode
+            if strip == "sudo_mode":
+                logger.info(f"💡 Using sudo LED control for {strip_name} pulse effect")
+                r, g, b = rgb_color
+                if run_sudo_led_command(r, g, b, brightness=70):
+                    logger.info(f"💫 Set {strip_name} to pulse RGB({r}, {g}, {b}) via sudo (simplified to solid)")
+                else:
+                    logger.warning(f"⚠️ Sudo LED pulse failed for {strip_name}, simulating")
+                    logger.info(f"💫 SIMULATED: Pulse effect on {strip_name}")
+            else:
+                # Normal strip operation
                 self.stop_effects[strip_name].clear()
                 thread = threading.Thread(target=self._pulse_worker, args=(strip_name, rgb_color, speed))
                 thread.daemon = True
@@ -1270,8 +1357,9 @@ class FirebaseRestListener:
                     for i, sink in enumerate(sinks):
                         logger.info(f"  {i+1}: {sink}")
                     
-                    # PRIORITY 1: Look for Bluetooth headsets FIRST (GL-TWS91 or GL-TWS61)
+                    # PRIORITY 1: Look for Bluetooth headsets FIRST (Soundtec-Vibe, GL-TWS91 or GL-TWS61)
                     bluetooth_devices = [
+                        ('F4_4E_FD_BA_98_79', 'F4:4E:FD:BA:98:79', 'Soundtec-Vibe'),
                         ('41_42_FF_3E_1F_25', '41:42:FF:3E:1F:25', 'GL-TWS91'),
                         ('FA_B0_2C_56_4E_72', 'FA:B0:2C:56:4E:72', 'GL-TWS61')
                     ]
@@ -1279,7 +1367,7 @@ class FirebaseRestListener:
                     for mac_underscore, mac_colon, device_name in bluetooth_devices:
                         logger.info(f"🔍 Searching for {device_name} ({mac_underscore})...")
                         for sink in sinks:
-                            if mac_underscore in sink and 'bluez_sink' in sink:
+                            if mac_underscore in sink and ('bluez_sink' in sink or 'bluez_output' in sink):
                                 sink_name = sink.split()[1] if len(sink.split()) > 1 else sink.strip()
                                 logger.info(f"🎧 Found {device_name} Bluetooth sink: {sink_name}")
                                 
