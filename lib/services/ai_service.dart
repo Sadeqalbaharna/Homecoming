@@ -18,6 +18,7 @@ import 'brain_debug_service.dart';
 import 'ambiance_service.dart';
 import 'kai_consciousness_service.dart';
 import 'home_automation_service.dart';
+import 'wake_on_lan_service.dart';
 
 /// Configuration class to hold all API keys
 /// Uses secure storage for encrypted key management
@@ -1440,6 +1441,9 @@ Don't force it - only ask if the flow of conversation makes it appropriate.''';
           BrainPhase.semanticRetrieval,
           'Using fallback consciousness (Pi offline)',
         );
+        
+        // Attempt to wake Pi if it's offline
+        _attemptPiWakeUp();
       }
     }
 
@@ -2228,8 +2232,24 @@ Execute the command immediately and report what you're doing as GM of this smart
         'set volume', 'volume to', 'volume at', 'make it louder', 'make it quieter'
       ];
       
-      bool mentionedAmbiance = ambianceIndicators.any((indicator) => 
-        lowerReply.contains(indicator));
+      // Check for direct lighting commands first (higher priority)
+      final lightingIndicators = [
+        'red lights', 'blue lights', 'green lights', 'white lights', 'yellow lights',
+        'purple lights', 'orange lights', 'amber lights', 'pink lights', 'cyan lights',
+        'set lights to', 'change lights to', 'make lights', 'turn lights',
+        'lighting to', 'light color', 'lights red', 'lights blue', 'lights green',
+        'lights white', 'lights yellow', 'lights purple', 'lights orange'
+      ];
+      
+      bool mentionedLighting = lightingIndicators.any((indicator) => 
+        originalInput.toLowerCase().contains(indicator) || lowerReply.contains(indicator));
+      
+      // Only check ambiance if it's NOT a direct lighting command
+      bool mentionedAmbiance = false;
+      if (!mentionedLighting) {
+        mentionedAmbiance = ambianceIndicators.any((indicator) => 
+          lowerReply.contains(indicator));
+      }
       
       bool mentionedYoutube = youtubeIndicators.any((indicator) => 
         lowerReply.contains(indicator) || originalInput.toLowerCase().contains(indicator));
@@ -2251,18 +2271,7 @@ Execute the command immediately and report what you're doing as GM of this smart
         return;
       }
       
-      // Check if this is a direct lighting command (red lights, blue lights, etc.)
-      final lightingIndicators = [
-        'red lights', 'blue lights', 'green lights', 'white lights', 'yellow lights',
-        'purple lights', 'orange lights', 'amber lights', 'pink lights', 'cyan lights',
-        'set lights to', 'change lights to', 'make lights', 'turn lights',
-        'lighting to', 'light color', 'lights red', 'lights blue', 'lights green',
-        'lights white', 'lights yellow', 'lights purple', 'lights orange'
-      ];
-      
-      bool mentionedLighting = lightingIndicators.any((indicator) => 
-        originalInput.toLowerCase().contains(indicator) || lowerReply.contains(indicator));
-        
+      // Check if this is a direct lighting command (already checked above)
       if (mentionedLighting) {
         print('💡 [AI_SERVICE] Direct lighting command detected');
         await _handleDirectLightingRequest(originalInput, reply, debugService);
@@ -2623,5 +2632,27 @@ Execute the command immediately and report what you're doing as GM of this smart
         .trim();
     
     return cleanInput.isNotEmpty ? cleanInput : input;
+  }
+
+  /// Attempt to wake up Pi when it's detected as offline
+  void _attemptPiWakeUp() async {
+    try {
+      print('🌅 [AI_SERVICE] Pi appears offline - attempting Wake-on-LAN...');
+      final wakeService = WakeOnLanService();
+      
+      // Attempt wake-up in background (don't block the current request)
+      wakeService.wakeAndWaitForListener().then((success) {
+        if (success) {
+          print('✅ [AI_SERVICE] Pi successfully awakened via Wake-on-LAN');
+        } else {
+          print('⚠️ [AI_SERVICE] Wake-on-LAN attempt failed or Pi not responding');
+        }
+      }).catchError((e) {
+        print('❌ [AI_SERVICE] Wake-on-LAN background task error: $e');
+      });
+      
+    } catch (e) {
+      print('❌ [AI_SERVICE] Error during Wake-on-LAN attempt: $e');
+    }
   }
 }
