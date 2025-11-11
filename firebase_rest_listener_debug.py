@@ -18,6 +18,7 @@ import math
 from typing import Dict, List, Optional, Tuple
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+import yt_dlp
 
 # Configure logging with more detail FIRST
 logging.basicConfig(
@@ -949,40 +950,117 @@ class FirebaseRestListener:
         logger.info(f"🌐 Consciousness API: Will serve on port 5001 at /kai/context")
         
     def _detect_audio_device(self):
-        """Detect best available audio device"""
+        """Detect reliable audio device - prioritize Bluetooth headsets for proper testing"""
         try:
-            # Try to get audio devices using pactl
-            result = subprocess.run(["pactl", "list", "short", "sinks"], 
-                                  capture_output=True, text=True, timeout=5)
+            logger.info("🎧 Detecting audio devices...")
             
-            if result.returncode == 0:
-                sinks = result.stdout.strip().split('\n')
+            # First, let's see all available sinks for debugging
+            try:
+                result = subprocess.run(["pactl", "list", "short", "sinks"], 
+                                      capture_output=True, text=True, timeout=5)
                 
-                # Prefer Bluetooth devices first
-                for sink in sinks:
-                    if 'bluez_output' in sink and 'SUSPENDED' not in sink:
-                        device_name = sink.split()[1]
-                        logger.info(f"🎧 Detected Bluetooth audio device: pulse/{device_name}")
-                        return f"pulse/{device_name}"
-                
-                # Fall back to any available non-suspended device  
-                for sink in sinks:
-                    if sink.strip() and 'SUSPENDED' not in sink:
-                        device_name = sink.split()[1]
-                        logger.info(f"🔊 Using available audio device: pulse/{device_name}")
-                        return f"pulse/{device_name}"
-                
-                # If all devices are suspended, use the first one anyway
-                if sinks and sinks[0].strip():
-                    device_name = sinks[0].split()[1]
-                    logger.info(f"🔊 Using default audio device: pulse/{device_name}")
-                    return f"pulse/{device_name}"
+                if result.returncode == 0:
+                    sinks = result.stdout.strip().split('\n')
+                    logger.info(f"🔍 Available audio sinks:")
+                    for i, sink in enumerate(sinks):
+                        logger.info(f"  {i+1}: {sink}")
+                    
+                    # PRIORITY 1: Look for Bluetooth headsets FIRST (GL-TWS91 or GL-TWS61)
+                    bluetooth_devices = [
+                        ('41_42_FF_3E_1F_25', '41:42:FF:3E:1F:25', 'GL-TWS91'),
+                        ('FA_B0_2C_56_4E_72', 'FA:B0:2C:56:4E:72', 'GL-TWS61')
+                    ]
+                    
+                    for mac_underscore, mac_colon, device_name in bluetooth_devices:
+                        logger.info(f"🔍 Searching for {device_name} ({mac_underscore})...")
+                        for sink in sinks:
+                            if mac_underscore in sink and 'bluez_sink' in sink:
+                                sink_name = sink.split()[1] if len(sink.split()) > 1 else sink.strip()
+                                logger.info(f"🎧 Found {device_name} Bluetooth sink: {sink_name}")
+                                
+                                # Check Bluetooth connection status
+                                try:
+                                    bt_check = subprocess.run(['bluetoothctl', 'info', mac_colon], 
+                                                            capture_output=True, text=True, timeout=5)
+                                    logger.info(f"📡 {device_name} Bluetooth info:")
+                                    logger.info(f"    {bt_check.stdout}")
+                                    
+                                    if 'Connected: yes' in bt_check.stdout:
+                                        logger.info(f"✅ {device_name} is connected! Activating...")
+                                        
+                                        # Activate the Bluetooth sink
+                                        try:
+                                            subprocess.run(['pactl', 'suspend-sink', sink_name, '0'], 
+                                                         timeout=3, capture_output=True)
+                                            subprocess.run(['pactl', 'set-default-sink', sink_name], 
+                                                         timeout=3, capture_output=True)
+                                            
+                                            # Verify it's active
+                                            verify_result = subprocess.run(['pactl', 'info'], 
+                                                                        capture_output=True, text=True, timeout=3)
+                                            if sink_name in verify_result.stdout:
+                                                logger.info(f"🔊 {device_name} activated and set as default!")
+                                                return f"pulse/{sink_name}"
+                                            else:
+                                                logger.warning(f"⚠️ {device_name} activation verification failed")
+                                        except Exception as e:
+                                            logger.error(f"❌ Failed to activate {device_name}: {e}")
+                                    else:
+                                        logger.warning(f"⚠️ {device_name} found but not connected (status: {bt_check.stdout})")
+                                        # Try to connect it
+                                        try:
+                                            logger.info(f"🔄 Attempting to connect {device_name}...")
+                                            connect_result = subprocess.run(['bluetoothctl', 'connect', mac_colon], 
+                                                                          capture_output=True, text=True, timeout=10)
+                                            logger.info(f"📡 Connect result: {connect_result.stdout}")
+                                            if connect_result.returncode == 0:
+                                                # Wait a moment for PulseAudio to detect it
+                                                time.sleep(2)
+                                                # Try activation again
+                                                subprocess.run(['pactl', 'suspend-sink', sink_name, '0'], timeout=3)
+                                                subprocess.run(['pactl', 'set-default-sink', sink_name], timeout=3)
+                                                logger.info(f"🔊 {device_name} connected and activated!")
+                                                return f"pulse/{sink_name}"
+                                        except Exception as e:
+                                            logger.warning(f"⚠️ Failed to connect {device_name}: {e}")
+                                            
+                                except Exception as e:
+                                    logger.warning(f"⚠️ {device_name} Bluetooth check failed: {e}")
+                    
+                    # PRIORITY 2: Pi's built-in audio (fallback for reliability)
+                    for sink in sinks:
+                        if 'alsa_output.platform-fe00b840.mailbox.stereo-fallback' in sink:
+                            device_name = sink.split()[1] if len(sink.split()) > 1 else sink.strip()
+                            logger.info(f"🔊 Falling back to Pi built-in audio: pulse/{device_name}")
+                            try:
+                                subprocess.run(['pactl', 'suspend-sink', device_name, '0'], timeout=3)
+                                subprocess.run(['pactl', 'set-default-sink', device_name], timeout=3)
+                                logger.info(f"✅ Pi audio activated and set as default")
+                            except Exception as e:
+                                logger.warning(f"⚠️ Pi audio activation failed: {e}")
+                            return f"pulse/{device_name}"
+                    
+                    # PRIORITY 3: Any other available device
+                    for sink in sinks:
+                        if sink.strip() and sink.split():
+                            device_name = sink.split()[1]
+                            logger.info(f"🔊 Using fallback audio device: pulse/{device_name}")
+                            try:
+                                subprocess.run(['pactl', 'suspend-sink', device_name, '0'], timeout=3)
+                                subprocess.run(['pactl', 'set-default-sink', device_name], timeout=3)
+                                logger.info(f"✅ Fallback device activated")
+                            except Exception as e:
+                                logger.warning(f"⚠️ Fallback device activation failed: {e}")
+                            return f"pulse/{device_name}"
+                        
+            except Exception as e:
+                logger.warning(f"⚠️ PulseAudio detection failed: {e}")
                         
         except Exception as e:
             logger.warning(f"⚠️ Could not detect audio devices: {e}")
         
-        # Ultimate fallback
-        logger.info("🔊 Using system default audio device")
+        # Ultimate fallback - just use pulse and let system decide
+        logger.info("🔊 Using system default PulseAudio")
         return "pulse"
     
     def _initialize_kai_identity(self):
@@ -1582,13 +1660,19 @@ This immediately changes the physical LED strips in the room. You have direct GP
             success = False
             retry_commands = [
                 cmd,  # Original command with detected audio device
-                [  # Fallback 1: Default pulse audio
+                [  # Fallback 1: GL-TWS61 ALSA card 1
+                    "mpv", track_file, "--audio-device=alsa/plughw:CARD=1,DEV=0", "--no-video", "--really-quiet"
+                ],
+                [  # Fallback 2: GL-TWS61 ALSA card 2
+                    "mpv", track_file, "--audio-device=alsa/plughw:CARD=2,DEV=0", "--no-video", "--really-quiet"
+                ],
+                [  # Fallback 3: Default pulse audio
                     "mpv", track_file, "--audio-device=pulse", "--no-video", "--really-quiet"
                 ],
-                [  # Fallback 2: System default audio
+                [  # Fallback 4: System default audio
                     "mpv", track_file, "--no-video", "--really-quiet"
                 ],
-                [  # Fallback 3: ALSA default
+                [  # Fallback 5: ALSA default
                     "mpv", track_file, "--audio-device=alsa", "--no-video", "--really-quiet"
                 ]
             ]
@@ -1647,6 +1731,243 @@ This immediately changes the physical LED strips in the room. You have direct GP
         except Exception as e:
             logger.error(f"❌ Error stopping music: {e}")
             return False
+
+    def play_youtube_audio(self, search_query, voice_analysis=None):
+        """Stream and play audio from YouTube based on search query"""
+        try:
+            logger.info(f"🎵 YouTube Audio Request: '{search_query}'")
+            
+            if voice_analysis:
+                logger.info(f"🎭 Voice context: {voice_analysis.get('mood', 'unknown')} mood")
+            
+            # Stop any currently playing music first
+            self.stop_music()
+            time.sleep(1)
+            
+            # Configure yt-dlp for audio extraction
+            ydl_opts = {
+                'format': 'bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio',
+                'quiet': True,
+                'no_warnings': True,
+                'extract_flat': False,
+                'default_search': 'ytsearch1:',  # Search YouTube and get first result
+            }
+            
+            logger.info(f"🔍 Searching YouTube for: '{search_query}'")
+            
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                # Search and extract info without downloading
+                search_url = f"ytsearch1:{search_query}"
+                info_dict = ydl.extract_info(search_url, download=False)
+                
+                if not info_dict or 'entries' not in info_dict or len(info_dict['entries']) == 0:
+                    logger.error(f"❌ No YouTube results found for '{search_query}'")
+                    return False
+                
+                # Get the first search result
+                video_info = info_dict['entries'][0]
+                video_title = video_info.get('title', 'Unknown')
+                video_duration = video_info.get('duration', 0)
+                uploader = video_info.get('uploader', 'Unknown')
+                
+                logger.info(f"🎵 Found: '{video_title}' by {uploader}")
+                logger.info(f"⏱️ Duration: {video_duration // 60}:{video_duration % 60:02d}")
+                
+                # Get the audio stream URL
+                audio_url = video_info.get('url')
+                if not audio_url:
+                    logger.error("❌ Could not extract audio stream URL")
+                    return False
+                
+                logger.info(f"🔗 Audio stream URL obtained")
+                
+            # Play the audio stream with mpv using our enhanced fallback system
+            logger.info("🎵 Starting YouTube audio playback...")
+            
+            success = False
+            retry_commands = [
+                [  # Primary: Detected audio device
+                    "mpv", audio_url, 
+                    f"--audio-device={self.bluetooth_device}",
+                    "--no-video", "--really-quiet",
+                    "--user-agent=Mozilla/5.0 (compatible; yt-dlp)",
+                    "--referrer=https://www.youtube.com/"
+                ],
+                [  # Fallback 1: GL-TWS61 ALSA card 1
+                    "mpv", audio_url,
+                    "--audio-device=alsa/plughw:CARD=1,DEV=0", "--no-video", "--really-quiet",
+                    "--user-agent=Mozilla/5.0 (compatible; yt-dlp)",
+                    "--referrer=https://www.youtube.com/"
+                ],
+                [  # Fallback 2: GL-TWS61 ALSA card 2
+                    "mpv", audio_url,
+                    "--audio-device=alsa/plughw:CARD=2,DEV=0", "--no-video", "--really-quiet",
+                    "--user-agent=Mozilla/5.0 (compatible; yt-dlp)",
+                    "--referrer=https://www.youtube.com/"
+                ],
+                [  # Fallback 3: Default pulse audio
+                    "mpv", audio_url,
+                    "--audio-device=pulse", "--no-video", "--really-quiet",
+                    "--user-agent=Mozilla/5.0 (compatible; yt-dlp)",
+                    "--referrer=https://www.youtube.com/"
+                ],
+                [  # Fallback 4: System default
+                    "mpv", audio_url, "--no-video", "--really-quiet",
+                    "--user-agent=Mozilla/5.0 (compatible; yt-dlp)",
+                    "--referrer=https://www.youtube.com/"
+                ]
+            ]
+            
+            for attempt, cmd in enumerate(retry_commands, 1):
+                try:
+                    logger.info(f"🎵 YouTube playback attempt {attempt}")
+                    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    logger.info(f"🎵 Started YouTube mpv process with PID: {process.pid}")
+                    
+                    # Wait to see if process starts successfully
+                    time.sleep(1)
+                    poll_result = process.poll()
+                    
+                    if poll_result is None:
+                        logger.info(f"✅ YouTube audio playing: '{video_title}'")
+                        logger.info(f"🎵 Streaming from YouTube via mpv (attempt {attempt})")
+                        success = True
+                        break
+                    elif poll_result == 0:
+                        logger.info(f"✅ YouTube audio completed: '{video_title}'")
+                        success = True
+                        break
+                    else:
+                        stdout, stderr = process.communicate()
+                        logger.warning(f"⚠️ YouTube attempt {attempt} failed with code {poll_result}")
+                        logger.warning(f"⚠️ stderr: {stderr.decode().strip()}")
+                        
+                except Exception as e:
+                    logger.warning(f"⚠️ YouTube attempt {attempt} exception: {e}")
+                    continue
+            
+            if not success:
+                logger.error(f"❌ All YouTube playback attempts failed for '{search_query}'")
+                return False
+            
+            logger.info(f"🎉 YouTube audio streaming successful: '{video_title}'")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ YouTube audio error: {e}")
+            return False
+
+    def search_youtube(self, query, max_results=5):
+        """Search YouTube and return results for selection"""
+        try:
+            logger.info(f"🔍 YouTube search: '{query}' (max {max_results} results)")
+            
+            ydl_opts = {
+                'quiet': True,
+                'no_warnings': True,
+                'extract_flat': True,  # Don't extract full info, just search results
+            }
+            
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                search_url = f"ytsearch{max_results}:{query}"
+                info_dict = ydl.extract_info(search_url, download=False)
+                
+                if not info_dict or 'entries' not in info_dict:
+                    logger.error(f"❌ No YouTube search results for '{query}'")
+                    return []
+                
+                results = []
+                for entry in info_dict['entries']:
+                    if entry:
+                        results.append({
+                            'title': entry.get('title', 'Unknown'),
+                            'id': entry.get('id', ''),
+                            'url': entry.get('url', ''),
+                            'uploader': entry.get('uploader', 'Unknown'),
+                            'duration': entry.get('duration', 0)
+                        })
+                
+                logger.info(f"✅ Found {len(results)} YouTube results for '{query}'")
+                return results
+                
+        except Exception as e:
+            logger.error(f"❌ YouTube search error: {e}")
+            return []
+    
+    def adjust_volume(self, direction):
+        """Adjust system volume up or down"""
+        try:
+            if direction == "up":
+                # Increase volume by 10%
+                result = subprocess.run(['amixer', 'sset', 'Master', '10%+'], 
+                                      capture_output=True, text=True, timeout=5)
+                logger.info("🔊 Volume increased by 10%")
+            elif direction == "down":
+                # Decrease volume by 10%  
+                result = subprocess.run(['amixer', 'sset', 'Master', '10%-'], 
+                                      capture_output=True, text=True, timeout=5)
+                logger.info("🔉 Volume decreased by 10%")
+            else:
+                logger.error(f"❌ Invalid volume direction: {direction}")
+                return False
+            
+            if result.returncode == 0:
+                # Get current volume level
+                current_vol = self.get_current_volume()
+                logger.info(f"🎚️ Current volume: {current_vol}%")
+                return True
+            else:
+                logger.error(f"❌ Volume adjustment failed: {result.stderr}")
+                return False
+                
+        except subprocess.TimeoutExpired:
+            logger.error("❌ Volume adjustment timed out")
+            return False
+        except Exception as e:
+            logger.error(f"❌ Volume adjustment error: {e}")
+            return False
+    
+    def set_volume(self, volume_level):
+        """Set specific volume level (0-100)"""
+        try:
+            # Clamp volume between 0-100
+            volume_level = max(0, min(100, int(volume_level)))
+            
+            result = subprocess.run(['amixer', 'sset', 'Master', f'{volume_level}%'], 
+                                  capture_output=True, text=True, timeout=5)
+            
+            if result.returncode == 0:
+                logger.info(f"🎚️ Volume set to {volume_level}%")
+                return True
+            else:
+                logger.error(f"❌ Set volume failed: {result.stderr}")
+                return False
+                
+        except subprocess.TimeoutExpired:
+            logger.error("❌ Set volume timed out")
+            return False
+        except Exception as e:
+            logger.error(f"❌ Set volume error: {e}")
+            return False
+    
+    def get_current_volume(self):
+        """Get current system volume level"""
+        try:
+            result = subprocess.run(['amixer', 'sget', 'Master'], 
+                                  capture_output=True, text=True, timeout=5)
+            
+            if result.returncode == 0:
+                # Parse amixer output to extract volume percentage
+                import re
+                match = re.search(r'\[(\d+)%\]', result.stdout)
+                if match:
+                    return int(match.group(1))
+            
+            return 50  # Default fallback
+            
+        except Exception as e:
+            logger.error(f"❌ Get volume error: {e}")
+            return 50  # Default fallback
     
     def set_ambiance_lighting(self, lighting_config, ambiance_analysis=None, target_strips=None):
         """Set intelligent ambiance lighting using WS2812B LED strips"""
@@ -1833,11 +2154,44 @@ This immediately changes the physical LED strips in the room. You have direct GP
                 success = self.stop_music()
                 message = "Music stopped" if success else "Failed to stop music"
                 
+            elif action == "play_youtube" and target == "music":
+                search_query = command_data.get("search_query", "")
+                voice_analysis = command_data.get("voice_analysis")
+                
+                logger.info(f"🎵 YouTube play command - Query: '{search_query}'")
+                
+                if not search_query:
+                    logger.error("❌ No search query provided for YouTube playback")
+                    success = False
+                    message = "No search query provided"
+                else:
+                    success = self.play_youtube_audio(search_query, voice_analysis)
+                    if success:
+                        message = f"Playing '{search_query}' from YouTube"
+                    else:
+                        message = f"Failed to play '{search_query}' from YouTube"
+                
             elif action == "pause_music":
                 logger.info("⏸️ Pause music command")
                 # Send pause signal to mpv (if running with input enabled)
                 success = True
                 message = "Music paused"
+                
+            elif action == "volume_up" and target == "music":
+                logger.info("🔊 Volume up command")
+                success = self.adjust_volume("up")
+                message = "Volume increased" if success else "Failed to increase volume"
+                
+            elif action == "volume_down" and target == "music":
+                logger.info("🔉 Volume down command")
+                success = self.adjust_volume("down")
+                message = "Volume decreased" if success else "Failed to decrease volume"
+                
+            elif action == "set_volume" and target == "music":
+                volume_level = command_data.get("volume", 50)
+                logger.info(f"🔊 Set volume command - Level: {volume_level}%")
+                success = self.set_volume(volume_level)
+                message = f"Volume set to {volume_level}%" if success else f"Failed to set volume to {volume_level}%"
                 
             elif action == "set_ambiance_lighting" and target == "lights":
                 logger.info("💡 Ambiance lighting command")
@@ -2028,16 +2382,40 @@ This immediately changes the physical LED strips in the room. You have direct GP
         except:
             logger.error("❌ mpv not found")
         
-        # Check Bluetooth audio device
+        # Check and activate Bluetooth audio device
         try:
             pactl_check = subprocess.run(["pactl", "list", "short", "sinks"], capture_output=True, text=True)
-            if self.bluetooth_device.replace("pulse/", "") in pactl_check.stdout:
+            logger.info(f"Available audio sinks:\n{pactl_check.stdout}")
+            
+            # Look for GL-TWS61 specifically
+            if "FA_B0_2C_56_4E_72" in pactl_check.stdout:
+                logger.info("🎧 GL-TWS61 Bluetooth device found!")
+                
+                # Activate GL-TWS61 if suspended
+                try:
+                    subprocess.run(["pactl", "suspend-sink", "bluez_sink.FA_B0_2C_56_4E_72.a2dp_sink", "0"], timeout=3)
+                    subprocess.run(["pactl", "set-default-sink", "bluez_sink.FA_B0_2C_56_4E_72.a2dp_sink"], timeout=3)
+                    logger.info("🔊 GL-TWS61 activated and set as default!")
+                    
+                    # Update our audio device to use the specific Bluetooth sink
+                    self.bluetooth_device = "pulse/bluez_sink.FA_B0_2C_56_4E_72.a2dp_sink"
+                    logger.info(f"🎧 Updated audio device to: {self.bluetooth_device}")
+                    
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not activate GL-TWS61: {e}")
+                    
+            elif self.bluetooth_device.replace("pulse/", "") in pactl_check.stdout:
                 logger.info(f"✅ Bluetooth audio device available: {self.bluetooth_device}")
             else:
                 logger.warning(f"⚠️ Bluetooth device may not be available: {self.bluetooth_device}")
-                logger.info(f"Available audio sinks:\n{pactl_check.stdout}")
-        except:
-            logger.warning("⚠️ Could not check audio devices")
+                logger.info("🔍 Checking for any Bluetooth devices...")
+                # Look for any Bluetooth device
+                for line in pactl_check.stdout.split('\n'):
+                    if 'bluez_sink' in line:
+                        logger.info(f"📱 Found Bluetooth device: {line}")
+                        
+        except Exception as e:
+            logger.warning(f"⚠️ Could not check audio devices: {e}")
         
         logger.info("🔄 Starting command polling...")
         logger.info("🌐 Consciousness API running on http://0.0.0.0:5001/kai/context")

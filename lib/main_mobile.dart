@@ -15,6 +15,7 @@ import 'package:firebase_core/firebase_core.dart';
 
 import 'services/ai_service.dart';
 import 'services/firebase_service.dart';
+import 'services/wake_on_lan_service.dart';
 import '../services/voice_activation_service.dart';
 import '../services/home_automation_service.dart';
 import '../screens/home_remote_screen.dart';
@@ -464,6 +465,50 @@ class _MobileKaiState extends State<_MobileKai>
         SnackBar(
           content: Text('❌ Light control error: $e'),
           duration: const Duration(seconds: 2),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Future<void> _wakePi() async {
+    try {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('🌅 Waking up Pi and starting Kai...'),
+          duration: Duration(seconds: 3),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      
+      final wakeService = WakeOnLanService();
+      final success = await wakeService.wakeAndWaitForListener();
+      
+      if (success) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✅ Pi awakened! Kai is ready to serve you.'),
+            duration: Duration(seconds: 3),
+            backgroundColor: Colors.green,
+          ),
+        );
+        
+        // Test connection to consciousness API
+        await _sendAudioFeedback('Good morning! I\'m now online and ready to help.');
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('⚠️ Pi woke up but Kai may still be starting...'),
+            duration: Duration(seconds: 3),
+            backgroundColor: Colors.amber,
+          ),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('❌ Wake-up failed: $e'),
+          duration: const Duration(seconds: 3),
           backgroundColor: Colors.red,
         ),
       );
@@ -1062,6 +1107,11 @@ class _MobileKaiState extends State<_MobileKai>
                     icon: Icons.lightbulb,
                     label: 'Lights',
                     onTap: _toggleLight,
+                  ),
+                  _MobileButton(
+                    icon: Icons.power_settings_new,
+                    label: 'Wake Pi',
+                    onTap: _wakePi,
                   ),
                   _MobileButton(
                     icon: Icons.color_lens,

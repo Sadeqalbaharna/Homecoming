@@ -17,6 +17,7 @@ import 'web_fetch_service.dart';
 import 'brain_debug_service.dart';
 import 'ambiance_service.dart';
 import 'kai_consciousness_service.dart';
+import 'home_automation_service.dart';
 
 /// Configuration class to hold all API keys
 /// Uses secure storage for encrypted key management
@@ -2203,7 +2204,7 @@ Execute the command immediately and report what you're doing as GM of this smart
     try {
       final lowerReply = reply.toLowerCase();
       
-      // Check if Kai mentioned setting up ambiance or music
+      // Check if Kai mentioned setting up ambiance, music, or YouTube
       final ambianceIndicators = [
         'setting up', 'creating', 'activating', 'i\'m setting', 'i\'m configuring', 
         'perfect!', 'let me activate', 'let me set', 'i\'ll create',
@@ -2213,8 +2214,60 @@ Execute the command immediately and report what you're doing as GM of this smart
         'forest ambiance', 'sunset mood', 'cozy lighting'
       ];
       
+      // Check if this is a YouTube music request
+      final youtubeIndicators = [
+        'youtube', 'from youtube', 'play song', 'play music', 'search for',
+        'find and play', 'stream', 'look up', 'song called', 'track called',
+        'by artist', 'music by', 'song by', 'album', 'band', 'artist'
+      ];
+      
+      // Check if this is a volume control request
+      final volumeIndicators = [
+        'volume up', 'turn up', 'louder', 'increase volume', 'raise volume',
+        'volume down', 'turn down', 'quieter', 'decrease volume', 'lower volume',
+        'set volume', 'volume to', 'volume at', 'make it louder', 'make it quieter'
+      ];
+      
       bool mentionedAmbiance = ambianceIndicators.any((indicator) => 
         lowerReply.contains(indicator));
+      
+      bool mentionedYoutube = youtubeIndicators.any((indicator) => 
+        lowerReply.contains(indicator) || originalInput.toLowerCase().contains(indicator));
+        
+      bool mentionedVolume = volumeIndicators.any((indicator) => 
+        originalInput.toLowerCase().contains(indicator) || lowerReply.contains(indicator));
+      
+      // Check if this is a volume control request
+      if (mentionedVolume) {
+        print('🔊 [AI_SERVICE] Volume control request detected');
+        await _handleVolumeControlRequest(originalInput, reply, debugService);
+        return;
+      }
+      
+      // Check if this is a YouTube music request
+      if (mentionedYoutube) {
+        print('🎵 [AI_SERVICE] YouTube music request detected');
+        await _handleYouTubeMusicRequest(originalInput, reply, debugService);
+        return;
+      }
+      
+      // Check if this is a direct lighting command (red lights, blue lights, etc.)
+      final lightingIndicators = [
+        'red lights', 'blue lights', 'green lights', 'white lights', 'yellow lights',
+        'purple lights', 'orange lights', 'amber lights', 'pink lights', 'cyan lights',
+        'set lights to', 'change lights to', 'make lights', 'turn lights',
+        'lighting to', 'light color', 'lights red', 'lights blue', 'lights green',
+        'lights white', 'lights yellow', 'lights purple', 'lights orange'
+      ];
+      
+      bool mentionedLighting = lightingIndicators.any((indicator) => 
+        originalInput.toLowerCase().contains(indicator) || lowerReply.contains(indicator));
+        
+      if (mentionedLighting) {
+        print('💡 [AI_SERVICE] Direct lighting command detected');
+        await _handleDirectLightingRequest(originalInput, reply, debugService);
+        return;
+      }
       
       if (!mentionedAmbiance) {
         print('🎭 [AI_SERVICE] No ambiance mention detected in reply');
@@ -2314,5 +2367,261 @@ Execute the command immediately and report what you're doing as GM of this smart
       );
       // Continue without failing the entire response
     }
+  }
+
+  Future<void> _handleYouTubeMusicRequest(
+    String originalInput, 
+    String reply,
+    dynamic debugService
+  ) async {
+    try {
+      print('🎵 [AI_SERVICE] Processing YouTube music request: "$originalInput"');
+      
+      debugService?.addStep(
+        BrainPhase.processing,
+        'YouTube music request detected',
+        data: {'original_input': originalInput, 'reply_preview': reply.length > 100 ? '${reply.substring(0, 100)}...' : reply},
+      );
+
+      // Extract search query from user input
+      String searchQuery = _extractSearchQuery(originalInput);
+      
+      if (searchQuery.isEmpty) {
+        print('⚠️ [AI_SERVICE] Could not extract search query from: "$originalInput"');
+        debugService?.addStep(
+          BrainPhase.processing,
+          'Failed to extract YouTube search query',
+          data: {'input': originalInput},
+        );
+        return;
+      }
+
+      print('🎵 [AI_SERVICE] Extracted YouTube search: "$searchQuery"');
+
+      // Send YouTube command to Firebase
+      await HomeAutomationService().sendCommand(
+        personaId: 'kai',
+        deviceId: 'raspberry_pi_home',
+        target: 'music',
+        action: 'play_youtube',
+        params: {
+          'search_query': searchQuery,
+          'voice_analysis': {
+            'original_input': originalInput,
+            'search_query': searchQuery,
+            'confidence': 0.8,
+          },
+        },
+      );
+      
+      print('✅ [AI_SERVICE] YouTube command sent to Pi: "$searchQuery"');
+      debugService?.addStep(
+        BrainPhase.processing,
+        'YouTube command sent successfully',
+        data: {'search_query': searchQuery, 'action': 'play_youtube'},
+      );
+
+    } catch (e) {
+      print('❌ [AI_SERVICE] Error handling YouTube request: $e');
+      debugService?.addStep(
+        BrainPhase.processing,
+        'YouTube request failed: $e',
+      );
+    }
+  }
+
+  Future<void> _handleVolumeControlRequest(
+    String originalInput, 
+    String reply,
+    dynamic debugService
+  ) async {
+    try {
+      print('🔊 [AI_SERVICE] Processing volume control request: "$originalInput"');
+      
+      debugService?.addStep(
+        BrainPhase.processing,
+        'Volume control request detected',
+        data: {'original_input': originalInput, 'reply_preview': reply.length > 100 ? '${reply.substring(0, 100)}...' : reply},
+      );
+
+      final lowerInput = originalInput.toLowerCase();
+      
+      String action = '';
+      Map<String, dynamic> params = {};
+
+      // Detect volume up commands
+      if (lowerInput.contains('volume up') || lowerInput.contains('turn up') || 
+          lowerInput.contains('louder') || lowerInput.contains('increase volume') ||
+          lowerInput.contains('raise volume') || lowerInput.contains('make it louder')) {
+        action = 'volume_up';
+        print('🔊 [AI_SERVICE] Detected volume up command');
+      }
+      // Detect volume down commands  
+      else if (lowerInput.contains('volume down') || lowerInput.contains('turn down') || 
+               lowerInput.contains('quieter') || lowerInput.contains('decrease volume') ||
+               lowerInput.contains('lower volume') || lowerInput.contains('make it quieter')) {
+        action = 'volume_down';
+        print('🔉 [AI_SERVICE] Detected volume down command');
+      }
+      // Detect set volume commands
+      else if (lowerInput.contains('set volume') || lowerInput.contains('volume to') || 
+               lowerInput.contains('volume at')) {
+        action = 'set_volume';
+        
+        // Extract volume level from input
+        final volumePattern = RegExp(r'(?:set volume|volume to|volume at)\s+(\d+)', caseSensitive: false);
+        final match = volumePattern.firstMatch(originalInput);
+        if (match != null) {
+          final volumeLevel = int.tryParse(match.group(1) ?? '50') ?? 50;
+          params['volume'] = volumeLevel.clamp(0, 100);
+          print('🎚️ [AI_SERVICE] Detected set volume command: ${params['volume']}%');
+        } else {
+          print('⚠️ [AI_SERVICE] Could not extract volume level, defaulting to 50%');
+          params['volume'] = 50;
+        }
+      }
+
+      if (action.isEmpty) {
+        print('⚠️ [AI_SERVICE] Could not determine volume action from: "$originalInput"');
+        return;
+      }
+
+      // Send volume command to Firebase
+      await HomeAutomationService().sendCommand(
+        personaId: 'kai',
+        deviceId: 'raspberry_pi_home',
+        target: 'music',
+        action: action,
+        params: params,
+      );
+      
+      print('✅ [AI_SERVICE] Volume command sent to Pi: $action ${params.isNotEmpty ? params : ''}');
+      debugService?.addStep(
+        BrainPhase.processing,
+        'Volume command sent successfully',
+        data: {'action': action, 'params': params},
+      );
+
+    } catch (e) {
+      print('❌ [AI_SERVICE] Error handling volume request: $e');
+      debugService?.addStep(
+        BrainPhase.processing,
+        'Volume request failed: $e',
+      );
+    }
+  }
+
+  Future<void> _handleDirectLightingRequest(
+    String originalInput, 
+    String reply,
+    dynamic debugService
+  ) async {
+    try {
+      print('💡 [AI_SERVICE] Processing direct lighting request: "$originalInput"');
+      
+      debugService?.addStep(
+        BrainPhase.processing,
+        'Direct lighting command detected',
+        data: {'original_input': originalInput, 'reply_preview': reply.length > 100 ? '${reply.substring(0, 100)}...' : reply},
+      );
+
+      final lowerInput = originalInput.toLowerCase();
+      
+      // Extract color from the input
+      String? detectedColor;
+      final colorMap = {
+        'red': 'red',
+        'blue': 'blue', 
+        'green': 'green',
+        'white': 'white',
+        'yellow': 'yellow',
+        'purple': 'purple',
+        'orange': 'orange',
+        'amber': 'amber',
+        'pink': 'pink',
+        'cyan': 'cyan',
+        'magenta': 'magenta',
+        'warm white': 'warm_white',
+        'warm_white': 'warm_white',
+        'light green': 'light_green',
+        'light_green': 'light_green',
+      };
+      
+      // Find the color mentioned in the input
+      for (final entry in colorMap.entries) {
+        if (lowerInput.contains(entry.key)) {
+          detectedColor = entry.value;
+          break;
+        }
+      }
+      
+      if (detectedColor == null) {
+        print('⚠️ [AI_SERVICE] No color detected in lighting request');
+        return;
+      }
+      
+      print('🎨 [AI_SERVICE] Detected color: $detectedColor');
+      
+      // Send lighting command to Firebase
+      await HomeAutomationService().sendCommand(
+        personaId: 'kai',
+        deviceId: 'raspberry_pi_home',
+        target: 'lights',
+        action: 'set_lighting',
+        params: {
+          'color': detectedColor,
+          'brightness': 70, // Default brightness
+          'effect': 'solid',
+          'zones': ['all'], // Control all zones
+        },
+      );
+      
+      print('✅ [AI_SERVICE] Lighting command sent to Pi: $detectedColor lights');
+      debugService?.addStep(
+        BrainPhase.processing,
+        'Lighting command sent successfully',
+        data: {'color': detectedColor, 'action': 'set_lighting'},
+      );
+
+    } catch (e) {
+      print('❌ [AI_SERVICE] Error handling lighting request: $e');
+      debugService?.addStep(
+        BrainPhase.processing,
+        'Lighting request failed: $e',
+      );
+    }
+  }
+
+  String _extractSearchQuery(String input) {
+    // Common patterns for music requests
+    final patterns = [
+      RegExp(r'play\s+(.+?)(?:\s+by\s+(.+?))?(?:\s+from\s+youtube)?(?:\s+on\s+youtube)?$', caseSensitive: false),
+      RegExp(r'(?:find|search|look up)\s+(.+?)(?:\s+on\s+youtube)?$', caseSensitive: false),
+      RegExp(r'(?:song|track|music)\s+called\s+(.+?)(?:\s+by\s+(.+?))?$', caseSensitive: false),
+      RegExp(r'(.+?)\s+by\s+(.+?)(?:\s+from\s+youtube)?$', caseSensitive: false),
+    ];
+
+    for (final pattern in patterns) {
+      final match = pattern.firstMatch(input);
+      if (match != null) {
+        final song = match.group(1)?.trim() ?? '';
+        final artist = match.group(2)?.trim() ?? '';
+        
+        if (song.isNotEmpty) {
+          if (artist.isNotEmpty) {
+            return '$song by $artist';
+          } else {
+            return song;
+          }
+        }
+      }
+    }
+
+    // Fallback: remove common trigger words and use the rest
+    final cleanInput = input
+        .replaceAll(RegExp(r'\b(hey\s+kai,?\s*|play\s+|from\s+youtube\s+|on\s+youtube\s+)', caseSensitive: false), '')
+        .trim();
+    
+    return cleanInput.isNotEmpty ? cleanInput : input;
   }
 }
