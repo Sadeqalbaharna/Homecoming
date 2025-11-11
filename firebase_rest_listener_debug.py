@@ -27,10 +27,10 @@ def run_sudo_led_command(r, g, b, brightness=80):
         led_script_content = f"""#!/usr/bin/env python3
 try:
     from rpi_ws281x import PixelStrip, Color
-    strip = PixelStrip(60, 18, 800000, 10, False, {brightness}, 0)
+    strip = PixelStrip(300, 18, 800000, 10, False, {brightness}, 0)
     strip.begin()
     color = Color({r}, {g}, {b})
-    for i in range(60):
+    for i in range(300):
         strip.setPixelColor(i, color)
     strip.show()
     print("LEDs set successfully")
@@ -81,35 +81,53 @@ class WS2812BController:
                 "led_channel": 0,      # PWM channel
             },
             # Optional: You could add zones for different areas
-            "zone1": {
-                "led_count": 100,      # First 100 LEDs as zone 1
-                "gpio_pin": 18,        # Same GPIO, different range
+            "ambient": {
+                "led_count": 300,      # All 300 LEDs for ambient lighting
+                "gpio_pin": 18,        # Same GPIO as main
                 "led_freq_hz": 800000,
                 "led_dma": 10,
                 "led_brightness": 200,
                 "led_invert": False,
                 "led_channel": 0,
-                "led_offset": 0,       # Start at LED 0
+            },
+            "accent": {
+                "led_count": 300,      # All 300 LEDs for accent lighting
+                "gpio_pin": 18,
+                "led_freq_hz": 800000,
+                "led_dma": 10,
+                "led_brightness": 200,
+                "led_invert": False,
+                "led_channel": 0,
+            },
+            "zone1": {
+                "led_count": 100,      # First 100 LEDs (0-99)
+                "gpio_pin": 18,
+                "led_freq_hz": 800000,
+                "led_dma": 10,
+                "led_brightness": 200,
+                "led_invert": False,
+                "led_channel": 0,
+                "led_offset": 0,
             },
             "zone2": {
-                "led_count": 100,      # LEDs 100-199 as zone 2
+                "led_count": 100,      # Middle 100 LEDs (100-199)
                 "gpio_pin": 18,
                 "led_freq_hz": 800000,
                 "led_dma": 10,
                 "led_brightness": 200,
                 "led_invert": False,
                 "led_channel": 0,
-                "led_offset": 100,     # Start at LED 100
+                "led_offset": 100,
             },
             "zone3": {
-                "led_count": 100,      # LEDs 200-299 as zone 3
+                "led_count": 100,      # Last 100 LEDs (200-299)
                 "gpio_pin": 18,
                 "led_freq_hz": 800000,
                 "led_dma": 10,
                 "led_brightness": 200,
                 "led_invert": False,
                 "led_channel": 0,
-                "led_offset": 200,     # Start at LED 200
+                "led_offset": 200,
             }
         }
         
