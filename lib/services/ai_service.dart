@@ -2695,7 +2695,7 @@ Execute the command immediately and report what you're doing as GM of this smart
       
       // Send direct HTTP POST to Pi (like your working curl commands)
       final response = await dio.post(
-        'http://192.168.26.5:5001/command',
+        'http://192.168.148.5:5001/command',
         data: {
           'command': 'dynamic_ambient',
           'prompt': prompt,
@@ -2815,7 +2815,7 @@ Execute the command immediately and report what you're doing as GM of this smart
       
       // Send direct HTTP POST to Pi for audio streaming
       final response = await dio.post(
-        'http://192.168.26.5:5001/command',
+        'http://192.168.148.5:5001/command',
         data: {
           'command': 'play_ambient_video',
           'query': video.searchQuery,
