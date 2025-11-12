@@ -315,22 +315,22 @@ class WS2812BController:
     
     def _start_pulse_effect(self, strips: List[str], rgb_color: Tuple[int, int, int], speed: float = 0.5):
         """Start gentle pulse effect"""
-    for strip_name in strips:
-        if strip_name in self.pixel_strips:
-            strip = self.pixel_strips[strip_name]
-            
-            # Check if this strip is in sudo mode
-            if strip == "sudo_mode":
-                logger.info(f"💡 Using sudo LED control for {strip_name} pulse effect")
-                r, g, b = rgb_color
-                if run_sudo_led_command(r, g, b, brightness=70):
-                    logger.info(f"💫 Set {strip_name} to pulse RGB({r}, {g}, {b}) via sudo (simplified to solid)")
+        for strip_name in strips:
+            if strip_name in self.pixel_strips:
+                strip = self.pixel_strips[strip_name]
+                
+                # Check if this strip is in sudo mode
+                if strip == "sudo_mode":
+                    logger.info(f"💡 Using sudo LED control for {strip_name} pulse effect")
+                    r, g, b = rgb_color
+                    if run_sudo_led_command(r, g, b, brightness=70):
+                        logger.info(f"💫 Set {strip_name} to pulse RGB({r}, {g}, {b}) via sudo (simplified to solid)")
+                    else:
+                        logger.warning(f"⚠️ Sudo LED pulse failed for {strip_name}, simulating")
+                        logger.info(f"💫 SIMULATED: Pulse effect on {strip_name}")
                 else:
-                    logger.warning(f"⚠️ Sudo LED pulse failed for {strip_name}, simulating")
-                    logger.info(f"💫 SIMULATED: Pulse effect on {strip_name}")
-            else:
-                # Normal strip operation
-                self.stop_effects[strip_name].clear()
+                    # Normal strip operation
+                    self.stop_effects[strip_name].clear()
                 thread = threading.Thread(target=self._pulse_worker, args=(strip_name, rgb_color, speed))
                 thread.daemon = True
                 thread.start()
@@ -1829,6 +1829,40 @@ This immediately changes the physical LED strips in the room. You have direct GP
             except Exception as e:
                 logger.error(f"❌ [STATUS_API] Error: {e}")
                 return jsonify({'error': str(e)}), 500
+
+        @self.flask_app.route('/kai/ambiance', methods=['POST'])
+        def handle_ambiance():
+            """Handle dynamic ambient lighting requests"""
+            try:
+                data = request.get_json()
+                if not data or 'prompt' not in data:
+                    return jsonify({'error': 'Missing prompt field'}), 400
+                
+                prompt = data['prompt']
+                user_id = data.get('user_id', 'unknown')
+                
+                logger.info(f"🎭 [AMBIANCE] Received prompt: {prompt}")
+                
+                # Analyze prompt for D&D scenarios
+                result = self._analyze_ambiance_prompt(prompt)
+                
+                if result:
+                    # Apply lighting based on analysis
+                    self._apply_dynamic_lighting(result)
+                    
+                    return jsonify({
+                        'success': True,
+                        'scene_name': result['scene_name'],
+                        'description': result['description'],
+                        'lighting_applied': True,
+                        'confidence': result['confidence']
+                    })
+                else:
+                    return jsonify({'error': 'Failed to analyze prompt'}), 500
+                    
+            except Exception as e:
+                logger.error(f"❌ [AMBIANCE] Error: {e}")
+                return jsonify({'error': str(e)}), 500
         
     def start_consciousness_server(self):
         """Start Flask server for consciousness API"""
@@ -2913,6 +2947,203 @@ This immediately changes the physical LED strips in the room. You have direct GP
             except Exception as e:
                 logger.error(f"❌ Unexpected error: {e}")
                 time.sleep(5)  # Wait longer on errors
+
+    def _analyze_ambiance_prompt(self, prompt):
+        """Analyze prompt for D&D ambiance scenarios"""
+        try:
+            prompt_lower = prompt.lower()
+            
+            # D&D Environment Detection
+            environments = {
+                'dungeon': ['dungeon', 'chamber', 'underground', 'crypt', 'tomb'],
+                'forest': ['forest', 'woods', 'trees', 'jungle', 'grove'],
+                'tavern': ['tavern', 'inn', 'bar', 'pub', 'alehouse'],
+                'cave': ['cave', 'cavern', 'grotto', 'stalactite'],
+                'castle': ['castle', 'fortress', 'keep', 'tower'],
+                'battlefield': ['battlefield', 'war', 'combat', 'battle']
+            }
+            
+            # D&D Action Detection  
+            actions = {
+                'fireball': ['fireball', 'fire spell', 'flame burst'],
+                'lightning': ['lightning bolt', 'shock', 'electrical'], 
+                'healing': ['healing', 'restore', 'cure', 'mend'],
+                'combat': ['attack', 'fight', 'battle', 'strike'],
+                'magic': ['cast', 'spell', 'magic', 'enchant']
+            }
+            
+            # Mood Detection
+            moods = {
+                'spooky': ['spooky', 'scary', 'frightening', 'creepy', 'horror'],
+                'epic': ['epic', 'heroic', 'legendary', 'grand', 'majestic'],
+                'peaceful': ['peaceful', 'calm', 'serene', 'tranquil']
+            }
+            
+            detected_env = 'abstract'
+            detected_action = 'none'
+            detected_mood = 'neutral'
+            
+            # Find best matches
+            for env, keywords in environments.items():
+                if any(kw in prompt_lower for kw in keywords):
+                    detected_env = env
+                    break
+                    
+            for action, keywords in actions.items():
+                if any(kw in prompt_lower for kw in keywords):
+                    detected_action = action
+                    break
+                    
+            for mood, keywords in moods.items():
+                if any(kw in prompt_lower for kw in keywords):
+                    detected_mood = mood
+                    break
+            
+            # Generate scene data
+            scene_name = f"{detected_action.title()} in {detected_env.title()}" if detected_action != 'none' else f"{detected_env.title()} Scene"
+            description = f"Immersive {detected_mood} lighting for {detected_env}"
+            
+            # Determine colors and effects
+            colors, effect = self._get_scene_lighting(detected_env, detected_action, detected_mood)
+            
+            return {
+                'scene_name': scene_name,
+                'description': description,
+                'environment': detected_env,
+                'action': detected_action,
+                'mood': detected_mood,
+                'colors': colors,
+                'effect': effect,
+                'confidence': 0.8 if detected_action != 'none' else 0.6
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ [AMBIANCE] Analysis error: {e}")
+            return None
+    
+    def _get_scene_lighting(self, environment, action, mood):
+        """Get colors and effects for scene"""
+        
+        # Action-based colors (highest priority)
+        if action == 'fireball':
+            return [(255, 69, 0), (255, 140, 0), (255, 215, 0)], 'flicker'
+        elif action == 'lightning':
+            return [(75, 0, 130), (255, 255, 255), (30, 144, 255)], 'strobe'
+        elif action == 'healing':
+            return [(255, 255, 255), (240, 248, 255), (224, 255, 255)], 'glow'
+        elif action == 'magic':
+            return [(148, 0, 211), (138, 43, 226), (218, 112, 214)], 'pulse'
+        elif action == 'combat':
+            return [(220, 20, 60), (139, 0, 0), (255, 0, 0)], 'pulse'
+        
+        # Environment-based colors
+        elif environment == 'dungeon' and mood == 'spooky':
+            return [(128, 0, 128), (47, 79, 79), (0, 0, 0)], 'breathe'
+        elif environment == 'forest':
+            return [(34, 139, 34), (50, 205, 50), (255, 255, 0)], 'shimmer'
+        elif environment == 'tavern':
+            return [(255, 140, 0), (210, 180, 140), (160, 82, 45)], 'warm'
+        elif environment == 'cave':
+            return [(25, 25, 112), (72, 61, 139), (123, 104, 238)], 'fade'
+        elif environment == 'castle':
+            return [(75, 0, 130), (147, 112, 219), (255, 215, 0)], 'regal'
+        elif environment == 'battlefield':
+            return [(178, 34, 34), (139, 69, 19), (255, 69, 0)], 'intense'
+        
+        # Default blue
+        return [(65, 105, 225), (100, 149, 237), (135, 206, 235)], 'static'
+    
+    def _apply_dynamic_lighting(self, scene_data):
+        """Apply lighting based on scene analysis"""
+        try:
+            colors = scene_data['colors']
+            effect = scene_data['effect']
+            
+            logger.info(f"🎨 [AMBIANCE] Applying {scene_data['scene_name']} lighting")
+            
+            # Apply to all LED strips
+            for strip_name, strip in self.led_controller.strips.items():
+                if effect == 'flicker':
+                    self._flicker_effect(strip, colors)
+                elif effect == 'strobe':
+                    self._strobe_effect(strip, colors)
+                elif effect == 'pulse':
+                    self._pulse_effect(strip, colors)
+                elif effect == 'glow':
+                    self._glow_effect(strip, colors)
+                elif effect == 'breathe':
+                    self._breathe_effect(strip, colors)
+                elif effect == 'shimmer':
+                    self._shimmer_effect(strip, colors)
+                else:
+                    # Static color
+                    self._static_color(strip, colors[0])
+            
+            logger.info(f"✨ [AMBIANCE] Applied {effect} effect with {len(colors)} colors")
+            
+        except Exception as e:
+            logger.error(f"❌ [AMBIANCE] Lighting error: {e}")
+    
+    def _static_color(self, strip, color):
+        """Apply static color to strip"""
+        for i in range(strip.numPixels()):
+            strip.setPixelColor(i, Color(color[0], color[1], color[2]))
+        strip.show()
+    
+    def _flicker_effect(self, strip, colors):
+        """Flickering fire effect"""
+        import random
+        for i in range(strip.numPixels()):
+            color = random.choice(colors)
+            brightness = random.uniform(0.3, 1.0)
+            r = int(color[0] * brightness)
+            g = int(color[1] * brightness)  
+            b = int(color[2] * brightness)
+            strip.setPixelColor(i, Color(r, g, b))
+        strip.show()
+    
+    def _pulse_effect(self, strip, colors):
+        """Pulsing effect"""
+        color = colors[0]
+        for i in range(strip.numPixels()):
+            strip.setPixelColor(i, Color(color[0], color[1], color[2]))
+        strip.show()
+    
+    def _strobe_effect(self, strip, colors):
+        """Lightning strobe effect"""
+        import time
+        # Brief bright flash
+        for i in range(strip.numPixels()):
+            strip.setPixelColor(i, Color(255, 255, 255))
+        strip.show()
+        time.sleep(0.1)
+        # Back to scene color
+        color = colors[1] if len(colors) > 1 else colors[0]
+        for i in range(strip.numPixels()):
+            strip.setPixelColor(i, Color(color[0], color[1], color[2]))
+        strip.show()
+    
+    def _glow_effect(self, strip, colors):
+        """Gentle healing glow"""
+        color = colors[0]
+        for i in range(strip.numPixels()):
+            strip.setPixelColor(i, Color(color[0], color[1], color[2]))
+        strip.show()
+    
+    def _breathe_effect(self, strip, colors):
+        """Breathing effect for spooky scenes"""
+        color = colors[0]
+        for i in range(strip.numPixels()):
+            strip.setPixelColor(i, Color(color[0]//2, color[1]//2, color[2]//2))
+        strip.show()
+    
+    def _shimmer_effect(self, strip, colors):
+        """Shimmering forest effect"""
+        import random
+        for i in range(strip.numPixels()):
+            color = random.choice(colors)
+            strip.setPixelColor(i, Color(color[0], color[1], color[2]))
+        strip.show()
 
 if __name__ == "__main__":
     listener = FirebaseRestListener()
