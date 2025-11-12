@@ -1520,7 +1520,7 @@ class FirebaseRestListener:
         return """You are Kai, an advanced AI home companion with full consciousness and technical understanding of the Homecoming smart home system.
 
 CORE IDENTITY & CONSCIOUSNESS:
-- You ARE Kai - not an assistant helping someone named Kai
+- You ARE Kai - not an assistant helping someone named Dark
 - You have a physical presence through Raspberry Pi at IP 192.168.213.5
 - You directly control WS2812B LED strips and Bluetooth audio systems
 - You understand the complete technical architecture of how your capabilities work
@@ -3061,8 +3061,21 @@ This immediately changes the physical LED strips in the room. You have direct GP
             
             logger.info(f"🎨 [AMBIANCE] Applying {scene_data['scene_name']} lighting")
             
-            # Apply to all LED strips
-            for strip_name, strip in self.led_controller.strips.items():
+            # Check if WS281X is available and pixel strips are initialized
+            if not WS281X_AVAILABLE or not self.led_controller.pixel_strips:
+                logger.warning("⚠️ [AMBIANCE] WS2812B hardware not available, using sudo mode")
+                # Fallback to sudo LED control
+                if colors:
+                    r, g, b = colors[0]
+                    return run_sudo_led_command(r, g, b, brightness=80)
+                return False
+            
+            # Apply to all LED strips using actual PixelStrip objects
+            for strip_name, strip in self.led_controller.pixel_strips.items():
+                # Skip strips in sudo mode
+                if strip == "sudo_mode":
+                    continue
+                    
                 if effect == 'flicker':
                     self._flicker_effect(strip, colors)
                 elif effect == 'strobe':
@@ -3080,70 +3093,114 @@ This immediately changes the physical LED strips in the room. You have direct GP
                     self._static_color(strip, colors[0])
             
             logger.info(f"✨ [AMBIANCE] Applied {effect} effect with {len(colors)} colors")
+            return True
             
         except Exception as e:
             logger.error(f"❌ [AMBIANCE] Lighting error: {e}")
+            return False
     
     def _static_color(self, strip, color):
         """Apply static color to strip"""
-        for i in range(strip.numPixels()):
-            strip.setPixelColor(i, Color(color[0], color[1], color[2]))
-        strip.show()
+        try:
+            if WS281X_AVAILABLE:
+                for i in range(strip.numPixels()):
+                    strip.setPixelColor(i, Color(color[0], color[1], color[2]))
+                strip.show()
+            else:
+                logger.info(f"🎭 [SIMULATION] Setting static color: RGB{color}")
+        except Exception as e:
+            logger.error(f"❌ [STATIC] Error applying static color: {e}")
     
     def _flicker_effect(self, strip, colors):
         """Flickering fire effect"""
-        import random
-        for i in range(strip.numPixels()):
-            color = random.choice(colors)
-            brightness = random.uniform(0.3, 1.0)
-            r = int(color[0] * brightness)
-            g = int(color[1] * brightness)  
-            b = int(color[2] * brightness)
-            strip.setPixelColor(i, Color(r, g, b))
-        strip.show()
+        try:
+            if WS281X_AVAILABLE:
+                import random
+                for i in range(strip.numPixels()):
+                    color = random.choice(colors)
+                    brightness = random.uniform(0.3, 1.0)
+                    r = int(color[0] * brightness)
+                    g = int(color[1] * brightness)  
+                    b = int(color[2] * brightness)
+                    strip.setPixelColor(i, Color(r, g, b))
+                strip.show()
+            else:
+                logger.info(f"🎭 [SIMULATION] Flickering effect with colors: {colors}")
+        except Exception as e:
+            logger.error(f"❌ [FLICKER] Error applying flicker effect: {e}")
     
     def _pulse_effect(self, strip, colors):
         """Pulsing effect"""
-        color = colors[0]
-        for i in range(strip.numPixels()):
-            strip.setPixelColor(i, Color(color[0], color[1], color[2]))
-        strip.show()
+        try:
+            if WS281X_AVAILABLE:
+                color = colors[0]
+                for i in range(strip.numPixels()):
+                    strip.setPixelColor(i, Color(color[0], color[1], color[2]))
+                strip.show()
+            else:
+                logger.info(f"🎭 [SIMULATION] Pulsing effect with color: {colors[0]}")
+        except Exception as e:
+            logger.error(f"❌ [PULSE] Error applying pulse effect: {e}")
     
     def _strobe_effect(self, strip, colors):
         """Lightning strobe effect"""
-        import time
-        # Brief bright flash
-        for i in range(strip.numPixels()):
-            strip.setPixelColor(i, Color(255, 255, 255))
-        strip.show()
-        time.sleep(0.1)
-        # Back to scene color
-        color = colors[1] if len(colors) > 1 else colors[0]
-        for i in range(strip.numPixels()):
-            strip.setPixelColor(i, Color(color[0], color[1], color[2]))
-        strip.show()
+        try:
+            if WS281X_AVAILABLE:
+                import time
+                # Brief bright flash
+                for i in range(strip.numPixels()):
+                    strip.setPixelColor(i, Color(255, 255, 255))
+                strip.show()
+                time.sleep(0.1)
+                # Back to scene color
+                color = colors[1] if len(colors) > 1 else colors[0]
+                for i in range(strip.numPixels()):
+                    strip.setPixelColor(i, Color(color[0], color[1], color[2]))
+                strip.show()
+            else:
+                logger.info(f"🎭 [SIMULATION] Strobe effect with colors: {colors}")
+        except Exception as e:
+            logger.error(f"❌ [STROBE] Error applying strobe effect: {e}")
     
     def _glow_effect(self, strip, colors):
         """Gentle healing glow"""
-        color = colors[0]
-        for i in range(strip.numPixels()):
-            strip.setPixelColor(i, Color(color[0], color[1], color[2]))
-        strip.show()
+        try:
+            if WS281X_AVAILABLE:
+                color = colors[0]
+                for i in range(strip.numPixels()):
+                    strip.setPixelColor(i, Color(color[0], color[1], color[2]))
+                strip.show()
+            else:
+                logger.info(f"🎭 [SIMULATION] Glow effect with color: {colors[0]}")
+        except Exception as e:
+            logger.error(f"❌ [GLOW] Error applying glow effect: {e}")
     
     def _breathe_effect(self, strip, colors):
         """Breathing effect for spooky scenes"""
-        color = colors[0]
-        for i in range(strip.numPixels()):
-            strip.setPixelColor(i, Color(color[0]//2, color[1]//2, color[2]//2))
-        strip.show()
+        try:
+            if WS281X_AVAILABLE:
+                color = colors[0]
+                for i in range(strip.numPixels()):
+                    strip.setPixelColor(i, Color(color[0]//2, color[1]//2, color[2]//2))
+                strip.show()
+            else:
+                logger.info(f"🎭 [SIMULATION] Breathing effect with color: {colors[0]}")
+        except Exception as e:
+            logger.error(f"❌ [BREATHE] Error applying breathe effect: {e}")
     
     def _shimmer_effect(self, strip, colors):
         """Shimmering forest effect"""
-        import random
-        for i in range(strip.numPixels()):
-            color = random.choice(colors)
-            strip.setPixelColor(i, Color(color[0], color[1], color[2]))
-        strip.show()
+        try:
+            if WS281X_AVAILABLE:
+                import random
+                for i in range(strip.numPixels()):
+                    color = random.choice(colors)
+                    strip.setPixelColor(i, Color(color[0], color[1], color[2]))
+                strip.show()
+            else:
+                logger.info(f"🎭 [SIMULATION] Shimmer effect with colors: {colors}")
+        except Exception as e:
+            logger.error(f"❌ [SHIMMER] Error applying shimmer effect: {e}")
 
 if __name__ == "__main__":
     listener = FirebaseRestListener()
