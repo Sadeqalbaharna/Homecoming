@@ -3,7 +3,7 @@
 # Deploys the enhanced WS2812B LED system to Pi
 
 param(
-    [string]$PiHost = "192.168.29.5",  # Your Pi's IP address
+    [string]$PiHost = "192.168.213.5",  # Your Pi's IP address
     [string]$PiUser = "pi",
     [switch]$InstallDependencies,
     [switch]$TestOnly

@@ -1,6 +1,6 @@
 #!/bin/bash
 # WS2812B LED Setup and Test Installation Script
-# For Homecoming Pi at 192.168.29.5
+# For Homecoming Pi at 192.168.213.5
 
 echo "🏡 Homecoming WS2812B LED Setup"
 echo "==============================="

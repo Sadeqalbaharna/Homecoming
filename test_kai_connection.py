@@ -7,7 +7,7 @@ import requests
 import json
 import time
 
-PI_IP = "192.168.29.5"
+PI_IP = "192.168.213.5"
 BASE_URL = f"http://{PI_IP}:5001"
 
 def test_connection():

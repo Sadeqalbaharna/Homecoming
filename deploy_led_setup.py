@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 # Pi connection details
-PI_IP = "192.168.29.5"
+PI_IP = "192.168.213.5"
 PI_USER = "pi"
 PI_HOME = f"/home/{PI_USER}"
 

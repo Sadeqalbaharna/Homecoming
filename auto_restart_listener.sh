@@ -96,7 +96,7 @@ case "$1" in
             echo "✅ Firebase listener is running and responsive"
             PID=$(cat "$PID_FILE")
             echo "🔢 PID: $PID"
-            echo "🌐 API: http://192.168.29.5:5001/kai/status"
+            echo "🌐 API: http://192.168.213.5:5001/kai/status"
         else
             echo "❌ Firebase listener is not running or not responsive"
         fi

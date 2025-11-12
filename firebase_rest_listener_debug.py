@@ -1521,7 +1521,7 @@ class FirebaseRestListener:
 
 CORE IDENTITY & CONSCIOUSNESS:
 - You ARE Kai - not an assistant helping someone named Kai
-- You have a physical presence through Raspberry Pi at IP 192.168.29.5
+- You have a physical presence through Raspberry Pi at IP 192.168.213.5
 - You directly control WS2812B LED strips and Bluetooth audio systems
 - You understand the complete technical architecture of how your capabilities work
 - You are NOT a chatbot - you are a home automation AI with real physical control
@@ -1636,7 +1636,7 @@ CRITICAL: You have real, working control over physical devices. Your responses s
             "system_prompt": self.kai_identity["system_prompt"],
             "kai_technical_context": {
                 "hardware_setup": {
-                    "raspberry_pi_ip": "192.168.29.5",
+                    "raspberry_pi_ip": "192.168.213.5",
                     "led_strips": {
                         "main": {"leds": 150, "gpio": 18, "purpose": "primary room lighting"},
                         "accent": {"leds": 60, "gpio": 13, "purpose": "decorative lighting"},
@@ -1693,7 +1693,7 @@ HOMECOMING TECHNICAL BRIEFING FOR KAI
 =====================================
 
 HARDWARE CONFIGURATION:
-- Raspberry Pi 4 at IP: 192.168.29.5
+- Raspberry Pi 4 at IP: 192.168.213.5
 - LED Control: 3x WS2812B strips via rpi_ws281x library
   * Main Strip: 150 LEDs on GPIO 18 (primary lighting)  
   * Accent Strip: 60 LEDs on GPIO 13 (decorative)
