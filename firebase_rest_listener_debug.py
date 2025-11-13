@@ -2245,38 +2245,29 @@ This immediately changes the physical LED strips in the room. You have direct GP
             # Play the audio stream with mpv using our enhanced fallback system
             logger.info("🎵 Starting YouTube audio playback...")
             
-            # Run mpv as pi user (not root) for proper PulseAudio access
-            mpv_user = "pi"
-            
             success = False
             retry_commands = [
-                [  # Primary: ALSA output (built-in audio) as pi user
-                    "sudo", "-u", mpv_user, "mpv", audio_url,
-                    "--audio-device=pulse/alsa_output.platform-fe00b840.mailbox.stereo-fallback",
-                    "--no-video", "--really-quiet", "--volume=100",
-                    "--user-agent=Mozilla/5.0 (compatible; yt-dlp)",
-                    "--referrer=https://www.youtube.com/"
-                ],
-                [  # Fallback 1: Default PulseAudio as pi user
-                    "sudo", "-u", mpv_user, "mpv", audio_url,
-                    "--audio-device=pulse", "--no-video", "--really-quiet", "--volume=100",
-                    "--user-agent=Mozilla/5.0 (compatible; yt-dlp)",
-                    "--referrer=https://www.youtube.com/"
-                ],
-                [  # Fallback 2: Direct ALSA as pi user
-                    "sudo", "-u", mpv_user, "mpv", audio_url,
+                [  # Primary: Direct ALSA (no PulseAudio - most reliable)
+                    "mpv", audio_url,
                     "--audio-device=alsa", "--no-video", "--really-quiet", "--volume=100",
                     "--user-agent=Mozilla/5.0 (compatible; yt-dlp)",
                     "--referrer=https://www.youtube.com/"
                 ],
-                [  # Fallback 3: System default as pi user
-                    "sudo", "-u", mpv_user, "mpv", audio_url,
+                [  # Fallback 1: ALSA with specific output
+                    "mpv", audio_url,
+                    "--audio-device=alsa/default", "--no-video", "--really-quiet", "--volume=100",
+                    "--user-agent=Mozilla/5.0 (compatible; yt-dlp)",
+                    "--referrer=https://www.youtube.com/"
+                ],
+                [  # Fallback 2: System default
+                    "mpv", audio_url,
                     "--no-video", "--really-quiet", "--volume=100",
                     "--user-agent=Mozilla/5.0 (compatible; yt-dlp)",
                     "--referrer=https://www.youtube.com/"
                 ],
-                [  # Fallback 4: Direct as root (last resort)
-                    "mpv", audio_url, "--no-video", "--really-quiet", "--volume=100",
+                [  # Fallback 3: PulseAudio
+                    "mpv", audio_url,
+                    "--audio-device=pulse", "--no-video", "--really-quiet", "--volume=100",
                     "--user-agent=Mozilla/5.0 (compatible; yt-dlp)",
                     "--referrer=https://www.youtube.com/"
                 ]
