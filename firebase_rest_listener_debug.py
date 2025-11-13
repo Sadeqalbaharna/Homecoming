@@ -1832,7 +1832,7 @@ This immediately changes the physical LED strips in the room. You have direct GP
 
         @self.flask_app.route('/kai/ambiance', methods=['POST'])
         def handle_ambiance():
-            """Handle dynamic ambient lighting and music requests"""
+            """Handle dynamic ambient lighting, music, and effects requests"""
             try:
                 data = request.get_json()
                 if not data or 'prompt' not in data:
@@ -1840,9 +1840,10 @@ This immediately changes the physical LED strips in the room. You have direct GP
                 
                 prompt = data['prompt']
                 user_id = data.get('user_id', 'unknown')
-                include_music = data.get('include_music', True)  # Default to include music
+                include_music = data.get('include_music', True)
+                include_smoke = data.get('include_smoke', False)  # Smoke machine control
                 
-                logger.info(f"🎭 [AMBIANCE] Received prompt: {prompt} (music: {include_music})")
+                logger.info(f"🎭 [AMBIANCE] Received prompt: {prompt} (music: {include_music}, smoke: {include_smoke})")
                 
                 # Analyze prompt for D&D scenarios
                 result = self._analyze_ambiance_prompt(prompt)
@@ -1850,6 +1851,11 @@ This immediately changes the physical LED strips in the room. You have direct GP
                 if result:
                     # Apply lighting based on analysis
                     lighting_success = self._apply_dynamic_lighting(result)
+                    
+                    # Apply smoke effects if requested
+                    smoke_success = False
+                    if include_smoke:
+                        smoke_success = self._trigger_smoke_machine(result)
                     
                     # Apply music if requested
                     music_success = False
@@ -1869,6 +1875,7 @@ This immediately changes the physical LED strips in the room. You have direct GP
                         'scene_name': result['scene_name'],
                         'description': result['description'],
                         'lighting_applied': lighting_success,
+                        'smoke_applied': smoke_success,
                         'music_applied': music_success,
                         'music_query': music_query,
                         'confidence': result['confidence']
@@ -2247,27 +2254,28 @@ This immediately changes the physical LED strips in the room. You have direct GP
             
             success = False
             retry_commands = [
-                [  # Primary: Direct ALSA (no PulseAudio - most reliable)
+                [  # Primary: Bluetooth A2DP (Soundtec-Vibe high quality)
+                    "mpv", audio_url,
+                    "--audio-device=pulse/bluez_output.F4_4E_FD_BA_98_79.1",
+                    "--no-video", "--really-quiet", "--volume=100",
+                    "--user-agent=Mozilla/5.0 (compatible; yt-dlp)",
+                    "--referrer=https://www.youtube.com/"
+                ],
+                [  # Fallback 1: Default PulseAudio
+                    "mpv", audio_url,
+                    "--audio-device=pulse", "--no-video", "--really-quiet", "--volume=100",
+                    "--user-agent=Mozilla/5.0 (compatible; yt-dlp)",
+                    "--referrer=https://www.youtube.com/"
+                ],
+                [  # Fallback 2: Direct ALSA
                     "mpv", audio_url,
                     "--audio-device=alsa", "--no-video", "--really-quiet", "--volume=100",
                     "--user-agent=Mozilla/5.0 (compatible; yt-dlp)",
                     "--referrer=https://www.youtube.com/"
                 ],
-                [  # Fallback 1: ALSA with specific output
-                    "mpv", audio_url,
-                    "--audio-device=alsa/default", "--no-video", "--really-quiet", "--volume=100",
-                    "--user-agent=Mozilla/5.0 (compatible; yt-dlp)",
-                    "--referrer=https://www.youtube.com/"
-                ],
-                [  # Fallback 2: System default
+                [  # Fallback 3: System default
                     "mpv", audio_url,
                     "--no-video", "--really-quiet", "--volume=100",
-                    "--user-agent=Mozilla/5.0 (compatible; yt-dlp)",
-                    "--referrer=https://www.youtube.com/"
-                ],
-                [  # Fallback 3: PulseAudio
-                    "mpv", audio_url,
-                    "--audio-device=pulse", "--no-video", "--really-quiet", "--volume=100",
                     "--user-agent=Mozilla/5.0 (compatible; yt-dlp)",
                     "--referrer=https://www.youtube.com/"
                 ]
