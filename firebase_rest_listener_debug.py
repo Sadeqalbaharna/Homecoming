@@ -2252,6 +2252,12 @@ This immediately changes the physical LED strips in the room. You have direct GP
             # Play the audio stream with mpv using our enhanced fallback system
             logger.info("🎵 Starting YouTube audio playback...")
             
+            # Set PulseAudio environment for root to connect to pi user's PulseAudio
+            import os
+            pulse_env = os.environ.copy()
+            pulse_env['PULSE_SERVER'] = 'unix:/run/user/1000/pulse/native'
+            pulse_env['XDG_RUNTIME_DIR'] = '/run/user/1000'
+            
             success = False
             retry_commands = [
                 [  # Primary: Bluetooth A2DP (Soundtec-Vibe high quality)
@@ -2284,7 +2290,7 @@ This immediately changes the physical LED strips in the room. You have direct GP
             for attempt, cmd in enumerate(retry_commands, 1):
                 try:
                     logger.info(f"🎵 YouTube playback attempt {attempt}")
-                    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=pulse_env)
                     logger.info(f"🎵 Started YouTube mpv process with PID: {process.pid}")
                     
                     # Wait to see if process starts successfully
