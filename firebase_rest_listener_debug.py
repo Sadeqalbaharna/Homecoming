@@ -1832,7 +1832,7 @@ This immediately changes the physical LED strips in the room. You have direct GP
 
         @self.flask_app.route('/kai/ambiance', methods=['POST'])
         def handle_ambiance():
-            """Handle dynamic ambient lighting requests"""
+            """Handle dynamic ambient lighting and music requests"""
             try:
                 data = request.get_json()
                 if not data or 'prompt' not in data:
@@ -1840,21 +1840,37 @@ This immediately changes the physical LED strips in the room. You have direct GP
                 
                 prompt = data['prompt']
                 user_id = data.get('user_id', 'unknown')
+                include_music = data.get('include_music', True)  # Default to include music
                 
-                logger.info(f"🎭 [AMBIANCE] Received prompt: {prompt}")
+                logger.info(f"🎭 [AMBIANCE] Received prompt: {prompt} (music: {include_music})")
                 
                 # Analyze prompt for D&D scenarios
                 result = self._analyze_ambiance_prompt(prompt)
                 
                 if result:
                     # Apply lighting based on analysis
-                    self._apply_dynamic_lighting(result)
+                    lighting_success = self._apply_dynamic_lighting(result)
+                    
+                    # Apply music if requested
+                    music_success = False
+                    music_query = None
+                    
+                    if include_music:
+                        music_query = self._get_ambiance_music(result)
+                        if music_query:
+                            logger.info(f"🎵 [AMBIANCE] Searching for music: {music_query}")
+                            try:
+                                music_success = self.play_youtube_audio(music_query)
+                            except Exception as music_error:
+                                logger.error(f"❌ [AMBIANCE] Music playback error: {music_error}")
                     
                     return jsonify({
                         'success': True,
                         'scene_name': result['scene_name'],
                         'description': result['description'],
-                        'lighting_applied': True,
+                        'lighting_applied': lighting_success,
+                        'music_applied': music_success,
+                        'music_query': music_query,
                         'confidence': result['confidence']
                     })
                 else:
@@ -3052,6 +3068,56 @@ This immediately changes the physical LED strips in the room. You have direct GP
         
         # Default blue
         return [(65, 105, 225), (100, 149, 237), (135, 206, 235)], 'static'
+    
+    def _get_ambiance_music(self, scene_data):
+        """Get YouTube search query for D&D ambiance music"""
+        try:
+            environment = scene_data['environment']
+            action = scene_data['action']
+            mood = scene_data['mood']
+            
+            # Action-based music (combat/spells have priority)
+            if action == 'fireball':
+                return "epic battle music intense dramatic orchestral"
+            elif action == 'lightning':
+                return "dramatic storm thunder orchestral music"
+            elif action == 'healing':
+                return "peaceful healing fantasy music ambient"
+            elif action == 'magic':
+                return "mystical magic spell casting music ambient"
+            elif action == 'combat':
+                return "epic battle combat music orchestral intense"
+            
+            # Environment-based music
+            elif environment == 'dungeon' and mood == 'spooky':
+                return "dark dungeon ambient horror music creepy"
+            elif environment == 'dungeon':
+                return "dungeon ambient music fantasy dark"
+            elif environment == 'forest':
+                return "forest ambient music fantasy peaceful nature"
+            elif environment == 'tavern':
+                return "medieval tavern music folk ambient fantasy"
+            elif environment == 'cave':
+                return "cave ambient music dark fantasy mysterious"
+            elif environment == 'castle':
+                return "royal castle music medieval orchestral"
+            elif environment == 'battlefield':
+                return "epic battle war drums orchestral intense"
+            
+            # Mood-based fallback
+            elif mood == 'spooky':
+                return "dark ambient horror music creepy"
+            elif mood == 'epic':
+                return "epic orchestral adventure music fantasy"
+            elif mood == 'peaceful':
+                return "peaceful fantasy ambient music relaxing"
+            
+            # Default fantasy ambiance
+            return "fantasy ambient music D&D atmospheric"
+            
+        except Exception as e:
+            logger.error(f"❌ [AMBIANCE] Error getting music query: {e}")
+            return "fantasy ambient music"
     
     def _apply_dynamic_lighting(self, scene_data):
         """Apply lighting based on scene analysis"""
