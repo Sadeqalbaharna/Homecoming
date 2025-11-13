@@ -2979,7 +2979,8 @@ This immediately changes the physical LED strips in the room. You have direct GP
                 'tavern': ['tavern', 'inn', 'bar', 'pub', 'alehouse'],
                 'cave': ['cave', 'cavern', 'grotto', 'stalactite'],
                 'castle': ['castle', 'fortress', 'keep', 'tower'],
-                'battlefield': ['battlefield', 'war', 'combat', 'battle']
+                'battlefield': ['battlefield', 'war', 'combat', 'battle'],
+                'market': ['market', 'marketplace', 'bazaar', 'square', 'plaza', 'trading post']
             }
             
             # D&D Action Detection  
@@ -3068,6 +3069,9 @@ This immediately changes the physical LED strips in the room. You have direct GP
             return [(75, 0, 130), (147, 112, 219), (255, 215, 0)], 'regal'
         elif environment == 'battlefield':
             return [(178, 34, 34), (139, 69, 19), (255, 69, 0)], 'intense'
+        elif environment == 'market':
+            # Bustling sunlit market - bright, warm, energetic colors
+            return [(255, 215, 0), (255, 140, 0), (255, 255, 224)], 'shimmer'
         
         # Default blue
         return [(65, 105, 225), (100, 149, 237), (135, 206, 235)], 'static'
@@ -3106,6 +3110,8 @@ This immediately changes the physical LED strips in the room. You have direct GP
                 return "royal castle music medieval orchestral"
             elif environment == 'battlefield':
                 return "epic battle war drums orchestral intense"
+            elif environment == 'market':
+                return "bustling medieval market music folk lively fantasy"
             
             # Mood-based fallback
             elif mood == 'spooky':
