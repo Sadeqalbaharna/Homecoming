@@ -2250,33 +2250,33 @@ This immediately changes the physical LED strips in the room. You have direct GP
             
             success = False
             retry_commands = [
-                [  # Primary: Soundtec-Vibe Bluetooth via PulseAudio
+                [  # Primary: ALSA output (built-in audio) as pi user
                     "sudo", "-u", mpv_user, "mpv", audio_url,
-                    "--audio-device=pulse/bluez_output.F4_4E_FD_BA_98_79.1",
-                    "--no-video", "--really-quiet",
+                    "--audio-device=pulse/alsa_output.platform-fe00b840.mailbox.stereo-fallback",
+                    "--no-video", "--really-quiet", "--volume=100",
                     "--user-agent=Mozilla/5.0 (compatible; yt-dlp)",
                     "--referrer=https://www.youtube.com/"
                 ],
                 [  # Fallback 1: Default PulseAudio as pi user
                     "sudo", "-u", mpv_user, "mpv", audio_url,
-                    "--audio-device=pulse", "--no-video", "--really-quiet",
+                    "--audio-device=pulse", "--no-video", "--really-quiet", "--volume=100",
                     "--user-agent=Mozilla/5.0 (compatible; yt-dlp)",
                     "--referrer=https://www.youtube.com/"
                 ],
-                [  # Fallback 2: GL-TWS61 ALSA card 1 as pi user
+                [  # Fallback 2: Direct ALSA as pi user
                     "sudo", "-u", mpv_user, "mpv", audio_url,
-                    "--audio-device=alsa/plughw:CARD=1,DEV=0", "--no-video", "--really-quiet",
+                    "--audio-device=alsa", "--no-video", "--really-quiet", "--volume=100",
                     "--user-agent=Mozilla/5.0 (compatible; yt-dlp)",
                     "--referrer=https://www.youtube.com/"
                 ],
                 [  # Fallback 3: System default as pi user
                     "sudo", "-u", mpv_user, "mpv", audio_url,
-                    "--no-video", "--really-quiet",
+                    "--no-video", "--really-quiet", "--volume=100",
                     "--user-agent=Mozilla/5.0 (compatible; yt-dlp)",
                     "--referrer=https://www.youtube.com/"
                 ],
                 [  # Fallback 4: Direct as root (last resort)
-                    "mpv", audio_url, "--no-video", "--really-quiet",
+                    "mpv", audio_url, "--no-video", "--really-quiet", "--volume=100",
                     "--user-agent=Mozilla/5.0 (compatible; yt-dlp)",
                     "--referrer=https://www.youtube.com/"
                 ]
