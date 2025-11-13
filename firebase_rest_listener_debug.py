@@ -2990,11 +2990,11 @@ This immediately changes the physical LED strips in the room. You have direct GP
             
             # D&D Action Detection  
             actions = {
+                'lightning': ['lightning', 'thunder', 'storm', 'electrical', 'shock'],
                 'fireball': ['fireball', 'fire spell', 'flame burst'],
-                'lightning': ['lightning bolt', 'shock', 'electrical'], 
                 'healing': ['healing', 'restore', 'cure', 'mend'],
-                'combat': ['attack', 'fight', 'battle', 'strike'],
-                'magic': ['cast', 'spell', 'magic', 'enchant']
+                'magic': ['cast', 'spell', 'magic', 'enchant'],
+                'combat': ['attack', 'fight', 'battle', 'strike']
             }
             
             # Mood Detection
