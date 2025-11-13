@@ -3070,6 +3070,18 @@ This immediately changes the physical LED strips in the room. You have direct GP
                     return run_sudo_led_command(r, g, b, brightness=80)
                 return False
             
+            # Check if all strips are in sudo mode
+            all_sudo = all(strip == "sudo_mode" for strip in self.led_controller.pixel_strips.values())
+            
+            if all_sudo:
+                # Use sudo LED control for ambiance effects
+                logger.info(f"💡 [AMBIANCE] Using sudo LED control - {effect} effect")
+                if colors:
+                    r, g, b = colors[0]
+                    # For effects, we'll just use the primary color with sudo
+                    return run_sudo_led_command(r, g, b, brightness=80)
+                return False
+            
             # Apply to all LED strips using actual PixelStrip objects
             for strip_name, strip in self.led_controller.pixel_strips.items():
                 # Skip strips in sudo mode
