@@ -2815,10 +2815,65 @@ This immediately changes the physical LED strips in the room. You have direct GP
                     success = False
                     message = "No search query provided for ambient video"
                 
+            elif action == "dnd_ambiance" or action == "set_dnd_ambiance":
+                logger.info("🎲 D&D Ambiance command")
+                prompt = command_data.get("prompt", "")
+                include_music = command_data.get("include_music", True)
+                include_smoke = command_data.get("include_smoke", False)
+                
+                if not prompt:
+                    logger.error("❌ No prompt provided for D&D ambiance")
+                    success = False
+                    message = "No prompt provided for D&D ambiance"
+                else:
+                    logger.info(f"🎭 D&D Ambiance prompt: '{prompt}'")
+                    logger.info(f"🎵 Music: {include_music}, 💨 Smoke: {include_smoke}")
+                    
+                    # Analyze the prompt
+                    scene_data = self._analyze_ambiance_prompt(prompt)
+                    
+                    if not scene_data:
+                        logger.error("❌ Failed to analyze ambiance prompt")
+                        success = False
+                        message = "Failed to analyze ambiance prompt"
+                    else:
+                        logger.info(f"🎬 Scene detected: {scene_data['scene_name']} (confidence: {scene_data['confidence']:.1%})")
+                        
+                        # Apply lighting
+                        lighting_success = self._apply_dynamic_lighting(scene_data)
+                        
+                        # Play music if requested
+                        music_success = False
+                        music_query = None
+                        if include_music:
+                            music_query = self._get_ambiance_music(scene_data)
+                            logger.info(f"🎵 Playing: {music_query}")
+                            music_success = self.play_youtube_audio(music_query)
+                        
+                        # Trigger smoke if requested
+                        smoke_success = False
+                        if include_smoke:
+                            smoke_success = self._trigger_smoke_machine(scene_data)
+                        
+                        success = lighting_success or music_success
+                        
+                        if success:
+                            status_parts = []
+                            if lighting_success:
+                                status_parts.append(f"lighting ({scene_data['effect']})")
+                            if music_success:
+                                status_parts.append(f"music ({music_query})")
+                            if smoke_success:
+                                status_parts.append("smoke")
+                            
+                            message = f"D&D ambiance '{scene_data['scene_name']}' activated: {', '.join(status_parts)}"
+                        else:
+                            message = "Failed to activate D&D ambiance"
+                
             else:
                 message = f"Unknown action: {action} (target: {target})"
                 logger.warning(f"⚠️ {message}")
-                logger.warning(f"🔍 Debug: action='{action}', target='{target}', available actions: play_mood, stop_music, pause_music, set_ambiance_lighting, set_scene, dynamic_ambient, play_ambient_video")
+                logger.warning(f"🔍 Debug: action='{action}', target='{target}', available actions: play_mood, stop_music, pause_music, set_ambiance_lighting, set_scene, dynamic_ambient, play_ambient_video, dnd_ambiance")
             
             # Send response
             status = "success" if success else "error"
@@ -3304,6 +3359,19 @@ This immediately changes the physical LED strips in the room. You have direct GP
                 logger.info(f"🎭 [SIMULATION] Shimmer effect with colors: {colors}")
         except Exception as e:
             logger.error(f"❌ [SHIMMER] Error applying shimmer effect: {e}")
+    
+    def _trigger_smoke_machine(self, scene_data):
+        """Trigger smoke machine for dramatic effect (GPIO control)"""
+        try:
+            # TODO: Implement GPIO control for smoke machine relay
+            # Example: GPIO pin 23 with 2-second burst
+            logger.info(f"💨 [SMOKE] Smoke machine triggered for {scene_data['scene_name']}")
+            logger.info(f"💨 [SMOKE] TODO: Implement GPIO relay control")
+            return False  # Not implemented yet
+        except Exception as e:
+            logger.error(f"❌ [SMOKE] Error triggering smoke machine: {e}")
+            return False
+
 
 if __name__ == "__main__":
     listener = FirebaseRestListener()
