@@ -2245,34 +2245,37 @@ This immediately changes the physical LED strips in the room. You have direct GP
             # Play the audio stream with mpv using our enhanced fallback system
             logger.info("🎵 Starting YouTube audio playback...")
             
+            # Run mpv as pi user (not root) for proper PulseAudio access
+            mpv_user = "pi"
+            
             success = False
             retry_commands = [
-                [  # Primary: Detected audio device
-                    "mpv", audio_url, 
-                    f"--audio-device={self.bluetooth_device}",
+                [  # Primary: Soundtec-Vibe Bluetooth via PulseAudio
+                    "sudo", "-u", mpv_user, "mpv", audio_url,
+                    "--audio-device=pulse/bluez_output.F4_4E_FD_BA_98_79.1",
                     "--no-video", "--really-quiet",
                     "--user-agent=Mozilla/5.0 (compatible; yt-dlp)",
                     "--referrer=https://www.youtube.com/"
                 ],
-                [  # Fallback 1: GL-TWS61 ALSA card 1
-                    "mpv", audio_url,
-                    "--audio-device=alsa/plughw:CARD=1,DEV=0", "--no-video", "--really-quiet",
-                    "--user-agent=Mozilla/5.0 (compatible; yt-dlp)",
-                    "--referrer=https://www.youtube.com/"
-                ],
-                [  # Fallback 2: GL-TWS61 ALSA card 2
-                    "mpv", audio_url,
-                    "--audio-device=alsa/plughw:CARD=2,DEV=0", "--no-video", "--really-quiet",
-                    "--user-agent=Mozilla/5.0 (compatible; yt-dlp)",
-                    "--referrer=https://www.youtube.com/"
-                ],
-                [  # Fallback 3: Default pulse audio
-                    "mpv", audio_url,
+                [  # Fallback 1: Default PulseAudio as pi user
+                    "sudo", "-u", mpv_user, "mpv", audio_url,
                     "--audio-device=pulse", "--no-video", "--really-quiet",
                     "--user-agent=Mozilla/5.0 (compatible; yt-dlp)",
                     "--referrer=https://www.youtube.com/"
                 ],
-                [  # Fallback 4: System default
+                [  # Fallback 2: GL-TWS61 ALSA card 1 as pi user
+                    "sudo", "-u", mpv_user, "mpv", audio_url,
+                    "--audio-device=alsa/plughw:CARD=1,DEV=0", "--no-video", "--really-quiet",
+                    "--user-agent=Mozilla/5.0 (compatible; yt-dlp)",
+                    "--referrer=https://www.youtube.com/"
+                ],
+                [  # Fallback 3: System default as pi user
+                    "sudo", "-u", mpv_user, "mpv", audio_url,
+                    "--no-video", "--really-quiet",
+                    "--user-agent=Mozilla/5.0 (compatible; yt-dlp)",
+                    "--referrer=https://www.youtube.com/"
+                ],
+                [  # Fallback 4: Direct as root (last resort)
                     "mpv", audio_url, "--no-video", "--really-quiet",
                     "--user-agent=Mozilla/5.0 (compatible; yt-dlp)",
                     "--referrer=https://www.youtube.com/"
