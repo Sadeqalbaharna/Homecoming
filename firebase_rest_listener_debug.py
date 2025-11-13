@@ -3156,9 +3156,18 @@ This immediately changes the physical LED strips in the room. You have direct GP
             if all_sudo:
                 # Use sudo LED control for ambiance effects
                 logger.info(f"💡 [AMBIANCE] Using sudo LED control - {effect} effect")
+                
+                # Special handling for strobe (lightning) effect
+                if effect == 'strobe':
+                    logger.info("⚡ [AMBIANCE] Starting threaded lightning strobe effect")
+                    # Start continuous lightning on all available strips
+                    strip_names = list(self.led_controller.pixel_strips.keys())
+                    self.led_controller._start_lightning_effect(strip_names)
+                    return True
+                
                 if colors:
                     r, g, b = colors[0]
-                    # For effects, we'll just use the primary color with sudo
+                    # For other effects, we'll just use the primary color with sudo
                     return run_sudo_led_command(r, g, b, brightness=80)
                 return False
             
@@ -3168,10 +3177,12 @@ This immediately changes the physical LED strips in the room. You have direct GP
                 if strip == "sudo_mode":
                     continue
                     
-                if effect == 'flicker':
+                if effect == 'strobe':
+                    # Use threaded lightning effect for continuous strobe
+                    logger.info(f"⚡ [AMBIANCE] Starting continuous lightning on {strip_name}")
+                    self.led_controller._start_lightning_effect([strip_name])
+                elif effect == 'flicker':
                     self._flicker_effect(strip, colors)
-                elif effect == 'strobe':
-                    self._strobe_effect(strip, colors)
                 elif effect == 'pulse':
                     self._pulse_effect(strip, colors)
                 elif effect == 'glow':
