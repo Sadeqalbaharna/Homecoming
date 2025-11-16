@@ -3147,7 +3147,7 @@ This immediately changes the physical LED strips in the room. You have direct GP
             if action == 'fireball':
                 return "epic battle music intense dramatic orchestral"
             elif action == 'lightning':
-                return "dramatic storm thunder orchestral music"
+                return "thunderstorm ambiance rain thunder sounds relaxing"
             elif action == 'healing':
                 return "peaceful healing fantasy music ambient"
             elif action == 'magic':
