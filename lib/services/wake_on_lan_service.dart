@@ -4,7 +4,7 @@ import 'dart:typed_data';
 class WakeOnLanService {
   // Pi's actual MAC address (WoL not supported on this Pi model)
   static const String piMacAddress = "d8:3a:dd:f2:2d:f5";
-  static const String piIpAddress = "192.168.1.100";
+  static const String piIpAddress = "192.168.227.100";
   
   /// Attempt Pi wake-up (WoL not supported on this Pi model)
   Future<bool> wakePi() async {
