@@ -1021,6 +1021,74 @@ Text:
       
       // In GM mode, force ambiance/house control processing
       final ambianceService = AmbianceService();
+      
+      // Check for D&D ambiance first (natural language scenes)
+      final isDnDRequest = ambianceService.isDnDAmbianceRequest(processedText);
+      
+      if (isDnDRequest) {
+        debugService.addStep(
+          BrainPhase.processing,
+          'GM mode D&D ambiance control triggered',
+          data: {
+            'command': processedText,
+            'type': 'dnd_ambiance',
+          },
+        );
+        
+        print('🎲 [AI_SERVICE] GM mode executing D&D ambiance: "$processedText"');
+        
+        // Execute D&D ambiance with natural language prompt
+        final success = await ambianceService.setDnDAmbiance(
+          prompt: processedText,
+          includeMusic: true,
+          includeSmoke: false,
+        );
+        
+        if (success) {
+          // Generate GM Kai response about the D&D scene
+          final gmResponse = _generateGMKaiDnDResponse(processedText);
+          
+          print('✅ [AI_SERVICE] GM mode D&D ambiance successful, returning response');
+          
+          // Complete trace
+          debugService.completeTrace(gmResponse);
+          
+          // Return the GM control response directly
+          return ChatResponse(
+            reply: gmResponse,
+            raw: {
+              'model': model,
+              'gm_mode': true,
+              'dnd_ambiance': true,
+              'prompt': processedText,
+              'original_command': text,
+              'processed_command': processedText,
+            },
+            personalityDelta: <String, int>{},
+            moodDelta: <String, int>{},
+            actualDeltas: <String, int>{},
+            tags: ['gm_mode', 'house_control', 'dnd_ambiance'],
+            mbti: personality['mbti']?.toString() ?? 'UNKNOWN',
+            webUsed: false,
+            memoriesUsed: [],
+            debugInfo: {
+              'gm_mode': true,
+              'dnd_ambiance': true,
+              'prompt': processedText,
+              'original_command': text,
+              'processed_command': processedText,
+              'processing_time_ms': DateTime.now().millisecondsSinceEpoch,
+              'direct_house_control': true,
+            },
+            webSearchUsed: false,
+            searchResults: [],
+          );
+        } else {
+          print('❌ [AI_SERVICE] GM mode D&D ambiance failed, trying standard ambiance');
+        }
+      }
+      
+      // Try standard ambiance profiles as fallback
       final gmAmbianceMatch = ambianceService.analyzeVoiceCommand(processedText);
       
       if (gmAmbianceMatch != null) {
@@ -2196,6 +2264,47 @@ Execute the command immediately and report what you're doing as GM of this smart
         baseResponse += '\n\n$profileResponse';
       }
     }
+    
+    return baseResponse;
+  }
+
+  /// Generate GM Kai response for D&D ambiance
+  String _generateGMKaiDnDResponse(String prompt) {
+    final responses = [
+      "🎲 GM Kai here - setting the scene for your adventure.",
+      "⚔️ Game Master mode active - crafting the perfect atmosphere.",
+      "🏰 GM Kai weaving an immersive D&D environment for you.",
+      "🎭 Scene coming to life with coordinated lighting and sound.",
+      "🌟 GM Kai bringing your campaign world to reality.",
+    ];
+    
+    String baseResponse = responses[Random().nextInt(responses.length)];
+    
+    // Add scene-specific details based on keywords in prompt
+    final lowercasePrompt = prompt.toLowerCase();
+    String sceneDetails = '';
+    
+    if (lowercasePrompt.contains('thunder') || lowercasePrompt.contains('storm') || lowercasePrompt.contains('lightning')) {
+      sceneDetails = 'Thunder rumbles as lightning illuminates the scene. ⚡🌩️';
+    } else if (lowercasePrompt.contains('dungeon') || lowercasePrompt.contains('cave')) {
+      sceneDetails = 'Torchlight flickers against ancient stone walls. 🕯️🏰';
+    } else if (lowercasePrompt.contains('tavern') || lowercasePrompt.contains('inn')) {
+      sceneDetails = 'The warmth of the tavern embraces you with lively music. 🍺🎵';
+    } else if (lowercasePrompt.contains('forest') || lowercasePrompt.contains('woods')) {
+      sceneDetails = 'Leaves rustle as mysterious sounds echo through the trees. 🌲🦉';
+    } else if (lowercasePrompt.contains('battle') || lowercasePrompt.contains('combat')) {
+      sceneDetails = 'The tension of battle fills the air with epic intensity. ⚔️🛡️';
+    } else if (lowercasePrompt.contains('magic') || lowercasePrompt.contains('spell')) {
+      sceneDetails = 'Arcane energy swirls as mystical forces awaken. ✨🔮';
+    } else if (lowercasePrompt.contains('dragon')) {
+      sceneDetails = 'The lair trembles with the presence of ancient power. 🐉🔥';
+    } else if (lowercasePrompt.contains('treasure') || lowercasePrompt.contains('gold')) {
+      sceneDetails = 'Glittering treasures shimmer in the ambient light. 💎✨';
+    } else {
+      sceneDetails = 'The scene comes alive with immersive lighting and sound. 🎭🌟';
+    }
+    
+    baseResponse += '\n\n' + sceneDetails;
     
     return baseResponse;
   }

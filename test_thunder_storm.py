@@ -4,7 +4,7 @@
 import requests
 import json
 
-PI_IP = "192.168.179.5"
+PI_IP = "192.168.227.5"
 PORT = 5001
 URL = f"http://{PI_IP}:{PORT}/kai/ambiance"
 

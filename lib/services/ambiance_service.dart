@@ -85,6 +85,64 @@ class AmbianceService {
     }
   }
 
+  /// Send D&D ambiance command with natural language prompt
+  /// This uses the Pi's intelligent scene analysis system
+  Future<bool> setDnDAmbiance({
+    required String prompt,
+    bool includeMusic = true,
+    bool includeSmoke = false,
+  }) async {
+    try {
+      print('🎲 [D&D Ambiance] Sending prompt: "$prompt"');
+      print('🎵 Music: $includeMusic, 💨 Smoke: $includeSmoke');
+
+      final success = await HomeAutomationService().sendCommand(
+        personaId: _personaId,
+        deviceId: _deviceId,
+        target: "ambiance",
+        action: "dnd_ambiance",
+        params: {
+          "prompt": prompt,
+          "include_music": includeMusic,
+          "include_smoke": includeSmoke,
+        },
+      );
+
+      if (success) {
+        print('✅ [D&D Ambiance] Scene activated successfully');
+      } else {
+        print('❌ [D&D Ambiance] Failed to activate scene');
+      }
+
+      return success;
+
+    } catch (e) {
+      print('❌ [D&D Ambiance] Error: $e');
+      return false;
+    }
+  }
+
+  /// Analyze voice input for D&D ambiance requests
+  bool isDnDAmbianceRequest(String input) {
+    final lowercaseInput = input.toLowerCase();
+    
+    // D&D-specific keywords
+    final dndKeywords = [
+      // Fantasy environments
+      'dungeon', 'tavern', 'castle', 'forest', 'cave', 'battlefield',
+      'temple', 'ruins', 'crypt', 'throne room', 'market square',
+      // D&D actions/events
+      'thunder storm', 'lightning', 'fireball', 'magic', 'spell',
+      'combat', 'battle', 'ambush', 'treasure', 'dragon',
+      // Moods
+      'spooky', 'mysterious', 'epic', 'tense', 'peaceful',
+      // Explicit D&D references
+      'd&d', 'dnd', 'rpg', 'game master', 'gm', 'campaign', 'session',
+    ];
+    
+    return dndKeywords.any((keyword) => lowercaseInput.contains(keyword));
+  }
+
   /// Analyze voice input for ambiance requests
   AmbianceMatch? analyzeVoiceCommand(String input) {
     final lowercaseInput = input.toLowerCase();
