@@ -2311,6 +2311,16 @@ Execute the command immediately and report what you're doing as GM of this smart
       };
     }
     
+    // Haunted Mansion
+    if (lowercase.contains('haunted') || lowercase.contains('mansion') || lowercase.contains('ghost') || lowercase.contains('creepy')) {
+      return {
+        'scene_description': 'Creepy haunted mansion with eerie creaking sounds, ghostly whispers, flickering candles casting unsettling shadows, cold drafts and ominous purple-green fog',
+        'include_music': true,
+        'include_smoke': true,
+        'intensity': 8,
+      };
+    }
+    
     // Dungeon/Cave
     if (lowercase.contains('dungeon') || lowercase.contains('cave') || lowercase.contains('crypt')) {
       return {

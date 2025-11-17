@@ -131,6 +131,7 @@ class AmbianceService {
       // Fantasy environments
       'dungeon', 'tavern', 'castle', 'forest', 'cave', 'battlefield',
       'temple', 'ruins', 'crypt', 'throne room', 'market square',
+      'mansion', 'haunted', 'ghost', 'creepy',
       // D&D actions/events
       'thunderstorm', 'thunder storm', 'lightning', 'fireball', 'magic', 'spell',
       'combat', 'battle', 'ambush', 'treasure', 'dragon',
