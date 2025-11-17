@@ -1037,11 +1037,20 @@ Text:
         
         print('🎲 [AI_SERVICE] GM mode executing D&D ambiance: "$processedText"');
         
-        // Execute D&D ambiance with natural language prompt
+        // Use AI to translate GM command into optimized D&D prompt
+        final translation = await _translateGMCommandToDnDPrompt(processedText);
+        final optimizedPrompt = translation['scene_description'] as String;
+        final includeMusic = translation['include_music'] as bool? ?? true;
+        final includeSmoke = translation['include_smoke'] as bool? ?? false;
+        
+        print('🎨 [AI_SERVICE] Translated to: "$optimizedPrompt"');
+        print('   🎵 Music: $includeMusic | 💨 Smoke: $includeSmoke');
+        
+        // Execute D&D ambiance with AI-optimized prompt
         final success = await ambianceService.setDnDAmbiance(
-          prompt: processedText,
-          includeMusic: true,
-          includeSmoke: false,
+          prompt: optimizedPrompt,
+          includeMusic: includeMusic,
+          includeSmoke: includeSmoke,
         );
         
         if (success) {
@@ -1060,9 +1069,10 @@ Text:
               'model': model,
               'gm_mode': true,
               'dnd_ambiance': true,
-              'prompt': processedText,
+              'prompt': optimizedPrompt,
               'original_command': text,
               'processed_command': processedText,
+              'translation': translation,
             },
             personalityDelta: <String, int>{},
             moodDelta: <String, int>{},
@@ -1074,9 +1084,10 @@ Text:
             debugInfo: {
               'gm_mode': true,
               'dnd_ambiance': true,
-              'prompt': processedText,
+              'prompt': optimizedPrompt,
               'original_command': text,
               'processed_command': processedText,
+              'translation': translation,
               'processing_time_ms': DateTime.now().millisecondsSinceEpoch,
               'direct_house_control': true,
             },
@@ -2266,6 +2277,87 @@ Execute the command immediately and report what you're doing as GM of this smart
     }
     
     return baseResponse;
+  }
+
+  /// Translate GM command into optimized D&D ambiance prompt
+  Future<Map<String, dynamic>> _translateGMCommandToDnDPrompt(String gmCommand) async {
+    print('🎨 [AI_SERVICE] Translating GM command: "$gmCommand"');
+    
+    // Use intelligent rule-based translation for instant response
+    return _getFallbackDnDPrompt(gmCommand);
+  }
+
+  /// Fallback D&D prompt generator (rule-based)
+  Map<String, dynamic> _getFallbackDnDPrompt(String gmCommand) {
+    final lowercase = gmCommand.toLowerCase();
+    
+    // Thunderstorm
+    if (lowercase.contains('thunder') || lowercase.contains('storm') || lowercase.contains('lightning')) {
+      return {
+        'scene_description': 'Intense thunderstorm with brilliant lightning strikes illuminating the sky, accompanied by deep rumbling thunder and heavy rainfall creating an atmospheric storm scene',
+        'include_music': true,
+        'include_smoke': false,
+        'intensity': 8,
+      };
+    }
+    
+    // Tavern
+    if (lowercase.contains('tavern') || lowercase.contains('inn') || lowercase.contains('pub')) {
+      return {
+        'scene_description': 'Warm cozy tavern with crackling fireplace, cheerful bardic music, and amber lighting creating a welcoming atmosphere for weary adventurers',
+        'include_music': true,
+        'include_smoke': false,
+        'intensity': 5,
+      };
+    }
+    
+    // Dungeon/Cave
+    if (lowercase.contains('dungeon') || lowercase.contains('cave') || lowercase.contains('crypt')) {
+      return {
+        'scene_description': 'Dark ominous dungeon with flickering torchlight casting dancing shadows on ancient stone walls, echoing drips and mysterious ambient sounds',
+        'include_music': true,
+        'include_smoke': true,
+        'intensity': 7,
+      };
+    }
+    
+    // Forest
+    if (lowercase.contains('forest') || lowercase.contains('woods') || lowercase.contains('jungle')) {
+      return {
+        'scene_description': 'Mysterious forest with rustling leaves, distant owl hoots, crickets chirping, and dappled green lighting filtering through the canopy',
+        'include_music': true,
+        'include_smoke': false,
+        'intensity': 6,
+      };
+    }
+    
+    // Dragon
+    if (lowercase.contains('dragon')) {
+      return {
+        'scene_description': 'Ominous dragon lair with deep rumbling, occasional roars, red and orange fiery lighting, and smoke effects creating an intense draconic atmosphere',
+        'include_music': true,
+        'include_smoke': true,
+        'intensity': 9,
+      };
+    }
+    
+    // Battle/Combat
+    if (lowercase.contains('battle') || lowercase.contains('combat') || lowercase.contains('fight')) {
+      return {
+        'scene_description': 'Epic battle scene with dramatic orchestral music, rapid red and white lighting pulses, and high-intensity atmosphere for combat encounters',
+        'include_music': true,
+        'include_smoke': false,
+        'intensity': 9,
+      };
+    }
+    
+    // Default
+    return {
+      'scene_description': gmCommand,
+      'include_music': true,
+      'include_smoke': false,
+      'intensity': 5,
+    };
   }
 
   /// Generate GM Kai response for D&D ambiance
