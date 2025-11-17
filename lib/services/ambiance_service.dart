@@ -132,7 +132,7 @@ class AmbianceService {
       'dungeon', 'tavern', 'castle', 'forest', 'cave', 'battlefield',
       'temple', 'ruins', 'crypt', 'throne room', 'market square',
       // D&D actions/events
-      'thunder storm', 'lightning', 'fireball', 'magic', 'spell',
+      'thunderstorm', 'thunder storm', 'lightning', 'fireball', 'magic', 'spell',
       'combat', 'battle', 'ambush', 'treasure', 'dragon',
       // Moods
       'spooky', 'mysterious', 'epic', 'tense', 'peaceful',
