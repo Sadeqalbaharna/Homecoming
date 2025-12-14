@@ -758,6 +758,34 @@ class WS2812BController:
                 if strip_name in self.effect_threads:
                     self.effect_threads[strip_name].join(timeout=1.0)
     
+    def _fade_out_all_strips(self, strips: List[str], duration: float = 0.5):
+        """Fade out all LED strips to black smoothly"""
+        if not WS281X_AVAILABLE:
+            return
+        
+        try:
+            steps = 20  # Number of fade steps
+            step_duration = duration / steps
+            
+            for i in range(steps, -1, -1):
+                brightness_factor = i / steps
+                for strip_name in strips:
+                    strip = self.pixel_strips.get(strip_name)
+                    if strip and strip != "sudo_mode":
+                        # Dim current colors gradually
+                        for j in range(strip.numPixels()):
+                            current_color = strip.getPixelColor(j)
+                            r = int(((current_color >> 16) & 0xFF) * brightness_factor)
+                            g = int(((current_color >> 8) & 0xFF) * brightness_factor)
+                            b = int((current_color & 0xFF) * brightness_factor)
+                            strip.setPixelColor(j, Color(r, g, b))
+                        strip.show()
+                time.sleep(step_duration)
+            
+            logger.info("🌑 [LED] Faded out all strips")
+        except Exception as e:
+            logger.error(f"❌ [LED] Fade out error: {e}")
+    
     def set_dynamic_lighting(self, dynamic_config: Dict, strips: List[str] = None):
         """Set dynamic ambient lighting with multiple colors and advanced effects"""
         if not WS281X_AVAILABLE:
@@ -1375,8 +1403,9 @@ class FirebaseRestListener:
                     for i, sink in enumerate(sinks):
                         logger.info(f"  {i+1}: {sink}")
                     
-                    # PRIORITY 1: Look for Bluetooth headsets FIRST (Soundtec-Vibe, GL-TWS91 or GL-TWS61)
+                    # PRIORITY 1: Look for Bluetooth headsets FIRST (TG-129C, Soundtec-Vibe, GL-TWS91 or GL-TWS61)
                     bluetooth_devices = [
+                        ('39_3E_58_14_40_4A', '39:3E:58:14:40:4A', 'TG-129C'),
                         ('F4_4E_FD_BA_98_79', 'F4:4E:FD:BA:98:79', 'Soundtec-Vibe'),
                         ('41_42_FF_3E_1F_25', '41:42:FF:3E:1F:25', 'GL-TWS91'),
                         ('FA_B0_2C_56_4E_72', 'FA:B0:2C:56:4E:72', 'GL-TWS61')
@@ -2999,6 +3028,18 @@ This immediately changes the physical LED strips in the room. You have direct GP
         logger.info("🔄 Starting command polling...")
         logger.info("🌐 Consciousness API running on http://0.0.0.0:5001/kai/context")
         
+        # Clear all old commands on startup
+        try:
+            logger.info("🧹 Clearing old commands from Firebase on startup...")
+            commands = self.get_commands()
+            if commands:
+                for command_id in commands.keys():
+                    self.processed_commands.add(command_id)
+                self.cleanup_old_commands(commands)
+                logger.info(f"✅ Marked {len(commands)} old commands as processed and cleaned up")
+        except Exception as e:
+            logger.warning(f"⚠️ Could not clear old commands on startup: {e}")
+        
         while True:
             try:
                 # Get commands from Firebase
@@ -3010,6 +3051,13 @@ This immediately changes the physical LED strips in the room. You have direct GP
                         if command_id not in self.processed_commands and isinstance(command_data, dict):
                             # Check if this is for our device
                             if command_data.get("device") == self.device_id:
+                                # Clear all OTHER pending commands when we receive a new one
+                                logger.info(f"🧹 New command received - clearing all other pending commands")
+                                for old_cmd_id in commands.keys():
+                                    if old_cmd_id != command_id:
+                                        self.processed_commands.add(old_cmd_id)
+                                
+                                # Process the new command
                                 self.process_command(command_id, command_data)
                                 self.processed_commands.add(command_id)
                     
@@ -3028,60 +3076,77 @@ This immediately changes the physical LED strips in the room. You have direct GP
                 time.sleep(5)  # Wait longer on errors
 
     def _analyze_ambiance_prompt(self, prompt):
-        """Analyze prompt for D&D ambiance scenarios"""
+        """Analyze prompt for D&D ambiance scenarios with enhanced keyword detection"""
         try:
             prompt_lower = prompt.lower()
             
-            # D&D Environment Detection
+            # D&D Environment Detection (expanded keyword sets)
             environments = {
-                'dungeon': ['dungeon', 'chamber', 'underground', 'crypt', 'tomb'],
-                'forest': ['forest', 'woods', 'trees', 'jungle', 'grove'],
-                'tavern': ['tavern', 'inn', 'bar', 'pub', 'alehouse'],
-                'cave': ['cave', 'cavern', 'grotto', 'stalactite'],
-                'castle': ['castle', 'fortress', 'keep', 'tower'],
-                'battlefield': ['battlefield', 'war', 'combat', 'battle'],
-                'market': ['market', 'marketplace', 'bazaar', 'square', 'plaza', 'trading post']
+                'haunted_mansion': ['haunted', 'ghost', 'mansion', 'creepy', 'eerie', 'spooky', 'whisper', 'spectral', 'paranormal'],
+                'dungeon': ['dungeon', 'chamber', 'underground', 'crypt', 'tomb', 'cell', 'chains'],
+                'forest': ['forest', 'woods', 'trees', 'jungle', 'grove', 'woodland', 'ancient forest'],
+                'tavern': ['tavern', 'inn', 'bar', 'pub', 'alehouse', 'drinking hall', 'warm', 'cozy'],
+                'cave': ['cave', 'cavern', 'grotto', 'stalactite', 'stalactites', 'caverns'],
+                'castle': ['castle', 'fortress', 'keep', 'tower', 'throne room', 'royal', 'hall'],
+                'battlefield': ['battlefield', 'war', 'combat', 'battle', 'skirmish', 'carnage'],
+                'market': ['market', 'marketplace', 'bazaar', 'square', 'plaza', 'trading post', 'merchant']
             }
             
-            # D&D Action Detection  
+            # D&D Action Detection (expanded verbs and spell names)
             actions = {
-                'lightning': ['lightning', 'thunder', 'storm', 'electrical', 'shock'],
-                'fireball': ['fireball', 'fire spell', 'flame burst'],
-                'healing': ['healing', 'restore', 'cure', 'mend'],
-                'magic': ['cast', 'spell', 'magic', 'enchant'],
-                'combat': ['attack', 'fight', 'battle', 'strike']
+                'lightning': ['lightning', 'thunder', 'storm', 'electrical', 'shock', 'thunderbolt', 'lightning bolt'],
+                'fireball': ['fireball', 'fire spell', 'flame burst', 'inferno', 'flames', 'burning'],
+                'healing': ['healing', 'restore', 'cure', 'mend', 'life', 'revival', 'resurrection'],
+                'magic': ['cast', 'spell', 'magic', 'enchant', 'arcane', 'magical', 'sorcery'],
+                'combat': ['attack', 'fight', 'battle', 'strike', 'clash', 'duel', 'combat', 'swords']
             }
             
-            # Mood Detection
+            # Mood/Atmosphere Detection (expanded emotional keywords)
             moods = {
-                'spooky': ['spooky', 'scary', 'frightening', 'creepy', 'horror'],
-                'epic': ['epic', 'heroic', 'legendary', 'grand', 'majestic'],
-                'peaceful': ['peaceful', 'calm', 'serene', 'tranquil']
+                'spooky': ['spooky', 'scary', 'frightening', 'creepy', 'horror', 'dread', 'ominous', 'eerie', 'sinister'],
+                'epic': ['epic', 'heroic', 'legendary', 'grand', 'majestic', 'triumphant', 'destiny', 'glorious'],
+                'peaceful': ['peaceful', 'calm', 'serene', 'tranquil', 'quiet', 'still', 'quiet', 'rest']
+            }
+            
+            # Intensity indicators (for volume/energy preference)
+            intensity_keywords = {
+                'high': ['intense', 'dramatic', 'powerful', 'explosive', 'chaotic', 'frenzied'],
+                'low': ['subtle', 'quiet', 'soft', 'gentle', 'whisper']
             }
             
             detected_env = 'abstract'
             detected_action = 'none'
             detected_mood = 'neutral'
+            detected_intensity = 'medium'
             
-            # Find best matches
+            # Find best environment match
             for env, keywords in environments.items():
                 if any(kw in prompt_lower for kw in keywords):
                     detected_env = env
                     break
-                    
-            for action, keywords in actions.items():
-                if any(kw in prompt_lower for kw in keywords):
-                    detected_action = action
-                    break
-                    
+            
+            # Skip action detection for environment-focused scenes like haunted mansion
+            if detected_env not in ['haunted_mansion']:
+                for action, keywords in actions.items():
+                    if any(kw in prompt_lower for kw in keywords):
+                        detected_action = action
+                        break
+            
+            # Detect mood
             for mood, keywords in moods.items():
                 if any(kw in prompt_lower for kw in keywords):
                     detected_mood = mood
                     break
             
+            # Detect intensity preference
+            for intensity, keywords in intensity_keywords.items():
+                if any(kw in prompt_lower for kw in keywords):
+                    detected_intensity = intensity
+                    break
+            
             # Generate scene data
             scene_name = f"{detected_action.title()} in {detected_env.title()}" if detected_action != 'none' else f"{detected_env.title()} Scene"
-            description = f"Immersive {detected_mood} lighting for {detected_env}"
+            description = f"Immersive {detected_mood} {detected_intensity}-intensity lighting for {detected_env}"
             
             # Determine colors and effects
             colors, effect = self._get_scene_lighting(detected_env, detected_action, detected_mood)
@@ -3092,9 +3157,11 @@ This immediately changes the physical LED strips in the room. You have direct GP
                 'environment': detected_env,
                 'action': detected_action,
                 'mood': detected_mood,
+                'intensity': detected_intensity,
                 'colors': colors,
                 'effect': effect,
-                'confidence': 0.8 if detected_action != 'none' else 0.6
+                'confidence': 0.8 if detected_action != 'none' else 0.6,
+                'original_prompt': prompt
             }
             
         except Exception as e:
@@ -3117,6 +3184,8 @@ This immediately changes the physical LED strips in the room. You have direct GP
             return [(220, 20, 60), (139, 0, 0), (255, 0, 0)], 'pulse'
         
         # Environment-based colors
+        elif environment == 'haunted_mansion':
+            return [(75, 0, 130), (0, 100, 0), (138, 43, 226)], 'flicker'
         elif environment == 'dungeon' and mood == 'spooky':
             return [(128, 0, 128), (47, 79, 79), (0, 0, 0)], 'breathe'
         elif environment == 'forest':
@@ -3137,55 +3206,83 @@ This immediately changes the physical LED strips in the room. You have direct GP
         return [(65, 105, 225), (100, 149, 237), (135, 206, 235)], 'static'
     
     def _get_ambiance_music(self, scene_data):
-        """Get YouTube search query for D&D ambiance music"""
+        """Generate intelligent YouTube search query based on scene analysis"""
         try:
             environment = scene_data['environment']
             action = scene_data['action']
             mood = scene_data['mood']
             
-            # Action-based music (combat/spells have priority)
-            if action == 'fireball':
-                return "epic battle music intense dramatic orchestral"
-            elif action == 'lightning':
-                return "thunderstorm ambiance rain thunder sounds relaxing"
-            elif action == 'healing':
-                return "peaceful healing fantasy music ambient"
-            elif action == 'magic':
-                return "mystical magic spell casting music ambient"
-            elif action == 'combat':
-                return "epic battle combat music orchestral intense"
+            # Build query components intelligently based on available data
+            query_parts = []
             
-            # Environment-based music
-            elif environment == 'dungeon' and mood == 'spooky':
-                return "dark dungeon ambient horror music creepy"
-            elif environment == 'dungeon':
-                return "dungeon ambient music fantasy dark"
-            elif environment == 'forest':
-                return "forest ambient music fantasy peaceful nature"
-            elif environment == 'tavern':
-                return "medieval tavern music folk ambient fantasy"
-            elif environment == 'cave':
-                return "cave ambient music dark fantasy mysterious"
-            elif environment == 'castle':
-                return "royal castle music medieval orchestral"
-            elif environment == 'battlefield':
-                return "epic battle war drums orchestral intense"
-            elif environment == 'market':
-                return "bustling medieval market music folk lively fantasy"
+            # 1. ACTION PRIORITY - Strong verbs indicate active music needs
+            action_music_map = {
+                'fireball': ['epic', 'dramatic', 'intense', 'orchestral', 'battle'],
+                'lightning': ['thunderstorm', 'epic', 'dramatic', 'weather'],
+                'healing': ['peaceful', 'serene', 'healing', 'magical', 'glowing'],
+                'magic': ['mystical', 'magical', 'mysterious', 'ethereal', 'spellcasting'],
+                'combat': ['epic', 'battle', 'intense', 'orchestral', 'dramatic']
+            }
             
-            # Mood-based fallback
-            elif mood == 'spooky':
-                return "dark ambient horror music creepy"
-            elif mood == 'epic':
-                return "epic orchestral adventure music fantasy"
-            elif mood == 'peaceful':
-                return "peaceful fantasy ambient music relaxing"
+            if action in action_music_map:
+                query_parts.extend(action_music_map[action])
             
-            # Default fantasy ambiance
-            return "fantasy ambient music D&D atmospheric"
+            # 2. ENVIRONMENT - Provides setting context
+            environment_music_map = {
+                'haunted_mansion': ['haunted', 'mansion', 'creepy', 'gothic', 'eerie', 'ghost'],
+                'dungeon': ['dungeon', 'underground', 'dark', 'ancient'],
+                'forest': ['forest', 'woods', 'nature', 'wilderness', 'natural'],
+                'tavern': ['tavern', 'medieval', 'folk', 'inn', 'fantasy'],
+                'cave': ['cave', 'cavern', 'underground', 'mysterious', 'ancient'],
+                'castle': ['castle', 'royal', 'medieval', 'fortress', 'regal'],
+                'battlefield': ['battlefield', 'war', 'combat', 'orchestral', 'intense'],
+                'market': ['market', 'bustling', 'medieval', 'folk', 'lively', 'fantasy'],
+                'abstract': []
+            }
+            
+            if environment in environment_music_map and environment != 'abstract':
+                # Add only 2-3 most important environment descriptors to keep query focused
+                env_terms = environment_music_map[environment][:2]
+                query_parts.extend(env_terms)
+            
+            # 3. MOOD - Emotional tone influences music style
+            mood_music_map = {
+                'spooky': ['dark', 'ominous', 'mysterious', 'eerie', 'suspenseful'],
+                'epic': ['epic', 'heroic', 'grand', 'legendary', 'majestic'],
+                'peaceful': ['peaceful', 'calm', 'serene', 'tranquil', 'soothing']
+            }
+            
+            if mood in mood_music_map and mood != 'neutral':
+                # Add just 1-2 mood terms to avoid query dilution
+                mood_terms = mood_music_map[mood][:1]
+                query_parts.extend(mood_terms)
+            
+            # 4. Always include base music type for better YouTube matching
+            query_parts.append('music')
+            
+            # 5. Add "ambient" or "D&D" context if no specific genre emerged
+            if not any(word in query_parts for word in ['ambient', 'orchestral', 'folk']):
+                query_parts.append('ambient')
+            
+            # Build final query - remove duplicates while preserving order
+            seen = set()
+            final_parts = []
+            for part in query_parts:
+                if part.lower() not in seen:
+                    seen.add(part.lower())
+                    final_parts.append(part)
+            
+            music_query = ' '.join(final_parts)
+            
+            # Ensure we have at least 3 meaningful terms
+            if len(final_parts) < 3:
+                music_query = f"{music_query} fantasy D&D"
+            
+            logger.info(f"🧠 [MUSIC AI] Generated query from action={action}, env={environment}, mood={mood}: '{music_query}'")
+            return music_query
             
         except Exception as e:
-            logger.error(f"❌ [AMBIANCE] Error getting music query: {e}")
+            logger.error(f"❌ [AMBIANCE] Error generating music query: {e}")
             return "fantasy ambient music"
     
     def _apply_dynamic_lighting(self, scene_data):
@@ -3195,6 +3292,14 @@ This immediately changes the physical LED strips in the room. You have direct GP
             effect = scene_data['effect']
             
             logger.info(f"🎨 [AMBIANCE] Applying {scene_data['scene_name']} lighting")
+            
+            # Stop all previous LED effects before starting new scene
+            if self.led_controller and self.led_controller.pixel_strips:
+                strip_names = list(self.led_controller.pixel_strips.keys())
+                self.led_controller._stop_all_effects(strip_names)
+                logger.info("🛑 [AMBIANCE] Stopped all previous LED effects")
+                # Fade out smoothly
+                self.led_controller._fade_out_all_strips(strip_names, duration=0.8)
             
             # Check if WS281X is available and pixel strips are initialized
             if not WS281X_AVAILABLE or not self.led_controller.pixel_strips:
