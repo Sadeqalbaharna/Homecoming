@@ -1503,6 +1503,48 @@ class FirebaseRestListener:
         logger.info("🔊 Using system default PulseAudio")
         return "pulse"
     
+    def _detect_active_bluetooth_device(self):
+        """Detect and return the active Bluetooth device for audio playback"""
+        try:
+            result = subprocess.run(["pactl", "list", "short", "sinks"], 
+                                  capture_output=True, text=True, timeout=5)
+            
+            if result.returncode == 0:
+                sinks = result.stdout.strip().split('\n')
+                
+                # Look for Bluetooth devices (bluez_output)
+                bluetooth_devices = [
+                    ('39_3E_58_14_40_4A', 'TG-129C'),        # Your speaker
+                    ('F4_4E_FD_BA_98_79', 'Soundtec-Vibe'),
+                    ('41_42_FF_3E_1F_25', 'GL-TWS91'),
+                    ('FA_B0_2C_56_4E_72', 'GL-TWS61')
+                ]
+                
+                # Check each known Bluetooth device
+                for mac_underscore, device_name in bluetooth_devices:
+                    for sink in sinks:
+                        if mac_underscore in sink and 'bluez_output' in sink:
+                            sink_name = sink.split()[1] if len(sink.split()) > 1 else None
+                            if sink_name:
+                                # Check if it's running/suspended
+                                if 'RUNNING' in sink or 'SUSPENDED' in sink:
+                                    logger.info(f"🔊 Detected active Bluetooth device: {device_name} ({sink_name})")
+                                    return sink_name
+                
+                # Fallback: Return first available bluez device
+                for sink in sinks:
+                    if 'bluez_output' in sink:
+                        sink_name = sink.split()[1] if len(sink.split()) > 1 else None
+                        if sink_name:
+                            logger.info(f"🔊 Using available Bluetooth device: {sink_name}")
+                            return sink_name
+                
+        except Exception as e:
+            logger.warning(f"⚠️ Error detecting Bluetooth device: {e}")
+        
+        # No Bluetooth device found
+        return None
+    
     def _initialize_kai_identity(self):
         """Initialize Kai's consciousness and self-awareness"""
         return {
@@ -2287,15 +2329,26 @@ This immediately changes the physical LED strips in the room. You have direct GP
             pulse_env['PULSE_SERVER'] = 'unix:/run/user/1000/pulse/native'
             pulse_env['XDG_RUNTIME_DIR'] = '/run/user/1000'
             
+            # Get the actual Bluetooth device (dynamically detect)
+            bluetooth_device = self._detect_active_bluetooth_device()
+            if bluetooth_device:
+                logger.info(f"🔊 Using Bluetooth device: {bluetooth_device}")
+            
             success = False
-            retry_commands = [
-                [  # Primary: Bluetooth A2DP (Soundtec-Vibe high quality)
+            retry_commands = []
+            
+            # If we have a Bluetooth device, prioritize it
+            if bluetooth_device:
+                retry_commands.append([
                     "mpv", audio_url,
-                    "--audio-device=pulse/bluez_output.F4_4E_FD_BA_98_79.1",
+                    f"--audio-device=pulse/{bluetooth_device}",
                     "--no-video", "--really-quiet", "--volume=100",
                     "--user-agent=Mozilla/5.0 (compatible; yt-dlp)",
                     "--referrer=https://www.youtube.com/"
-                ],
+                ])
+            
+            # Add fallback options
+            retry_commands.extend([
                 [  # Fallback 1: Default PulseAudio
                     "mpv", audio_url,
                     "--audio-device=pulse", "--no-video", "--really-quiet", "--volume=100",
@@ -2314,7 +2367,7 @@ This immediately changes the physical LED strips in the room. You have direct GP
                     "--user-agent=Mozilla/5.0 (compatible; yt-dlp)",
                     "--referrer=https://www.youtube.com/"
                 ]
-            ]
+            ])
             
             for attempt, cmd in enumerate(retry_commands, 1):
                 try:
