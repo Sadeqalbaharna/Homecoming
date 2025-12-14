@@ -2333,6 +2333,16 @@ This immediately changes the physical LED strips in the room. You have direct GP
             bluetooth_device = self._detect_active_bluetooth_device()
             if bluetooth_device:
                 logger.info(f"🔊 Using Bluetooth device: {bluetooth_device}")
+                
+                # Try to set Bluetooth as default sink before playback
+                try:
+                    subprocess.run(['pactl', 'set-default-sink', bluetooth_device], 
+                                 timeout=3, capture_output=True)
+                    logger.info(f"✅ Set Bluetooth device as default sink")
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not set default sink: {e}")
+            else:
+                logger.warning("⚠️ No Bluetooth device detected, falling back to default")
             
             success = False
             retry_commands = []
