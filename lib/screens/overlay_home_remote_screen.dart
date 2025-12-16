@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../services/home_automation_service.dart';
+import 'gm_kai_audio_screen.dart';
 
 class OverlayHomeRemoteScreen extends StatefulWidget {
   const OverlayHomeRemoteScreen({super.key});
@@ -434,6 +435,21 @@ class _OverlayHomeRemoteScreenState extends State<OverlayHomeRemoteScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // GM Kai Audio Control
+          _FeatureCard(
+            icon: Icons.gamepad,
+            title: 'GM Kai Audio Control',
+            subtitle: 'Direct text input for YouTube music',
+            isEnabled: true,
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (context) => const GMKaiAudioScreen(),
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: 20),
           const Text(
             '🔧 Coming Soon',
             style: TextStyle(
@@ -670,63 +686,84 @@ class _FeatureCard extends StatelessWidget {
   final String title;
   final String subtitle;
   final bool isEnabled;
+  final VoidCallback? onTap;
 
   const _FeatureCard({
     required this.icon,
     required this.title,
     required this.subtitle,
     required this.isEnabled,
+    this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1A1A1A).withOpacity(isEnabled ? 1.0 : 0.5),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: Colors.grey.withOpacity(isEnabled ? 0.3 : 0.1),
+    return GestureDetector(
+      onTap: isEnabled ? onTap : null,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1A1A1A).withOpacity(isEnabled ? 1.0 : 0.5),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: Colors.grey.withOpacity(isEnabled ? 0.3 : 0.1),
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              icon,
+              color: isEnabled
+                  ? const Color(0xFFD4AF37)
+                  : Colors.grey.withOpacity(0.5),
+              size: 24,
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      color: isEnabled ? Colors.white : Colors.white38,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      color: isEnabled ? Colors.white70 : Colors.white24,
+                      fontSize: 14,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (!isEnabled)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Text(
+                  'Soon',
+                  style: TextStyle(
+                    color: Colors.orange,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+          ],
         ),
       ),
-      child: Row(
-        children: [
-          Icon(
-            icon,
-            color: isEnabled
-                ? const Color(0xFFD4AF37)
-                : Colors.grey.withOpacity(0.5),
-            size: 24,
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: TextStyle(
-                    color: isEnabled ? Colors.white : Colors.white38,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  subtitle,
-                  style: TextStyle(
-                    color: isEnabled ? Colors.white70 : Colors.white24,
-                    fontSize: 14,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          if (!isEnabled)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: Colors.orange.withOpacity(0.2),
+    );
+  }
+}
                 borderRadius: BorderRadius.circular(8),
               ),
               child: const Text(
