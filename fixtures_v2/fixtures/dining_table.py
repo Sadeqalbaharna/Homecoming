@@ -12,6 +12,7 @@ from ..core.driver_base import DriverConfig
 from ..drivers.voice_input_driver import VoiceInputDriver
 from ..drivers.led_driver import LEDDriver
 from ..drivers.audio_driver import AudioDriver
+from ..drivers.kai_ai_input_driver import KaiAIInputDriver, KaiCommandInterpreter
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,25 @@ class DiningTableFixture(BaseFixture):
             self.input_drivers["voice_input"] = self.voice_input
             
             await self.voice_input.start()
+            
+            # Create Kai AI input driver (listens to Firebase for ambiance commands)
+            kai_config = DriverConfig(
+                driver_id="kai_ai_input",
+                driver_type="kai_ai",
+                enabled=True,
+                params={
+                    'persona_id': 'kai_persona_1',
+                    'device_id': 'raspberry_pi_home',
+                }
+            )
+            self.kai_input = KaiAIInputDriver(kai_config)
+            self.input_drivers["kai_ai_input"] = self.kai_input
+            
+            try:
+                await self.kai_input.start()
+                self.logger.info("✅ Kai AI input driver initialized")
+            except Exception as e:
+                self.logger.warning(f"⚠️ Kai AI input driver failed: {e}")
             
             # Create output drivers
             # LED Strip
@@ -95,11 +115,16 @@ class DiningTableFixture(BaseFixture):
     
     async def process_input(self, event: InputEvent) -> List[OutputCommand]:
         """
-        Process voice input and decide what outputs to activate.
+        Process input from any source (voice, Kai AI, etc.) and generate outputs.
         """
         try:
             commands = []
             
+            # Handle Kai AI ambiance commands from Firebase
+            if event.source == "kai_ai":
+                return await self._process_kai_ai_input(event)
+            
+            # Handle manual voice input
             if event.source != "voice":
                 return commands
             
@@ -199,3 +224,69 @@ class DiningTableFixture(BaseFixture):
                 return scene_def
         
         return None
+    
+    async def _process_kai_ai_input(self, event: InputEvent) -> List[OutputCommand]:
+        """
+        Process Kai AI ambiance commands from Firebase.
+        
+        Event data format:
+        {
+            'prompt': 'tavern music',  # or mood: 'relaxing'
+            'confidence': 0.9,
+            'lighting_config': {...},  # optional
+            'music_query': {...}       # optional
+        }
+        """
+        try:
+            commands = []
+            data = event.data
+            
+            # Get the scenario details from Kai's interpretation
+            prompt = data.get('prompt', '')
+            mood = data.get('mood', '')
+            confidence = data.get('confidence', 0.8)
+            
+            # Interpret the command
+            if prompt:
+                # D&D ambiance command
+                scene_config = KaiCommandInterpreter.interpret_dnd_ambiance(prompt, confidence)
+                self.logger.info(f"🎭 Kai AI Scene: {prompt} (confidence: {confidence})")
+            elif mood:
+                # Mood-based command
+                scene_config = KaiCommandInterpreter.interpret_play_mood(mood, confidence)
+                self.logger.info(f"😊 Kai AI Mood: {mood} (confidence: {confidence})")
+            else:
+                self.logger.warning(f"⚠️ No prompt or mood in Kai AI command")
+                return commands
+            
+            # Add LED command
+            lighting = scene_config.get('lighting', {})
+            if lighting:
+                commands.append(OutputCommand(
+                    driver_id="led_main",
+                    action="activate",
+                    params={
+                        'color': lighting.get('color', (255, 100, 0)),
+                        'effect': lighting.get('effect', 'warm'),
+                        'brightness': lighting.get('brightness', 180),
+                    }
+                ))
+                self.logger.info(f"💡 LED: {lighting.get('color')} {lighting.get('effect')}")
+            
+            # Add music command
+            music_query = scene_config.get('music_query', prompt or mood)
+            commands.append(OutputCommand(
+                driver_id="speaker_1",
+                action="activate",
+                params={
+                    'query': music_query,
+                    'volume': 0.1,  # Start quiet (10%)
+                }
+            ))
+            self.logger.info(f"🎵 Music: {music_query}")
+            
+            return commands
+            
+        except Exception as e:
+            self.logger.error(f"❌ Error processing Kai AI input: {e}")
+            return []
