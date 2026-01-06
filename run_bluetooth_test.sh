@@ -54,7 +54,7 @@ fi
 
 echo ""
 echo "3️⃣  Running STEP 1 initialization test..."
-python3 fixtures_v2/tests/test_step1_initialization.py
+sudo python3 fixtures_v2/tests/test_step1_initialization.py
 
 if [ $? -ne 0 ]; then
     echo -e "${RED}❌ STEP 1 test failed${NC}"
@@ -66,7 +66,7 @@ echo "4️⃣  Running Bluetooth speaker test..."
 echo "   (This will play music on your TG-129C speaker)"
 echo ""
 
-python3 test_bluetooth_speaker.py --simple
+sudo python3 test_bluetooth_speaker.py --simple
 
 if [ $? -eq 0 ]; then
     echo -e "${GREEN}✅ All tests passed!${NC}"
