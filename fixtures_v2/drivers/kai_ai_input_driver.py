@@ -38,10 +38,15 @@ class KaiAIInputDriver(InputDriver):
         """Start listening for Firebase commands"""
         try:
             # Initialize Firebase if not already done
-            if not firebase_admin._apps:
-                firebase_admin.initialize_app(options={
-                    'databaseURL': 'https://homecoming-74f73-default-rtdb.europe-west1.firebasedatabase.app'
-                })
+            try:
+                if firebase_admin._apps:
+                    self.logger.info("Firebase already initialized")
+                else:
+                    # Will need credentials set up on Pi
+                    firebase_admin.initialize_app()
+            except (ValueError, AttributeError):
+                # App already initialized or _apps attribute missing
+                pass
             
             self.firebase_ref = db.reference(f'home_automation/{self.persona_id}/commands')
             self.is_listening = True
