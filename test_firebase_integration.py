@@ -147,6 +147,7 @@ async def test_firebase_to_bluetooth():
         ("tavern music", "🍺 Tavern Scene", "Medieval tavern ambiance"),
         ("forest ambience", "🌲 Forest Scene", "Peaceful nature sounds"),
         ("spooky dungeon", "👻 Spooky Dungeon", "Dark scary ambiance"),
+        ("haunted ship", "👻⚓ Haunted Ship", "Eerie pirate ghost ship"),
     ]
     
     firebase_client = FirebaseRESTClient()
@@ -264,13 +265,130 @@ async def test_quick_command():
     return True
 
 
+async def test_haunted_ship():
+    """Test the haunted ship scene specifically"""
+    
+    print("\n" + "="*80)
+    print("HAUNTED SHIP SCENE TEST".center(80))
+    print("Testing the new pirate ghost ship ambiance scene".center(80))
+    print("="*80 + "\n")
+    
+    # Initialize fixture
+    config = FixtureConfig(
+        fixture_id="dining_table_1",
+        fixture_type=FixtureType.DINING_TABLE,
+        location="dining_room",
+        enabled=True
+    )
+    
+    fixture = DiningTableFixture(config)
+    
+    print("🎭 Initializing fixture...")
+    if not await fixture.initialize():
+        print("❌ Fixture initialization failed")
+        return False
+    
+    print("✅ Fixture ready\n")
+    
+    firebase_client = FirebaseRESTClient()
+    
+    print(f"\n{'='*80}")
+    print(f"👻⚓ HAUNTED SHIP SCENE".center(80))
+    print(f"   Eerie pirate ghost ship with creepy ocean sounds".center(80))
+    print(f"{'='*80}\n")
+    
+    # Send haunted ship command
+    logger.info(f"📡 Sending haunted ship command...")
+    logger.info(f"   Voice input: 'haunted ship'")
+    command_id = firebase_client.send_dnd_ambiance("haunted ship")
+    
+    if not command_id:
+        logger.error(f"Failed to send command")
+        return False
+    
+    # Wait for Pi to process
+    logger.info(f"⏳ Processing haunted ship ambiance...")
+    await asyncio.sleep(1)
+    
+    # Create input event
+    input_event = InputEvent(
+        source="kai_ai",
+        event_type="dnd_ambiance",
+        data={
+            "prompt": "haunted ship",
+            "confidence": 0.9,
+            "command_id": command_id
+        }
+    )
+    
+    # Process through fixture
+    logger.info(f"🎭 Fixture processing scene interpretation...")
+    commands = await fixture.process_input(input_event)
+    
+    if not commands:
+        logger.warning(f"⚠️ No commands generated")
+        return False
+    
+    # Execute commands
+    logger.info(f"⚡ Executing {len(commands)} commands:")
+    for cmd in commands:
+        logger.info(f"   ✓ {cmd.driver_id}: {cmd.action}")
+        await fixture.execute_output(cmd)
+    
+    # Display what's happening
+    print(f"\n{'='*80}")
+    print(f"  👻 Eerie ghost crew sounds...".center(80))
+    print(f"  💡 LEDs showing dark blue ocean colors...".center(80))
+    print(f"  ⚓ Creaking ship timber sounds...".center(80))
+    print(f"{'='*80}\n")
+    
+    logger.info(f"📻 Listening for 20 seconds...\n")
+    
+    for i in range(20):
+        bar_length = int((i + 1) / 20 * 40)
+        bar = "█" * bar_length + "░" * (40 - bar_length)
+        percent = int((i + 1) / 20 * 100)
+        print(f"  [{bar}] {percent}%", end='\r')
+        await asyncio.sleep(1)
+    
+    print()  # New line
+    
+    # Stop playback
+    logger.info(f"⏹️  Stopping haunted ship ambiance...")
+    if "speaker_1" in fixture.output_drivers:
+        await fixture.output_drivers["speaker_1"].deactivate()
+    
+    await asyncio.sleep(1)
+    
+    print("\n" + "="*80)
+    print("HAUNTED SHIP TEST COMPLETE".center(80))
+    print("="*80)
+    print("""
+✅ WHAT YOU SHOULD HAVE HEARD/SEEN:
+   1. Eerie pirate ghost ship music started playing
+   2. Dark blue LEDs (0, 100, 150) lit up with flicker effect
+   3. Music featured creepy ocean/ghost sounds
+   4. Bluetooth speaker played for ~20 seconds
+   
+🎭 SCENE DETAILS:
+   Color: Dark teal blue (0, 100, 150)
+   Effect: Flicker (like candles on a ghost ship)
+   Music: Haunted pirate ship with ghost crew sounds
+   Brightness: 140 (dimmer for spooky effect)
+
+✨ This is a brand new D&D scene just added!
+    """)
+    
+    return True
+
+
 async def main():
     parser = argparse.ArgumentParser(
         description="Firebase integration tests for Homecoming Pi fixture"
     )
     parser.add_argument(
         '--test',
-        choices=['quick', 'full'],
+        choices=['quick', 'full', 'ship'],
         default='full',
         help='Which test to run'
     )
@@ -298,30 +416,30 @@ async def main():
         await test_quick_command()
     elif args.test == 'full':
         await test_firebase_to_bluetooth()
+    elif args.test == 'ship':
+        await test_haunted_ship()
     
     print("\n✅ Firebase integration tests complete!")
     print("="*80)
     print("🎉 READY FOR HOMECOMING APP TESTING!")
     print("="*80)
     print("""
-Next steps:
-1. Open the Homecoming app on your mobile device
-2. Go to Settings → Developer or Chat with Kai
-3. Say something like:
-   - "Play some tavern music"
-   - "Create a spooky atmosphere"
-   - "Set the mood to forest ambiance"
-4. Watch the Pi respond:
-   - LEDs light up with scene colors
-   - Bluetooth speaker plays ambiance music
-   - This test monitors the command flow in real-time
+D&D Scenes Available:
+  ✓ Tavern (warm orange, medieval music)
+  ✓ Forest (green shimmer, nature sounds)
+  ✓ Dungeon (purple pulse, spooky sounds)
+  ✓ Castle (gold steady, throne room music)
+  ✓ Battle (red strobe, epic combat)
+  ✓ Spooky (dark purple, ghost sounds)
+  ✓ Haunted Ship (dark blue flicker, pirate ghost crew) NEW!
 
-To manually test from command line:
-  python3 test_firebase_integration.py --test quick
-  python3 test_firebase_integration.py --test full
+To test from command line:
+  python3 test_firebase_integration.py --test quick    # Quick Firebase only
+  python3 test_firebase_integration.py --test full     # All scenes including new ship
+  python3 test_firebase_integration.py --test ship     # NEW: Just haunted ship scene
 
 To test on Pi:
-  ssh pi@192.168.48.5 "cd /home/pi/homecoming_app && python3 test_firebase_integration.py"
+  ssh pi@192.168.48.5 "cd /home/pi && python3 test_firebase_integration.py --test ship"
     """)
     print()
 

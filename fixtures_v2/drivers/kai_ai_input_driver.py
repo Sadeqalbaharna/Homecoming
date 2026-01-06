@@ -178,6 +178,10 @@ class KaiCommandInterpreter:
             'spooky': {
                 'music_query': 'creepy ghost spooky horror ambience',
                 'lighting': {'color': (75, 0, 130), 'effect': 'pulse', 'brightness': 80},
+            },
+            'haunted ship': {
+                'music_query': 'haunted pirate ship ghost crew eerie ocean',
+                'lighting': {'color': (0, 100, 150), 'effect': 'flicker', 'brightness': 140},
                 'confidence': 0.87,
             },
         }
