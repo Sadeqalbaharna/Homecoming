@@ -67,6 +67,19 @@ class AudioDriver(OutputDriver):
             await self.deactivate()
             await asyncio.sleep(0.5)
             
+            # Wake up the sink if it's suspended (Bluetooth speakers go to sleep)
+            if self.sink_name:
+                try:
+                    self.logger.info(f"🔌 Waking up audio sink...")
+                    # Set mute off and volume to max to activate the sink
+                    subprocess.run(['pactl', 'set-sink-mute', self.sink_name, '0'], 
+                                 timeout=2, capture_output=True)
+                    subprocess.run(['pactl', 'set-sink-volume', self.sink_name, '100%'], 
+                                 timeout=2, capture_output=True)
+                    await asyncio.sleep(0.5)
+                except Exception as e:
+                    self.logger.warning(f"⚠️  Could not set sink properties: {e}")
+            
             # Check if it's a YouTube query (doesn't start with /)
             if not query.startswith('/') and not query.startswith('http'):
                 # YouTube search
@@ -149,9 +162,9 @@ class AudioDriver(OutputDriver):
                 'default_search': 'ytsearch1',
             }
             
-            # Try to use yt-dlp command line
+            # Try to use yt-dlp command line (increase timeout for slower networks)
             cmd = [self.yt_dlp_path, '-f', 'bestaudio', '-q', '-j', f'ytsearch1:{query}']
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
             
             if result.returncode == 0:
                 import json
