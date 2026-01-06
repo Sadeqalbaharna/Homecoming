@@ -82,11 +82,31 @@ class AudioDriver(OutputDriver):
             
             # Check if it's a YouTube query (doesn't start with /)
             if not query.startswith('/') and not query.startswith('http'):
-                # YouTube search
+                # YouTube search - download to /tmp then play
                 self.logger.info(f"🔍 Searching YouTube for: {query}")
-                audio_url = await self._search_youtube(query)
-                if not audio_url:
-                    self.logger.error(f"❌ No YouTube results found")
+                audio_file = f"/tmp/{query.replace(' ', '_')[:20]}.mp3"
+                
+                # Download with yt-dlp
+                self.logger.info(f"⬇️ Downloading audio to: {audio_file}")
+                dl_cmd = [
+                    self.yt_dlp_path,
+                    '-x',
+                    '--audio-format', 'mp3',
+                    '--audio-quality', '128K',
+                    '-q',
+                    '-o', audio_file,
+                    f'ytsearch1:{query}'
+                ]
+                
+                try:
+                    result = subprocess.run(dl_cmd, timeout=90, capture_output=True, text=True)
+                    if result.returncode != 0:
+                        self.logger.error(f"❌ Download failed: {result.stderr}")
+                        return False
+                    self.logger.info(f"✅ Downloaded: {audio_file}")
+                    audio_url = audio_file
+                except subprocess.TimeoutExpired:
+                    self.logger.error(f"❌ Download timeout")
                     return False
             else:
                 audio_url = query
@@ -101,10 +121,10 @@ class AudioDriver(OutputDriver):
                 mpv_cmd.extend(['--audio-device', f'pulse/{self.sink_name}'])
                 self.logger.info(f"🔊 Using audio device: {self.sink_name}")
             
-            # Volume control
+            # Volume control (convert 0-1 to 0-100)
             mpv_cmd.extend(['--volume', str(int(volume * 100))])
             
-            # Other options
+            # Other options - no video, quiet output
             mpv_cmd.extend(['--no-video', '--really-quiet', audio_url])
             
             # Start playback
@@ -152,28 +172,24 @@ class AudioDriver(OutputDriver):
             return False
     
     async def _search_youtube(self, query: str) -> Optional[str]:
-        """Search YouTube using yt-dlp and return audio stream URL"""
+        """Search YouTube using yt-dlp and return YouTube URL (mpv will handle playback)"""
         try:
-            ydl_opts = {
-                'format': 'bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio',
-                'quiet': True,
-                'no_warnings': True,
-                'extract_flat': False,
-                'default_search': 'ytsearch1',
-            }
-            
-            # Try to use yt-dlp command line (increase timeout for slower networks)
+            # Use yt-dlp to find the video ID, then return a YouTube URL that mpv can play
             cmd = [self.yt_dlp_path, '-f', 'bestaudio', '-q', '-j', f'ytsearch1:{query}']
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
             
             if result.returncode == 0:
                 import json
                 data = json.loads(result.stdout)
-                if 'url' in data:
-                    self.logger.info(f"✅ Found: {data.get('title', 'Unknown')}")
-                    return data['url']
+                video_id = data.get('id')
+                title = data.get('title', 'Unknown')
+                
+                if video_id:
+                    self.logger.info(f"✅ Found: {title}")
+                    # Return YouTube URL that mpv can play with youtube-dl/yt-dlp
+                    return f"https://www.youtube.com/watch?v={video_id}"
             
-            self.logger.error(f"❌ yt-dlp search failed: {result.stderr}")
+            self.logger.error(f"❌ yt-dlp search failed: {result.stderr[:200]}")
             return None
             
         except Exception as e:
