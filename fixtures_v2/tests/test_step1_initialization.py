@@ -7,9 +7,11 @@ Tests that the modular driver architecture works correctly
 import asyncio
 import sys
 import logging
+from pathlib import Path
 
 # Add parent directory to path
-sys.path.insert(0, str(__file__).rsplit('\\', 2)[0])
+test_dir = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(test_dir))
 
 from fixtures_v2.core.fixture_base import FixtureConfig, FixtureType
 from fixtures_v2.fixtures.dining_table import DiningTableFixture
