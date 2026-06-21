@@ -16,6 +16,12 @@
         ".write": true
       }
     },
+    "knowledge_graph": {
+      "$personaId": {
+        ".read": true,
+        ".write": true
+      }
+    },
     "personalities": {
       "$personaId": {
         ".read": true,
