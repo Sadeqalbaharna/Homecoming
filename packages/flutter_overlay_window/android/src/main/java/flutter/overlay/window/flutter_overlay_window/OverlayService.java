@@ -6,15 +6,20 @@ import android.app.NotificationManager;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ServiceInfo;
+import android.content.res.AssetFileDescriptor;
 import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.graphics.PixelFormat;
 import android.app.PendingIntent;
+import android.media.MediaPlayer;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
 import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
@@ -97,7 +102,12 @@ public class OverlayService extends Service {
                 .setVisibility(WindowSetup.notificationVisibility)
                 .build();
 
-        startForeground(OverlayConstants.NOTIFICATION_ID, notification);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(OverlayConstants.NOTIFICATION_ID, notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
+        } else {
+            startForeground(OverlayConstants.NOTIFICATION_ID, notification);
+        }
         instance = this;
     }
 
@@ -216,6 +226,10 @@ public class OverlayService extends Service {
 
         isListening = true;
 
+        // Haptic + audio feedback: user knows Kai is listening
+        vibrate(60);
+        playSound("assets/audio/record_start.wav");
+
         // Dim the flame as a visual "listening" cue
         if (flameView != null) flameView.setAlpha(0.4f);
 
@@ -268,6 +282,10 @@ public class OverlayService extends Service {
         isListening = false;
         destroySpeechRecognizer();
 
+        // Audio + haptic: confirm capture (double-tap feel for success, single for empty)
+        playSound("assets/audio/record_stop.wav");
+        vibrate(text.isEmpty() ? 30 : 80);
+
         // Restore flame brightness
         if (flameView != null) flameView.setAlpha(1.0f);
 
@@ -298,6 +316,32 @@ public class OverlayService extends Service {
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
+
+    /** Play a Flutter asset WAV without opening the app. Fire-and-forget. */
+    private void playSound(String flutterAssetPath) {
+        try {
+            AssetFileDescriptor afd = getApplicationContext().getAssets()
+                    .openFd("flutter_assets/" + flutterAssetPath);
+            MediaPlayer mp = new MediaPlayer();
+            mp.setDataSource(afd.getFileDescriptor(), afd.getStartOffset(), afd.getLength());
+            mp.setOnCompletionListener(MediaPlayer::release);
+            mp.prepare();
+            mp.start();
+        } catch (Exception e) {
+            Log.w("OverlayService", "Could not play sound: " + flutterAssetPath, e);
+        }
+    }
+
+    /** Short haptic pulse — requires VIBRATE permission. */
+    private void vibrate(long ms) {
+        Vibrator v = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
+        if (v == null || !v.hasVibrator()) return;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            v.vibrate(VibrationEffect.createOneShot(ms, VibrationEffect.DEFAULT_AMPLITUDE));
+        } else {
+            v.vibrate(ms);
+        }
+    }
 
     private void removeFlameView() {
         if (windowManager != null && flameView != null) {
