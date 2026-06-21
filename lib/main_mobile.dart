@@ -1,7 +1,6 @@
 // main_mobile.dart
 // Mobile-compatible version without desktop-specific dependencies
 
-import 'package:gif/gif.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -9,18 +8,32 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:firebase_core/firebase_core.dart';
 
-import 'services/ai_service.dart';
-import 'services/firebase_service.dart';
-import 'services/wake_on_lan_service.dart';
-import '../services/voice_activation_service.dart';
-import '../services/home_automation_service.dart';
-import '../screens/home_remote_screen.dart';
+import 'services/ai/ai_service.dart';
+import 'services/core/firebase_service.dart';
+import 'services/core/memory_consolidation_service.dart';
+import 'services/automation/wake_on_lan_service.dart';
+import 'services/voice/voice_activation_service.dart';
+import 'services/automation/home_automation_service.dart';
+import 'screens/home_remote_screen.dart';
+import 'screens/chaos_journal_screen.dart';
+import 'screens/mind_map_screen.dart';
+import 'screens/brain_3d_screen.dart';
+import 'screens/activity_feed_screen.dart';
+import 'services/core/activity_card_service.dart';
 import 'firebase_options.dart';
 import 'widgets/debug_button.dart';
+import 'api_key_setup_screen.dart';
+import 'services/core/kai_state_service.dart';
+import 'services/core/emotional_event_service.dart';
+import 'services/core/memory_reflection_service.dart';
+import 'services/core/personality_drift_service.dart';
+import 'services/core/proactive_service.dart';
+import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 
 /// ===== Layout / Window =====
 const double kSpriteSize = 170;
@@ -31,16 +44,18 @@ const double kSpriteAlignY = 0.30;
 const double kUiLiftPx = 64;
 
 /// ===== Avatar assets + timings =====
-// Using static image as fallback for missing GIF animations
-const String kAvatarIdleGif = 'assets/avatar/images/mage.png';
-const String kAvatarAttentionGif = 'assets/avatar/images/mage.png';
-const String kAvatarThinkingGif = 'assets/avatar/images/mage.png';
-const String kAvatarSpeakingGif = 'assets/avatar/images/mage.png';
+const String kAvatarIdleFrameDir      = 'assets/avatar/idle_frames/';
+const String kAvatarAttentionFrameDir = 'assets/avatar/attention_frames/';
+const String kAvatarThinkingFrameDir  = 'assets/avatar/thinking_frames/';
+const String kAvatarSpeakingFrameDir  = 'assets/avatar/speaking_frames/';
+const String kAvatarFallback          = 'assets/avatar/images/mage.png';
+const int kIdleFrameCount      = 121;
+const int kAttentionFrameCount = 121;
+const int kThinkingFrameCount  = 241;
+const int kSpeakingFrameCount  = 121;
 
 const Duration kIdleAfter = Duration(seconds: 15);
 const Duration kAttentionPulse = Duration(seconds: 2);
-
-enum _AvatarState { idle, attention, thinking, speaking }
 
 /// Persona IDs
 const String kPersonaKai = 'truekai';
@@ -142,6 +157,11 @@ class _MobileKaiState extends State<_MobileKai>
   late final AnimationController _glowCtrl;
   late final Animation<double> _glow;
 
+  // background mode overlay
+  StreamSubscription<String>? _wakeWordSub;
+  StreamSubscription? _overlayMsgSub;
+  Timer? _idleBackgroundTimer;
+
   // bubble state
   bool _showBubble = false;
   bool _devOpen = false;
@@ -163,7 +183,7 @@ class _MobileKaiState extends State<_MobileKai>
   bool _autoPlayTts = true;
   bool _adaptToUser = false;
   String _modelId = 'gpt-4o';
-  final int _ctxTurns = 20;
+  final int _ctxTurns = 8; // Reduced from 20 — episodic memory covers the rest
 
   // delta bubbles
   final List<_Floater> _floaters = [];
@@ -174,37 +194,94 @@ class _MobileKaiState extends State<_MobileKai>
   DateTime _attentionUntil = DateTime.fromMillisecondsSinceEpoch(0);
   Timer? _idleTicker;
 
+  // frame-based animation
+  String _currentAnimation = 'idle';
+  int _currentFrame = 0;
+  AnimationController? _frameAnimController;
+
   void _markInteraction() {
     _lastInteraction = DateTime.now();
+    _resetIdleTimer();
+  }
+
+  void _resetIdleTimer() {
+    _idleBackgroundTimer?.cancel();
+    _idleBackgroundTimer = Timer(const Duration(minutes: 3), () {
+      // Only auto-sleep if not currently sending or speaking
+      if (mounted && !_sending && !_isSpeaking) {
+        print('💤 [BackgroundMode] 3-min idle — entering background');
+        _enterBackground();
+      }
+    });
   }
 
   void _pulseAttention() {
     _attentionUntil = DateTime.now().add(kAttentionPulse);
+    _switchToAnimation('attention');
+    // Return to idle after pulse expires
+    Future.delayed(kAttentionPulse, () {
+      if (mounted && !_isSpeaking && !_sending) _switchToAnimation('idle');
+    });
     setState(() {});
   }
 
   bool get _isSpeaking => _currentState == PlayerState.playing;
 
-  _AvatarState _resolveAvatarState() {
-    if (_isSpeaking) return _AvatarState.speaking;
-    if (_sending) return _AvatarState.thinking;
-    if (DateTime.now().isBefore(_attentionUntil)) return _AvatarState.attention;
-    final idleFor = DateTime.now().difference(_lastInteraction);
-    if (idleFor >= kIdleAfter) return _AvatarState.idle;
-    return _AvatarState.idle;
+  int _getFrameCount(String animType) {
+    switch (animType) {
+      case 'attention': return kAttentionFrameCount;
+      case 'thinking':  return kThinkingFrameCount;
+      case 'speaking':  return kSpeakingFrameCount;
+      default:          return kIdleFrameCount;
+    }
   }
 
-  String _avatarAssetFor(_AvatarState s) {
-    switch (s) {
-      case _AvatarState.speaking:
-        return kAvatarSpeakingGif;
-      case _AvatarState.thinking:
-        return kAvatarThinkingGif;
-      case _AvatarState.attention:
-        return kAvatarAttentionGif;
-      case _AvatarState.idle:
-        return kAvatarIdleGif;
+  String _getFrameDir(String animType) {
+    switch (animType) {
+      case 'attention': return kAvatarAttentionFrameDir;
+      case 'thinking':  return kAvatarThinkingFrameDir;
+      case 'speaking':  return kAvatarSpeakingFrameDir;
+      default:          return kAvatarIdleFrameDir;
     }
+  }
+
+  Future<void> _precacheAnimation(String dir, int frameCount) async {
+    final futures = List.generate(frameCount, (i) {
+      final path = '${dir}frame_${i.toString().padLeft(4, '0')}.png';
+      return precacheImage(AssetImage(path), context);
+    });
+    await Future.wait(futures, eagerError: false);
+  }
+
+  void _switchToAnimation(String animType) {
+    if (_currentAnimation == animType && _frameAnimController != null) return;
+    _currentAnimation = animType;
+    _currentFrame = 0;
+    _frameAnimController?.dispose();
+    final frameCount = _getFrameCount(animType);
+    _frameAnimController = AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: frameCount * 40), // ~25 fps
+    )..repeat();
+    _frameAnimController!.addListener(() {
+      final frame = (_frameAnimController!.value * frameCount).floor().clamp(0, frameCount - 1);
+      if (mounted && frame != _currentFrame) {
+        setState(() => _currentFrame = frame);
+      }
+    });
+  }
+
+  Widget _buildAvatarWidget() {
+    final dir = _getFrameDir(_currentAnimation);
+    final framePath = '${dir}frame_${_currentFrame.toString().padLeft(4, '0')}.png';
+    return Image.asset(
+      framePath,
+      fit: BoxFit.cover,
+      errorBuilder: (_, __, ___) => Image.asset(
+        kAvatarFallback,
+        fit: BoxFit.cover,
+      ),
+    );
   }
 
   // persona toggle
@@ -219,6 +296,8 @@ class _MobileKaiState extends State<_MobileKai>
   @override
   void initState() {
     super.initState();
+    KaiStateService().setSurface('mobile');
+    EmotionalEventService().setSurface('mobile');
     _glowCtrl =
         AnimationController(vsync: this, duration: const Duration(milliseconds: 1400))
           ..repeat(reverse: true);
@@ -226,14 +305,48 @@ class _MobileKaiState extends State<_MobileKai>
         .chain(CurveTween(curve: Curves.easeInOut))
         .animate(_glowCtrl);
 
+    // Precache all frames, then start animation
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await _precacheAnimation(kAvatarIdleFrameDir, kIdleFrameCount);
+      _switchToAnimation('idle');
+      // Remaining animations in background — no await
+      _precacheAnimation(kAvatarAttentionFrameDir, kAttentionFrameCount);
+      _precacheAnimation(kAvatarThinkingFrameDir,  kThinkingFrameCount);
+      _precacheAnimation(kAvatarSpeakingFrameDir,  kSpeakingFrameCount);
+
+      // Daily autonomous reflection — fire-and-forget, skips if <24h since last run
+      MemoryReflectionService().maybeReflect(personaId: _personaId)
+          .catchError((e) => print('⚠️ [Reflection] $e'));
+
+      // 48h personality drift — analyses conversation patterns, nudges baseline
+      PersonalityDriftService().maybeDrift(personaId: _personaId)
+          .catchError((e) => print('⚠️ [Drift] $e'));
+
+      // 📲 Proactive Kai — register FCM token + check for pending message
+      ProactiveService().initialize(_personaId)
+          .catchError((e) => print('⚠️ [Proactive] $e'));
+
+      // Check if Kai left a message while we were away
+      final pending = await ProactiveService().checkPendingMessage(_personaId);
+      if (pending != null && mounted) {
+        await ProactiveService().markDelivered(_personaId, pending.id);
+        setState(() {
+          _reply = pending.message;
+          _showBubble = true;
+        });
+      }
+    });
+
     _stateSub = _player.onPlayerStateChanged.listen((s) {
       _currentState = s;
-      
-      // Pause voice activation when Kai is speaking to avoid self-activation
+
+      // Switch animation based on audio state
       if (s == PlayerState.playing) {
+        _switchToAnimation('speaking');
         print('🔇 [MAIN_MOBILE] Audio playing - PAUSING voice activation');
         VoiceActivationService().pause();
       } else if (s == PlayerState.stopped || s == PlayerState.completed) {
+        _switchToAnimation('idle');
         print('🔊 [MAIN_MOBILE] Audio stopped/completed - RESUMING voice activation (with buffer)');
         VoiceActivationService().resume();
       }
@@ -246,35 +359,139 @@ class _MobileKaiState extends State<_MobileKai>
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      // Precache GIF animations (mobile uses GIFs, not frame sequences)
-      for (final p in [
-        kAvatarIdleGif,
-        kAvatarAttentionGif,
-        kAvatarThinkingGif,
-        kAvatarSpeakingGif
-      ]) {
-        precacheImage(AssetImage(p), context);
-      }
-      
-      // If using frame-based animations, preload them
-      // (Currently mobile uses static images as fallback)
-      
       unawaited(aiService.bootstrapPersona(_personaId));
     });
+
+    // Listen for messages from the flame overlay (tap to expand)
+    _overlayMsgSub = FlutterOverlayWindow.overlayListener.listen((data) {
+      if (data is Map && data['action'] == 'expand') {
+        _exitBackground();
+      }
+    });
+
+    // Subscribe to wake-word events (VoiceActivationService singleton)
+    _wakeWordSub = VoiceActivationService().onWakeWordDetected.listen((transcript) {
+      // Wake word brings the app back from background if the overlay is active
+      if (mounted) _exitBackground(initialMessage: transcript);
+    });
+
+    // Start 3-minute idle-to-background timer
+    _resetIdleTimer();
   }
 
   @override
   void dispose() {
     _glowCtrl.dispose();
+    _frameAnimController?.dispose();
     _controller.dispose();
     _focus.dispose();
     _stateSub.cancel();
+    _wakeWordSub?.cancel();
+    _overlayMsgSub?.cancel();
+    _idleBackgroundTimer?.cancel();
     _player.dispose();
     _idleTicker?.cancel();
     for (final f in _floaters) {
       f.ctrl.dispose();
     }
     super.dispose();
+  }
+
+  // ── Background mode ────────────────────────────────────────────────────────
+
+  Future<void> _enterBackground() async {
+    try {
+      // Stop the idle-sleep timer while we're already going to sleep
+      _idleBackgroundTimer?.cancel();
+
+      // Check / request overlay permission
+      final hasPermission = await FlutterOverlayWindow.isPermissionGranted();
+      if (!hasPermission) {
+        await FlutterOverlayWindow.requestPermission();
+        if (!await FlutterOverlayWindow.isPermissionGranted()) {
+          print('⚠️ [BackgroundMode] Overlay permission denied — minimizing without overlay');
+          await _minimizeApp();
+          return;
+        }
+      }
+
+      // Don't double-show
+      if (!await FlutterOverlayWindow.isActive()) {
+        // Stop heavy animations
+        _frameAnimController?.stop();
+        _glowCtrl.stop();
+        _idleTicker?.cancel();
+
+        await FlutterOverlayWindow.showOverlay(
+          height: 120,
+          width: 90,
+          alignment: OverlayAlignment.centerRight,
+          flag: OverlayFlag.defaultFlag,
+          enableDrag: true,
+          positionGravity: PositionGravity.auto,
+          overlayTitle: 'Kai',
+          overlayContent: 'Tap the flame to open Kai',
+        );
+        print('🔵 [BackgroundMode] Overlay shown');
+
+        // Push pending-message badge state to the overlay
+        final pending = await ProactiveService().checkPendingMessage(_personaId);
+        await FlutterOverlayWindow.shareData({'pending': pending != null});
+
+        // Brief pause so the overlay window is fully visible before we hide the app
+        await Future.delayed(const Duration(milliseconds: 400));
+      }
+
+      await _minimizeApp();
+    } catch (e, st) {
+      print('❌ [BackgroundMode] _enterBackground error: $e\n$st');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Sleep error: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _minimizeApp() async {
+    try {
+      const channel = MethodChannel('com.homecoming.app/activity');
+      await channel.invokeMethod<void>('moveTaskToBack');
+      print('🔵 [BackgroundMode] App moved to background');
+    } catch (e) {
+      print('❌ [BackgroundMode] moveTaskToBack failed: $e');
+    }
+  }
+
+  Future<void> _exitBackground({String? initialMessage}) async {
+    // Close the floating overlay if it's still up
+    if (await FlutterOverlayWindow.isActive()) {
+      await FlutterOverlayWindow.closeOverlay();
+    }
+
+    if (!mounted) return;
+
+    // Resume full-mode animations
+    _glowCtrl.repeat(reverse: true);
+    _switchToAnimation('idle');
+    _idleTicker ??= Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+
+    // Restart idle timer — user is active again
+    _resetIdleTimer();
+    print('🌟 [BackgroundMode] Exited — full mode restored');
+
+    // If woken by voice, send the transcript to Kai
+    if (initialMessage != null && initialMessage.trim().isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        setState(() {
+          _showBubble = true;
+          _controller.text = initialMessage;
+        });
+        _send();
+      });
+    }
   }
 
   void _spawnDeltas(Map<String, int> deltas) {
@@ -333,6 +550,8 @@ class _MobileKaiState extends State<_MobileKai>
   Future<void> _send() async {
     final text = _controller.text.trim();
     if (text.isEmpty || _sending) return;
+    _controller.clear(); // clear immediately so double-taps don't re-send
+    _switchToAnimation('thinking');
     setState(() {
       _sending = true;
       _reply = null;
@@ -359,7 +578,24 @@ class _MobileKaiState extends State<_MobileKai>
         }
       });
       _spawnDeltas(resp.actualDeltas);
-      
+
+      // 🃏 Save activity card (fire-and-forget)
+      ActivityCardService().saveCard(
+        personaId:         _personaId,
+        userMessage:       text,
+        kaiReply:          resp.reply,
+        personalityDelta:  resp.personalityDelta,
+        moodDelta:         resp.moodDelta,
+        tags:              resp.tags,
+        mbti:              resp.mbti,
+        memoriesUsed:      resp.memoriesUsed,
+        webSearchUsed:     resp.webSearchUsed,
+        curiosityQuestion: resp.curiosityQuestion?.question,
+        inputTokens:       resp.promptInputTokens,
+        outputTokens:      resp.promptOutputTokens,
+        costUsd:           resp.promptCostUsd,
+      ).catchError((e) => print('⚠️ [ActivityCard] $e'));
+
       // Note: Conversation already saved to Firebase in ai_service.sendMessage()
       
       if (resp.ttsBase64 != null) {
@@ -376,6 +612,7 @@ class _MobileKaiState extends State<_MobileKai>
         _devOpen = true;
       });
     } finally {
+      if (!_isSpeaking) _switchToAnimation('idle');
       setState(() {
         _sending = false;
       });
@@ -818,7 +1055,6 @@ class _MobileKaiState extends State<_MobileKai>
 
   Future<void> _playDefaultMusic() async {
     try {
-      // Send music command to Pi
       final success = await HomeAutomationService().sendCommand(
         personaId: 'truekai',
         deviceId: 'raspberry_pi_home',
@@ -826,28 +1062,50 @@ class _MobileKaiState extends State<_MobileKai>
         action: 'play_mood',
         params: {'mood': 'energetic', 'shuffle': true},
       );
-      
-      // Send audio feedback
       if (success) {
         await _sendAudioFeedback('Starting energetic music playlist! Get ready for some great tunes through your Bluetooth speaker.');
       }
-      
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(success ? '🎵 Music started! 🔊 Audio sent' : '❌ Music command failed'),
+          content: Text(success ? '🎵 Music started!' : '❌ Music command failed'),
           duration: const Duration(seconds: 2),
           backgroundColor: success ? Colors.green : Colors.red,
         ),
       );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('❌ Music error: $e'),
-          duration: const Duration(seconds: 2),
-          backgroundColor: Colors.red,
-        ),
+        SnackBar(content: Text('❌ Music error: $e'), duration: const Duration(seconds: 2), backgroundColor: Colors.red),
       );
     }
+  }
+
+  // ── GM Kai panel ──────────────────────────────────────────────────────────
+
+  void _openGmKai() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF0D0A07),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        side: BorderSide(color: Color(0x44FFE7B0)),
+      ),
+      builder: (_) => _GmKaiSheet(
+        personaId: _personaId,
+        onOpenRemote: () {
+          Navigator.pop(context);
+          _openHomeRemote(context);
+        },
+        onOpenMusic: () {
+          Navigator.pop(context);
+          _showMusicSelectionDialog();
+        },
+        onWakePi: _wakePi,
+        onToggleLight: _toggleLight,
+        onRainbow: _testRainbow,
+        onPulse: _testPulse,
+      ),
+    );
   }
 
   Future<void> _openPersonaPanel(BuildContext context) async {
@@ -865,6 +1123,7 @@ class _MobileKaiState extends State<_MobileKai>
           barrierDismissible: true,
           builder: (_) => PersonaDialog(
             initial: state,
+            personaId: _personaId,
             pg13: _isClone,
             onSave: (pc, mc, ac) async {
               await aiService.setAgentState(
@@ -913,8 +1172,6 @@ class _MobileKaiState extends State<_MobileKai>
 
   @override
   Widget build(BuildContext context) {
-    final avatarState = _resolveAvatarState();
-    final avatarAsset = _avatarAssetFor(avatarState);
     const stroke = Color(0xFFFFE7B0);
 
     return Scaffold(
@@ -938,6 +1195,13 @@ class _MobileKaiState extends State<_MobileKai>
         elevation: 0,
         centerTitle: false,
         actions: [
+          // Background mode — blue flame icon
+          IconButton(
+            onPressed: _enterBackground,
+            icon: const Icon(Icons.local_fire_department_outlined,
+                color: Color(0xFF3D9BFF)),
+            tooltip: 'Background mode (low power)',
+          ),
           IconButton(
             onPressed: _togglePersona,
             icon: Icon(
@@ -945,6 +1209,16 @@ class _MobileKaiState extends State<_MobileKai>
               color: _isClone ? Colors.redAccent : stroke,
             ),
             tooltip: 'Switch Persona',
+          ),
+          IconButton(
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => ApiKeySetupScreen(onComplete: () => Navigator.pop(context)),
+              ),
+            ),
+            icon: const Icon(Icons.key, color: Colors.white70),
+            tooltip: 'API Keys',
           ),
         ],
       ),
@@ -995,16 +1269,7 @@ class _MobileKaiState extends State<_MobileKai>
                                 ),
                               ),
                               child: ClipOval(
-                                child: AnimatedSwitcher(
-                                  duration: const Duration(milliseconds: 220),
-                                  child: Gif(
-                                    key: ValueKey(avatarAsset),
-                                    image: AssetImage(avatarAsset),
-                                    autostart: Autostart.loop,
-                                    fit: BoxFit.cover,
-                                    fps: 24,
-                                  ),
-                                ),
+                                child: _buildAvatarWidget(),
                               ),
                             ),
                             // Floating deltas
@@ -1067,23 +1332,13 @@ class _MobileKaiState extends State<_MobileKai>
                 runSpacing: 12,
                 alignment: WrapAlignment.center,
                 children: [
+                  // ── GM Kai: Gamemaster controls ───────────────────────────
+                  _GmKaiButton(onTap: _openGmKai),
+
                   _MobileButton(
                     icon: Icons.volume_up,
                     label: 'Voice',
                     onTap: _toggleVoice,
-                  ),
-                  _MobileButton(
-                    icon: Icons.home_outlined,
-                    label: 'Remote',
-                    onTap: () => _openHomeRemote(context),
-                  ),
-                  _MobileButton(
-                    icon: Icons.music_note,
-                    label: '🎵 MUSIC',
-                    onTap: () {
-                      print('🎵 MUSIC BUTTON TAPPED!');
-                      _playMusic();
-                    },
                   ),
                   if (!_isClone)
                     _MobileButton(
@@ -1104,35 +1359,45 @@ class _MobileKaiState extends State<_MobileKai>
                     }),
                   ),
                   _MobileButton(
-                    icon: Icons.lightbulb,
-                    label: 'Lights',
-                    onTap: _toggleLight,
+                    icon: Icons.auto_stories_outlined,
+                    label: 'Journal',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => ChaosJournalScreen(personaId: _personaId),
+                      ),
+                    ),
                   ),
                   _MobileButton(
-                    icon: Icons.power_settings_new,
-                    label: 'Wake Pi',
-                    onTap: _wakePi,
+                    icon: Icons.hub_outlined,
+                    label: 'Brain',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => Brain3DScreen(personaId: _personaId),
+                      ),
+                    ),
+                    onLongPress: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => MindMapScreen(personaId: _personaId),
+                      ),
+                    ),
                   ),
                   _MobileButton(
-                    icon: Icons.color_lens,
-                    label: 'Rainbow',
-                    onTap: _testRainbow,
+                    icon: Icons.style_outlined,
+                    label: 'Cards',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => ActivityFeedScreen(personaId: _personaId),
+                      ),
+                    ),
                   ),
-                  _MobileButton(
-                    icon: Icons.favorite,
-                    label: 'Pulse',
-                    onTap: _testPulse,
-                  ),
-
                 ],
               ),
 
               const SizedBox(height: 20),
-
-              // Music Status Widget
-              const _MusicStatusWidget(),
-
-              const SizedBox(height: 16),
 
               // Chat section
               if (_showBubble)
@@ -1193,11 +1458,13 @@ class _MobileButton extends StatelessWidget {
   final IconData icon;
   final String label;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
 
   const _MobileButton({
     required this.icon,
     required this.label,
     required this.onTap,
+    this.onLongPress,
   });
 
   @override
@@ -1205,6 +1472,7 @@ class _MobileButton extends StatelessWidget {
     const stroke = Color(0xFFFFE7B0);
     return GestureDetector(
       onTap: onTap,
+      onLongPress: onLongPress,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: BoxDecoration(
@@ -1553,12 +1821,18 @@ class _MobileChatBubble extends StatelessWidget {
 // Include PersonaDialog from the original file for mobile compatibility
 class PersonaDialog extends StatefulWidget {
   final AgentState initial;
+  final String personaId;
   final Future<void> Function(
           Map<String, num> pc, Map<String, num> mc, Map<String, num> ac)
       onSave;
   final bool pg13;
-  const PersonaDialog(
-      {super.key, required this.initial, required this.onSave, this.pg13 = false});
+  const PersonaDialog({
+    super.key,
+    required this.initial,
+    required this.personaId,
+    required this.onSave,
+    this.pg13 = false,
+  });
   @override
   State<PersonaDialog> createState() => _PersonaDialogState();
 }
@@ -1682,6 +1956,74 @@ class _PersonaDialogState extends State<PersonaDialog> {
                           color: Colors.white70, height: 1.25)),
                   const SizedBox(height: 12),
                 ],
+
+                // Developmental drift portrait
+                FutureBuilder<DriftSummary?>(
+                  future: PersonalityDriftService.getDriftSummary(widget.personaId),
+                  builder: (context, snap) {
+                    final drift = snap.data;
+                    if (drift == null || drift.narrativeArc.isEmpty) return const SizedBox.shrink();
+                    final p = drift.portrait;
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF0F0F1E),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0x55B8A9FF)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(children: [
+                            const Text('🌀 ', style: TextStyle(fontSize: 13)),
+                            const Text('Developmental Portrait',
+                                style: TextStyle(
+                                    color: Color(0xFFB8A9FF),
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: 0.8)),
+                            const Spacer(),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: const Color(0x22B8A9FF),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                drift.confidence.toUpperCase(),
+                                style: const TextStyle(color: Color(0x88B8A9FF), fontSize: 9, letterSpacing: 0.8),
+                              ),
+                            ),
+                          ]),
+                          const SizedBox(height: 8),
+                          // Narrative arc
+                          Text(drift.narrativeArc,
+                              style: const TextStyle(
+                                  color: Colors.white, fontSize: 12, height: 1.4,
+                                  fontStyle: FontStyle.italic)),
+                          if (p != null) ...[
+                            const SizedBox(height: 10),
+                            if (p.relationalRole.isNotEmpty)
+                              _DriftRow('Role', p.relationalRole),
+                            if (p.corresponsiveSignal.isNotEmpty)
+                              _DriftRow('Reinforcing', p.corresponsiveSignal),
+                            if (p.shadowNote.isNotEmpty)
+                              _DriftRow('Shadow', p.shadowNote),
+                            if (p.integrationAssessment.isNotEmpty)
+                              _DriftRow('Integration', p.integrationAssessment),
+                          ],
+                          if (drift.cumulativeDescription != 'No significant drift yet') ...[
+                            const SizedBox(height: 8),
+                            Text(drift.cumulativeDescription,
+                                style: const TextStyle(
+                                    color: Color(0x66B8A9FF), fontSize: 10, letterSpacing: 0.3)),
+                          ],
+                        ],
+                      ),
+                    );
+                  },
+                ),
 
                 // Personality section
                 Container(
@@ -1860,113 +2202,6 @@ class _PersonaDialogState extends State<PersonaDialog> {
   }
 }
 
-/// Music Status Widget - Shows current music playing status
-class _MusicStatusWidget extends StatelessWidget {
-  const _MusicStatusWidget();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1A1A2E).withOpacity(0.8),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFFFE7B0).withOpacity(0.3)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.3),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          // Music icon with pulse animation
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: Colors.purple.withOpacity(0.2),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: const Icon(
-              Icons.music_note,
-              color: Colors.purple,
-              size: 24,
-            ),
-          ),
-          
-          const SizedBox(width: 12),
-          
-          // Music info
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '🎵 Pi Music Library',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  '7 tracks • 7 moods • Bluetooth ready',
-                  style: TextStyle(
-                    color: Colors.white70,
-                    fontSize: 12,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          
-          // Quick controls
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _MusicControlButton(
-                icon: Icons.shuffle,
-                tooltip: 'Shuffle',
-                onTap: () => _sendMusicCommand('shuffle'),
-              ),
-              const SizedBox(width: 8),
-              _MusicControlButton(
-                icon: Icons.pause,
-                tooltip: 'Stop',
-                onTap: () => _sendMusicCommand('stop'),
-              ),
-              const SizedBox(width: 8),
-              _MusicControlButton(
-                icon: Icons.skip_next,
-                tooltip: 'Next',
-                onTap: () => _sendMusicCommand('next'),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  static void _sendMusicCommand(String command) async {
-    try {
-      await HomeAutomationService().sendCommand(
-        personaId: 'truekai',
-        deviceId: 'raspberry_pi_home',
-        target: 'music',
-        action: command,
-        params: {},
-      );
-    } catch (e) {
-      print('Music command error: $e');
-    }
-  }
-}
-
 /// Music Control Button Widget
 class _MusicControlButton extends StatelessWidget {
   final IconData icon;
@@ -1989,11 +2224,380 @@ class _MusicControlButton extends StatelessWidget {
           color: Colors.white.withOpacity(0.1),
           borderRadius: BorderRadius.circular(6),
         ),
-        child: Icon(
-          icon,
-          color: Colors.white70,
-          size: 18,
+        child: Icon(icon, color: Colors.white70, size: 18),
+      ),
+    );
+  }
+}
+
+// ── Drift portrait row ────────────────────────────────────────────────────────
+
+class _DriftRow extends StatelessWidget {
+  final String label;
+  final String value;
+  const _DriftRow(this.label, this.value);
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 5),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 72,
+            child: Text(label,
+                style: const TextStyle(
+                    color: Color(0x88B8A9FF), fontSize: 10,
+                    fontWeight: FontWeight.w600, letterSpacing: 0.5)),
+          ),
+          Expanded(
+            child: Text(value,
+                style: const TextStyle(
+                    color: Color(0xCCFFFFFF), fontSize: 11, height: 1.3)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── GM Kai Button ─────────────────────────────────────────────────────────────
+
+class _GmKaiButton extends StatelessWidget {
+  final VoidCallback onTap;
+  const _GmKaiButton({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [Color(0xFF2A1A05), Color(0xFF1A0D02)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: const Color(0xFFFFE7B0), width: 1.5),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFFFFE7B0).withOpacity(0.18),
+              blurRadius: 12,
+              spreadRadius: 1,
+            ),
+          ],
         ),
+        child: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('🎮', style: TextStyle(fontSize: 18)),
+            SizedBox(width: 10),
+            Text(
+              'GM Kai',
+              style: TextStyle(
+                color: Color(0xFFFFE7B0),
+                fontWeight: FontWeight.w700,
+                fontSize: 15,
+                letterSpacing: 0.5,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── GM Kai Bottom Sheet ───────────────────────────────────────────────────────
+
+class _GmKaiSheet extends StatelessWidget {
+  final String personaId;
+  final VoidCallback onOpenRemote;
+  final VoidCallback onOpenMusic;
+  final VoidCallback onWakePi;
+  final VoidCallback onToggleLight;
+  final VoidCallback onRainbow;
+  final VoidCallback onPulse;
+
+  const _GmKaiSheet({
+    required this.personaId,
+    required this.onOpenRemote,
+    required this.onOpenMusic,
+    required this.onWakePi,
+    required this.onToggleLight,
+    required this.onRainbow,
+    required this.onPulse,
+  });
+
+  static void _musicCmd(String action, [Map<String, dynamic>? params]) {
+    HomeAutomationService().sendCommand(
+      personaId: 'truekai',
+      deviceId: 'raspberry_pi_home',
+      target: 'music',
+      action: action,
+      params: params ?? {},
+    ).catchError((e) => print('GM music $action error: $e'));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const stroke = Color(0xFFFFE7B0);
+    const dim = Color(0x88FFE7B0);
+
+    // Helper: large action tile
+    Widget tile(String emoji, String label, VoidCallback fn,
+        {Color borderColor = const Color(0x33FFE7B0)}) =>
+        GestureDetector(
+          onTap: fn,
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.05),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: borderColor),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(emoji, style: const TextStyle(fontSize: 26)),
+                const SizedBox(height: 6),
+                Text(label,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                        color: stroke, fontSize: 12, fontWeight: FontWeight.w600)),
+              ],
+            ),
+          ),
+        );
+
+    // Helper: small transport button
+    Widget transport(IconData icon, String label, VoidCallback fn) =>
+        GestureDetector(
+          onTap: fn,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.07),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: const Color(0x33FFE7B0)),
+                ),
+                child: Icon(icon, color: stroke, size: 20),
+              ),
+              const SizedBox(height: 4),
+              Text(label, style: const TextStyle(color: dim, fontSize: 10)),
+            ],
+          ),
+        );
+
+    final moods = [
+      ('⚡', 'Energetic'), ('🧘', 'Relaxing'), ('🎯', 'Focused'),
+      ('🎉', 'Party'),     ('😴', 'Sleep'),    ('💼', 'Work'),
+    ];
+
+    return DraggableScrollableSheet(
+      initialChildSize: 0.75,
+      minChildSize: 0.5,
+      maxChildSize: 0.92,
+      expand: false,
+      builder: (_, scrollCtrl) => ListView(
+        controller: scrollCtrl,
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+        children: [
+          // Handle
+          Center(
+            child: Container(
+              width: 36, height: 4,
+              margin: const EdgeInsets.only(bottom: 16),
+              decoration: BoxDecoration(
+                color: stroke.withOpacity(0.25),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+
+          // Title
+          const Row(
+            children: [
+              Text('🎮', style: TextStyle(fontSize: 22)),
+              SizedBox(width: 10),
+              Text('GM Kai',
+                  style: TextStyle(
+                      color: stroke, fontSize: 18, fontWeight: FontWeight.w700)),
+            ],
+          ),
+
+          const SizedBox(height: 4),
+          const Text('Gamemaster controls — physical devices & environment',
+              style: TextStyle(color: dim, fontSize: 12)),
+
+          const SizedBox(height: 20),
+
+          // ── Pi & Environment ──────────────────────────────────────────────
+          const Text('ENVIRONMENT', style: TextStyle(color: dim, fontSize: 11, letterSpacing: 1.2)),
+          const SizedBox(height: 10),
+          GridView.count(
+            crossAxisCount: 4,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            crossAxisSpacing: 10,
+            mainAxisSpacing: 10,
+            children: [
+              tile('🍓', 'Wake Pi', onWakePi),
+              tile('💡', 'Lights', onToggleLight),
+              tile('🌈', 'Rainbow', onRainbow),
+              tile('💙', 'Pulse', onPulse),
+            ],
+          ),
+
+          const SizedBox(height: 20),
+
+          // ── Music ─────────────────────────────────────────────────────────
+          const Text('MUSIC', style: TextStyle(color: dim, fontSize: 11, letterSpacing: 1.2)),
+          const SizedBox(height: 12),
+
+          // Transport row
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              transport(Icons.skip_previous, 'Prev',  () => _musicCmd('prev')),
+              transport(Icons.play_arrow,    'Play',  () => _musicCmd('play')),
+              transport(Icons.pause,         'Pause', () => _musicCmd('pause')),
+              transport(Icons.stop,          'Stop',  () => _musicCmd('stop')),
+              transport(Icons.skip_next,     'Next',  () => _musicCmd('next')),
+              transport(Icons.shuffle,       'Shuffle',() => _musicCmd('shuffle')),
+            ],
+          ),
+
+          const SizedBox(height: 14),
+
+          // Mood chips
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: moods.map((m) => GestureDetector(
+              onTap: () => _musicCmd('play_mood',
+                  {'mood': m.$2.toLowerCase(), 'shuffle': true}),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.05),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: const Color(0x33FFE7B0)),
+                ),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Text(m.$1, style: const TextStyle(fontSize: 14)),
+                  const SizedBox(width: 5),
+                  Text(m.$2, style: const TextStyle(color: stroke, fontSize: 12)),
+                ]),
+              ),
+            )).toList(),
+          ),
+
+          const SizedBox(height: 10),
+
+          // Full song library
+          GestureDetector(
+            onTap: onOpenMusic,
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.04),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0x33FFE7B0)),
+              ),
+              child: const Center(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.library_music_outlined, color: stroke, size: 18),
+                    SizedBox(width: 8),
+                    Text('Full Song Library', style: TextStyle(color: stroke, fontSize: 13)),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 20),
+
+          // ── Remote ───────────────────────────────────────────────────────
+          const Text('REMOTE', style: TextStyle(color: dim, fontSize: 11, letterSpacing: 1.2)),
+          const SizedBox(height: 10),
+          GestureDetector(
+            onTap: onOpenRemote,
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.04),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0x44FFE7B0)),
+              ),
+              child: const Center(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('🏠', style: TextStyle(fontSize: 20)),
+                    SizedBox(width: 10),
+                    Text('Home Remote Control',
+                        style: TextStyle(
+                            color: stroke, fontSize: 14, fontWeight: FontWeight.w600)),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          // ── Debug ─────────────────────────────────────────────────────────
+          const SizedBox(height: 20),
+          const Text('DEBUG', style: TextStyle(color: dim, fontSize: 11, letterSpacing: 1.2)),
+          const SizedBox(height: 10),
+          Builder(builder: (ctx) => GestureDetector(
+            onTap: () async {
+              ScaffoldMessenger.of(ctx).showSnackBar(
+                const SnackBar(content: Text('🗜️ Running memory consolidation…'), duration: Duration(seconds: 2)),
+              );
+              try {
+                await MemoryConsolidationService().forceConsolidate(personaId: personaId);
+                if (ctx.mounted) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    const SnackBar(content: Text('✅ Consolidation done — check Firebase'), duration: Duration(seconds: 3)),
+                  );
+                }
+              } catch (e) {
+                if (ctx.mounted) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    SnackBar(content: Text('❌ $e'), duration: const Duration(seconds: 4)),
+                  );
+                }
+              }
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.03),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: Colors.white.withOpacity(0.15)),
+              ),
+              child: const Center(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('🗜️', style: TextStyle(fontSize: 18)),
+                    SizedBox(width: 10),
+                    Text('Force Memory Consolidation',
+                        style: TextStyle(color: dim, fontSize: 13, fontWeight: FontWeight.w500)),
+                  ],
+                ),
+              ),
+            ),
+          )),
+        ],
       ),
     );
   }

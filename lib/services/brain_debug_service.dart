@@ -94,7 +94,7 @@ class BrainDebugTrace {
     
     print('\n${'=' * 80}');
     print('🧠 BRAIN TRACE COMPLETE');
-    print('${'=' * 80}');
+    print('=' * 80);
     print('Input: "$userInput"');
     print('Output: "$response"');
     print('Total Time: ${totalDuration.inMilliseconds}ms');
@@ -117,7 +117,7 @@ class BrainDebugTrace {
         buffer.writeln('      • $key: $value');
       });
     }
-    buffer.writeln('${'-' * 80}');
+    buffer.writeln('-' * 80);
     
     return buffer.toString();
   }
@@ -143,7 +143,7 @@ class BrainDebugTrace {
     
     buffer.writeln('\n${'=' * 80}');
     buffer.writeln('🧠 BRAIN TRACE: $id');
-    buffer.writeln('${'=' * 80}');
+    buffer.writeln('=' * 80);
     buffer.writeln('📝 Input: "$userInput"');
     buffer.writeln('⏱️  Start: ${startTime.toIso8601String()}');
     if (endTime != null) {
@@ -165,9 +165,9 @@ class BrainDebugTrace {
     }
     
     if (finalResponse != null) {
-      buffer.writeln('${'=' * 80}');
+      buffer.writeln('=' * 80);
       buffer.writeln('💬 Final Response: "$finalResponse"');
-      buffer.writeln('${'=' * 80}');
+      buffer.writeln('=' * 80);
     }
     
     return buffer.toString();
@@ -219,7 +219,7 @@ class BrainDebugService {
     
     print('\n${'=' * 80}');
     print('🧠 NEW BRAIN TRACE STARTED');
-    print('${'=' * 80}');
+    print('=' * 80);
     print('ID: ${trace.id}');
     print('Input: "$userInput"');
     print('Time: ${trace.startTime.toIso8601String()}');

@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../services/usage_tracking_service.dart';
+import '../services/ai/usage_tracking_service.dart';
 
 class CostIndicatorWidget extends StatefulWidget {
   const CostIndicatorWidget({super.key});

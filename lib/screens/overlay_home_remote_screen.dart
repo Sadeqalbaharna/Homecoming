@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import '../services/home_automation_service.dart';
+import '../services/automation/home_automation_service.dart';
 import 'gm_kai_audio_screen.dart';
 
 class OverlayHomeRemoteScreen extends StatefulWidget {
@@ -122,13 +122,13 @@ class _OverlayHomeRemoteScreenState extends State<OverlayHomeRemoteScreen>
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: BoxDecoration(
+      decoration: const BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            const Color(0xFF0D0A07),
-            const Color(0xFF1A1611),
+            Color(0xFF0D0A07),
+            Color(0xFF1A1611),
           ],
         ),
       ),
@@ -459,28 +459,28 @@ class _OverlayHomeRemoteScreenState extends State<OverlayHomeRemoteScreen>
             ),
           ),
           const SizedBox(height: 20),
-          _FeatureCard(
+          const _FeatureCard(
             icon: Icons.thermostat,
             title: 'Climate Control',
             subtitle: 'Temperature & humidity controls',
             isEnabled: false,
           ),
           const SizedBox(height: 12),
-          _FeatureCard(
+          const _FeatureCard(
             icon: Icons.security,
             title: 'Security System',
             subtitle: 'Cameras & sensors monitoring',
             isEnabled: false,
           ),
           const SizedBox(height: 12),
-          _FeatureCard(
+          const _FeatureCard(
             icon: Icons.tv,
             title: 'Media Center',
             subtitle: 'TV & streaming controls',
             isEnabled: false,
           ),
           const SizedBox(height: 12),
-          _FeatureCard(
+          const _FeatureCard(
             icon: Icons.power,
             title: 'Smart Outlets',
             subtitle: 'Power control for devices',
@@ -764,19 +764,4 @@ class _FeatureCard extends StatelessWidget {
     );
   }
 }
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Text(
-                'Soon',
-                style: TextStyle(
-                  color: Colors.orange,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
+

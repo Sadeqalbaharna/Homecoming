@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../services/ai_service.dart';
+import '../services/ai/ai_service.dart';
 
 /// Voice selector widget for choosing ElevenLabs voice
 class VoiceSelector extends StatefulWidget {
@@ -154,3 +154,4 @@ class _VoiceSelectorState extends State<VoiceSelector> {
     );
   }
 }
+

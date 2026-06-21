@@ -3,9 +3,8 @@
 library;
 
 import 'package:flutter/material.dart';
-import '../services/proactive_service.dart';
-import '../services/voice_activation_service.dart';
-import '../services/voice_training_service.dart';
+import '../services/ai/proactive_service.dart';
+import '../services/voice/voice_activation_service.dart';
 import '../widgets/voice_setup_dialog.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 

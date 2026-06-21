@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../services/home_automation_service.dart';
+import '../services/automation/home_automation_service.dart';
 
 class HomeRemoteScreen extends StatefulWidget {
   const HomeRemoteScreen({super.key});

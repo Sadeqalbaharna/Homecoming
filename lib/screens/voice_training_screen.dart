@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import '../services/voice_training_service.dart';
-import '../services/voice_activation_service.dart';
+import '../services/voice/voice_training_service.dart';
+import '../services/voice/voice_activation_service.dart';
 import '../widgets/animated_button.dart';
 
 class VoiceTrainingScreen extends StatefulWidget {
@@ -477,8 +477,8 @@ class _VoiceTrainingScreenState extends State<VoiceTrainingScreen> with TickerPr
             shape: BoxShape.circle,
             gradient: RadialGradient(
               colors: [
-                Color(0xFFD4AF37).withOpacity(0.3),
-                Color(0xFFD4AF37).withOpacity(0.1),
+                const Color(0xFFD4AF37).withOpacity(0.3),
+                const Color(0xFFD4AF37).withOpacity(0.1),
               ],
             ),
           ),
@@ -657,7 +657,7 @@ class _VoiceTrainingScreenState extends State<VoiceTrainingScreen> with TickerPr
         color: Colors.grey[900],
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: Color(0xFFD4AF37).withOpacity(0.3),
+          color: const Color(0xFFD4AF37).withOpacity(0.3),
         ),
       ),
       child: Column(
@@ -730,16 +730,16 @@ class _VoiceTrainingScreenState extends State<VoiceTrainingScreen> with TickerPr
             ),
             child: Column(
               children: [
-                Row(
+                const Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Icon(
+                    Icon(
                       Icons.record_voice_over,
                       color: Color(0xFFD4AF37),
                       size: 24,
                     ),
-                    const SizedBox(width: 8),
-                    const Text(
+                    SizedBox(width: 8),
+                    Text(
                       'SAY THIS PHRASE CLEARLY:',
                       style: TextStyle(
                         color: Color(0xFFD4AF37),
@@ -900,7 +900,7 @@ class _VoiceTrainingScreenState extends State<VoiceTrainingScreen> with TickerPr
                     ),
                     boxShadow: [
                       BoxShadow(
-                        color: (_isRecording ? Colors.red : Color(0xFFD4AF37))
+                        color: (_isRecording ? Colors.red : const Color(0xFFD4AF37))
                             .withOpacity(0.4),
                         blurRadius: 20,
                         spreadRadius: 4,
@@ -935,7 +935,7 @@ class _VoiceTrainingScreenState extends State<VoiceTrainingScreen> with TickerPr
           const Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const SizedBox(
+              SizedBox(
                 width: 20,
                 height: 20,
                 child: CircularProgressIndicator(
@@ -943,7 +943,7 @@ class _VoiceTrainingScreenState extends State<VoiceTrainingScreen> with TickerPr
                   strokeWidth: 2,
                 ),
               ),
-              const SizedBox(width: 12),
+              SizedBox(width: 12),
               Text(
                 'Processing...',
                 style: TextStyle(
@@ -965,7 +965,7 @@ class _VoiceTrainingScreenState extends State<VoiceTrainingScreen> with TickerPr
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: _currentPhase == 3 ? Colors.orange.withOpacity(0.5) : 
-                 Color(0xFFD4AF37).withOpacity(0.3),
+                 const Color(0xFFD4AF37).withOpacity(0.3),
         ),
       ),
       child: Column(

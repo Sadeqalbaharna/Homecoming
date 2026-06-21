@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../services/memory_service.dart';
+import '../services/ai/memory_service.dart';
 
 /// Debug button widget that displays AI decision-making data
 class DebugButton extends StatefulWidget {
@@ -349,3 +349,4 @@ class _DebugButtonState extends State<DebugButton> {
     );
   }
 }
+

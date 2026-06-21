@@ -8,7 +8,7 @@ plugins {
 
 android {
     namespace = "com.homecoming.app"
-    compileSdk = 35  // Updated for flutter_sound and audioplayers_android
+    compileSdk = 36  // Updated for path_provider_android and shared_preferences_android
     ndkVersion = "27.0.12077973"  // Updated for plugin compatibility
 
     compileOptions {

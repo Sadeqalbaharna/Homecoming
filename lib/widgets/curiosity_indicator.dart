@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'dart:math' as math;
-import '../services/curiosity_service.dart';
+import '../services/ai/curiosity_service.dart';
 
 /// Floating curiosity indicator that shows when Kai has a question
 /// Shows an animated question mark that pulses and glows

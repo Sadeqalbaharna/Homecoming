@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'dart:math' as math;
-import '../services/ai_service.dart';
+import '../services/ai/ai_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 // Affinity traits list
@@ -938,3 +938,4 @@ class RadarChartPainter extends CustomPainter {
     return personality != oldDelegate.personality || mood != oldDelegate.mood;
   }
 }
+

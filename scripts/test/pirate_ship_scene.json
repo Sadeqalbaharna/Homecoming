@@ -1,0 +1,66 @@
+{
+  "id": "scene_20260107_143022_pirate_ship",
+  "metadata": {
+    "created_at": 1704975622,
+    "user_id": "kai_companion",
+    "original_command": "create a pirate ship scene with swashbuckling adventure",
+    "source": "mobile_voice_command",
+    "version": "1.0"
+  },
+  "scene": {
+    "name": "Pirate Ship Adventure",
+    "type": "tavern",
+    "mood": "epic",
+    "description": "A swashbuckling pirate ship on the high seas. The deck creaks with each wave, cannons rumble in the distance, and the crew chants sea shanties. Adventure and danger lurk in every shadow.",
+    "intensity": 0.75,
+    "duration_seconds": 300
+  },
+  "audio": {
+    "enabled": true,
+    "type": "youtube_search",
+    "query": "pirate ship sea shanty D&D ambiance music",
+    "stream_url": null,
+    "volume_percent": 20,
+    "fade_in_seconds": 2,
+    "fade_out_seconds": 3,
+    "loop": true
+  },
+  "lighting": {
+    "enabled": true,
+    "strips": [
+      {
+        "name": "main",
+        "animation": "wave",
+        "colors": [
+          {"r": 0, "g": 51, "b": 102, "intensity": 0.7},
+          {"r": 0, "g": 102, "b": 153, "intensity": 0.6},
+          {"r": 25, "g": 25, "b": 51, "intensity": 0.4}
+        ],
+        "speed": 0.5,
+        "brightness": 180
+      }
+    ],
+    "transition_seconds": 2
+  },
+  "devices": {
+    "bluetooth_speaker": {
+      "enabled": true,
+      "device_name": "TG-129C",
+      "sink_name": "bluez_output.39_3E_58_14_40_4A.1"
+    },
+    "led_strips": {
+      "enabled": true,
+      "count": 300
+    }
+  },
+  "execution": {
+    "status": "pending",
+    "started_at": null,
+    "completed_at": null,
+    "error": null
+  },
+  "mobile_callback": {
+    "send_status_updates": true,
+    "send_completion": true
+  }
+}

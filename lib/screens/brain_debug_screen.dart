@@ -431,3 +431,4 @@ class _BrainDebugScreenState extends State<BrainDebugScreen> {
     return buffer.toString().trim();
   }
 }
+

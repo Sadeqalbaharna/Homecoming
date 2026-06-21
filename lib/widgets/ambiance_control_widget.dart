@@ -3,7 +3,7 @@
 library;
 
 import 'package:flutter/material.dart';
-import '../services/ambiance_service.dart';
+import '../services/media/ambiance_service.dart';
 
 class AmbianceControlWidget extends StatefulWidget {
   const AmbianceControlWidget({super.key});

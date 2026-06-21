@@ -54,6 +54,25 @@
         }
       }
     },
+    "kai": {
+      "$personaId": {
+        ".read": true,
+        ".write": true,
+        "journal": {
+          ".indexOn": ["timestamp"]
+        },
+        "emotional_events": {
+          ".indexOn": ["timestamp"]
+        },
+        "state": {
+          ".read": true,
+          ".write": true
+        },
+        "proactive_queue": {
+          ".indexOn": ["delivered"]
+        }
+      }
+    },
     "analytics": {
       ".read": true,
       ".write": true

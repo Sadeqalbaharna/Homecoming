@@ -4,8 +4,8 @@ library;
 
 import 'package:flutter/material.dart';
 import 'dart:async';
-import '../services/ai_service.dart';
-import '../services/home_automation_service.dart';
+import '../services/ai/ai_service.dart';
+import '../services/automation/home_automation_service.dart';
 
 class GMKaiAudioScreen extends StatefulWidget {
   const GMKaiAudioScreen({super.key});
@@ -22,7 +22,7 @@ class _GMKaiAudioScreenState extends State<GMKaiAudioScreen> {
   bool _isProcessing = false;
   String? _lastPrompt;
   String? _lastResponse;
-  List<String> _history = [];
+  final List<String> _history = [];
   bool _showDebug = false;
   Map<String, dynamic>? _debugInfo;
 
@@ -125,12 +125,12 @@ class _GMKaiAudioScreenState extends State<GMKaiAudioScreen> {
                   Card(
                     margin: const EdgeInsets.all(16),
                     color: Colors.blue.withAlpha(200),
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
+                    child: const Padding(
+                      padding: EdgeInsets.all(16),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
+                          Text(
                             '🎮 GM Kai Mode - Direct Audio Control',
                             style: TextStyle(
                               fontSize: 18,
@@ -138,24 +138,24 @@ class _GMKaiAudioScreenState extends State<GMKaiAudioScreen> {
                               color: Colors.white,
                             ),
                           ),
-                          const SizedBox(height: 12),
-                          const Text(
+                          SizedBox(height: 12),
+                          Text(
                             'Enter any text prompt and Kai will search YouTube for matching audio and play it on your Bluetooth speaker.',
                             style: TextStyle(
                               color: Colors.white,
                               height: 1.5,
                             ),
                           ),
-                          const SizedBox(height: 12),
-                          const Text(
+                          SizedBox(height: 12),
+                          Text(
                             'Examples:',
                             style: TextStyle(
                               fontWeight: FontWeight.bold,
                               color: Colors.white,
                             ),
                           ),
-                          const SizedBox(height: 8),
-                          const Text(
+                          SizedBox(height: 8),
+                          Text(
                             '• "tavern medieval music ambient"\n'
                             '• "epic battle orchestral music"\n'
                             '• "peaceful healing ambient magic"\n'
@@ -335,12 +335,9 @@ class _GMKaiAudioScreenState extends State<GMKaiAudioScreen> {
       ('⛈️ Storm', 'thunderstorm dramatic music'),
     ];
 
-    return quickPrompts.map((label, prompt) {
-      return label[0];
-    }).map((item) {
-      final label = item as String;
-      final prompt = (item as List)[1] as String;
-      
+    return quickPrompts.map((record) {
+      final label = record.$1;
+      final prompt = record.$2;
       return Padding(
         padding: const EdgeInsets.only(right: 8),
         child: OutlinedButton(
@@ -363,7 +360,7 @@ class _GMKaiAudioScreenState extends State<GMKaiAudioScreen> {
     info.forEach((key, value) {
       if (value is Map) {
         buffer.writeln('$key:');
-        (value as Map).forEach((k, v) {
+        (value).forEach((k, v) {
           buffer.writeln('  $k: $v');
         });
       } else {
@@ -379,3 +376,4 @@ class _GMKaiAudioScreenState extends State<GMKaiAudioScreen> {
     super.dispose();
   }
 }
+

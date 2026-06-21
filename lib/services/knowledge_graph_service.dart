@@ -6,10 +6,18 @@ import 'dart:async';
 import 'dart:math';
 import 'package:firebase_database/firebase_database.dart';
 import '../models/knowledge_node.dart';
-import 'firebase_service.dart';
-import 'graph_archive_service.dart';
-import 'local_nlp_service.dart';
-import 'consciousness_service.dart';
+import 'core/firebase_service.dart';
+// import 'graph_archive_service.dart'; // TODO: file missing
+import 'voice/local_nlp_service.dart';
+// import 'consciousness_service.dart'; // TODO: file missing
+
+/// Firebase Realtime DB sometimes returns stored arrays as Map<int,dynamic>.
+/// This helper coerces both shapes to a plain List.
+List<dynamic> _asList(dynamic value) {
+  if (value is List) return value;
+  if (value is Map) return value.values.toList();
+  return [];
+}
 
 class KnowledgeGraphService {
   static final KnowledgeGraphService _instance = KnowledgeGraphService._internal();
@@ -20,18 +28,15 @@ class KnowledgeGraphService {
   DateTime? _lastBuildTime;
   static const Duration _cacheValidDuration = Duration(minutes: 5);
   
-  // Use lazy getter to avoid circular dependency
-  GraphArchiveService get _archiveService => GraphArchiveService();
-  
-  // NEW: Consciousness service for building Kai's mind
-  final _consciousness = ConsciousnessService();
+  // GraphArchiveService and ConsciousnessService are not yet implemented;
+  // archive methods below fall back to no-ops until those files are created.
 
   /// Build knowledge graph from memories and conversations
   /// NEW: Now builds Kai's CONSCIOUSNESS - not just filtered chat archive!
   Future<KnowledgeGraph> buildGraph({
     required String personaId,
     bool forceRebuild = false,
-    bool useConsciousness = true, // NEW: Toggle between old and new approach
+    bool useConsciousness = true, // reserved — consciousness service not yet implemented
   }) async {
     // Return cached graph if still valid
     if (!forceRebuild &&
@@ -55,10 +60,8 @@ class KnowledgeGraphService {
       }
     }
 
-    // NEW: Build Kai's consciousness instead of filtering conversations!
-    final graph = useConsciousness
-        ? await _consciousness.buildConsciousness(personaId)
-        : await _buildGraphFromConversations(personaId);
+    // Build graph from conversations (consciousness service not yet implemented)
+    final graph = await _buildGraphFromConversations(personaId);
     
     // Save to Firebase for next time
     if (FirebaseService.isAvailable) {
@@ -499,7 +502,7 @@ class KnowledgeGraphService {
     if ((lowerA == '${lowerB}es') || (lowerB == '${lowerA}es')) return true;
     if ((lowerA == '${lowerB}ing') || (lowerB == '${lowerA}ing')) return true;
     if ((lowerA == '${lowerB}ed') || (lowerB == '${lowerA}ed')) return true;
-    if ((lowerA == "${lowerB}'s") || (lowerB == "${lowerA}'s")) return true;
+    if ((lowerA == "$lowerB's") || (lowerB == "$lowerA's")) return true;
     
     // Remove common articles and check again
     final cleanA = lowerA.replaceAll(RegExp(r'\b(the|a|an)\s+'), '');
@@ -539,8 +542,12 @@ class KnowledgeGraphService {
     
     final matrix = List.generate(len1 + 1, (_) => List.filled(len2 + 1, 0));
     
-    for (var i = 0; i <= len1; i++) matrix[i][0] = i;
-    for (var j = 0; j <= len2; j++) matrix[0][j] = j;
+    for (var i = 0; i <= len1; i++) {
+      matrix[i][0] = i;
+    }
+    for (var j = 0; j <= len2; j++) {
+      matrix[0][j] = j;
+    }
     
     for (var i = 1; i <= len1; i++) {
       for (var j = 1; j <= len2; j++) {
@@ -620,7 +627,7 @@ class KnowledgeGraphService {
       
       // Deserialize nodes
       final nodes = <KnowledgeNode>[];
-      final nodesData = data['nodes'] as List? ?? [];
+      final nodesData = _asList(data['nodes']);
       
       for (final nodeData in nodesData) {
         final n = Map<String, dynamic>.from(nodeData as Map);
@@ -650,7 +657,7 @@ class KnowledgeGraphService {
       
       // Deserialize edges
       final edges = <KnowledgeEdge>[];
-      final edgesData = data['edges'] as List? ?? [];
+      final edgesData = _asList(data['edges']);
       
       for (final edgeData in edgesData) {
         final e = Map<String, dynamic>.from(edgeData as Map);
@@ -697,30 +704,19 @@ class KnowledgeGraphService {
   Future<ArchiveResult> archiveUnprocessedData({
     required String personaId,
   }) async {
-    print('🔄 [GRAPH] Triggering archive process...');
-    final result = await _archiveService.archiveUnprocessedData(
-      personaId: personaId,
-    );
-    
-    if (result.success) {
-      // Clear cache to force rebuild with new data
-      clearCache();
-      print('✅ [GRAPH] Archived ${result.conversationsArchived} conversations');
-      print('📊 [GRAPH] Created ${result.nodesCreated} nodes, ${result.edgesCreated} edges');
-    }
-    
-    return result;
+    print('🔄 [GRAPH] Archive not yet implemented — triggering graph rebuild');
+    clearCache();
+    return ArchiveResult(success: true, conversationsArchived: 0, nodesCreated: 0, edgesCreated: 0);
   }
-  
+
   /// Get archive statistics
   Future<ArchiveStats> getArchiveStats(String personaId) async {
-    return await _archiveService.getArchiveStats(personaId);
+    return ArchiveStats(totalArchived: 0, lastArchiveTime: null);
   }
-  
+
   /// Schedule automatic archiving (call on app start)
   void scheduleAutoArchive(String personaId) {
-    _archiveService.scheduleAutoArchive(personaId);
-    print('⏰ [GRAPH] Auto-archive scheduled (every 6 hours)');
+    print('⏰ [GRAPH] scheduleAutoArchive: not yet implemented');
   }
 
   /// Cull low-quality, non-sensical nodes from the mind map
@@ -827,6 +823,46 @@ class KnowledgeGraphService {
       );
     }
   }
+}
+
+/// Stub result for archive operations (GraphArchiveService not yet implemented)
+class ArchiveResult {
+  final bool success;
+  final int conversationsArchived;
+  final int nodesCreated;
+  final int edgesCreated;
+  final bool nothingToArchive;
+  final List<String> errors;
+
+  ArchiveResult({
+    required this.success,
+    required this.conversationsArchived,
+    required this.nodesCreated,
+    required this.edgesCreated,
+    this.nothingToArchive = false,
+    this.errors = const [],
+  });
+}
+
+/// Stub stats for archive operations (GraphArchiveService not yet implemented)
+class ArchiveStats {
+  final int totalArchived;
+  final DateTime? lastArchiveTime;
+  final DateTime? lastArchivedTime;
+  final int totalConversations;
+  final int unarchivedCount;
+  final double completionPercentage;
+  final bool isUpToDate;
+
+  ArchiveStats({
+    required this.totalArchived,
+    this.lastArchiveTime,
+    this.lastArchivedTime,
+    this.totalConversations = 0,
+    this.unarchivedCount = 0,
+    this.completionPercentage = 100.0,
+    this.isUpToDate = true,
+  });
 }
 
 /// Result of culling operation

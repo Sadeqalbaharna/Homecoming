@@ -502,6 +502,201 @@ function cosineSimilarity(a, b) {
   return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
 }
 
+// ============= PROACTIVE KAI =============
+/**
+ * Runs every 6 hours. For each persona:
+ *   1. Checks cooldown (min 8h between proactive messages)
+ *   2. Checks if user was recently active (skip if active in last 2h)
+ *   3. Reads consolidated memory (curiosities, commitments, patterns)
+ *   4. Asks GPT-4o-mini: "Is there something genuinely worth reaching out about?"
+ *   5. If yes: stores message in proactive_queue, sends blank FCM push
+ *
+ * Notification design: title = "•", body = "" — Kai only speaks after tap.
+ * The actual message sits in Firebase until the app opens.
+ */
+exports.proactiveKai = functions.pubsub
+  .schedule('every 6 hours')
+  .onRun(async (context) => {
+    console.log('📲 [Proactive] Running proactive check...');
+
+    // Get all persona IDs by scanning kai/ node
+    const kaiSnap = await db.ref('kai').get();
+    if (!kaiSnap.exists()) {
+      console.log('📲 [Proactive] No personas found');
+      return null;
+    }
+
+    const personaIds = Object.keys(kaiSnap.val() || {});
+    console.log(`📲 [Proactive] Checking ${personaIds.length} persona(s)`);
+
+    for (const personaId of personaIds) {
+      try {
+        await _checkAndPushForPersona(personaId);
+      } catch (e) {
+        console.error(`📲 [Proactive] Error for ${personaId}:`, e.message);
+      }
+    }
+    return null;
+  });
+
+async function _checkAndPushForPersona(personaId) {
+  const now = Date.now();
+  const MIN_INTERVAL_MS = 8 * 60 * 60 * 1000;   // 8 hours between messages
+  const RECENT_ACTIVE_MS = 2 * 60 * 60 * 1000;  // skip if active in last 2h
+
+  // ── Cooldown check ────────────────────────────────────────────────────────
+  const lastSentSnap = await db.ref(`kai/${personaId}/proactive/last_sent`).get();
+  if (lastSentSnap.exists()) {
+    const elapsed = now - lastSentSnap.val();
+    if (elapsed < MIN_INTERVAL_MS) {
+      console.log(`📲 [Proactive] ${personaId}: cooldown (${Math.round(elapsed / 3600000)}h elapsed)`);
+      return;
+    }
+  }
+
+  // ── Recent activity check — skip if user already talking ─────────────────
+  const activitySnap = await db.ref(`kai/${personaId}/activity_cards`)
+    .orderByChild('timestamp')
+    .limitToLast(1)
+    .get();
+  if (activitySnap.exists()) {
+    const cards = Object.values(activitySnap.val() || {});
+    const lastActivity = cards[0]?.timestamp || 0;
+    if (now - lastActivity < RECENT_ACTIVE_MS) {
+      console.log(`📲 [Proactive] ${personaId}: user recently active, skipping`);
+      return;
+    }
+  }
+
+  // ── Load consolidated memory ──────────────────────────────────────────────
+  const memSnap = await db.ref(`kai/${personaId}/memory/consolidated`).get();
+  if (!memSnap.exists()) {
+    console.log(`📲 [Proactive] ${personaId}: no consolidated memory yet`);
+    return;
+  }
+  const memory = memSnap.val();
+
+  // ── GPT decision: is there something genuinely worth reaching out about? ──
+  const systemPrompt = `You are Kai, an AI companion who genuinely cares about the person you're talking with.
+
+You have access to what you know about this person from your shared history.
+Your job is to decide: is there something GENUINELY worth reaching out about right now?
+
+Rules:
+- Only reach out if there's a real reason — a peaked curiosity, a commitment to follow up on,
+  or a pattern that deserves gentle acknowledgment
+- Do NOT reach out just to say hello or check in generically
+- Curiosity must be something you're GENUINELY intrigued by, not a generic question
+- Commitment follow-up: only if there's a specific plan/goal with a natural check-in moment
+- Be warm, specific, and natural — not a bot announcing itself
+
+Respond with JSON only:
+{
+  "should_reach_out": boolean,
+  "reason": "why now? what specifically peaked?",
+  "trigger": "curiosity" | "commitment" | "pattern",
+  "message": "What Kai would say — warm, specific, 1-3 sentences. Written as Kai speaking directly."
+}`;
+
+  const userPrompt = `Here's what I know about this person:
+
+NARRATIVE: ${memory.running_narrative || '(none yet)'}
+EMOTIONAL PATTERN: ${memory.emotional_patterns || '(none)'}
+RECURRING THEMES: ${JSON.stringify(memory.recurring_themes || [])}
+OPEN COMMITMENTS/PLANS: ${JSON.stringify(memory.commitments_and_plans || [])}
+KEY MOMENTS: ${JSON.stringify((memory.key_moments || []).slice(0, 4))}
+RELATIONSHIP: ${memory.relationship_depth_note || '(early stages)'}
+
+Current time: ${new Date().toUTCString()}
+Time since last proactive message: ${lastSentSnap.exists() ? Math.round((now - lastSentSnap.val()) / 3600000) + ' hours' : 'never sent before'}
+
+Is there something genuinely worth reaching out about right now?`;
+
+  const completion = await openai.chat.completions.create({
+    model: 'gpt-4o-mini',
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user',   content: userPrompt },
+    ],
+    max_tokens: 300,
+    temperature: 0.7,
+    response_format: { type: 'json_object' },
+  });
+
+  const result = JSON.parse(completion.choices[0].message.content);
+  console.log(`📲 [Proactive] ${personaId}: should_reach_out=${result.should_reach_out}, reason=${result.reason}`);
+
+  if (!result.should_reach_out || !result.message) return;
+
+  // ── Store message in proactive queue ──────────────────────────────────────
+  const queueRef = db.ref(`kai/${personaId}/proactive_queue`).push();
+  await queueRef.set({
+    message:   result.message,
+    trigger:   result.trigger || 'curiosity',
+    reason:    result.reason,
+    createdAt: now,
+    delivered: false,
+  });
+
+  // Record last sent time
+  await db.ref(`kai/${personaId}/proactive/last_sent`).set(now);
+
+  // ── Send blank FCM push to all registered tokens ──────────────────────────
+  const tokensSnap = await db.ref(`kai/${personaId}/fcm_tokens`).get();
+  if (!tokensSnap.exists()) {
+    console.log(`📲 [Proactive] ${personaId}: no FCM tokens registered`);
+    return;
+  }
+
+  const tokens = Object.keys(tokensSnap.val() || {})
+    .map(k => k.replace(/_/g, '.'));  // un-sanitize dots
+
+  if (tokens.length === 0) return;
+
+  // Intentionally blank notification — Kai only speaks after tap
+  const message = {
+    notification: {
+      title: '•',
+      body: '',
+    },
+    android: {
+      notification: {
+        sound: 'default',
+        priority: 'default',
+        channelId: 'kai_proactive',
+      },
+    },
+    apns: {
+      payload: {
+        aps: {
+          sound: 'default',
+          badge: 1,
+        },
+      },
+    },
+    tokens: tokens,
+  };
+
+  try {
+    const response = await admin.messaging().sendEachForMulticast(message);
+    console.log(`📲 [Proactive] ${personaId}: sent to ${response.successCount}/${tokens.length} devices`);
+
+    // Remove stale tokens (404 = token no longer valid)
+    const staleTokens = [];
+    response.responses.forEach((resp, idx) => {
+      if (!resp.success && resp.error?.code === 'messaging/registration-token-not-registered') {
+        staleTokens.push(tokens[idx]);
+      }
+    });
+    for (const stale of staleTokens) {
+      const key = stale.replace(/\./g, '_');
+      await db.ref(`kai/${personaId}/fcm_tokens/${key}`).remove();
+    }
+  } catch (e) {
+    console.error(`📲 [Proactive] FCM send failed:`, e.message);
+  }
+}
+
 // ============= EXPORTS =============
 // All functions are exported above
 console.log('🧠 Kai Brain Functions loaded successfully');

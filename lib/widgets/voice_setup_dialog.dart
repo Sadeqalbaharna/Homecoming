@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../screens/voice_training_screen.dart';
-import '../services/voice_training_service.dart';
+import '../services/voice/voice_training_service.dart';
 import '../widgets/animated_button.dart';
 
 class VoiceSetupDialog extends StatefulWidget {
@@ -42,7 +42,7 @@ class _VoiceSetupDialogState extends State<VoiceSetupDialog> {
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(20),
         side: BorderSide(
-          color: Color(0xFFD4AF37).withOpacity(0.3),
+          color: const Color(0xFFD4AF37).withOpacity(0.3),
           width: 1,
         ),
       ),
@@ -66,8 +66,8 @@ class _VoiceSetupDialogState extends State<VoiceSetupDialog> {
                     shape: BoxShape.circle,
                     gradient: RadialGradient(
                       colors: [
-                        Color(0xFFD4AF37).withOpacity(0.3),
-                        Color(0xFFD4AF37).withOpacity(0.1),
+                        const Color(0xFFD4AF37).withOpacity(0.3),
+                        const Color(0xFFD4AF37).withOpacity(0.1),
                       ],
                     ),
                   ),
@@ -147,8 +147,8 @@ class _VoiceSetupDialogState extends State<VoiceSetupDialog> {
             shape: BoxShape.circle,
             gradient: RadialGradient(
               colors: [
-                Color(0xFFD4AF37).withOpacity(0.3),
-                Color(0xFFD4AF37).withOpacity(0.1),
+                const Color(0xFFD4AF37).withOpacity(0.3),
+                const Color(0xFFD4AF37).withOpacity(0.1),
               ],
             ),
           ),
@@ -245,8 +245,8 @@ class _VoiceSetupDialogState extends State<VoiceSetupDialog> {
             shape: BoxShape.circle,
             gradient: RadialGradient(
               colors: [
-                Color(0xFFD4AF37).withOpacity(0.2),
-                Color(0xFFD4AF37).withOpacity(0.05),
+                const Color(0xFFD4AF37).withOpacity(0.2),
+                const Color(0xFFD4AF37).withOpacity(0.05),
               ],
             ),
           ),
@@ -377,7 +377,7 @@ class _VoiceSetupDialogState extends State<VoiceSetupDialog> {
         color: Colors.grey[900]?.withOpacity(0.5),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: Color(0xFFD4AF37).withOpacity(0.2),
+          color: const Color(0xFFD4AF37).withOpacity(0.2),
         ),
       ),
       child: Column(

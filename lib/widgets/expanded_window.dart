@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:audioplayers/audioplayers.dart';
-import '../services/ai_service.dart';
-import '../services/voice_activation_service.dart';
+import '../services/ai/ai_service.dart';
+import '../services/voice/voice_activation_service.dart';
 import '../screens/usage_stats_screen.dart';
 import '../screens/mind_map_screen.dart';
 import '../screens/overlay_home_remote_screen.dart';
@@ -816,3 +816,4 @@ class _ExpandedWindowState extends State<ExpandedWindow> with SingleTickerProvid
     );
   }
 }
+

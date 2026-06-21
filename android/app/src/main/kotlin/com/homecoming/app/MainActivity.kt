@@ -22,25 +22,8 @@ class MainActivity : FlutterActivity() {
         return TransparencyMode.transparent
     }
     
-    override fun onResume() {
-        super.onResume()
-        
-        // Check if overlay service is running
-        // If it is, this activity should close itself
-        if (OverlayService.isRunning) {
-            Log.d(TAG, "Overlay is running, finishing MainActivity")
-            
-            // Make window not touchable immediately
-            window.addFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
-            window.addFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
-            window.addFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL)
-            
-            // Finish after a short delay to ensure flags are applied
-            Handler(Looper.getMainLooper()).postDelayed({
-                finish()
-            }, 100)
-        }
-    }
+    // No auto-finish on resume — overlay and main app coexist.
+    // The Dart layer controls visibility via moveTaskToBack / bring-to-front.
     
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -59,14 +42,15 @@ class MainActivity : FlutterActivity() {
             when (call.method) {
                 "finishActivity" -> {
                     Log.d(TAG, "finishActivity called via MethodChannel")
-                    
-                    // Make window not touchable before finishing
                     window.addFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
                     window.addFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
                     window.addFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL)
-                    
-                    // Finish the activity
                     finish()
+                    result.success(true)
+                }
+                "moveTaskToBack" -> {
+                    Log.d(TAG, "moveTaskToBack called via MethodChannel")
+                    moveTaskToBack(true)
                     result.success(true)
                 }
                 else -> result.notImplemented()

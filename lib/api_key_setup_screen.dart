@@ -2,7 +2,10 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'services/secure_storage_service.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'services/core/secure_storage_service.dart';
+import 'services/ai/ai_config.dart';
 
 /// Screen for setting up API keys on first launch
 class ApiKeySetupScreen extends StatefulWidget {
@@ -16,13 +19,19 @@ class ApiKeySetupScreen extends StatefulWidget {
 
 class _ApiKeySetupScreenState extends State<ApiKeySetupScreen> {
   final _secureStorage = SecureStorageService();
+  final _rawStorage = const FlutterSecureStorage();
   final _openaiController = TextEditingController();
   final _elevenlabsController = TextEditingController();
-  
+  final _voiceIdController = TextEditingController();
+  final _anthropicController = TextEditingController();
+  final _picovoiceController = TextEditingController();
+
   bool _saving = false;
   String? _error;
   bool _showOpenAI = false;
   bool _showElevenLabs = false;
+  bool _showAnthropic = false;
+  bool _showPicovoice = false;
 
   @override
   void initState() {
@@ -33,13 +42,25 @@ class _ApiKeySetupScreenState extends State<ApiKeySetupScreen> {
   Future<void> _loadExistingKeys() async {
     final openai = await _secureStorage.getOpenAIKey();
     final elevenlabs = await _secureStorage.getElevenLabsKey();
-    
+    final anthropic = await _secureStorage.getAnthropicKey();
+    final picovoice = await _rawStorage.read(key: 'picovoice');
+    final prefs = await SharedPreferences.getInstance();
+    final voiceId = prefs.getString('selected_voice_id') ?? '';
+
     if (openai != null && openai.isNotEmpty) {
       _openaiController.text = openai;
     }
-    
     if (elevenlabs != null && elevenlabs.isNotEmpty) {
       _elevenlabsController.text = elevenlabs;
+    }
+    if (anthropic != null && anthropic.isNotEmpty) {
+      _anthropicController.text = anthropic;
+    }
+    if (picovoice != null && picovoice.isNotEmpty) {
+      _picovoiceController.text = picovoice;
+    }
+    if (voiceId.isNotEmpty) {
+      _voiceIdController.text = voiceId;
     }
   }
 
@@ -68,7 +89,24 @@ class _ApiKeySetupScreenState extends State<ApiKeySetupScreen> {
       if (elevenlabsKey.isNotEmpty) {
         await _secureStorage.setElevenLabsKey(elevenlabsKey);
       }
-      
+
+      final anthropicKey = _anthropicController.text.trim();
+      if (anthropicKey.isNotEmpty) {
+        await _secureStorage.setAnthropicKey(anthropicKey);
+      }
+
+      final picovoiceKey = _picovoiceController.text.trim();
+      if (picovoiceKey.isNotEmpty) {
+        await _rawStorage.write(key: 'picovoice', value: picovoiceKey);
+      }
+
+      final voiceId = _voiceIdController.text.trim();
+      if (voiceId.isNotEmpty) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('selected_voice_id', voiceId);
+      }
+
+      AIConfig.clearCache();
       widget.onComplete();
     } catch (e) {
       setState(() => _error = 'Failed to save keys: $e');
@@ -81,6 +119,9 @@ class _ApiKeySetupScreenState extends State<ApiKeySetupScreen> {
   void dispose() {
     _openaiController.dispose();
     _elevenlabsController.dispose();
+    _voiceIdController.dispose();
+    _anthropicController.dispose();
+    _picovoiceController.dispose();
     super.dispose();
   }
 
@@ -207,9 +248,134 @@ class _ApiKeySetupScreenState extends State<ApiKeySetupScreen> {
                   fontSize: 12,
                 ),
               ),
-              
+
+              const SizedBox(height: 24),
+
+              // ElevenLabs Voice ID
+              const Text(
+                'ElevenLabs Voice ID (Optional)',
+                style: TextStyle(
+                  color: Color(0xFFFFE7B0),
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _voiceIdController,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  hintText: 'e.g. 21m00Tcm4TlvDq8ikWAM',
+                  hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
+                  filled: true,
+                  fillColor: const Color(0xFF2A2119),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Find your Voice ID at elevenlabs.io → Voices → click a voice → copy its ID',
+                style: TextStyle(
+                  color: Colors.white.withOpacity(0.5),
+                  fontSize: 12,
+                ),
+              ),
+
+              const SizedBox(height: 24),
+
+              // Anthropic API Key (for Opus personality drift)
+              const Text(
+                'Anthropic API Key (Optional)',
+                style: TextStyle(
+                  color: Color(0xFFFFE7B0),
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _anthropicController,
+                obscureText: !_showAnthropic,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  hintText: 'sk-ant-...',
+                  hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
+                  filled: true,
+                  fillColor: const Color(0xFF2A2119),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      _showAnthropic ? Icons.visibility_off : Icons.visibility,
+                      color: Colors.white.withOpacity(0.5),
+                    ),
+                    onPressed: () => setState(() => _showAnthropic = !_showAnthropic),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Powers deep personality drift analysis using Claude Opus. Get one at console.anthropic.com',
+                style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 12),
+              ),
+
+              const SizedBox(height: 24),
+
+              // Picovoice Access Key (on-device "Hey Kai" wake word)
+              Row(
+                children: [
+                  const Icon(Icons.mic_none, color: Color(0xFF3D9BFF), size: 18),
+                  const SizedBox(width: 8),
+                  const Text(
+                    'Picovoice Access Key (Optional)',
+                    style: TextStyle(
+                      color: Color(0xFFFFE7B0),
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _picovoiceController,
+                obscureText: !_showPicovoice,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  hintText: 'Leave empty to disable "Hey Kai" wake word',
+                  hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
+                  filled: true,
+                  fillColor: const Color(0xFF2A2119),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      _showPicovoice ? Icons.visibility_off : Icons.visibility,
+                      color: Colors.white.withOpacity(0.5),
+                    ),
+                    onPressed: () =>
+                        setState(() => _showPicovoice = !_showPicovoice),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Enables on-device "Hey Kai" detection — zero API cost, ~1% CPU.\n'
+                '1. Sign up free at console.picovoice.ai\n'
+                '2. Copy your Access Key here\n'
+                '3. Train "Hey Kai" → Export → put .ppn in assets/models/',
+                style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 12),
+              ),
+
               const SizedBox(height: 32),
-              
+
               // Error message
               if (_error != null)
                 Container(
@@ -335,3 +501,4 @@ class _ApiKeySetupScreenState extends State<ApiKeySetupScreen> {
     );
   }
 }
+

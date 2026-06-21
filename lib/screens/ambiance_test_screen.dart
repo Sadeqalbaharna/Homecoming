@@ -4,8 +4,8 @@ library;
 
 import 'package:flutter/material.dart';
 import '../widgets/ambiance_control_widget.dart';
-import '../services/ambiance_service.dart';
-import '../services/ai_service.dart';
+import '../services/media/ambiance_service.dart';
+import '../services/ai/ai_service.dart';
 
 class AmbianceTestScreen extends StatefulWidget {
   const AmbianceTestScreen({super.key});

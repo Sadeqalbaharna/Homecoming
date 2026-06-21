@@ -34,6 +34,8 @@ class _MindMapScreenState extends State<MindMapScreen> with TickerProviderStateM
   
   // View state
   final TransformationController _transformationController = TransformationController();
+  static const double _canvasSize = 2000.0;
+  static const double _defaultScale = 0.35; // start zoomed out to see the whole graph
   
   // Selection
   KnowledgeNode? _selectedNode;
@@ -138,7 +140,10 @@ class _MindMapScreenState extends State<MindMapScreen> with TickerProviderStateM
         _loadingProgress = 1.0;
         _loadingStatus = 'Complete!';
       });
-      
+
+      // Start zoomed out so the full graph is visible
+      WidgetsBinding.instance.addPostFrameCallback((_) => _fitToScreen());
+
       // Start force-directed layout animation
       _startForceSimulation();
     } catch (e, stackTrace) {
@@ -188,10 +193,11 @@ class _MindMapScreenState extends State<MindMapScreen> with TickerProviderStateM
     
     _forceAnimationController.repeat();
     
-    // Stop after 3 seconds
+    // Stop after 3 seconds, then re-fit so outliers are visible
     Future.delayed(const Duration(seconds: 3), () {
       _forceAnimationController.stop();
       _isAnimating = false;
+      if (mounted) _fitToScreen();
     });
   }
 
@@ -270,6 +276,73 @@ class _MindMapScreenState extends State<MindMapScreen> with TickerProviderStateM
       _selectedNode = null;
       _highlightedNodeIds.clear();
     });
+  }
+
+  /// Fit ALL nodes (including outliers) into the viewport by computing the
+  /// actual bounding box of node positions rather than the fixed canvas size.
+  void _fitToScreen() {
+    final nodes = _graph?.nodes;
+    if (nodes == null || nodes.isEmpty) return;
+
+    // Compute bounding box of all node centres
+    double minX = nodes.first.x;
+    double maxX = nodes.first.x;
+    double minY = nodes.first.y;
+    double maxY = nodes.first.y;
+
+    for (final n in nodes) {
+      if (n.x < minX) minX = n.x;
+      if (n.x > maxX) maxX = n.x;
+      if (n.y < minY) minY = n.y;
+      if (n.y > maxY) maxY = n.y;
+    }
+
+    // Add padding so node circles aren't clipped at the edges
+    const pad = 60.0;
+    minX -= pad; minY -= pad;
+    maxX += pad; maxY += pad;
+
+    final contentW = maxX - minX;
+    final contentH = maxY - minY;
+    if (contentW <= 0 || contentH <= 0) return;
+
+    final size = MediaQuery.of(context).size;
+    final scale = min(size.width / contentW, size.height / contentH) * 0.9;
+
+    // Centre the bounding box on screen
+    final tx = size.width  / 2 - (minX + contentW / 2) * scale;
+    final ty = size.height / 2 - (minY + contentH / 2) * scale;
+
+    _transformationController.value = Matrix4.identity()
+      ..setEntry(0, 0, scale)
+      ..setEntry(1, 1, scale)
+      ..setEntry(0, 3, tx)
+      ..setEntry(1, 3, ty);
+  }
+
+  void _zoomBy(double factor) {
+    final m = _transformationController.value;
+    final currentScale = m.getMaxScaleOnAxis();
+    final nextScale = (currentScale * factor).clamp(0.05, 5.0);
+    final actualFactor = nextScale / currentScale;
+
+    // Current translation
+    final tx = m.entry(0, 3);
+    final ty = m.entry(1, 3);
+
+    // Zoom toward the screen center so the view doesn't jump
+    final size = MediaQuery.of(context).size;
+    final cx = size.width  / 2;
+    final cy = size.height / 2;
+
+    final newTx = cx - actualFactor * (cx - tx);
+    final newTy = cy - actualFactor * (cy - ty);
+
+    _transformationController.value = Matrix4.identity()
+      ..setEntry(0, 0, nextScale)
+      ..setEntry(1, 1, nextScale)
+      ..setEntry(0, 3, newTx)
+      ..setEntry(1, 3, newTy);
   }
 
   @override
@@ -536,17 +609,13 @@ class _MindMapScreenState extends State<MindMapScreen> with TickerProviderStateM
           child: Listener(
             onPointerSignal: (event) {
               if (event is PointerScrollEvent) {
-                setState(() {
-                  // Zoom with mouse wheel - adjust transformation matrix
-                  final delta = event.scrollDelta.dy;
-                  final scale = (_transformationController.value.getMaxScaleOnAxis() - delta * 0.001).clamp(0.1, 5.0);
-                  _transformationController.value = Matrix4.identity()..scale(scale);
-                });
+                final factor = event.scrollDelta.dy > 0 ? 0.9 : 1.1;
+                _zoomBy(factor);
               }
             },
             child: InteractiveViewer(
               transformationController: _transformationController,
-              minScale: 0.1,
+              minScale: 0.01,
               maxScale: 5.0,
               boundaryMargin: const EdgeInsets.all(double.infinity),
               child: GraphCanvas(
@@ -578,6 +647,33 @@ class _MindMapScreenState extends State<MindMapScreen> with TickerProviderStateM
             ),
           ),
         
+        // Zoom controls
+        Positioned(
+          right: 16,
+          bottom: 100,
+          child: Column(
+            children: [
+              _ZoomButton(
+                icon: Icons.add,
+                onTap: () => _zoomBy(1.25),
+                tooltip: 'Zoom in',
+              ),
+              const SizedBox(height: 6),
+              _ZoomButton(
+                icon: Icons.remove,
+                onTap: () => _zoomBy(0.8),
+                tooltip: 'Zoom out',
+              ),
+              const SizedBox(height: 6),
+              _ZoomButton(
+                icon: Icons.fit_screen,
+                onTap: _fitToScreen,
+                tooltip: 'Fit to screen',
+              ),
+            ],
+          ),
+        ),
+
         // Stats overlay
         Positioned(
           left: 16,
@@ -655,7 +751,7 @@ class _MindMapScreenState extends State<MindMapScreen> with TickerProviderStateM
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Last Archived: ${_formatDateTime(stats.lastArchivedTime)}'),
+              Text('Last Archived: ${stats.lastArchivedTime != null ? _formatDateTime(stats.lastArchivedTime!) : 'Never'}'),
               const SizedBox(height: 8),
               Text('Total Conversations: ${stats.totalConversations}'),
               Text('Archived: ${stats.totalArchived}'),
@@ -975,3 +1071,36 @@ class _MindMapScreenState extends State<MindMapScreen> with TickerProviderStateM
     );
   }
 }
+
+class _ZoomButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+  final String tooltip;
+
+  const _ZoomButton({
+    required this.icon,
+    required this.onTap,
+    required this.tooltip,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            color: Colors.black.withOpacity(0.7),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.white24, width: 0.5),
+          ),
+          child: Icon(icon, color: Colors.white70, size: 18),
+        ),
+      ),
+    );
+  }
+}
+
