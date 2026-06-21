@@ -59,7 +59,6 @@ const Duration kAttentionPulse = Duration(seconds: 2);
 
 /// Persona IDs
 const String kPersonaKai = 'truekai';
-const String kPersonaClone = 'clonekai';
 
 /// Global AI service instance
 final aiService = AIService();
@@ -149,13 +148,19 @@ class _Floater {
 
 class _MobileKaiState extends State<_MobileKai>
     with TickerProviderStateMixin {
-  // persona runtime
-  String _personaId = kPersonaKai;
-  bool get _isClone => _personaId == kPersonaClone;
+  // persona
+  final String _personaId = kPersonaKai;
 
   // glow
   late final AnimationController _glowCtrl;
   late final Animation<double> _glow;
+
+  // loading screen
+  bool _isLoading = true;
+  String _loadingStep = 'Starting up…';
+
+  // background mode guard — prevents concurrent enter/exit calls
+  bool _inBackgroundTransition = false;
 
   // background mode overlay
   StreamSubscription<String>? _wakeWordSub;
@@ -192,27 +197,87 @@ class _MobileKaiState extends State<_MobileKai>
   // avatar state machine
   DateTime _lastInteraction = DateTime.now();
   DateTime _attentionUntil = DateTime.fromMillisecondsSinceEpoch(0);
-  Timer? _idleTicker;
-
   // frame-based animation
   String _currentAnimation = 'idle';
-  int _currentFrame = 0;
   AnimationController? _frameAnimController;
+  // _currentFrame and _idleTicker removed — AnimatedBuilder reads the
+  // controller value directly, so no setState per frame is needed.
+
+  void _setStep(String step) {
+    if (mounted) setState(() => _loadingStep = step);
+  }
+
+  Future<void> _initialize() async {
+    try {
+      // Close any overlay left over from a previous session / hot restart
+      try {
+        if (await FlutterOverlayWindow.isActive()) {
+          await FlutterOverlayWindow.closeOverlay();
+          print('🔵 [Init] Closed stale overlay from previous session');
+        }
+      } catch (_) {}
+
+      // 1 — avatar frames (the slow one)
+      _setStep('Loading avatar…');
+      await _precacheAnimation(kAvatarIdleFrameDir, kIdleFrameCount);
+      if (mounted) _switchToAnimation('idle');
+
+      // 2 — warm up the AI persona
+      _setStep('Waking Kai…');
+      await aiService.bootstrapPersona(_personaId)
+          .catchError((e) => print('⚠️ [Bootstrap] $e'));
+
+      // 3 — check for a message Kai left while we were away
+      _setStep('Checking messages…');
+      await ProactiveService().initialize(_personaId)
+          .catchError((e) => print('⚠️ [Proactive] $e'));
+      final pending = await ProactiveService()
+          .checkPendingMessage(_personaId)
+          .catchError((e) { print('⚠️ [Proactive] $e'); return null; });
+      if (pending != null && mounted) {
+        await ProactiveService().markDelivered(_personaId, pending.id);
+        setState(() => _reply = pending.message);
+        _setBubble(true);
+      }
+
+      // Done — show UI immediately, other animations load on first use
+      if (mounted) setState(() => _isLoading = false);
+      MemoryReflectionService().maybeReflect(personaId: _personaId)
+          .catchError((e) => print('⚠️ [Reflection] $e'));
+      PersonalityDriftService().maybeDrift(personaId: _personaId)
+          .catchError((e) => print('⚠️ [Drift] $e'));
+    } catch (e) {
+      print('❌ [Init] $e');
+      // Don't block the user — just open the app
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
 
   void _markInteraction() {
     _lastInteraction = DateTime.now();
     _resetIdleTimer();
   }
 
+  void _setBubble(bool open) {
+    if (_showBubble == open) return;
+    setState(() => _showBubble = open);
+    if (open) {
+      VoiceActivationService().pause();
+    } else {
+      VoiceActivationService().resume();
+    }
+  }
+
   void _resetIdleTimer() {
     _idleBackgroundTimer?.cancel();
-    _idleBackgroundTimer = Timer(const Duration(minutes: 3), () {
-      // Only auto-sleep if not currently sending or speaking
-      if (mounted && !_sending && !_isSpeaking) {
-        print('💤 [BackgroundMode] 3-min idle — entering background');
-        _enterBackground();
-      }
-    });
+    // Auto-sleep disabled — user controls background mode via the flame button.
+    // Re-enable by uncommenting the timer below.
+    // _idleBackgroundTimer = Timer(const Duration(minutes: 3), () {
+    //   if (mounted && !_sending && !_isSpeaking) {
+    //     print('💤 [BackgroundMode] 3-min idle — entering background');
+    //     _enterBackground();
+    //   }
+    // });
   }
 
   void _pulseAttention() {
@@ -245,52 +310,71 @@ class _MobileKaiState extends State<_MobileKai>
     }
   }
 
+  // Tracks which animation dirs are loaded so we only evict on a real switch
+  final Set<String> _cachedAnimDirs = {};
+
   Future<void> _precacheAnimation(String dir, int frameCount) async {
+    if (_cachedAnimDirs.contains(dir)) return; // already loaded
     final futures = List.generate(frameCount, (i) {
       final path = '${dir}frame_${i.toString().padLeft(4, '0')}.png';
       return precacheImage(AssetImage(path), context);
     });
     await Future.wait(futures, eagerError: false);
+    _cachedAnimDirs.add(dir);
+  }
+
+  void _evictAnimation(String dir, int frameCount) {
+    if (!_cachedAnimDirs.contains(dir)) return;
+    for (int i = 0; i < frameCount; i++) {
+      final path = '${dir}frame_${i.toString().padLeft(4, '0')}.png';
+      imageCache.evict(AssetImage(path));
+    }
+    _cachedAnimDirs.remove(dir);
   }
 
   void _switchToAnimation(String animType) {
     if (_currentAnimation == animType && _frameAnimController != null) return;
+    final prevAnim = _currentAnimation;
     _currentAnimation = animType;
-    _currentFrame = 0;
     _frameAnimController?.dispose();
     final frameCount = _getFrameCount(animType);
     _frameAnimController = AnimationController(
       vsync: this,
       duration: Duration(milliseconds: frameCount * 40), // ~25 fps
     )..repeat();
-    _frameAnimController!.addListener(() {
-      final frame = (_frameAnimController!.value * frameCount).floor().clamp(0, frameCount - 1);
-      if (mounted && frame != _currentFrame) {
-        setState(() => _currentFrame = frame);
+
+    // Lazy-load new animation, then evict the previous one to free RAM
+    final newDir = _getFrameDir(animType);
+    final prevDir = _getFrameDir(prevAnim);
+    _precacheAnimation(newDir, frameCount).then((_) {
+      if (prevAnim != animType) {
+        _evictAnimation(prevDir, _getFrameCount(prevAnim));
       }
     });
+
+    // No addListener+setState — AnimatedBuilder reads controller.value directly
+    setState(() {}); // single rebuild to swap controller reference
   }
 
   Widget _buildAvatarWidget() {
+    final ctrl = _frameAnimController;
+    if (ctrl == null) {
+      return Image.asset(kAvatarFallback, fit: BoxFit.cover);
+    }
     final dir = _getFrameDir(_currentAnimation);
-    final framePath = '${dir}frame_${_currentFrame.toString().padLeft(4, '0')}.png';
-    return Image.asset(
-      framePath,
-      fit: BoxFit.cover,
-      errorBuilder: (_, __, ___) => Image.asset(
-        kAvatarFallback,
-        fit: BoxFit.cover,
-      ),
+    final frameCount = _getFrameCount(_currentAnimation);
+    return AnimatedBuilder(
+      animation: ctrl,
+      builder: (_, __) {
+        final frame = (ctrl.value * frameCount).floor().clamp(0, frameCount - 1);
+        final framePath = '${dir}frame_${frame.toString().padLeft(4, '0')}.png';
+        return Image.asset(
+          framePath,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => Image.asset(kAvatarFallback, fit: BoxFit.cover),
+        );
+      },
     );
-  }
-
-  // persona toggle
-  Future<void> _togglePersona() async {
-    setState(() {
-      _personaId = _personaId == kPersonaKai ? kPersonaClone : kPersonaKai;
-    });
-    unawaited(aiService.bootstrapPersona(_personaId));
-    if (_isClone && _devOpen) setState(() => _devOpen = false);
   }
 
   @override
@@ -305,37 +389,7 @@ class _MobileKaiState extends State<_MobileKai>
         .chain(CurveTween(curve: Curves.easeInOut))
         .animate(_glowCtrl);
 
-    // Precache all frames, then start animation
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      await _precacheAnimation(kAvatarIdleFrameDir, kIdleFrameCount);
-      _switchToAnimation('idle');
-      // Remaining animations in background — no await
-      _precacheAnimation(kAvatarAttentionFrameDir, kAttentionFrameCount);
-      _precacheAnimation(kAvatarThinkingFrameDir,  kThinkingFrameCount);
-      _precacheAnimation(kAvatarSpeakingFrameDir,  kSpeakingFrameCount);
-
-      // Daily autonomous reflection — fire-and-forget, skips if <24h since last run
-      MemoryReflectionService().maybeReflect(personaId: _personaId)
-          .catchError((e) => print('⚠️ [Reflection] $e'));
-
-      // 48h personality drift — analyses conversation patterns, nudges baseline
-      PersonalityDriftService().maybeDrift(personaId: _personaId)
-          .catchError((e) => print('⚠️ [Drift] $e'));
-
-      // 📲 Proactive Kai — register FCM token + check for pending message
-      ProactiveService().initialize(_personaId)
-          .catchError((e) => print('⚠️ [Proactive] $e'));
-
-      // Check if Kai left a message while we were away
-      final pending = await ProactiveService().checkPendingMessage(_personaId);
-      if (pending != null && mounted) {
-        await ProactiveService().markDelivered(_personaId, pending.id);
-        setState(() {
-          _reply = pending.message;
-          _showBubble = true;
-        });
-      }
-    });
+    WidgetsBinding.instance.addPostFrameCallback((_) => _initialize());
 
     _stateSub = _player.onPlayerStateChanged.listen((s) {
       _currentState = s;
@@ -354,18 +408,24 @@ class _MobileKaiState extends State<_MobileKai>
       if (mounted) setState(() {});
     });
 
-    _idleTicker = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted) setState(() {});
-    });
-
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      unawaited(aiService.bootstrapPersona(_personaId));
-    });
-
-    // Listen for messages from the flame overlay (tap to expand)
+    // Listen for messages from the flame overlay
     _overlayMsgSub = FlutterOverlayWindow.overlayListener.listen((data) {
-      if (data is Map && data['action'] == 'expand') {
+      if (data is! Map) return;
+      final action = data['action'];
+      if (action == 'expand') {
+        // Tap: expand the app normally
         _exitBackground();
+      } else if (action == 'pauseVoice') {
+        // Long press step 1: pause Porcupine so Android SpeechRecognizer can take the mic
+        VoiceActivationService().pause();
+      } else if (action == 'message') {
+        // Long press step 2: transcript arrived — send silently, resume wake word
+        final text = (data['text'] as String? ?? '').trim();
+        if (text.isNotEmpty) {
+          _controller.text = text;
+          _send(); // runs in background; TTS plays the response
+        }
+        VoiceActivationService().resume();
       }
     });
 
@@ -390,7 +450,6 @@ class _MobileKaiState extends State<_MobileKai>
     _overlayMsgSub?.cancel();
     _idleBackgroundTimer?.cancel();
     _player.dispose();
-    _idleTicker?.cancel();
     for (final f in _floaters) {
       f.ctrl.dispose();
     }
@@ -400,8 +459,10 @@ class _MobileKaiState extends State<_MobileKai>
   // ── Background mode ────────────────────────────────────────────────────────
 
   Future<void> _enterBackground() async {
+    if (_inBackgroundTransition) return;
+    if (await FlutterOverlayWindow.isActive()) return; // already sleeping
+    _inBackgroundTransition = true;
     try {
-      // Stop the idle-sleep timer while we're already going to sleep
       _idleBackgroundTimer?.cancel();
 
       // Check / request overlay permission
@@ -409,47 +470,40 @@ class _MobileKaiState extends State<_MobileKai>
       if (!hasPermission) {
         await FlutterOverlayWindow.requestPermission();
         if (!await FlutterOverlayWindow.isPermissionGranted()) {
-          print('⚠️ [BackgroundMode] Overlay permission denied — minimizing without overlay');
+          print('⚠️ [BackgroundMode] No overlay permission — minimizing only');
           await _minimizeApp();
           return;
         }
       }
 
-      // Don't double-show
-      if (!await FlutterOverlayWindow.isActive()) {
-        // Stop heavy animations
-        _frameAnimController?.stop();
-        _glowCtrl.stop();
-        _idleTicker?.cancel();
+      // Stop heavy animations
+      _frameAnimController?.stop();
+      _glowCtrl.stop();
 
-        await FlutterOverlayWindow.showOverlay(
-          height: 120,
-          width: 90,
-          alignment: OverlayAlignment.centerRight,
-          flag: OverlayFlag.defaultFlag,
-          enableDrag: true,
-          positionGravity: PositionGravity.auto,
-          overlayTitle: 'Kai',
-          overlayContent: 'Tap the flame to open Kai',
-        );
-        print('🔵 [BackgroundMode] Overlay shown');
-
-        // Push pending-message badge state to the overlay
-        final pending = await ProactiveService().checkPendingMessage(_personaId);
-        await FlutterOverlayWindow.shareData({'pending': pending != null});
-
-        // Brief pause so the overlay window is fully visible before we hide the app
-        await Future.delayed(const Duration(milliseconds: 400));
-      }
-
+      // 1. Minimize FIRST so the app is gone before the flame appears
       await _minimizeApp();
+      // Give the activity time to actually go to background
+      await Future.delayed(const Duration(milliseconds: 350));
+
+      // 2. Now show the flame on top of the home screen (no overlap with the app)
+      await FlutterOverlayWindow.showOverlay(
+        height: 120,
+        width: 90,
+        alignment: OverlayAlignment.centerRight,
+        flag: OverlayFlag.defaultFlag,
+        enableDrag: true,
+        positionGravity: PositionGravity.auto,
+        overlayTitle: 'Kai',
+        overlayContent: 'Tap the flame to open Kai',
+      );
+      print('🔵 [BackgroundMode] Overlay shown');
+
+      final pending = await ProactiveService().checkPendingMessage(_personaId);
+      await FlutterOverlayWindow.shareData({'pending': pending != null});
     } catch (e, st) {
       print('❌ [BackgroundMode] _enterBackground error: $e\n$st');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Sleep error: $e')),
-        );
-      }
+    } finally {
+      _inBackgroundTransition = false;
     }
   }
 
@@ -464,33 +518,39 @@ class _MobileKaiState extends State<_MobileKai>
   }
 
   Future<void> _exitBackground({String? initialMessage}) async {
-    // Close the floating overlay if it's still up
-    if (await FlutterOverlayWindow.isActive()) {
-      await FlutterOverlayWindow.closeOverlay();
-    }
+    if (_inBackgroundTransition) return;
+    _inBackgroundTransition = true;
+    try {
+      // Close the floating overlay if it's still up
+      try {
+        if (await FlutterOverlayWindow.isActive()) {
+          await FlutterOverlayWindow.closeOverlay();
+        }
+      } catch (_) {}
 
-    if (!mounted) return;
+      if (!mounted) return;
 
-    // Resume full-mode animations
-    _glowCtrl.repeat(reverse: true);
-    _switchToAnimation('idle');
-    _idleTicker ??= Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted) setState(() {});
-    });
+      // Resume full-mode animations
+      // Clear _currentAnimation so _switchToAnimation always does a full restart
+      // (the guard skips if already 'idle', even when the controller was stopped)
+      _currentAnimation = '';
+      _glowCtrl.repeat(reverse: true);
+      _switchToAnimation('idle');
 
-    // Restart idle timer — user is active again
-    _resetIdleTimer();
-    print('🌟 [BackgroundMode] Exited — full mode restored');
+      // Restart idle timer — user is active again
+      _resetIdleTimer();
+      print('🌟 [BackgroundMode] Exited — full mode restored');
 
-    // If woken by voice, send the transcript to Kai
-    if (initialMessage != null && initialMessage.trim().isNotEmpty) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        setState(() {
-          _showBubble = true;
-          _controller.text = initialMessage;
+      // If woken by voice, send the transcript to Kai
+      if (initialMessage != null && initialMessage.trim().isNotEmpty) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          setState(() => _controller.text = initialMessage);
+          _setBubble(true);
+          _send();
         });
-        _send();
-      });
+      }
+    } finally {
+      _inBackgroundTransition = false;
     }
   }
 
@@ -1124,7 +1184,6 @@ class _MobileKaiState extends State<_MobileKai>
           builder: (_) => PersonaDialog(
             initial: state,
             personaId: _personaId,
-            pg13: _isClone,
             onSave: (pc, mc, ac) async {
               await aiService.setAgentState(
                 personaId: _personaId,
@@ -1170,8 +1229,68 @@ class _MobileKaiState extends State<_MobileKai>
     );
   }
 
+  Widget _buildLoadingScreen() {
+    return Scaffold(
+      backgroundColor: const Color(0xFF0D0A07),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            // Pulsing flame icon
+            AnimatedBuilder(
+              animation: _glow,
+              builder: (_, __) => Opacity(
+                opacity: _glow.value,
+                child: const Icon(
+                  Icons.local_fire_department,
+                  color: Color(0xFF3D9BFF),
+                  size: 72,
+                ),
+              ),
+            ),
+            const SizedBox(height: 32),
+            const Text(
+              'Kai',
+              style: TextStyle(
+                color: Color(0xFFFFE7B0),
+                fontSize: 36,
+                fontWeight: FontWeight.w300,
+                letterSpacing: 6,
+              ),
+            ),
+            const SizedBox(height: 48),
+            // Step indicator
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 300),
+              child: Text(
+                _loadingStep,
+                key: ValueKey(_loadingStep),
+                style: const TextStyle(
+                  color: Color(0x99FFE7B0),
+                  fontSize: 14,
+                  letterSpacing: 1,
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: 160,
+              child: LinearProgressIndicator(
+                backgroundColor: const Color(0x22FFE7B0),
+                valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF3D9BFF)),
+                minHeight: 2,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) return _buildLoadingScreen();
+
     const stroke = Color(0xFFFFE7B0);
 
     return Scaffold(
@@ -1180,9 +1299,9 @@ class _MobileKaiState extends State<_MobileKai>
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
+            const Text(
               'Kai - AI Avatar',
-              style: TextStyle(color: _isClone ? Colors.redAccent : Colors.white, fontSize: 16),
+              style: TextStyle(color: Colors.white, fontSize: 16),
             ),
             if (!widget.firebaseInitialized)
               const Text(
@@ -1201,14 +1320,6 @@ class _MobileKaiState extends State<_MobileKai>
             icon: const Icon(Icons.local_fire_department_outlined,
                 color: Color(0xFF3D9BFF)),
             tooltip: 'Background mode (low power)',
-          ),
-          IconButton(
-            onPressed: _togglePersona,
-            icon: Icon(
-              Icons.swap_horiz,
-              color: _isClone ? Colors.redAccent : stroke,
-            ),
-            tooltip: 'Switch Persona',
           ),
           IconButton(
             onPressed: () => Navigator.push(
@@ -1234,7 +1345,7 @@ class _MobileKaiState extends State<_MobileKai>
                     onTap: () {
                       _markInteraction();
                       _pulseAttention();
-                      setState(() => _showBubble = !_showBubble);
+                      _setBubble(!_showBubble);
                     },
                     child: AnimatedBuilder(
                       animation: _glow,
@@ -1315,9 +1426,9 @@ class _MobileKaiState extends State<_MobileKai>
                   border: Border.all(color: stroke.withOpacity(0.7)),
                 ),
                 child: Text(
-                  'Kai${_isClone ? ' (Clone)' : ''}',
-                  style: TextStyle(
-                    color: _isClone ? Colors.redAccent : Colors.white,
+                  'Kai',
+                  style: const TextStyle(
+                    color: Colors.white,
                     fontWeight: FontWeight.w600,
                     fontSize: 16,
                   ),
@@ -1340,8 +1451,7 @@ class _MobileKaiState extends State<_MobileKai>
                     label: 'Voice',
                     onTap: _toggleVoice,
                   ),
-                  if (!_isClone)
-                    _MobileButton(
+                  _MobileButton(
                       icon: _adaptToUser ? Icons.favorite : Icons.favorite_border,
                       label: 'Adapt',
                       onTap: () => setState(() => _adaptToUser = !_adaptToUser),
@@ -1413,7 +1523,7 @@ class _MobileKaiState extends State<_MobileKai>
                     controller: _controller,
                     focusNode: _focus,
                     onSend: _send,
-                    onClose: () => setState(() => _showBubble = false),
+                    onClose: () => _setBubble(false),
                     onToggleDev: () => setState(() => _devOpen = !_devOpen),
                     onPersonaTap: () => _openPersonaPanel(context),
                     autoPlay: _autoPlayTts,
@@ -1429,7 +1539,6 @@ class _MobileKaiState extends State<_MobileKai>
                     hasVoice: _ttsPath != null,
                     playingStream: _player.onPlayerStateChanged,
                     personaId: _personaId,
-                    pg13: _isClone,
                   ),
                 ),
 
@@ -1520,14 +1629,13 @@ class _MobileChatBubble extends StatelessWidget {
   final bool hasVoice;
   final Stream<PlayerState> playingStream;
   final String personaId;
-  final bool pg13;
 
   const _MobileChatBubble({
     required this.sending,
     required this.reply,
     required this.error,
-    required this.memoriesUsed, // NEW: Required parameter
-    this.debugInfo, // NEW: Optional debug info
+    required this.memoriesUsed,
+    this.debugInfo,
     required this.devOpen,
     required this.onToggleDev,
     required this.controller,
@@ -1546,7 +1654,6 @@ class _MobileChatBubble extends StatelessWidget {
     required this.hasVoice,
     required this.playingStream,
     required this.personaId,
-    required this.pg13,
   });
 
   @override
@@ -1575,10 +1682,10 @@ class _MobileChatBubble extends StatelessWidget {
           // Header
           Row(
             children: [
-              Text(
+              const Text(
                 'Kai (Mobile)',
                 style: TextStyle(
-                  color: pg13 ? Colors.redAccent : Colors.white70,
+                  color: Colors.white70,
                   fontWeight: FontWeight.w600,
                   fontSize: 16,
                 ),
@@ -1825,13 +1932,11 @@ class PersonaDialog extends StatefulWidget {
   final Future<void> Function(
           Map<String, num> pc, Map<String, num> mc, Map<String, num> ac)
       onSave;
-  final bool pg13;
   const PersonaDialog({
     super.key,
     required this.initial,
     required this.personaId,
     required this.onSave,
-    this.pg13 = false,
   });
   @override
   State<PersonaDialog> createState() => _PersonaDialogState();
@@ -2121,9 +2226,8 @@ class _PersonaDialogState extends State<PersonaDialog> {
                 ),
                 const SizedBox(height: 12),
 
-                // Affinity section (not for clone)
-                if (!widget.pg13)
-                  Container(
+                // Affinity section
+                Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
                       color: const Color(0xFF2A2119),
@@ -2148,7 +2252,7 @@ class _PersonaDialogState extends State<PersonaDialog> {
                       ],
                     ),
                   ),
-                if (!widget.pg13) const SizedBox(height: 12),
+                const SizedBox(height: 12),
 
                 // Buttons
                 Row(

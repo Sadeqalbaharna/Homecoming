@@ -9,41 +9,28 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  # UI
-  lottie: ^3.1.0
-  cupertino_icons: ^1.0.8
-  gif: ^2.3.0
-  http: ^1.2.0
-  # Desktop-specific packages (will be ignored on mobile)
-  window_manager: ^0.3.9
-  flutter_acrylic: ^1.1.4
   # Net
+  http: ^1.2.0
   dio: ^5.5.0
   html: ^0.15.4
   syncfusion_flutter_pdf: ^27.1.58
-  # Audio (choose ONE lib → audioplayers)
+  # Audio
   audioplayers: ^6.0.0
-  # Voice input - using native Android MediaRecorder via MethodChannel
+  # Permissions / storage
   permission_handler: ^11.0.0
-  # Secure storage for API keys
   flutter_secure_storage: ^9.0.0
-  # State management
-  hooks_riverpod: ^2.5.1
-  flutter_hooks: ^0.20.5
-  # Storage & data
   shared_preferences: ^2.2.2
   path_provider: ^2.1.1
   intl: ^0.19.0
   # 3D Brain WebView
   webview_flutter: ^4.8.0
-  # Firebase Integration
+  # Firebase
   firebase_core: ^3.6.0
   firebase_database: ^11.1.4
-  cloud_functions: ^5.1.3
   firebase_messaging: ^15.1.3
-  # On-device wake word detection (replaces Whisper polling for "Hey Kai")
+  # Wake word detection
   porcupine_flutter: ^3.0.3
-  # Use local modified flutter_overlay_window for click-through support
+  # Overlay window (local fork)
   flutter_overlay_window:
     path: packages/flutter_overlay_window
 
@@ -55,22 +42,14 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
-    - assets/avatar/kai_idle.json
-    - assets/avatar/kai_talk.json
     - assets/avatar/images/mage.png
     - assets/audio/record_start.wav
     - assets/audio/record_stop.wav
-    # GIF animations (for fallback compatibility)
-    - assets/avatar/idle.gif
-    - assets/avatar/kai_attention.gif
-    - assets/avatar/kai_thinking.gif
-    - assets/avatar/kai_speaking.gif
-    # Frame-based animations (lightweight PNG sequences)
+    # Frame-based animations (PNG sequences)
     - assets/avatar/idle_frames/
     - assets/avatar/attention_frames/
     - assets/avatar/thinking_frames/
     - assets/avatar/speaking_frames/
-    # Porcupine wake word model — place your hey_kai_android.ppn here
-    # Download from: console.picovoice.ai → Wake Word → "Hey Kai"
+    # Porcupine wake word model
     - assets/models/
 
