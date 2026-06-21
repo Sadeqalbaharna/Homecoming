@@ -20,9 +20,11 @@ import 'widgets/flame_avatar.dart';
 @pragma('vm:entry-point')
 void overlayMain() {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const MaterialApp(
-    debugShowCheckedModeBanner: false,
-    home: _FlameOverlay(),
+  // Do NOT use MaterialApp — it renders an opaque background that hides the flame.
+  // Use a bare transparent widget tree instead.
+  runApp(const Directionality(
+    textDirection: TextDirection.ltr,
+    child: _FlameOverlay(),
   ));
 }
 
@@ -63,10 +65,10 @@ class _FlameOverlayState extends State<_FlameOverlay> {
 
   @override
   Widget build(BuildContext context) {
-    // Transparent scaffold — only the flame is visible
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      body: Center(
+    // No Scaffold or Material — just the flame on a fully transparent canvas.
+    return Material(
+      color: Colors.transparent,
+      child: Center(
         child: FlameAvatarCompact(
           size: 64,
           urgent: _hasPending,

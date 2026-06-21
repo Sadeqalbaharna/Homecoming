@@ -182,20 +182,13 @@ public class OverlayService extends Service implements View.OnTouchListener {
         // For a 400dp window, convert to pixels
         int overlayWidthPx = WindowSetup.width == -1999 ? -1 : dpToPx(WindowSetup.width);
         int overlayHeightPx = WindowSetup.height != -1999 ? dpToPx(WindowSetup.height) : screenHeight();
-        
-        // Center the overlay window on screen
-        int dx = overlayWidthPx > 0 ? (screenWidth - overlayWidthPx) / 2 : 0;
-        int dy = overlayHeightPx > 0 ? (screenHeight - overlayHeightPx) / 2 : 0;
-        
+
         WindowManager.LayoutParams params = new WindowManager.LayoutParams(
                 overlayWidthPx,
                 overlayHeightPx,
-                dx, // X position: Centered
-                dy, // Y position: Centered
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY : WindowManager.LayoutParams.TYPE_PHONE,
                 WindowSetup.flag | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
                         | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
-                        | WindowManager.LayoutParams.FLAG_LAYOUT_INSET_DECOR
                         | WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
                         | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
                 PixelFormat.TRANSLUCENT
@@ -203,9 +196,8 @@ public class OverlayService extends Service implements View.OnTouchListener {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && WindowSetup.flag == clickableFlag) {
             params.alpha = MAXIMUM_OPACITY_ALLOWED_FOR_S_AND_HIGHER;
         }
-        params.gravity = Gravity.TOP | Gravity.LEFT; // Position relative to top-left for centering calculation
-        // REMOVED touch listener - overlay is now completely fixed and non-draggable
-            flutterView.setOnTouchListener(this);
+        params.gravity = WindowSetup.gravity; // Use alignment passed from Dart
+        flutterView.setOnTouchListener(this);
         windowManager.addView(flutterView, params);
         return START_STICKY;
     }
