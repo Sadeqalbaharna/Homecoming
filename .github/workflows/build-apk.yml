@@ -31,9 +31,6 @@ jobs:
       - name: Get dependencies
         run: flutter pub get
 
-      - name: Analyze (non-blocking)
-        run: flutter analyze --no-fatal-infos || true
-
       - name: Build debug APK
         run: flutter build apk --debug --target=lib/main.dart
 
@@ -41,12 +38,12 @@ jobs:
         uses: wzieba/Firebase-Distribution-Github-Action@v1
         with:
           appId: 1:632366966739:android:351bee9e47901e29ac3126
-          token: ${{ secrets.FIREBASE_TOKEN }}
+          serviceCredentialsFileContent: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
           groups: testers
           file: build/app/outputs/flutter-apk/app-debug.apk
           releaseNotes: "Build #${{ github.run_number }} — ${{ github.event.head_commit.message }}"
 
-      - name: Also save as artifact
+      - name: Save APK as artifact
         uses: actions/upload-artifact@v4
         with:
           name: homecoming-debug-${{ github.run_number }}
