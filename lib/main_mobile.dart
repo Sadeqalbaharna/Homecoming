@@ -162,6 +162,14 @@ class _MobileKaiState extends State<_MobileKai>
   // background mode guard — prevents concurrent enter/exit calls
   bool _inBackgroundTransition = false;
 
+  // true while the flame is (or should be) showing
+  bool _isSleeping = false;
+
+  // fallback lifecycle observer — if the overlay "expand" message is dropped
+  // (common when the engine is paused on physical devices), this catches the
+  // app coming back to foreground and calls _exitBackground() anyway.
+  AppLifecycleListener? _lifecycleListener;
+
   // background mode overlay
   StreamSubscription<String>? _wakeWordSub;
   StreamSubscription? _overlayMsgSub;
@@ -408,6 +416,19 @@ class _MobileKaiState extends State<_MobileKai>
       if (mounted) setState(() {});
     });
 
+    // Fallback lifecycle observer — on physical devices the overlay "expand"
+    // message is sometimes dropped while the engine is paused. This catches the
+    // app resuming to foreground and calls _exitBackground() if we think we're
+    // still sleeping.
+    _lifecycleListener = AppLifecycleListener(
+      onResume: () {
+        if (_isSleeping && !_inBackgroundTransition) {
+          print('🔵 [BackgroundMode] Lifecycle resume — triggering _exitBackground fallback');
+          _exitBackground();
+        }
+      },
+    );
+
     // Listen for messages from the flame overlay
     _overlayMsgSub = FlutterOverlayWindow.overlayListener.listen((data) {
       if (data is! Map) return;
@@ -441,6 +462,7 @@ class _MobileKaiState extends State<_MobileKai>
 
   @override
   void dispose() {
+    _lifecycleListener?.dispose();
     _glowCtrl.dispose();
     _frameAnimController?.dispose();
     _controller.dispose();
@@ -460,8 +482,15 @@ class _MobileKaiState extends State<_MobileKai>
 
   Future<void> _enterBackground() async {
     if (_inBackgroundTransition) return;
-    if (await FlutterOverlayWindow.isActive()) return; // already sleeping
+    if (_isSleeping) return; // already in sleep mode
     _inBackgroundTransition = true;
+    // Safety timeout — never leave _inBackgroundTransition stuck forever
+    Future.delayed(const Duration(seconds: 8), () {
+      if (_inBackgroundTransition) {
+        _inBackgroundTransition = false;
+        print('⚠️ [BackgroundMode] Transition timeout — reset flag');
+      }
+    });
     try {
       _idleBackgroundTimer?.cancel();
 
@@ -489,18 +518,28 @@ class _MobileKaiState extends State<_MobileKai>
       // Physical devices need more time than emulators to complete the transition
       await Future.delayed(const Duration(milliseconds: 600));
 
-      // 2. Now show the flame on top of the home screen (no overlap with the app)
-      await FlutterOverlayWindow.showOverlay(
-        height: 120,
-        width: 90,
-        alignment: OverlayAlignment.centerRight,
-        flag: OverlayFlag.defaultFlag,
-        enableDrag: true,
-        positionGravity: PositionGravity.auto,
-        overlayTitle: 'Kai',
-        overlayContent: 'Tap the flame to open Kai',
-      );
-      print('🔵 [BackgroundMode] Overlay shown');
+      // 2. Show the flame — retry up to 3 times (service start is async on device)
+      for (int attempt = 1; attempt <= 3; attempt++) {
+        await FlutterOverlayWindow.showOverlay(
+          height: 120,
+          width: 90,
+          alignment: OverlayAlignment.centerRight,
+          flag: OverlayFlag.defaultFlag,
+          enableDrag: true,
+          positionGravity: PositionGravity.auto,
+          overlayTitle: 'Kai',
+          overlayContent: 'Tap the flame to open Kai',
+        );
+        await Future.delayed(const Duration(milliseconds: 600));
+        if (await FlutterOverlayWindow.isActive()) {
+          print('🔵 [BackgroundMode] Overlay confirmed active (attempt $attempt)');
+          break;
+        }
+        print('⚠️ [BackgroundMode] Overlay not active after attempt $attempt — retrying');
+      }
+
+      _isSleeping = true;
+      print('🔵 [BackgroundMode] Entered sleep mode');
 
       final pending = await ProactiveService().checkPendingMessage(_personaId);
       await FlutterOverlayWindow.shareData({'pending': pending != null});
@@ -535,7 +574,15 @@ class _MobileKaiState extends State<_MobileKai>
 
   Future<void> _exitBackground({String? initialMessage}) async {
     if (_inBackgroundTransition) return;
+    _isSleeping = false; // clear immediately — lifecycle listener won't re-trigger
     _inBackgroundTransition = true;
+    // Safety timeout
+    Future.delayed(const Duration(seconds: 5), () {
+      if (_inBackgroundTransition) {
+        _inBackgroundTransition = false;
+        print('⚠️ [BackgroundMode] Exit transition timeout — reset flag');
+      }
+    });
     try {
       // Close the floating overlay if it's still up
       try {

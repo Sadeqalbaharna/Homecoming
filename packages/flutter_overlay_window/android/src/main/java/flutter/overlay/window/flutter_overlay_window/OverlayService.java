@@ -131,8 +131,11 @@ public class OverlayService extends Service {
         }
 
         if (windowManager != null && flameView != null) {
-            removeFlameView();
-            stopSelf();
+            // Flame already visible — nothing to do.
+            // (Previously this removed the flame and called stopSelf() with no return,
+            //  which caused onDestroy to immediately remove the freshly-added flame.)
+            Log.d("OverlayService", "Already showing flame — no-op");
+            return START_STICKY;
         }
 
         isRunning = true;
@@ -205,7 +208,11 @@ public class OverlayService extends Service {
 
     private void sendActionAndLaunch(String action) {
         removeFlameView();
+        // Mark not running immediately so Dart's isActive() returns false
+        // before _exitBackground() runs (avoids a redundant closeOverlay call).
+        isRunning = false;
         sendMessage(action, null);
+        stopSelf();
         Intent launch = getApplicationContext()
                 .getPackageManager()
                 .getLaunchIntentForPackage(getApplicationContext().getPackageName());
