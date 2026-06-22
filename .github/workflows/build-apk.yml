@@ -31,7 +31,7 @@ jobs:
       - name: Get dependencies
         run: flutter pub get
 
-      - name: Build debug APK
+      - name: Write dart-defines file
         env:
           OPENAI_API_KEY: ${{ secrets.OPEN_API_KEY }}
           ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
@@ -40,13 +40,32 @@ jobs:
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           GOOGLE_CSE_ID: ${{ secrets.GOOGLE_CSE_ID }}
         run: |
+          python3 - <<'PYEOF'
+          import json, os, sys
+          keys = {
+            "OPENAI_API_KEY":      os.environ.get("OPENAI_API_KEY", ""),
+            "ELEVENLABS_API_KEY":  os.environ.get("ELEVENLABS_API_KEY", ""),
+            "ELEVENLABS_VOICE_ID": os.environ.get("ELEVENLABS_VOICE_ID", ""),
+            "PICOVOICE_API_KEY":   os.environ.get("PICOVOICE_API_KEY", ""),
+            "GOOGLE_API_KEY":      os.environ.get("GOOGLE_API_KEY", ""),
+            "GOOGLE_CSE_ID":       os.environ.get("GOOGLE_CSE_ID", ""),
+          }
+          # Print key status for CI debugging (never prints values)
+          for k, v in keys.items():
+            status = f"SET ({len(v)} chars)" if v else "MISSING"
+            print(f"  {k}: {status}")
+          if not keys["OPENAI_API_KEY"]:
+            print("ERROR: OPENAI_API_KEY is empty — check GitHub secret OPEN_API_KEY", file=sys.stderr)
+            sys.exit(1)
+          with open("dart_defines.json", "w") as f:
+            json.dump(keys, f)
+          print("dart_defines.json written successfully")
+          PYEOF
+
+      - name: Build debug APK
+        run: |
           flutter build apk --debug --target=lib/main.dart \
-            --dart-define=OPENAI_API_KEY="$OPENAI_API_KEY" \
-            --dart-define=ELEVENLABS_API_KEY="$ELEVENLABS_API_KEY" \
-            --dart-define=ELEVENLABS_VOICE_ID="$ELEVENLABS_VOICE_ID" \
-            --dart-define=PICOVOICE_API_KEY="$PICOVOICE_API_KEY" \
-            --dart-define=GOOGLE_API_KEY="$GOOGLE_API_KEY" \
-            --dart-define=GOOGLE_CSE_ID="$GOOGLE_CSE_ID"
+            --dart-define-from-file=dart_defines.json
 
       - name: Upload to Firebase App Distribution
         uses: wzieba/Firebase-Distribution-Github-Action@v1
