@@ -56,8 +56,7 @@ class AIConfig {
   }
 
   // ElevenLabs voice settings
-  static const String elevenlabsVoiceId =
-      kElevenLabsVoiceId.isNotEmpty ? kElevenLabsVoiceId : 'rjyk3ukVFAi8OdkRXxK2';
+  static const String elevenlabsVoiceId = kElevenLabsVoiceId;
   static const String elevenlabsModelId = 'eleven_monolingual_v1';
 
   static const Map<String, Map<String, String>> availableVoices = {
