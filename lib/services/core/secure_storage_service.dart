@@ -1,6 +1,17 @@
 // Secure Storage Service - Encrypted API key management using Android Keystore
+//
+// Keys are read from secure storage first; if empty, fall back to compile-time
+// constants injected via --dart-define at build time (CI / GitHub Actions).
+// This means a CI-built APK works without any manual key entry.
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import '../../secrets.dart';
+
+// Compile-time defaults — sourced from lib/secrets.dart (gitignored).
+// CI generates secrets.dart from GitHub secrets before building.
+const _kBuiltInOpenAI     = kOpenAIKey;
+const _kBuiltInElevenLabs = kElevenLabsKey;
+const _kBuiltInPicovoice  = kPicovoiceKey;
 
 /// Secure storage for API keys using device encryption
 /// Keys are encrypted using Android Keystore (hardware-backed when available)
@@ -42,16 +53,18 @@ class SecureStorageService {
     }
   }
   
-  /// Get OpenAI API Key
+  /// Get OpenAI API Key (secure storage → built-in compile-time constant)
   Future<String?> getOpenAIKey() async {
     if (_cachedOpenAIKey != null) return _cachedOpenAIKey;
-    
     try {
-      _cachedOpenAIKey = await _storage.read(key: _openaiKeyName);
+      final stored = await _storage.read(key: _openaiKeyName);
+      _cachedOpenAIKey = (stored != null && stored.isNotEmpty)
+          ? stored
+          : (_kBuiltInOpenAI.isNotEmpty ? _kBuiltInOpenAI : null);
       return _cachedOpenAIKey;
     } catch (e) {
       print('❌ Error reading OpenAI key: $e');
-      return null;
+      return _kBuiltInOpenAI.isNotEmpty ? _kBuiltInOpenAI : null;
     }
   }
   
@@ -67,16 +80,18 @@ class SecureStorageService {
     }
   }
   
-  /// Get ElevenLabs API Key
+  /// Get ElevenLabs API Key (secure storage → built-in compile-time constant)
   Future<String?> getElevenLabsKey() async {
     if (_cachedElevenLabsKey != null) return _cachedElevenLabsKey;
-    
     try {
-      _cachedElevenLabsKey = await _storage.read(key: _elevenlabsKeyName);
+      final stored = await _storage.read(key: _elevenlabsKeyName);
+      _cachedElevenLabsKey = (stored != null && stored.isNotEmpty)
+          ? stored
+          : (_kBuiltInElevenLabs.isNotEmpty ? _kBuiltInElevenLabs : null);
       return _cachedElevenLabsKey;
     } catch (e) {
       print('❌ Error reading ElevenLabs key: $e');
-      return null;
+      return _kBuiltInElevenLabs.isNotEmpty ? _kBuiltInElevenLabs : null;
     }
   }
   
@@ -96,11 +111,11 @@ class SecureStorageService {
   Future<String?> getGoogleKey() async {
     if (_cachedGoogleKey != null) return _cachedGoogleKey;
     
-    // Try dart-define first (for CI/CD builds)
-    const defineKey = String.fromEnvironment('GOOGLE_API_KEY');
+    // Try compile-time constant first (from secrets.dart)
+    const defineKey = kGoogleApiKey;
     if (defineKey.isNotEmpty) {
       _cachedGoogleKey = defineKey;
-      print('✅ Google API Key loaded from dart-define');
+      print('✅ Google API Key loaded from secrets.dart');
       return _cachedGoogleKey;
     }
     
@@ -130,11 +145,11 @@ class SecureStorageService {
   Future<String?> getGoogleCseId() async {
     if (_cachedGoogleCseId != null) return _cachedGoogleCseId;
     
-    // Try dart-define first (for CI/CD builds)
-    const defineId = String.fromEnvironment('GOOGLE_CSE_ID');
+    // Try compile-time constant first (from secrets.dart)
+    const defineId = kGoogleCseId;
     if (defineId.isNotEmpty) {
       _cachedGoogleCseId = defineId;
-      print('✅ Google CSE ID loaded from dart-define');
+      print('✅ Google CSE ID loaded from secrets.dart');
       return _cachedGoogleCseId;
     }
     

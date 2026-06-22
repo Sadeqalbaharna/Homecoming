@@ -32,6 +32,7 @@ import 'package:porcupine_flutter/porcupine_error.dart';   // PorcupineException
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/native_audio_recorder.dart';
+import '../../secrets.dart';
 import 'voice_service.dart';
 import 'voice_training_service.dart';
 
@@ -164,7 +165,9 @@ class VoiceActivationService {
 
   Future<void> _startPorcupine() async {
     try {
-      final accessKey = await _storage.read(key: 'picovoice') ?? '';
+      const _kBuiltIn = kPicovoiceKey;
+      final stored = await _storage.read(key: 'picovoice') ?? '';
+      final accessKey = stored.isNotEmpty ? stored : _kBuiltIn;
       if (accessKey.isEmpty) {
         print('⚠️ [VAS] No Picovoice access key — wake word disabled. '
             'Add key in API Keys screen.');

@@ -3,6 +3,7 @@
 
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/secure_storage_service.dart';
+import '../../secrets.dart';
 
 /// Holds all API keys (loaded on-demand from secure storage) and voice settings.
 class AIConfig {
@@ -55,12 +56,9 @@ class AIConfig {
   }
 
   // ElevenLabs voice settings
-  static const String elevenlabsVoiceId = String.fromEnvironment(
-      'ELEVENLABS_VOICE_ID',
-      defaultValue: 'rjyk3ukVFAi8OdkRXxK2');
-  static const String elevenlabsModelId = String.fromEnvironment(
-      'ELEVENLABS_MODEL_ID',
-      defaultValue: 'eleven_monolingual_v1');
+  static const String elevenlabsVoiceId =
+      kElevenLabsVoiceId.isNotEmpty ? kElevenLabsVoiceId : 'rjyk3ukVFAi8OdkRXxK2';
+  static const String elevenlabsModelId = 'eleven_monolingual_v1';
 
   static const Map<String, Map<String, String>> availableVoices = {
     'kai_default': {
