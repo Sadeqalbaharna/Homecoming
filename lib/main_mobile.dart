@@ -476,14 +476,18 @@ class _MobileKaiState extends State<_MobileKai>
         }
       }
 
+      // Request battery optimization exemption so the foreground service
+      // isn't killed by aggressive device power management (Samsung, Xiaomi, etc.)
+      await _requestBatteryExemption();
+
       // Stop heavy animations
       _frameAnimController?.stop();
       _glowCtrl.stop();
 
       // 1. Minimize FIRST so the app is gone before the flame appears
       await _minimizeApp();
-      // Give the activity time to actually go to background
-      await Future.delayed(const Duration(milliseconds: 350));
+      // Physical devices need more time than emulators to complete the transition
+      await Future.delayed(const Duration(milliseconds: 600));
 
       // 2. Now show the flame on top of the home screen (no overlap with the app)
       await FlutterOverlayWindow.showOverlay(
@@ -514,6 +518,18 @@ class _MobileKaiState extends State<_MobileKai>
       print('🔵 [BackgroundMode] App moved to background');
     } catch (e) {
       print('❌ [BackgroundMode] moveTaskToBack failed: $e');
+    }
+  }
+
+  /// Ask Android to exempt us from battery optimization so the overlay
+  /// foreground service isn't killed on physical devices (Samsung, Xiaomi, etc.).
+  /// Only shown once — Android remembers the user's choice.
+  Future<void> _requestBatteryExemption() async {
+    try {
+      const channel = MethodChannel('com.homecoming.app/activity');
+      await channel.invokeMethod<void>('requestBatteryExemption');
+    } catch (_) {
+      // Non-fatal — device may not support it or it's already granted
     }
   }
 
