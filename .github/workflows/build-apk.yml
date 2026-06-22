@@ -32,14 +32,21 @@ jobs:
         run: flutter pub get
 
       - name: Build debug APK
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPEN_API_KEY }}
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+          ELEVENLABS_VOICE_ID: ${{ secrets.ELEVENLABS_VOICE_ID }}
+          PICOVOICE_API_KEY: ${{ secrets.PICOVOICE_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          GOOGLE_CSE_ID: ${{ secrets.GOOGLE_CSE_ID }}
         run: |
           flutter build apk --debug --target=lib/main.dart \
-            --dart-define=OPENAI_API_KEY="${{ secrets.OPEN_API_KEY }}" \
-            --dart-define=ELEVENLABS_API_KEY="${{ secrets.ELEVENLABS_API_KEY }}" \
-            --dart-define=ELEVENLABS_VOICE_ID="${{ secrets.ELEVENLABS_VOICE_ID }}" \
-            --dart-define=PICOVOICE_API_KEY="${{ secrets.PICOVOICE_API_KEY }}" \
-            --dart-define=GOOGLE_API_KEY="${{ secrets.GOOGLE_API_KEY }}" \
-            --dart-define=GOOGLE_CSE_ID="${{ secrets.GOOGLE_CSE_ID }}"
+            --dart-define=OPENAI_API_KEY="$OPENAI_API_KEY" \
+            --dart-define=ELEVENLABS_API_KEY="$ELEVENLABS_API_KEY" \
+            --dart-define=ELEVENLABS_VOICE_ID="$ELEVENLABS_VOICE_ID" \
+            --dart-define=PICOVOICE_API_KEY="$PICOVOICE_API_KEY" \
+            --dart-define=GOOGLE_API_KEY="$GOOGLE_API_KEY" \
+            --dart-define=GOOGLE_CSE_ID="$GOOGLE_CSE_ID"
 
       - name: Upload to Firebase App Distribution
         uses: wzieba/Firebase-Distribution-Github-Action@v1
