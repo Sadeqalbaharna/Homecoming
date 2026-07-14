@@ -174,12 +174,21 @@ class MemoryService {
     // Try Firebase first
     if (FirebaseService.isAvailable) {
       try {
-        final data = await FirebaseService.readData('personas/$personaId/memory/shards');
+        // Cloud Functions store the embedding + summary together at
+        // /memory/embeddings/{persona}/{shardId} as { vector, summary, shardRef }.
+        // Map that server shape to what queryMemory expects (embedding/summary/…).
+        final data = await FirebaseService.readData('memory/embeddings/$personaId');
         if (data != null && data is Map) {
           return data.entries.map((e) {
-            final shard = Map<String, dynamic>.from(e.value as Map);
-            shard['id'] = e.key;
-            return shard;
+            final m = Map<String, dynamic>.from(e.value as Map);
+            return <String, dynamic>{
+              'id': e.key,
+              'shardId': e.key,
+              'embedding': m['embedding'] ?? m['vector'],
+              'summary': m['summary'] ?? '',
+              'shardRef': m['shardRef'] ?? '/memory/shards/$personaId/${e.key}',
+              'timestamp': (m['timestamp'] ?? m['createdAt'] ?? '').toString(),
+            };
           }).toList();
         }
       } catch (e) {

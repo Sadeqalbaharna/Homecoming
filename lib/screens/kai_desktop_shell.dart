@@ -20,6 +20,8 @@ import '../services/core/code_workspace_service.dart';
 import '../services/core/engineer_status_bus.dart';
 import '../services/core/edit_gate.dart';
 import '../services/core/cortex_activity_bus.dart';
+import '../widgets/kai_brain_panel.dart';
+import '../widgets/kai_hud_overlay.dart';
 
 // Must match main_mobile's persona so it's the same Kai (memory/personality).
 const String _kPersona = 'truekai';
@@ -154,11 +156,20 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
     return Scaffold(
       backgroundColor: const Color(0xFF070B12),
       body: SafeArea(
-        child: Row(
+        child: Stack(
           children: [
-            _projectsPanel(),
-            Expanded(child: _chat()),
-            _cortexPane(),
+            Positioned.fill(
+              child: KaiBrainBackground(
+                  personaId: _kPersona, opacity: 0.22, radiusFactor: 0.5),
+            ),
+            const Positioned.fill(child: KaiHudOverlay(opacity: 0.55)),
+            Row(
+              children: [
+                _projectsPanel(),
+                Expanded(child: _chat()),
+                _cortexPane(),
+              ],
+            ),
           ],
         ),
       ),
@@ -168,7 +179,7 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
   Widget _projectsPanel() {
     return Container(
       width: 210,
-      color: const Color(0xFF080D15),
+      color: Colors.black.withOpacity(0.32),
       padding: const EdgeInsets.fromLTRB(10, 14, 10, 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -405,20 +416,12 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
 
   Widget _cortexPane() {
     return Container(
-      width: 288,
-      decoration: const BoxDecoration(
-        color: Color(0xFF04070D),
-        border: Border(left: BorderSide(color: Color(0xFF14202C))),
+      width: 300,
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.32),
+        border: const Border(left: BorderSide(color: Color(0xFF14202C))),
       ),
-      child: Column(
-        children: [
-          Expanded(
-            child: _cortex == null
-                ? const Center(child: CircularProgressIndicator(color: Color(0xFF38E1FF)))
-                : WebViewWidget(controller: _cortex!),
-          ),
-        ],
-      ),
+      child: KaiVitals(personaId: _kPersona),
     );
   }
 }

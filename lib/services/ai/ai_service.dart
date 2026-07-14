@@ -560,7 +560,7 @@ Text:
     // Query long-term memory
     String memoryContext = '';
     List<String> memoriesUsed = [];
-    dynamic memoryResult; // Capture for debug info
+    MemoryQueryResult? memoryResult; // Capture for debug info
     if (useMemory) {
       debugService.addStep(
         BrainPhase.semanticRetrieval,
