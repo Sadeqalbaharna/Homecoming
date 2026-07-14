@@ -4,6 +4,7 @@ library;
 
 import 'dart:async';
 import 'package:firebase_database/firebase_database.dart';
+import '../core/kai_db.dart';
 import '../core/firebase_service.dart';
 
 class HomeAutomationService {
@@ -26,7 +27,7 @@ class HomeAutomationService {
 
     try {
       final commandId = 'cmd_${DateTime.now().millisecondsSinceEpoch}';
-      final commandRef = FirebaseDatabase.instance
+      final commandRef = KaiDb.instance
           .ref('home_automation/$personaId/commands/$commandId');
 
       final commandData = {
@@ -53,7 +54,7 @@ class HomeAutomationService {
   /// Wait for command response from device
   Future<bool> _waitForResponse(String personaId, String commandId) async {
     try {
-      final responseRef = FirebaseDatabase.instance
+      final responseRef = KaiDb.instance
           .ref('home_automation/$personaId/responses/$commandId');
 
       // Wait up to 10 seconds for response
@@ -112,7 +113,7 @@ class HomeAutomationService {
     if (!FirebaseService.isAvailable) return null;
 
     try {
-      final statusRef = FirebaseDatabase.instance
+      final statusRef = KaiDb.instance
           .ref('home_automation/$personaId/status/$deviceId');
 
       final snapshot = await statusRef.get();
@@ -135,7 +136,7 @@ class HomeAutomationService {
     if (!FirebaseService.isAvailable) return [];
 
     try {
-      final statusRef = FirebaseDatabase.instance
+      final statusRef = KaiDb.instance
           .ref('home_automation/$personaId/status');
 
       final snapshot = await statusRef.get();
@@ -176,7 +177,7 @@ class HomeAutomationService {
     }
 
     try {
-      final statusRef = FirebaseDatabase.instance
+      final statusRef = KaiDb.instance
           .ref('home_automation/$personaId/status/$deviceId');
 
       final subscription = statusRef.onValue.listen((event) {

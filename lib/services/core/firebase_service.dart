@@ -1,10 +1,11 @@
 // Firebase Service - Integrates with existing Firebase Realtime Database
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'kai_db.dart';
 import '../ai/usage_tracking_service.dart';
 
 class FirebaseService {
-  static FirebaseDatabase? _database;
+  static KaiDb? _database;
   static bool _initialized = false;
 
   /// Initialize Firebase (call this once at app startup)
@@ -13,7 +14,7 @@ class FirebaseService {
     
     try {
       await Firebase.initializeApp();
-      _database = FirebaseDatabase.instance;
+      _database = KaiDb.instance;
       _database!.setPersistenceEnabled(true); // offline cache — replaces SharedPreferences fallback
       _initialized = true;
       print('✅ Firebase initialized successfully');

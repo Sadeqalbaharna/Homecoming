@@ -1,0 +1,21 @@
+# Kai NFC station — full dependency set for nfc_listener.py, kai_screen.py,
+# and kai_station.py combined. Supersedes requirements_nfc.txt, which only
+# covered nfc_listener.py's Firebase/NFC pieces and missed the audio, GPT,
+# screen, and GPIO dependencies the other two scripts need.
+#
+# System packages needed alongside these (not pip-installable):
+#   sudo apt install -y python3-pip portaudio19-dev mpg123 espeak pcscd libpcsclite-dev
+
+# -- nfc_listener.py --
+firebase-admin>=6.0.0
+requests>=2.31.0
+pyaudio>=0.2.13
+openai>=1.30.0
+pyscard>=2.0.0
+
+# -- kai_screen.py --
+pillow>=10.0.0
+numpy>=1.26.0
+
+# -- kai_station.py --
+RPi.GPIO>=0.7.1

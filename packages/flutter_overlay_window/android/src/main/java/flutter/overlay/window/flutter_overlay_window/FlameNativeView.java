@@ -10,12 +10,10 @@ import android.os.Looper;
 import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.MotionEvent;
-import android.view.View;
 import android.view.WindowManager;
 import android.widget.ImageView;
 
 import java.io.IOException;
-import java.io.InputStream;
 
 /**
  * Flame overlay view using the custom WebP animation asset.
@@ -28,16 +26,17 @@ public class FlameNativeView extends ImageView {
     private WindowManager wm;
     private WindowManager.LayoutParams lp;
     private Runnable onTap;
-    private Runnable onLongPress;
+    private Runnable onLongPressStart;
+    private Runnable onLongPressEnd;
 
     private float touchDownX, touchDownY;
     private int   paramDownX, paramDownY;
     private boolean dragging = false;
-    private static final int SLOP = 16;         // px — less than this = tap
-    private static final int LONG_PRESS_MS = 500;
-
-    private final Handler longPressHandler = new Handler(Looper.getMainLooper());
-    private Runnable longPressRunnable;
+    private boolean longPressActive = false; // true while a press is in progress (recording)
+    private static final int   SLOP             = 16;  // px — less than this = tap vs drag
+    private static final long  HOLD_DELAY_MS    = 400; // must be still this long to start recording
+    private final Handler      holdHandler      = new Handler(Looper.getMainLooper());
+    private Runnable           holdRunnable     = null;
 
     private AnimatedImageDrawable animDrawable;
 
@@ -80,15 +79,26 @@ public class FlameNativeView extends ImageView {
 
     /**
      * Must be called immediately after construction, before addView().
+     *
+     * Push-to-talk model: recording starts on press-down (pressStartCallback)
+     * and stops on finger-lift (pressEndCallback). Dart decides whether the
+     * resulting audio is a real voice message or a quick tap (by checking file
+     * size), and acts accordingly (expand vs transcribe+send).
+     *
+     * @param tapCallback      unused — kept for API compat; Dart handles tap via file-size check
+     * @param pressStartCallback fires immediately on ACTION_DOWN
+     * @param pressEndCallback   fires on ACTION_UP (non-drag) and ACTION_CANCEL
      */
     public void attach(WindowManager windowManager,
                        WindowManager.LayoutParams layoutParams,
                        Runnable tapCallback,
-                       Runnable longPressCallback) {
-        this.wm          = windowManager;
-        this.lp          = layoutParams;
-        this.onTap       = tapCallback;
-        this.onLongPress = longPressCallback;
+                       Runnable pressStartCallback,
+                       Runnable pressEndCallback) {
+        this.wm               = windowManager;
+        this.lp               = layoutParams;
+        this.onTap            = tapCallback;     // kept for compat, not currently fired
+        this.onLongPressStart = pressStartCallback;
+        this.onLongPressEnd   = pressEndCallback;
     }
 
     public void setHasPending(boolean pending) {
@@ -102,18 +112,22 @@ public class FlameNativeView extends ImageView {
         switch (e.getAction()) {
 
             case MotionEvent.ACTION_DOWN:
-                touchDownX = e.getRawX();
-                touchDownY = e.getRawY();
-                paramDownX = lp.x;
-                paramDownY = lp.y;
-                dragging   = false;
-                // Schedule long press
-                longPressRunnable = () -> {
-                    if (!dragging && onLongPress != null) {
-                        onLongPress.run();
+                touchDownX    = e.getRawX();
+                touchDownY    = e.getRawY();
+                paramDownX    = lp.x;
+                paramDownY    = lp.y;
+                dragging      = false;
+                longPressActive = false;
+                // Schedule recording start — only fires if finger stays still for HOLD_DELAY_MS.
+                // Any drag detected in ACTION_MOVE will cancel this runnable first.
+                holdHandler.removeCallbacks(holdRunnable != null ? holdRunnable : () -> {});
+                holdRunnable = () -> {
+                    if (!dragging) {
+                        longPressActive = true;
+                        if (onLongPressStart != null) onLongPressStart.run();
                     }
                 };
-                longPressHandler.postDelayed(longPressRunnable, LONG_PRESS_MS);
+                holdHandler.postDelayed(holdRunnable, HOLD_DELAY_MS);
                 return true;
 
             case MotionEvent.ACTION_MOVE:
@@ -122,8 +136,12 @@ public class FlameNativeView extends ImageView {
                 if (!dragging && Math.abs(dx) < SLOP && Math.abs(dy) < SLOP) {
                     return true;
                 }
-                // Cancel long press once drag is confirmed
-                if (!dragging) longPressHandler.removeCallbacks(longPressRunnable);
+                // User started dragging — cancel pending hold timer and any active recording
+                holdHandler.removeCallbacks(holdRunnable != null ? holdRunnable : () -> {});
+                if (!dragging && longPressActive) {
+                    longPressActive = false;
+                    if (onLongPressEnd != null) onLongPressEnd.run(); // cancel in Dart
+                }
                 dragging = true;
                 lp.x = paramDownX + (int) dx;
                 lp.y = paramDownY + (int) dy;
@@ -131,20 +149,27 @@ public class FlameNativeView extends ImageView {
                 return true;
 
             case MotionEvent.ACTION_UP:
-                longPressHandler.removeCallbacks(longPressRunnable);
-                if (!dragging) {
-                    if (onTap != null) onTap.run();
-                } else {
-                    // Snap to nearest vertical edge
+                holdHandler.removeCallbacks(holdRunnable != null ? holdRunnable : () -> {});
+                if (dragging) {
+                    // End of drag — snap to nearest vertical edge
                     DisplayMetrics dm = getResources().getDisplayMetrics();
                     int cx = lp.x + getWidth() / 2;
                     lp.x = (cx < dm.widthPixels / 2) ? 0 : dm.widthPixels - getWidth();
                     if (wm != null) wm.updateViewLayout(this, lp);
+                } else if (longPressActive) {
+                    // Finger lifted — stop recording (Dart checks file size to
+                    // distinguish a true tap from a voice message)
+                    longPressActive = false;
+                    if (onLongPressEnd != null) onLongPressEnd.run();
                 }
                 return true;
 
             case MotionEvent.ACTION_CANCEL:
-                longPressHandler.removeCallbacks(longPressRunnable);
+                holdHandler.removeCallbacks(holdRunnable != null ? holdRunnable : () -> {});
+                if (longPressActive) {
+                    longPressActive = false;
+                    if (onLongPressEnd != null) onLongPressEnd.run();
+                }
                 return true;
         }
         return false;
@@ -153,7 +178,6 @@ public class FlameNativeView extends ImageView {
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     public void cleanup() {
-        if (longPressRunnable != null) longPressHandler.removeCallbacks(longPressRunnable);
         if (animDrawable != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             animDrawable.stop();
             animDrawable = null;

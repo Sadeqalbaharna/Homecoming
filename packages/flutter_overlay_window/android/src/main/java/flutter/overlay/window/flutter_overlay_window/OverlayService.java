@@ -14,15 +14,11 @@ import android.graphics.PixelFormat;
 import android.app.PendingIntent;
 import android.media.MediaPlayer;
 import android.os.Build;
-import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
-import android.speech.RecognitionListener;
-import android.speech.RecognizerIntent;
-import android.speech.SpeechRecognizer;
 import android.util.DisplayMetrics;
 import android.util.Log;
 import android.util.TypedValue;
@@ -33,7 +29,6 @@ import androidx.annotation.Nullable;
 import androidx.annotation.RequiresApi;
 import androidx.core.app.NotificationCompat;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -50,11 +45,11 @@ import io.flutter.plugin.common.JSONMessageCodec;
  *    (which must stay pointed at the MAIN engine so Java→Dart messages
  *    reach the main app's _overlayMsgSub listener).
  *
- *  Tap:       removes flame, brings app to foreground ({action:expand}).
- *  Long press: dims flame, uses SpeechRecognizer in-place. App stays hidden.
- *              Sends {action:pauseVoice} so Dart releases the mic from Porcupine,
- *              then captures speech, then sends {action:message, text:"..."} so
- *              Dart can call _send() silently. Flame re-brightens when done.
+ *  Tap:              removes flame, brings app to foreground ({action:expand}).
+ *  Hold-to-speak:    dims flame on press-down (after 500ms), sends
+ *                    {action:startRecording} so Dart starts NativeAudioRecorder.
+ *                    On finger-lift sends {action:stopRecording} so Dart stops,
+ *                    transcribes with Whisper, and sends the reply.
  */
 public class OverlayService extends Service {
 
@@ -67,8 +62,8 @@ public class OverlayService extends Service {
     private FlameNativeView flameView = null;
     private WindowManager.LayoutParams flameParams = null;
 
-    private SpeechRecognizer speechRecognizer = null;
-    private boolean isListening = false;
+    // true while user is holding the flame down (recording in Dart)
+    private boolean flamePressedForRecording = false;
 
     private Resources mResources;
     private Integer mStatusBarHeight = -1;
@@ -114,15 +109,13 @@ public class OverlayService extends Service {
     @RequiresApi(api = Build.VERSION_CODES.JELLY_BEAN_MR1)
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        if (intent == null) {
-            Log.w("OverlayService", "Null intent on restart — stopping");
-            stopSelf();
-            return START_NOT_STICKY;
-        }
-
         mResources = getApplicationContext().getResources();
 
-        boolean isCloseWindow = intent.getBooleanExtra(INTENT_EXTRA_IS_CLOSE_WINDOW, false);
+        // null intent = Android restarted the service after killing it (START_STICKY).
+        // Treat it the same as a fresh "show overlay" request — recreate the flame.
+        boolean isCloseWindow = intent != null
+                && intent.getBooleanExtra(INTENT_EXTRA_IS_CLOSE_WINDOW, false);
+
         if (isCloseWindow) {
             removeFlameView();
             isRunning = false;
@@ -132,14 +125,14 @@ public class OverlayService extends Service {
 
         if (windowManager != null && flameView != null) {
             // Flame already visible — nothing to do.
-            // (Previously this removed the flame and called stopSelf() with no return,
-            //  which caused onDestroy to immediately remove the freshly-added flame.)
             Log.d("OverlayService", "Already showing flame — no-op");
             return START_STICKY;
         }
 
         isRunning = true;
-        Log.d("OverlayService", "Starting flame overlay");
+        Log.d("OverlayService", intent == null
+                ? "Restarting flame overlay after system kill"
+                : "Starting flame overlay");
 
         windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
         DisplayMetrics dm = new DisplayMetrics();
@@ -151,7 +144,13 @@ public class OverlayService extends Service {
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                         ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
                         : WindowManager.LayoutParams.TYPE_PHONE,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                // FLAG_NOT_FOCUSABLE  — overlay never steals keyboard focus
+                // FLAG_NOT_TOUCH_MODAL — touches outside the view pass through to
+                //                        whatever app is below (required to stay
+                //                        visible; without it Android may hide the
+                //                        overlay when another app is interacted with)
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
                 PixelFormat.TRANSLUCENT
         );
         flameParams.gravity = Gravity.TOP | Gravity.LEFT;
@@ -160,8 +159,9 @@ public class OverlayService extends Service {
 
         flameView = new FlameNativeView(getApplicationContext());
         flameView.attach(windowManager, flameParams,
-                /* tap */        () -> sendActionAndLaunch("expand"),
-                /* long press */ this::startBackgroundListening
+                /* tap */              () -> sendActionAndLaunch("expand"),
+                /* hold-to-speak ↓ */ this::onFlameHoldStart,
+                /* hold-to-speak ↑ */ this::onFlameHoldEnd
         );
 
         windowManager.addView(flameView, flameParams);
@@ -173,7 +173,6 @@ public class OverlayService extends Service {
     @Override
     public void onDestroy() {
         Log.d("OverlayService", "onDestroy");
-        destroySpeechRecognizer();
         removeFlameView();
         isRunning = false;
         NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
@@ -222,89 +221,39 @@ public class OverlayService extends Service {
         }
     }
 
-    // ── Long press: listen in background, flame stays ─────────────────────────
+    // ── Hold-to-speak: press down starts recording in Dart, lift stops it ─────
 
-    private void startBackgroundListening() {
-        if (isListening) return;
-        if (!SpeechRecognizer.isRecognitionAvailable(getApplicationContext())) {
-            Log.w("OverlayService", "SpeechRecognizer not available on this device");
-            return;
-        }
+    private void onFlameHoldStart() {
+        if (flamePressedForRecording) return; // guard against double-fire
+        flamePressedForRecording = true;
 
-        isListening = true;
-
-        // Haptic + audio feedback: user knows Kai is listening
+        // Haptic + audio: user knows Kai is recording
         vibrate(60);
         playSound("assets/audio/record_start.wav");
 
-        // Dim the flame as a visual "listening" cue
+        // Dim flame as a visual "listening" cue
         if (flameView != null) flameView.setAlpha(0.4f);
 
-        // Tell Dart to pause Porcupine so it releases the mic
+        // Tell Dart: pause Porcupine (releases the mic), then start recording
         sendMessage("pauseVoice", null);
-
-        // Small delay so Porcupine has time to release the mic before we open it
-        new Handler(Looper.getMainLooper()).postDelayed(() -> {
-            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(getApplicationContext());
-            speechRecognizer.setRecognitionListener(new RecognitionListener() {
-
-                @Override
-                public void onResults(Bundle results) {
-                    ArrayList<String> matches =
-                            results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
-                    String text = (matches != null && !matches.isEmpty()) ? matches.get(0) : "";
-                    Log.d("OverlayService", "STT result: " + text);
-                    onListeningFinished(text);
-                }
-
-                @Override public void onError(int error) {
-                    Log.w("OverlayService", "STT error: " + error);
-                    onListeningFinished("");
-                }
-
-                // ── Required stubs ─────────────────────────────────────────────
-                @Override public void onReadyForSpeech(Bundle params) {
-                    Log.d("OverlayService", "STT ready");
-                }
-                @Override public void onBeginningOfSpeech() {}
-                @Override public void onRmsChanged(float rmsdB) {}
-                @Override public void onBufferReceived(byte[] buffer) {}
-                @Override public void onEndOfSpeech() {}
-                @Override public void onPartialResults(Bundle partialResults) {}
-                @Override public void onEvent(int eventType, Bundle params) {}
-            });
-
-            Intent recIntent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
-            recIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                    RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
-            recIntent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
-            recIntent.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE,
-                    getApplicationContext().getPackageName());
-            speechRecognizer.startListening(recIntent);
-
-        }, 250); // 250 ms for Porcupine to release the mic
+        sendMessage("startRecording", null);
+        Log.d("OverlayService", "Hold-to-speak: recording started");
     }
 
-    private void onListeningFinished(String text) {
-        isListening = false;
-        destroySpeechRecognizer();
-
-        // Audio + haptic: confirm capture (double-tap feel for success, single for empty)
-        playSound("assets/audio/record_stop.wav");
-        vibrate(text.isEmpty() ? 30 : 80);
+    private void onFlameHoldEnd() {
+        if (!flamePressedForRecording) return;
+        flamePressedForRecording = false;
 
         // Restore flame brightness
         if (flameView != null) flameView.setAlpha(1.0f);
 
-        // Send transcript (or empty string) to Dart — Dart will resume voice + call _send()
-        sendMessage("message", text);
-    }
+        // Haptic: confirm end of capture
+        vibrate(40);
+        playSound("assets/audio/record_stop.wav");
 
-    private void destroySpeechRecognizer() {
-        if (speechRecognizer != null) {
-            try { speechRecognizer.destroy(); } catch (Exception ignored) {}
-            speechRecognizer = null;
-        }
+        // Tell Dart: stop recording → Dart will transcribe + call _send()
+        sendMessage("stopRecording", null);
+        Log.d("OverlayService", "Hold-to-speak: recording stopped, Dart transcribing");
     }
 
     // ── Messenger helper ──────────────────────────────────────────────────────

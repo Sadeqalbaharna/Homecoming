@@ -17,6 +17,13 @@ class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.homecoming.app/activity"
     private val TAG = "MainActivity"
     private var audioRecorderPlugin: AudioRecorderPlugin? = null
+    private var micStreamPlugin: KaiMicStreamPlugin? = null
+
+    override fun onCreate(savedInstanceState: android.os.Bundle?) {
+        super.onCreate(savedInstanceState)
+        // Schedule background proactive checks (safe to call every launch — uses KEEP policy)
+        KaiProactiveWorker.schedule(this)
+    }
 
     // Tell Flutter to use transparent rendering
     override fun getTransparencyMode(): TransparencyMode {
@@ -28,6 +35,13 @@ class MainActivity : FlutterActivity() {
 
         // Initialize AudioRecorderPlugin
         audioRecorderPlugin = AudioRecorderPlugin(this)
+
+        // Register Kai tools channel (agentic function calling)
+        KaiToolsPlugin(this).register(flutterEngine.dartExecutor.binaryMessenger)
+
+        // Register PCM mic stream (for sherpa-onnx keyword spotting)
+        micStreamPlugin = KaiMicStreamPlugin()
+        micStreamPlugin!!.register(flutterEngine.dartExecutor.binaryMessenger)
 
         // Register AudioRecorder channel
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, AudioRecorderPlugin.CHANNEL_NAME)
@@ -65,13 +79,30 @@ class MainActivity : FlutterActivity() {
                         }
                         result.success(true)
                     }
+                    // Called by Flutter on resume to drain any WorkManager-queued message
+                    "consumePendingProactive" -> {
+                        val payload = KaiProactiveWorker.consumePending(this)
+                        if (payload != null) {
+                            result.success(mapOf(
+                                "trigger" to payload.optString("trigger"),
+                                "mood"    to payload.optString("mood"),
+                                "message" to payload.optString("message"),
+                            ))
+                        } else {
+                            result.success(null)
+                        }
+                    }
                     else -> result.notImplemented()
                 }
             }
     }
 
     override fun onDestroy() {
-        super.onDestroy()
+        // Stop the mic reader thread BEFORE super.onDestroy() tears down the
+        // Flutter engine / JNI bridge — prevents the "FlutterJNI was detached"
+        // warning flood in logcat on every hot restart.
+        micStreamPlugin?.destroy()
         audioRecorderPlugin?.cleanup()
+        super.onDestroy()
     }
 }

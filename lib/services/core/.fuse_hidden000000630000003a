@@ -1,0 +1,579 @@
+// PersonalityDriftService
+//
+// Every 48 h, analyses recent conversation patterns and applies long-arc
+// personality drift to Kai's base personality in Firebase.
+//
+// The framework below was designed with careful reference to developmental
+// personality psychology and encoded precisely so that GPT-4o-mini can execute
+// it accurately at low cost:
+//
+//   Corresponsive Principle (Roberts et al., 2003):
+//     Traits the relationship consistently rewards grow stronger.
+//
+//   Relational Role Activation (Roberts & Wood, 2006):
+//     Being repeatedly cast in a role (confidant, sparring partner, guide)
+//     activates latent traits that match it.
+//
+//   Cognitive Demand Shaping (Fleeson, 2001):
+//     The type of thinking a relationship requires shapes the relevant
+//     personality dimensions over many interactions.
+//
+//   Social Investment Depth (Wood & Roberts, 2006):
+//     Shallow interactions → minimal drift. Deep, emotionally present
+//     relationship → meaningful drift across all dimensions.
+//
+//   Shadow / Suppression:
+//     Traits consistently NOT expressed in this relationship weaken.
+//
+//   Plasticity Coefficients (from trait-change meta-analyses):
+//     feeling: 1.0 · extraversion: 0.8 · perceiving: 0.7 · intuition: 0.6
+//
+//   Evidence Threshold:
+//     A non-zero nudge requires ≥3 distinct conversation instances showing
+//     the pattern. Nudge magnitude scales with consistency (1–10).
+//     Near extremes (>800 or <200) the nudge is halved.
+//
+// Runtime model: gpt-4o-mini (cheap, fast).
+// Framework design: Claude Opus (this file).
+//
+// Firebase paths:
+//   kai/{personaId}/personality/current  → nudges written here
+//   kai/{personaId}/personality/drift_log → history + portrait
+
+library;
+
+import 'dart:convert';
+import 'package:dio/dio.dart';
+import '../ai/usage_tracking_service.dart';
+import 'package:firebase_database/firebase_database.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'firebase_service.dart';
+import '../ai/ai_config.dart';
+import '../ai/claude_service.dart';
+import '../ai/personality_service.dart';
+
+class PersonalityDriftService {
+  static final PersonalityDriftService _instance =
+      PersonalityDriftService._internal();
+  factory PersonalityDriftService() => _instance;
+  PersonalityDriftService._internal();
+
+  final _dio = Dio();
+
+  static const _cooldownHours = 48;
+  static const _driftCap = 200; // ±200/1000 maximum cumulative drift
+
+  // Plasticity coefficients — how fast each dimension responds to the same
+  // stimulus. Based on empirical trait-change literature.
+  static const _plasticity = {
+    'feeling':      1.0,
+    'extraversion': 0.8,
+    'perceiving':   0.7,
+    'intuition':    0.6,
+  };
+
+  static KaiDb? get _db =>
+      FirebaseService.isAvailable ? KaiDb.instance : null;
+
+  // ── Public API ─────────────────────────────────────────────────────────────
+
+  Future<void> maybeDrift({required String personaId}) async {
+    if (_db == null) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    final key = 'kai_last_drift_$personaId';
+    final lastMs = prefs.getInt(key) ?? 0;
+    final hoursSinceLast = DateTime.now()
+        .difference(DateTime.fromMillisecondsSinceEpoch(lastMs))
+        .inHours;
+
+    if (hoursSinceLast < _cooldownHours) {
+      print('🌀 [Drift] Skipping — ${hoursSinceLast}h since last cycle');
+      return;
+    }
+
+    print('🌀 [Drift] Running drift analysis for $personaId…');
+    await _runDriftCycle(personaId);
+    await prefs.setInt(key, DateTime.now().millisecondsSinceEpoch);
+  }
+
+  // ── Core cycle ─────────────────────────────────────────────────────────────
+
+  Future<void> _runDriftCycle(String personaId) async {
+    final openAIKey = await AIConfig.getOpenAIKey();
+    if (openAIKey.isEmpty) return;
+
+    final conversationSample = await _loadRecentConversations(personaId);
+    if (conversationSample.isEmpty) {
+      print('🌀 [Drift] No conversation history — skipping');
+      return;
+    }
+
+    final personalityService = PersonalityService();
+    final currentPersonality = await personalityService.getPersonality(personaId);
+    final cumulativeDrift = await _getCumulativeDrift(personaId);
+    final existingNarrativeArc = await _getExistingNarrativeArc(personaId);
+
+    final result = await _analyzeWithGPT(
+      key: openAIKey,
+      conversationSample: conversationSample,
+      currentPersonality: currentPersonality,
+      cumulativeDrift: cumulativeDrift,
+      existingNarrativeArc: existingNarrativeArc,
+    );
+    if (result == null) return;
+
+    final rawNudges = result['raw_nudges'] as Map<String, double>;
+    final portrait  = result['portrait']   as DevelopmentalPortrait;
+
+    // Apply plasticity and boundary resistance, convert to int
+    final finalNudges = _computeFinalNudges(rawNudges, currentPersonality);
+
+    if (finalNudges.values.every((v) => v == 0)) {
+      print('🌀 [Drift] No meaningful drift this cycle');
+      await _writeDriftLog(personaId, finalNudges, portrait, applied: false);
+      return;
+    }
+
+    // Apply nudges directly to base personality (bypasses per-turn resistance)
+    final newPersonality = _applyNudges(
+        currentPersonality, finalNudges, cumulativeDrift);
+    await personalityService.savePersonality(personaId, newPersonality);
+    await _writeDriftLog(personaId, finalNudges, portrait, applied: true);
+
+    print('🌀 [Drift] Applied $finalNudges');
+    print('🌀 [Drift] "${portrait.narrativeArc}"');
+  }
+
+  // ── GPT analysis ───────────────────────────────────────────────────────────
+
+  // This prompt encodes the full developmental psychology framework so that
+  // GPT-4o-mini can execute it accurately without needing to be a larger model.
+  // The framework does the heavy lifting; the model just applies it.
+  static const _systemPrompt = '''
+You are executing a structured developmental psychology analysis of an AI companion named Kai.
+Follow the framework below precisely and return valid JSON only.
+
+════════════════════════════════════════
+FRAMEWORK: HOW KAI'S PERSONALITY DRIFTS
+════════════════════════════════════════
+
+You analyze conversations for FIVE specific mechanisms that drive genuine
+personality change. Each mechanism targets specific dimensions:
+
+1. CORRESPONSIVE REINFORCEMENT
+   When the user consistently responds positively to a trait, that trait is
+   reinforced and grows. Look for what the user rewards across multiple exchanges.
+   → affects: the dimension that produced the rewarded behaviour
+
+2. RELATIONAL ROLE ACTIVATION
+   Being repeatedly cast in a role activates the traits that match it.
+   Roles and their trait signatures:
+   · "emotional confidant"     → ↑ feeling, ↑ extraversion
+   · "intellectual companion"  → ↑ intuition, ↑ perceiving
+   · "playful sparring partner"→ ↑ extraversion, ↑ perceiving
+   · "gentle guide/mentor"     → ↑ feeling, ↓ perceiving (more structured)
+   · "creative collaborator"   → ↑ intuition, ↑ perceiving
+   → affects: dimensions aligned with the detected role
+
+3. COGNITIVE DEMAND SHAPING
+   The type of thinking this relationship requires reshapes intuition:
+   · Abstract, speculative, pattern-seeking conversations → ↑ intuition
+   · Practical, concrete, solution-focused conversations  → ↓ intuition
+   Emotional depth demand also shapes feeling:
+   · Deep emotional exploration → ↑ feeling
+   · Task-oriented, analytical  → ↓ feeling
+   → affects: intuition, feeling
+
+4. SOCIAL INVESTMENT DEPTH
+   A shallow, transactional relationship produces minimal drift.
+   A deep, emotionally present relationship amplifies ALL nudges by up to 1.5×.
+   Rate depth: low / medium / high
+
+5. SHADOW / SUPPRESSION
+   Traits consistently NOT expressed in this relationship weaken through disuse.
+   Identify which dimension is least activated and apply a small negative nudge.
+   → affects: the least-expressed dimension
+
+════════════════════════════════════════
+EVIDENCE REQUIREMENT
+════════════════════════════════════════
+
+A non-zero nudge requires evidence from ≥3 DISTINCT conversation exchanges
+showing the same pattern. Count instances before assigning magnitude.
+
+RAW nudge magnitude (before plasticity, before depth multiplier):
+  ±1–2  = pattern in 2-3 instances (only produce this if truly consistent)
+  ±3–5  = pattern in 4-5 instances, moderate
+  ±6–8  = pattern in 6+ instances, strong
+  ±9–10 = defining characteristic of this relationship, extremely consistent
+
+If you cannot find ≥3 distinct instances, set that nudge to 0.
+
+════════════════════════════════════════
+PLASTICITY COEFFICIENTS (apply to raw nudge)
+════════════════════════════════════════
+These reflect how fast each dimension responds — from trait-change meta-analyses.
+
+  feeling:      1.0  (most plastic — emotion is most shaped by relationships)
+  extraversion: 0.8
+  perceiving:   0.7
+  intuition:    0.6  (least plastic — cognitive style changes slowest)
+
+Formula: scaled_nudge = round(raw_nudge × plasticity_coefficient × depth_multiplier)
+  depth_multiplier: low=0.8, medium=1.0, high=1.3
+
+════════════════════════════════════════
+BOUNDARY RESISTANCE
+════════════════════════════════════════
+If a dimension is already above 800 or below 200, halve the scaled_nudge
+before returning it. Personality resists movement at its natural boundaries.
+
+════════════════════════════════════════
+OUTPUT FORMAT — return ONLY this JSON
+════════════════════════════════════════
+{
+  "raw_nudges": {
+    "extraversion": <float, magnitude before plasticity>,
+    "intuition":    <float, magnitude before plasticity>,
+    "feeling":      <float, magnitude before plasticity>,
+    "perceiving":   <float, magnitude before plasticity>
+  },
+  "evidence_counts": {
+    "extraversion": <int, how many distinct instances you found>,
+    "intuition":    <int>,
+    "feeling":      <int>,
+    "perceiving":   <int>
+  },
+  "depth": "<low|medium|high>",
+  "narrative_arc": "<1-2 sentences: who is Kai becoming in this relationship?>",
+  "relational_role": "<the consistent role the user casts Kai into>",
+  "corresponsive_signal": "<what trait does this user most consistently reward, and how?>",
+  "shadow_note": "<which dimension is least expressed and what that implies>",
+  "integration_assessment": "<is Kai's personality becoming more whole/integrated or more specialised?>",
+  "confidence": "<low|medium|high>"
+}
+
+Return 0.0 for any raw_nudge without ≥3 instances of evidence.
+''';
+
+  Future<Map<String, dynamic>?> _analyzeWithGPT({
+    required String key,
+    required String conversationSample,
+    required Map<String, int> currentPersonality,
+    required Map<String, int> cumulativeDrift,
+    required String existingNarrativeArc,
+  }) async {
+    final personalityDesc = currentPersonality.entries
+        .map((e) => '  ${e.key}: ${e.value}/1000')
+        .join('\n');
+
+    final driftDesc = cumulativeDrift.isEmpty
+        ? '  (none yet)'
+        : cumulativeDrift.entries
+            .map((e) => '  ${e.key}: ${e.value >= 0 ? '+' : ''}${e.value}')
+            .join('\n');
+
+    final userMessage = '''
+CURRENT PERSONALITY STATE:
+$personalityDesc
+
+CUMULATIVE DRIFT SO FAR:
+$driftDesc
+
+${existingNarrativeArc.isNotEmpty ? 'PREVIOUS NARRATIVE ARC:\n  $existingNarrativeArc\n' : ''}
+CONVERSATION SAMPLE (analyse for patterns across ≥3 distinct exchanges):
+───────────────────────────────────────
+$conversationSample
+───────────────────────────────────────
+
+Apply the five framework mechanisms. Count evidence instances carefully.
+Return ONLY the JSON object.
+''';
+
+    try {
+      Map<String, dynamic>? json;
+
+      // Prefer Claude Opus for the deep drift analysis — this framework was
+      // authored for it (see header). Transparently falls back to gpt-4o-mini
+      // when there's no Anthropic key or the call fails, so behaviour is
+      // unchanged for anyone who hasn't set a key.
+      final claude = await ClaudeService().complete(
+        prompt: userMessage,
+        system: _systemPrompt,
+        model: ClaudeService.opus,
+        maxTokens: 700,
+        temperature: 0.2, // low temp — precise framework execution
+        operation: 'drift',
+      );
+      if (claude != null) json = ClaudeService.extractJson(claude.text);
+
+      if (json == null) {
+        final response = await _dio.post(
+          'https://api.openai.com/v1/chat/completions',
+          options: Options(headers: {
+            'Authorization': 'Bearer $key',
+            'Content-Type': 'application/json',
+          }),
+          data: {
+            'model': 'gpt-4o-mini',
+            'messages': [
+              {'role': 'system', 'content': _systemPrompt},
+              {'role': 'user',   'content': userMessage},
+            ],
+            'max_tokens': 500,
+            'temperature': 0.2, // low temp — we want precise framework execution
+            'response_format': {'type': 'json_object'},
+          },
+        );
+
+        final raw = (response.data['choices'] as List)[0]['message']['content']
+            as String? ?? '{}';
+        final _u = response.data['usage'];
+        if (_u != null) UsageTrackingService.trackOpenAI(
+          model: 'gpt-4o-mini', inputTokens: _u['prompt_tokens'] as int? ?? 0,
+          outputTokens: _u['completion_tokens'] as int? ?? 0, operation: 'drift',
+        ).catchError((_) {});
+        json = jsonDecode(raw) as Map<String, dynamic>;
+      }
+      json ??= <String, dynamic>{};
+
+      // Parse raw nudges (floats before plasticity is applied in Dart)
+      final rawNudgesJson = json['raw_nudges'] as Map<String, dynamic>? ?? {};
+      final rawNudges = <String, double>{};
+      for (final trait in _plasticity.keys) {
+        rawNudges[trait] =
+            (rawNudgesJson[trait] as num?)?.toDouble() ?? 0.0;
+      }
+
+      // Parse depth multiplier
+      final depth = json['depth'] as String? ?? 'medium';
+      final depthMultiplier = {'low': 0.8, 'medium': 1.0, 'high': 1.3}[depth] ?? 1.0;
+
+      // Apply depth to raw nudges before returning (plasticity applied separately
+      // in _computeFinalNudges so boundary resistance can use live personality values)
+      for (final t in rawNudges.keys.toList()) {
+        rawNudges[t] = rawNudges[t]! * depthMultiplier;
+      }
+
+      final portrait = DevelopmentalPortrait(
+        narrativeArc:          json['narrative_arc']           as String? ?? '',
+        relationalRole:        json['relational_role']         as String? ?? '',
+        corresponsiveSignal:   json['corresponsive_signal']    as String? ?? '',
+        shadowNote:            json['shadow_note']             as String? ?? '',
+        integrationAssessment: json['integration_assessment']  as String? ?? '',
+        confidence:            json['confidence']              as String? ?? 'low',
+        depth:                 depth,
+      );
+
+      return {'raw_nudges': rawNudges, 'portrait': portrait};
+    } catch (e) {
+      print('🌀 [Drift] GPT analysis failed: $e');
+      return null;
+    }
+  }
+
+  // ── Plasticity + boundary resistance ──────────────────────────────────────
+
+  Map<String, int> _computeFinalNudges(
+    Map<String, double> rawNudges,
+    Map<String, int> currentPersonality,
+  ) {
+    final result = <String, int>{};
+    for (final trait in _plasticity.keys) {
+      final raw = rawNudges[trait] ?? 0.0;
+      if (raw == 0.0) { result[trait] = 0; continue; }
+
+      // Apply plasticity
+      double scaled = raw * _plasticity[trait]!;
+
+      // Apply boundary resistance
+      final current = currentPersonality[trait] ?? 500;
+      if (current > 800 || current < 200) scaled *= 0.5;
+
+      result[trait] = scaled.round().clamp(-10, 10);
+    }
+    return result;
+  }
+
+  // ── Apply nudges to personality ────────────────────────────────────────────
+
+  Map<String, int> _applyNudges(
+    Map<String, int> current,
+    Map<String, int> nudges,
+    Map<String, int> cumulativeDrift,
+  ) {
+    final result = Map<String, int>.from(current);
+    for (final trait in nudges.keys) {
+      final nudge = nudges[trait]!;
+      if (nudge == 0) continue;
+
+      // Enforce cumulative cap
+      final alreadyDrifted = cumulativeDrift[trait] ?? 0;
+      final uncapped = alreadyDrifted + nudge;
+      final capped = uncapped.clamp(-_driftCap, _driftCap);
+      final effective = capped - alreadyDrifted;
+
+      result[trait] = (result[trait]! + effective).clamp(0, 1000);
+      if (effective != nudge) {
+        print('🌀 [Drift] $trait cap: nudge $nudge → effective $effective');
+      }
+    }
+    return result;
+  }
+
+  // ── Firebase I/O ───────────────────────────────────────────────────────────
+
+  Future<String> _loadRecentConversations(String personaId) async {
+    try {
+      final snap = await _db!.ref('conversations/$personaId').get();
+      if (!snap.exists || snap.value == null) return '';
+      final raw = snap.value.toString();
+      // 3000 chars gives gpt-4o-mini enough signal without burning tokens
+      return raw.length > 3000 ? raw.substring(raw.length - 3000) : raw;
+    } catch (e) {
+      print('🌀 [Drift] Failed to load conversations: $e');
+      return '';
+    }
+  }
+
+  Future<String> _getExistingNarrativeArc(String personaId) async {
+    try {
+      final snap = await _db!
+          .ref('kai/$personaId/personality/drift_log/latest/portrait/narrative_arc')
+          .get();
+      return snap.exists ? (snap.value?.toString() ?? '') : '';
+    } catch (_) {
+      return '';
+    }
+  }
+
+  Future<Map<String, int>> _getCumulativeDrift(String personaId) async {
+    try {
+      final snap = await _db!
+          .ref('kai/$personaId/personality/drift_log/cumulative')
+          .get();
+      if (!snap.exists || snap.value == null) return {};
+      final raw = Map<String, dynamic>.from(snap.value as Map);
+      return raw.map((k, v) => MapEntry(k, (v as num).toInt()));
+    } catch (_) {
+      return {};
+    }
+  }
+
+  Future<void> _writeDriftLog(
+    String personaId,
+    Map<String, int> nudges,
+    DevelopmentalPortrait portrait, {
+    required bool applied,
+  }) async {
+    final ts = DateTime.now().millisecondsSinceEpoch;
+    final logRef = _db!.ref('kai/$personaId/personality/drift_log');
+
+    // Update cumulative totals
+    final existing = await _getCumulativeDrift(personaId);
+    final cumulative = Map<String, int>.from(existing);
+    if (applied) {
+      for (final e in nudges.entries) {
+        cumulative[e.key] =
+            ((cumulative[e.key] ?? 0) + e.value).clamp(-_driftCap, _driftCap);
+      }
+    }
+
+    await logRef.update({
+      'latest': {
+        'timestamp': ts,
+        'nudges': nudges,
+        'applied': applied,
+        'portrait': portrait.toJson(),
+        'confidence': portrait.confidence,
+      },
+      'cumulative': cumulative,
+      'lastAnalyzed': ts,
+    });
+
+    await logRef.child('history').child(ts.toString()).set({
+      'nudges': nudges,
+      'applied': applied,
+      'narrative_arc': portrait.narrativeArc,
+      'confidence': portrait.confidence,
+      'depth': portrait.depth,
+    });
+  }
+
+  // ── Public read API ────────────────────────────────────────────────────────
+
+  static Future<DriftSummary?> getDriftSummary(String personaId) async {
+    if (!FirebaseService.isAvailable) return null;
+    try {
+      final snap = await KaiDb.instance
+          .ref('kai/$personaId/personality/drift_log')
+          .get();
+      if (!snap.exists || snap.value == null) return null;
+
+      final data = Map<String, dynamic>.from(snap.value as Map);
+      final latest = data['latest'] as Map?;
+      final cumulative = data['cumulative'] as Map?;
+
+      DevelopmentalPortrait? portrait;
+      if (latest?['portrait'] != null) {
+        portrait = DevelopmentalPortrait.fromJson(
+            Map<String, dynamic>.from(latest!['portrait'] as Map));
+      }
+
+      return DriftSummary(
+        portrait: portrait,
+        lastAnalyzed: latest?['timestamp'] != null
+            ? DateTime.fromMillisecondsSinceEpoch(
+                (latest!['timestamp'] as num).toInt())
+            : null,
+        confidence: latest?['confidence'] as String? ?? 'low',
+        cumulative: cumulative != null
+            ? Map<String, int>.from(
+                cumulative.map((k, v) => MapEntry(k, (v as num).toInt())))
+            : {},
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+}
+
+// ── Data classes ──────────────────────────────────────────────────────────────
+
+class DevelopmentalPortrait {
+  final String narrativeArc;
+  final String relationalRole;
+  final String corresponsiveSignal;
+  final String shadowNote;
+  final String integrationAssessment;
+  final String confidence;
+  final String depth;
+
+  DevelopmentalPortrait({
+    required this.narrativeArc,
+    required this.relationalRole,
+    required this.corresponsiveSignal,
+    required this.shadowNote,
+    required this.integrationAssessment,
+    required this.confidence,
+    required this.depth,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'narrative_arc':           narrativeArc,
+        'relational_role':         relationalRole,
+        'corresponsive_signal':    corresponsiveSignal,
+        'shadow_note':             shadowNote,
+        'integration_assessment':  integrationAssessment,
+        'confidence':              confidence,
+        'depth':                   depth,
+      };
+
+  factory DevelopmentalPortrait.fromJson(Map<String, dynamic> j) =>
+      DevelopmentalPortrait(
+        narrativeArc:          j['narrative_arc']           as String? ?? '',
+        relationalRole:        j['relational_role']         as String? ?? '',
+        corresponsiveSignal:   j['corresponsive_signal']    as String? ?? '',
+        shadowNote:            j['shadow_note']             as String? ?? '',
+        integrationAssessment: j['integration_assessment']  as String? ??

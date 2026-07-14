@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../screens/voice_training_screen.dart';
 import '../services/voice/voice_training_service.dart';
 import '../widgets/animated_button.dart';
 
@@ -415,17 +414,14 @@ class _VoiceSetupDialogState extends State<VoiceSetupDialog> {
     );
   }
 
-  void _startTraining() async {
-    final result = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(
-        builder: (context) => const VoiceTrainingScreen(),
+  void _startTraining() {
+    // Wake word training is done at console.picovoice.ai — no in-app screen needed.
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Train your "Hey Kai" wake word at console.picovoice.ai'),
+        duration: Duration(seconds: 4),
       ),
     );
-
-    if (result == true) {
-      // Training completed successfully
-      _loadCurrentProfile(); // Refresh the profile
-    }
   }
 
   void _retrainVoice() async {

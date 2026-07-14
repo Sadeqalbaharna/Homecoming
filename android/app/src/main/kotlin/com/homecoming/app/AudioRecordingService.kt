@@ -191,4 +191,13 @@ class AudioRecordingService : Service() {
     fun isRecording(): Boolean {
         return mediaRecorder != null
     }
+
+    /**
+     * Get the current peak amplitude from MediaRecorder (0-32767).
+     * Returns 0 if not recording or on error.
+     * Note: maxAmplitude resets after each call (it's a peak-since-last-call meter).
+     */
+    fun getAmplitude(): Int {
+        return try { mediaRecorder?.maxAmplitude ?: 0 } catch (e: Exception) { 0 }
+    }
 }

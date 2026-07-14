@@ -23,6 +23,7 @@ library;
 import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'kai_db.dart';
 import 'firebase_service.dart';
 import '../ai/ai_config.dart';
 import '../ai/usage_tracking_service.dart';
@@ -213,7 +214,7 @@ Return ONLY valid JSON:
     List<Map<String, dynamic>> newEdges,
   ) async {
     final ref =
-        FirebaseDatabase.instance.ref('knowledge_graph/$personaId');
+        KaiDb.instance.ref('knowledge_graph/$personaId');
     final snap = await ref.get();
 
     List<dynamic> nodes = [];
@@ -315,7 +316,7 @@ Return ONLY valid JSON:
 
   Future<void> _writePersonalityContext(
       String personaId, String context) async {
-    await FirebaseDatabase.instance
+    await KaiDb.instance
         .ref('kai/$personaId/personality/chatgpt_context')
         .set({
       'text': context,
@@ -328,7 +329,7 @@ Return ONLY valid JSON:
   Future<void> _writeCoreFacts(
       String personaId, Map<String, dynamic> facts) async {
     if (facts.isEmpty) return;
-    await FirebaseDatabase.instance
+    await KaiDb.instance
         .ref('kai/$personaId/core_facts')
         .update({
       ...facts,

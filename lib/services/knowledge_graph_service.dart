@@ -5,6 +5,7 @@ library;
 import 'dart:async';
 import 'dart:math';
 import 'package:firebase_database/firebase_database.dart';
+import 'core/kai_db.dart';
 import '../models/knowledge_node.dart';
 import 'core/firebase_service.dart';
 // import 'graph_archive_service.dart'; // TODO: file missing
@@ -576,7 +577,7 @@ class KnowledgeGraphService {
     try {
       print('💾 [GRAPH] Saving graph to Firebase...');
       
-      final ref = FirebaseDatabase.instance.ref('knowledge_graph/$personaId');
+      final ref = KaiDb.instance.ref('knowledge_graph/$personaId');
       
       // Serialize graph
       final data = {
@@ -615,7 +616,7 @@ class KnowledgeGraphService {
     try {
       print('📥 [GRAPH] Loading graph from Firebase...');
       
-      final ref = FirebaseDatabase.instance.ref('knowledge_graph/$personaId');
+      final ref = KaiDb.instance.ref('knowledge_graph/$personaId');
       final snapshot = await ref.get();
       
       if (!snapshot.exists) {

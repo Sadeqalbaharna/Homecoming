@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Tavern Shift Simulation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@400;700&family=Cinzel:wght@400;600;700&family=Rajdhani:wght@500;600;700&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#090705;--bg2:#0d0a07;--bg3:#111009;--border:#1a1714;--border2:#2a2016;--gold:#c9a96e;--gold2:#f0c040;--cream:#ede8de;--muted:#5a4a35;--muted2:#3a2e22;--green:#40c050;--red:#e04040;--purple:#a060d0;}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--cream);font-family:'Inter',sans-serif;height:100vh;display:flex;flex-direction:column;overflow:hidden;}
+
+/* ── Header ── */
+#hdr{background:#0b0804;border-bottom:1px solid var(--border);padding:8px 14px;display:flex;align-items:center;gap:12px;flex-shrink:0;}
+#hdr-title{font-family:'Cinzel Decorative',serif;font-size:13px;color:var(--gold);flex:1;}
+#sim-clock{font-family:'Rajdhani',sans-serif;font-size:22px;color:var(--cream);letter-spacing:3px;min-width:80px;text-align:right;}
+.ctrl-btn{font-family:'Cinzel',serif;font-size:8px;letter-spacing:1px;padding:5px 11px;border-radius:4px;border:1px solid var(--border2);background:var(--bg2);color:var(--gold);cursor:pointer;transition:all .15s;}
+.ctrl-btn:hover{border-color:var(--gold);color:var(--gold2);}
+.ctrl-btn.act{border-color:var(--gold2);color:var(--gold2);background:#181208;}
+#play-btn{border-color:#3a5a30;background:#081008;color:#70c060;}
+#play-btn.playing{border-color:#5a3a20;background:#100808;color:#e08040;}
+#prog-wrap{height:2px;background:#111009;flex-shrink:0;}
+#prog-fill{height:2px;background:linear-gradient(90deg,var(--gold),var(--gold2));width:0%;transition:width .4s linear;}
+
+/* ── Body grid ── */
+#body{flex:1;display:grid;grid-template-columns:190px 1fr 210px 175px;grid-template-rows:1fr 155px;gap:1px;background:var(--border);overflow:hidden;}
+#body>div{background:var(--bg);overflow:hidden;}
+
+/* ── Panels ── */
+.p-title{font-family:'Cinzel',serif;font-size:8px;color:var(--muted);letter-spacing:1.5px;padding:10px 10px 6px;border-bottom:1px solid var(--border);}
+
+/* Staff */
+#p-staff{display:flex;flex-direction:column;}
+#staff-list{flex:1;overflow-y:auto;padding:8px;}
+.sc{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:8px;margin-bottom:6px;transition:border-color .3s;}
+.sc-top{display:flex;align-items:center;gap:7px;margin-bottom:5px;}
+.sc-av{width:28px;height:28px;border-radius:50%;background:#1a1410;border:1px solid var(--border2);display:flex;align-items:center;justify-content:center;font-family:'Cinzel',serif;font-size:11px;color:var(--gold);flex-shrink:0;}
+.sc-name{font-family:'Cinzel',serif;font-size:10px;color:var(--cream);}
+.sc-role{font-size:8px;color:var(--muted);}
+.sc-rev{font-family:'Rajdhani',sans-serif;font-size:14px;color:var(--gold2);font-weight:700;line-height:1;}
+.sc-rlbl{font-size:7px;color:var(--muted);}
+.sc-tbls{display:flex;flex-wrap:wrap;gap:3px;margin-top:4px;}
+.sc-tbl-dot{font-size:7px;font-family:'Cinzel',serif;padding:1px 5px;border-radius:3px;border:1px solid var(--border2);color:var(--muted);}
+.sc-tbl-dot.occ{border-color:#4a3a20;color:var(--gold);background:#141008;}
+.sc-tbl-dot.late{border-color:var(--red);color:var(--red);background:#140808;}
+
+/* Tables */
+#p-tables{display:flex;flex-direction:column;}
+#tbl-grid{flex:1;padding:8px;display:grid;grid-template-columns:repeat(5,1fr);gap:5px;align-content:start;}
+.tc{border:1px solid var(--border);border-radius:5px;background:var(--bg2);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:5px 2px;min-height:60px;transition:all .3s;cursor:default;position:relative;}
+.tc-name{font-family:'Cinzel',serif;font-size:7px;color:var(--muted);letter-spacing:.3px;text-align:center;margin-bottom:2px;}
+.tc-covers{font-family:'Rajdhani',sans-serif;font-size:14px;color:var(--cream);line-height:1;}
+.tc-spend{font-family:'Rajdhani',sans-serif;font-size:9px;color:var(--gold2);line-height:1;margin-top:2px;}
+.tc-badge{position:absolute;top:3px;right:3px;font-size:8px;}
+.tc.occ{background:#100d08;border-color:#3a2e18;}
+.tc.occ .tc-name{color:var(--gold);}
+.tc.late{background:#0e0808;border-color:var(--red);box-shadow:0 0 6px rgba(224,64,64,.15);}
+.tc.ready{background:#080e08;border-color:var(--green);}
+.tc.closing{background:#080e08;border-color:#3a6a40;}
+.tc.empty{opacity:.5;}
+
+/* Orders */
+#p-orders{display:flex;flex-direction:column;}
+#orders-list{flex:1;overflow-y:auto;}
+.or{padding:5px 10px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:2px;transition:background .3s;}
+.or-top{display:flex;align-items:center;gap:6px;}
+.or-tbl{font-family:'Cinzel',serif;font-size:7px;color:var(--muted);letter-spacing:1px;flex:1;}
+.or-st{font-size:7px;font-family:'Cinzel',serif;letter-spacing:.5px;padding:1px 5px;border-radius:3px;}
+.st-pend{background:#141008;color:#c9a030;border:1px solid #3a2e10;}
+.st-rdy{background:#081408;color:var(--green);border:1px solid #204020;}
+.st-late{background:#140808;color:var(--red);border:1px solid #402020;}
+.or-item{font-size:9px;color:#a09070;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.or-price{font-family:'Rajdhani',sans-serif;font-size:10px;color:var(--gold2);}
+
+/* Stats */
+#p-stats{display:flex;flex-direction:column;}
+#stats-body{flex:1;padding:10px;display:flex;flex-direction:column;gap:10px;}
+.st-block{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;}
+.st-val{font-family:'Rajdhani',sans-serif;font-size:24px;color:var(--gold2);font-weight:700;line-height:1;}
+.st-lbl{font-size:8px;color:var(--muted);letter-spacing:1px;margin-top:2px;}
+.st-trend{font-size:9px;color:var(--green);margin-top:1px;}
+#rev-chart-wrap{position:relative;height:34px;margin-top:4px;}
+#rev-chart{width:100%;height:34px;}
+
+/* Log */
+#p-log{grid-column:1/-1;display:flex;flex-direction:column;}
+#log-inner{flex:1;overflow-y:auto;padding:4px 10px;display:flex;flex-direction:column-reverse;gap:0;}
+.le{display:flex;align-items:baseline;gap:7px;padding:3px 0;border-bottom:1px solid #0d0b08;font-size:9px;animation:slideIn .3s ease;}
+@keyframes slideIn{from{opacity:0;transform:translateY(-4px);}to{opacity:1;transform:translateY(0);}}
+.le-time{font-family:'Rajdhani',sans-serif;color:var(--muted);width:32px;flex-shrink:0;font-size:9px;}
+.le-ico{flex-shrink:0;width:14px;}
+.le-msg{color:#8a7a58;}
+.le.arr .le-msg{color:#70a880;}
+.le.ord .le-msg{color:#a0a050;}
+.le.rdy .le-msg{color:var(--green);}
+.le.pay .le-msg{color:var(--gold);}
+.le.alrt .le-msg{color:var(--red);}
+.le.inf .le-msg{color:#8080a0;}
+
+/* End screen */
+#end-screen{display:none;position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:200;align-items:center;justify-content:center;}
+#end-screen.show{display:flex;}
+.end-card{background:#0e0b08;border:1px solid var(--border2);border-radius:12px;padding:28px;width:460px;max-width:94vw;}
+.end-ttl{font-family:'Cinzel Decorative',serif;font-size:16px;color:var(--gold);text-align:center;margin-bottom:6px;}
+.end-sub{text-align:center;font-size:9px;color:var(--muted);letter-spacing:1px;margin-bottom:20px;}
+.end-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;}
+.end-st{background:#0a0704;border:1px solid var(--border);border-radius:7px;padding:12px;text-align:center;}
+.end-v{font-family:'Rajdhani',sans-serif;font-size:26px;color:var(--gold2);font-weight:700;}
+.end-l{font-size:8px;color:var(--muted);letter-spacing:1px;margin-top:3px;}
+.end-staff{margin-top:8px;}
+.end-srow{display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border);}
+.end-sname{font-family:'Cinzel',serif;font-size:10px;color:var(--cream);flex:1;}
+.end-srev{font-family:'Rajdhani',sans-serif;font-size:14px;color:var(--gold2);font-weight:700;}
+.end-close{display:block;width:100%;margin-top:16px;font-family:'Cinzel',serif;font-size:9px;letter-spacing:1.5px;padding:9px;border-radius:5px;border:1px solid var(--border2);background:var(--bg2);color:var(--gold);cursor:pointer;text-align:center;}
+.end-close:hover{border-color:var(--gold);}
+</style>
+</head>
+<body>
+
+<div id="hdr">
+  <span id="hdr-title">⚔ Tavern Shift Simulator &nbsp;·&nbsp; 2-Hour Evening Service</span>
+  <span id="sim-clock">0:00</span>
+  <button class="ctrl-btn act" id="sp1" onclick="setSpeed(1)">1×</button>
+  <button class="ctrl-btn" id="sp2" onclick="setSpeed(2)">2×</button>
+  <button class="ctrl-btn" id="sp4" onclick="setSpeed(4)">4×</button>
+  <button class="ctrl-btn" id="play-btn" onclick="togglePlay()">▶ START</button>
+</div>
+<div id="prog-wrap"><div id="prog-fill"></div></div>
+
+<div id="body">
+  <!-- Staff -->
+  <div id="p-staff">
+    <div class="p-title">⚔ STAFF ON SHIFT</div>
+    <div id="staff-list"></div>
+  </div>
+
+  <!-- Tables -->
+  <div id="p-tables">
+    <div class="p-title">◈ FLOOR MAP</div>
+    <div id="tbl-grid"></div>
+  </div>
+
+  <!-- Orders -->
+  <div id="p-orders">
+    <div class="p-title">🍳 KITCHEN QUEUE</div>
+    <div id="orders-list"></div>
+  </div>
+
+  <!-- Stats -->
+  <div id="p-stats">
+    <div class="p-title">◆ LIVE STATS</div>
+    <div id="stats-body">
+      <div class="st-block">
+        <div class="st-val" id="st-rev">0.000</div>
+        <div class="st-lbl">REVENUE (BD)</div>
+        <div id="rev-chart-wrap"><canvas id="rev-chart"></canvas></div>
+      </div>
+      <div class="st-block">
+        <div class="st-val" id="st-covers">0</div>
+        <div class="st-lbl">COVERS SERVED</div>
+      </div>
+      <div class="st-block">
+        <div class="st-val" id="st-turns">0</div>
+        <div class="st-lbl">TABLE TURNS</div>
+      </div>
+      <div class="st-block">
+        <div class="st-val" id="st-avg">—</div>
+        <div class="st-lbl">AVG SPEND / COVER</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Log -->
+  <div id="p-log">
+    <div class="p-title">📜 EVENT LOG</div>
+    <div id="log-inner"></div>
+  </div>
+</div>
+
+<div id="end-screen">
+  <div class="end-card">
+    <div class="end-ttl">🏆 Shift Complete</div>
+    <div class="end-sub">EVENING SERVICE · 2 HOURS</div>
+    <div class="end-grid">
+      <div class="end-st"><div class="end-v" id="e-rev">0.000</div><div class="end-l">TOTAL REVENUE BD</div></div>
+      <div class="end-st"><div class="end-v" id="e-cov">0</div><div class="end-l">COVERS SERVED</div></div>
+      <div class="end-st"><div class="end-v" id="e-turns">0</div><div class="end-l">TABLE TURNS</div></div>
+      <div class="end-st"><div class="end-v" id="e-avg">0.000</div><div class="end-l">AVG / COVER BD</div></div>
+    </div>
+    <div class="end-sub" style="margin-bottom:8px;">STAFF PERFORMANCE</div>
+    <div class="end-staff" id="end-staff-rows"></div>
+    <button class="end-close" onclick="document.getElementById('end-screen').classList.remove('show')">✕ CLOSE SUMMARY</button>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════
+//  DATA
+// ═══════════════════════════════════════════════════════
+const TABLES = [
+  {id:'t1', name:'Table 1', cap:2, x:0,y:0},
+  {id:'t2', name:'Table 2', cap:2, x:1,y:0},
+  {id:'t3', name:'Table 3', cap:4, x:2,y:0},
+  {id:'t4', name:'Table 4', cap:4, x:3,y:0},
+  {id:'t5', name:'Table 5', cap:6, x:4,y:0},
+  {id:'t6', name:'Table 6', cap:4, x:0,y:1},
+  {id:'t7', name:'Table 7', cap:4, x:1,y:1},
+  {id:'nook', name:'Nook',  cap:2, x:2,y:1},
+  {id:'l1', name:'Lounge 1',cap:6, x:3,y:1},
+  {id:'l2', name:'Lounge 2',cap:6, x:4,y:1},
+];
+
+const STAFF = [
+  {id:'faisal', name:'Faisal', role:'Server', tables:['t1','t2','t3','t4']},
+  {id:'layla',  name:'Layla',  role:'Server', tables:['t5','t6','t7','nook','l1','l2']},
+];
+
+const MENU = [
+  {name:'Lamb Machboos',   price:4.500},
+  {name:'Chicken Kabsa',   price:3.800},
+  {name:'Mixed Grill',     price:6.500},
+  {name:'Hummus & Bread',  price:1.200},
+  {name:'Fattoush Salad',  price:2.000},
+  {name:'Lemon Mint',      price:1.800},
+  {name:'Mango Laban',     price:1.500},
+  {name:'Saffron Rice',    price:2.500},
+  {name:'Kofta Platter',   price:5.200},
+  {name:'Baklava Plate',   price:2.800},
+  {name:'Shrimp Biryani',  price:5.800},
+  {name:'Date Smoothie',   price:1.600},
+];
+
+const GUESTS = [
+  'Amir Al-Khalid','Sara Hassan','Yusuf Mansoor','Nora Zayed',
+  'Hassan Baharna','Khalid Rahman','Fatima Ali','Omar Sherif',
+  'Laila Qasim','Tariq Mahmoud','Reem Jassim','Bader Salman',
+  'Nouf Al-Rashid','Walid Karimi','Hessa Al-Dosari','Mazen Taher',
+];
+
+// ═══════════════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════════════
+let simTime = 0;    // sim minutes 0-120
+let playing = false;
+let speed = 1;
+let ticker = null;
+let guestIdx = 0;
+
+const state = {
+  tables: {},       // id → {guests:[], spend:0, status:'empty', orderId:null}
+  orders: [],       // {id, tableId, tableName, items, status, createdAt}
+  staffRev: {faisal:0, layla:0},
+  totalRev: 0,
+  totalCovers: 0,
+  tableTurns: 0,
+  orderSeq: 0,
+  revHistory: [],   // [time, rev] pairs for chart
+};
+
+TABLES.forEach(t => {
+  state.tables[t.id] = {guests:[], spend:0, status:'empty', orderId:null};
+});
+
+// ═══════════════════════════════════════════════════════
+//  EVENTS TIMELINE  (time = sim minutes)
+// ═══════════════════════════════════════════════════════
+const EVENTS = [
+  {t:0,   fn:'log',    args:['inf','🌅','Evening service begins. Staff on floor.']},
+  {t:2,   fn:'arrive', args:['t1', 2]},
+  {t:5,   fn:'arrive', args:['t3', 4]},
+  {t:9,   fn:'order',  args:['t1', [0,5]]},       // Lamb Machboos + Saffron Rice
+  {t:12,  fn:'order',  args:['t3', [1,1,3,6]]},   // 2× Chicken Kabsa + Hummus + Mango
+  {t:15,  fn:'arrive', args:['l1', 3]},
+  {t:20,  fn:'ready',  args:['t1']},
+  {t:24,  fn:'arrive', args:['t5', 6]},
+  {t:25,  fn:'ready',  args:['t3']},
+  {t:28,  fn:'order',  args:['l1', [4,4,6]]},     // 2× Fattoush + Lemon Mint
+  {t:30,  fn:'order',  args:['t5', [2,2,0,0,9,9]]}, // 2× Mixed Grill + 2× Lamb + 2× Baklava
+  {t:33,  fn:'order',  args:['t1', [9,9]]},       // desserts
+  {t:35,  fn:'arrive', args:['nook', 2]},
+  {t:38,  fn:'ready',  args:['l1']},
+  {t:40,  fn:'ready',  args:['t1']},              // desserts ready
+  {t:43,  fn:'arrive', args:['t2', 2]},
+  {t:45,  fn:'pay',    args:['t3']},
+  {t:48,  fn:'order',  args:['nook', [10,6]]},    // Shrimp Biryani + Lemon Mint
+  {t:50,  fn:'order',  args:['t2',  [2,0]]},      // Mixed Grill + Lamb
+  {t:52,  fn:'arrive', args:['t6', 4]},
+  {t:55,  fn:'alert',  args:['t5','Order at Table 5 running 25+ mins — still pending']},
+  {t:56,  fn:'ready',  args:['t5']},
+  {t:58,  fn:'pay',    args:['t1']},
+  {t:60,  fn:'arrive', args:['t4', 3]},
+  {t:62,  fn:'ready',  args:['nook']},
+  {t:63,  fn:'order',  args:['t6',  [1,3,4,11]]}, // Kabsa + Hummus + Fattoush + Date Smoothie
+  {t:65,  fn:'order',  args:['t4',  [0,6,6]]},    // Lamb + 2× Mango
+  {t:68,  fn:'ready',  args:['t2']},
+  {t:70,  fn:'arrive', args:['l2', 5]},
+  {t:72,  fn:'pay',    args:['t5']},
+  {t:75,  fn:'ready',  args:['t6']},
+  {t:76,  fn:'order',  args:['l2',  [2,0,10,3,4]]}, // Mixed + Lamb + Shrimp + Hummus + Fattoush
+  {t:78,  fn:'pay',    args:['t2']},
+  {t:80,  fn:'ready',  args:['t4']},
+  {t:82,  fn:'arrive', args:['t3', 2]},
+  {t:83,  fn:'pay',    args:['nook']},
+  {t:85,  fn:'order',  args:['t3',  [2,9]]},      // Mixed Grill + Baklava
+  {t:87,  fn:'ready',  args:['l2']},
+  {t:88,  fn:'pay',    args:['t6']},
+  {t:90,  fn:'arrive', args:['t7', 4]},
+  {t:92,  fn:'order',  args:['l2',  [11,11,11,6,6]]}, // 3× Date Smoothie + 2× Lemon Mint
+  {t:93,  fn:'pay',    args:['t4']},
+  {t:95,  fn:'order',  args:['t7',  [1,0,3,7]]},  // Kabsa + Lamb + Hummus + Saffron
+  {t:97,  fn:'ready',  args:['t3']},
+  {t:99,  fn:'ready',  args:['l2']},  // drinks
+  {t:100, fn:'arrive', args:['t1', 4]},
+  {t:103, fn:'pay',    args:['l1']},
+  {t:105, fn:'ready',  args:['t7']},
+  {t:107, fn:'order',  args:['t1',  [10,0,4,6]]}, // Shrimp + Lamb + Fattoush + Lemon
+  {t:108, fn:'pay',    args:['t3']},
+  {t:110, fn:'pay',    args:['l2']},
+  {t:112, fn:'arrive', args:['l1', 3]},
+  {t:113, fn:'ready',  args:['t1']},
+  {t:115, fn:'pay',    args:['t7']},
+  {t:116, fn:'order',  args:['l1',  [9,6,6]]},    // Baklava + 2× Lemon Mint
+  {t:118, fn:'ready',  args:['l1']},
+  {t:120, fn:'end',    args:[]},
+];
+
+let nextEvIdx = 0;
+
+// ═══════════════════════════════════════════════════════
+//  HELPERS
+// ═══════════════════════════════════════════════════════
+function fmtTime(m){
+  const h = Math.floor(m/60), min = m%60;
+  return h+':'+String(min).padStart(2,'0');
+}
+function fmtBD(n){ return n.toFixed(3); }
+function staffFor(tableId){
+  return STAFF.find(s=>s.tables.includes(tableId))||STAFF[0];
+}
+function pickGuests(n){
+  const out=[];
+  for(let i=0;i<n;i++) out.push(GUESTS[(guestIdx++)%GUESTS.length]);
+  return out;
+}
+
+// ═══════════════════════════════════════════════════════
+//  EVENT HANDLERS
+// ═══════════════════════════════════════════════════════
+function evArrive(tableId, count){
+  const t = TABLES.find(x=>x.id===tableId);
+  const guests = pickGuests(Math.min(count, t.cap));
+  state.tables[tableId].guests = guests;
+  state.tables[tableId].spend = 0;
+  state.tables[tableId].status = 'occupied';
+  state.tables[tableId].orderId = null;
+  state.totalCovers += guests.length;
+  addLog('arr','👥', guests[0]+(guests.length>1?' party ('+guests.length+'pax)':'')+' seated at '+t.name);
+  render();
+}
+
+function evOrder(tableId, menuIdxs){
+  const t = TABLES.find(x=>x.id===tableId);
+  if(state.tables[tableId].status !== 'occupied') return;
+  const items = menuIdxs.map(i=>MENU[i]);
+  const total = items.reduce((s,x)=>s+x.price, 0);
+  const oid = ++state.orderSeq;
+  const order = {id:oid, tableId, tableName:t.name, items, total, status:'pending', createdAt:simTime};
+  state.orders.unshift(order);
+  state.tables[tableId].spend += total;
+  state.tables[tableId].orderId = oid;
+  addLog('ord','🍳','Order placed at '+t.name+' · '+items.map(x=>x.name).join(', ')+' · BD '+fmtBD(total));
+  render();
+}
+
+function evReady(tableId){
+  const ord = state.orders.find(o=>o.tableId===tableId && o.status==='pending');
+  if(!ord) return;
+  const late = (simTime - ord.createdAt) > 20;
+  ord.status = 'ready';
+  const t = TABLES.find(x=>x.id===tableId);
+  state.tables[tableId].status = 'ready';
+  addLog('rdy','✅','Order READY at '+t.name+(late?' (was delayed)':''));
+  render();
+}
+
+function evPay(tableId){
+  const t = TABLES.find(x=>x.id===tableId);
+  const spend = state.tables[tableId].spend;
+  const guests = state.tables[tableId].guests;
+  if(!spend && !guests.length) return;
+  const staff = staffFor(tableId);
+  state.totalRev += spend;
+  state.staffRev[staff.id] = (state.staffRev[staff.id]||0) + spend;
+  state.tableTurns++;
+  // push revenue history
+  state.revHistory.push([simTime, state.totalRev]);
+  // close orders for this table
+  state.orders.forEach(o=>{ if(o.tableId===tableId) o.status='paid'; });
+  // clear table
+  state.tables[tableId] = {guests:[], spend:0, status:'empty', orderId:null};
+  addLog('pay','💰',t.name+' closed · BD '+fmtBD(spend)+' · '+guests.length+' pax · served by '+staff.name);
+  render();
+}
+
+function evAlert(tableId, msg){
+  state.tables[tableId].status = 'late';
+  addLog('alrt','⚠️', msg);
+  render();
+}
+
+function evLog(type, icon, msg){
+  addLog(type, icon, msg);
+}
+
+function evEnd(){
+  playing = false;
+  document.getElementById('play-btn').textContent='✓ DONE';
+  document.getElementById('play-btn').classList.remove('playing');
+  // Show end screen
+  const es = document.getElementById('end-screen');
+  document.getElementById('e-rev').textContent = fmtBD(state.totalRev);
+  document.getElementById('e-cov').textContent = state.totalCovers;
+  document.getElementById('e-turns').textContent = state.tableTurns;
+  document.getElementById('e-avg').textContent = state.totalCovers>0 ? fmtBD(state.totalRev/state.totalCovers) : '—';
+  const rows = STAFF.map(s=>'<div class="end-srow"><div class="end-sname">'+s.name+' <span style="font-size:8px;color:var(--muted);">'+s.role+'</span></div><div class="end-srev">'+fmtBD(state.staffRev[s.id]||0)+' BD</div></div>').join('');
+  document.getElementById('end-staff-rows').innerHTML = rows;
+  setTimeout(()=>es.classList.add('show'), 800);
+}
+
+// ═══════════════════════════════════════════════════════
+//  LOG
+// ═══════════════════════════════════════════════════════
+function addLog(cls, icon, msg){
+  const el = document.createElement('div');
+  el.className = 'le '+cls;
+  el.innerHTML = '<span class="le-time">'+fmtTime(simTime)+'</span>'
+    +'<span class="le-ico">'+icon+'</span>'
+    +'<span class="le-msg">'+msg+'</span>';
+  const inner = document.getElementById('log-inner');
+  inner.insertBefore(el, inner.firstChild);
+}
+
+// ═══════════════════════════════════════════════════════
+//  RENDER
+// ═══════════════════════════════════════════════════════
+function render(){
+  renderStaff();
+  renderTables();
+  renderOrders();
+  renderStats();
+}
+
+function renderStaff(){
+  const el = document.getElementById('staff-list');
+  el.innerHTML = STAFF.map(s=>{
+    const myTables = s.tables.map(tid=>{
+      const st = state.tables[tid];
+      const t = TABLES.find(x=>x.id===tid);
+      const cls = st.status==='late'?'late':st.status==='occupied'||st.status==='ready'?'occ':'';
+      return '<span class="sc-tbl-dot '+cls+'">'+t.name+'</span>';
+    }).join('');
+    return '<div class="sc">'
+      +'<div class="sc-top">'
+      +'<div class="sc-av">'+s.name[0]+'</div>'
+      +'<div style="flex:1"><div class="sc-name">'+s.name+'</div><div class="sc-role">'+s.role+'</div></div>'
+      +'<div style="text-align:right"><div class="sc-rev">'+fmtBD(state.staffRev[s.id]||0)+'</div><div class="sc-rlbl">BD</div></div>'
+      +'</div>'
+      +'<div class="sc-tbls">'+myTables+'</div>'
+      +'</div>';
+  }).join('');
+}
+
+function renderTables(){
+  const el = document.getElementById('tbl-grid');
+  el.innerHTML = TABLES.map(t=>{
+    const st = state.tables[t.id];
+    let cls = 'tc ';
+    if(st.status==='occupied') cls+='occ';
+    else if(st.status==='late') cls+='late occ';
+    else if(st.status==='ready') cls+='ready occ';
+    else if(st.status==='closing') cls+='closing';
+    else cls+='empty';
+    const badge = st.status==='late'?'<span class="tc-badge">⚠️</span>':st.status==='ready'?'<span class="tc-badge">🔔</span>':'';
+    const covers = st.guests.length>0?'<div class="tc-covers">'+st.guests.length+'</div>':'';
+    const spend = st.spend>0?'<div class="tc-spend">'+fmtBD(st.spend)+'</div>':'';
+    return '<div class="'+cls+'">'+badge
+      +'<div class="tc-name">'+t.name+'</div>'
+      +covers+spend
+      +'</div>';
+  }).join('');
+}
+
+function renderOrders(){
+  const el = document.getElementById('orders-list');
+  const active = state.orders.filter(o=>o.status!=='paid');
+  if(!active.length){el.innerHTML='<div style="padding:16px;text-align:center;font-size:9px;color:var(--muted);">Kitchen clear</div>';return;}
+  el.innerHTML = active.slice(0,12).map(o=>{
+    const age = simTime - o.createdAt;
+    let stCls = o.status==='ready'?'st-rdy':age>20?'st-late':'st-pend';
+    let stTxt = o.status==='ready'?'READY':age>20?'LATE':'PENDING';
+    const topItem = o.items[0]?o.items[0].name:'—';
+    const extra = o.items.length>1?' +'+( o.items.length-1):'';
+    return '<div class="or">'
+      +'<div class="or-top">'
+      +'<span class="or-tbl">'+o.tableName+'</span>'
+      +'<span class="or-st '+stCls+'">'+stTxt+'</span>'
+      +'</div>'
+      +'<div style="display:flex;justify-content:space-between;align-items:baseline;">'
+      +'<span class="or-item">'+topItem+extra+'</span>'
+      +'<span class="or-price">'+fmtBD(o.total)+'</span>'
+      +'</div></div>';
+  }).join('');
+}
+
+function renderStats(){
+  document.getElementById('st-rev').textContent = fmtBD(state.totalRev);
+  document.getElementById('st-covers').textContent = state.totalCovers;
+  document.getElementById('st-turns').textContent = state.tableTurns;
+  document.getElementById('st-avg').textContent = state.totalCovers>0
+    ? fmtBD(state.totalRev/state.totalCovers) : '—';
+  drawRevChart();
+}
+
+// ═══════════════════════════════════════════════════════
+//  REVENUE CHART
+// ═══════════════════════════════════════════════════════
+function drawRevChart(){
+  const canvas = document.getElementById('rev-chart');
+  const wrap = document.getElementById('rev-chart-wrap');
+  canvas.width = wrap.offsetWidth;
+  canvas.height = 34;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  const pts = state.revHistory;
+  if(pts.length < 2) return;
+  const maxRev = Math.max(...pts.map(p=>p[1]), 1);
+  const W = canvas.width, H = canvas.height;
+  ctx.beginPath();
+  pts.forEach((p,i)=>{
+    const x = (p[0]/120)*W;
+    const y = H - (p[1]/maxRev)*(H-4) - 2;
+    i===0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
+  });
+  ctx.strokeStyle='#f0c040';
+  ctx.lineWidth=1.5;
+  ctx.stroke();
+  // fill
+  ctx.lineTo(W*(pts[pts.length-1][0]/120), H);
+  ctx.lineTo(W*(pts[0][0]/120), H);
+  ctx.closePath();
+  ctx.fillStyle='rgba(240,192,64,.06)';
+  ctx.fill();
+}
+
+// ═══════════════════════════════════════════════════════
+//  SIMULATION TICK
+// ═══════════════════════════════════════════════════════
+function tick(){
+  simTime++;
+  // clock
+  document.getElementById('sim-clock').textContent = fmtTime(simTime);
+  document.getElementById('prog-fill').style.width = (simTime/120*100)+'%';
+  // fire events
+  while(nextEvIdx < EVENTS.length && EVENTS[nextEvIdx].t <= simTime){
+    const ev = EVENTS[nextEvIdx++];
+    switch(ev.fn){
+      case 'arrive': evArrive(...ev.args); break;
+      case 'order':  evOrder(...ev.args);  break;
+      case 'ready':  evReady(...ev.args);  break;
+      case 'pay':    evPay(...ev.args);    break;
+      case 'alert':  evAlert(...ev.args);  break;
+      case 'log':    evLog(...ev.args);    break;
+      case 'end':    evEnd();              break;
+    }
+  }
+  if(simTime >= 120){ clearInterval(ticker); ticker=null; return; }
+}
+
+// ═══════════════════════════════════════════════════════
+//  CONTROLS
+// ═══════════════════════════════════════════════════════
+function setSpeed(s){
+  speed = s;
+  [1,2,4].forEach(x=>{
+    document.getElementById('sp'+x).classList.toggle('act', x===s);
+  });
+  if(playing){ clearInterval(ticker); ticker=setInterval(tick, Math.round(1000/speed)); }
+}
+
+function togglePlay(){
+  if(simTime >= 120) return;
+  playing = !playing;
+  const btn = document.getElementById('play-btn');
+  if(playing){
+    btn.textContent='⏸ PAUSE';
+    btn.classList.add('playing');
+    ticker = setInterval(tick, Math.round(1000/speed));
+  } else {
+    btn.textContent='▶ RESUME';
+    btn.classList.remove('playing');
+    clearInterval(ticker);
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+//  INIT
+// ═══════════════════════════════════════════════════════
+buildTableGrid();
+render();
+addLog('inf','⚔','Tavern doors open. Click START to begin the shift.');
+
+function buildTableGrid(){
+  const el = document.getElementById('tbl-grid');
+  el.innerHTML = TABLES.map(t=>'<div class="tc empty"><div class="tc-name">'+t.name+'</div></div>').join('');
+}
+</script>
+</body>
+</html>

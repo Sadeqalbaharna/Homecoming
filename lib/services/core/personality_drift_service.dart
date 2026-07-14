@@ -46,6 +46,7 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import '../ai/usage_tracking_service.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'kai_db.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'firebase_service.dart';
 import '../ai/ai_config.dart';
@@ -71,8 +72,8 @@ class PersonalityDriftService {
     'intuition':    0.6,
   };
 
-  static FirebaseDatabase? get _db =>
-      FirebaseService.isAvailable ? FirebaseDatabase.instance : null;
+  static KaiDb? get _db =>
+      FirebaseService.isAvailable ? KaiDb.instance : null;
 
   // ── Public API ─────────────────────────────────────────────────────────────
 
@@ -486,7 +487,7 @@ Return ONLY the JSON object.
   static Future<DriftSummary?> getDriftSummary(String personaId) async {
     if (!FirebaseService.isAvailable) return null;
     try {
-      final snap = await FirebaseDatabase.instance
+      final snap = await KaiDb.instance
           .ref('kai/$personaId/personality/drift_log')
           .get();
       if (!snap.exists || snap.value == null) return null;

@@ -55,3 +55,6 @@ secrets.dart
 .env.production
 config/secrets.yaml
 assets/config/api_keys.json
+
+# Firebase service account credentials — never commit
+**/serviceAccountKey.json

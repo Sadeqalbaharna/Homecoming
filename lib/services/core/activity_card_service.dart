@@ -14,6 +14,7 @@
 library;
 
 import 'package:firebase_database/firebase_database.dart';
+import 'kai_db.dart';
 import 'firebase_service.dart';
 
 class ActivityCard {
@@ -102,8 +103,8 @@ class ActivityCardService {
   factory ActivityCardService() => _instance;
   ActivityCardService._internal();
 
-  static FirebaseDatabase? get _db =>
-      FirebaseService.isAvailable ? FirebaseDatabase.instance : null;
+  static KaiDb? get _db =>
+      FirebaseService.isAvailable ? KaiDb.instance : null;
 
   /// Save a card fire-and-forget style.
   Future<void> saveCard({

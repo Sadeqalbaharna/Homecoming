@@ -51,13 +51,16 @@ class EvolutionSettings {
   static const double personalityDecayRate = 0.5;
 
   // Mood evolution (elastic - fast to change, fast to decay)
+  // Units: points per HOUR. Applied at per-minute granularity so sub-hour
+  // conversations get meaningful decay. Rates tuned so a spike to ~85 returns
+  // to baseline (~50) within 2–4 hours of inactivity.
   static const Map<String, double> moodDecayRates = {
-    'valence': 2.0,
-    'energy': 3.0,
-    'warmth': 1.5,
-    'confidence': 1.0,
-    'playfulness': 2.5,
-    'focus': 3.5,
+    'valence':      10.0,  // neutral emotional tone — decays in ~2.5h
+    'energy':       15.0,  // most transient — decays in ~1.7h
+    'warmth':        6.0,  // relationship-grounded, lingers longest (~4h)
+    'confidence':    5.0,  // earned slowly, lost slowly (~5h)
+    'playfulness':  14.0,  // highly ephemeral — decays in ~1.8h
+    'focus':        12.0,  // situational — decays in ~2h
   };
 
   // Context intensity multipliers for mood changes
@@ -68,7 +71,7 @@ class EvolutionSettings {
   };
 
   // Baseline learning
-  static const int minInteractionsForBaseline = 50;
+  static const int minInteractionsForBaseline = 15; // was 50 — learn sooner
   static const int baselineWindowDays = 30;
   static const int maxMoodHistorySize = 100;
 }
@@ -88,13 +91,16 @@ class PersonalityService {
     "perceiving": 600,
   };
 
+  // Resting / baseline mood — where Kai returns to when idle.
+  // These are intentionally near-neutral. High values here mean mood never
+  // feels earned; keep them modest so positive interactions genuinely show.
   static const Map<String, int> _defaultMood = {
-    "valence": 60,
-    "energy": 65,
-    "warmth": 70,
-    "confidence": 60,
-    "playfulness": 80,
-    "focus": 50,
+    "valence":      50,  // was 60  — true neutral
+    "energy":       45,  // was 65  — calm, not buzzing
+    "warmth":       58,  // was 70  — Kai is naturally warm, but not gushing
+    "confidence":   52,  // was 60  — grounded, not overconfident
+    "playfulness":  42,  // was 80  — playfulness must be sparked
+    "focus":        50,  // was 50  — unchanged
   };
 
   static const Map<String, int> _defaultAffinity = {
@@ -207,8 +213,10 @@ class PersonalityService {
     Map<String, int> currentMood,
     DateTime lastUpdate,
   ) async {
-    final hoursSinceUpdate = DateTime.now().difference(lastUpdate).inHours;
-    if (hoursSinceUpdate == 0) return currentMood;
+    // Use minutes for granularity — inHours rounds down so anything under
+    // 60 min gets zero decay, which is why mood was permanently maxed out.
+    final minutesSinceUpdate = DateTime.now().difference(lastUpdate).inMinutes;
+    if (minutesSinceUpdate <= 0) return currentMood;
 
     final baselines = await getPersonalMoodBaselines(personaId);
     final decayedMood = Map<String, int>.from(currentMood);
@@ -216,8 +224,9 @@ class PersonalityService {
     for (final trait in PersonalityTraits.mood) {
       final current = currentMood[trait]!;
       final baseline = baselines[trait]!;
+      // Rates are stored as points-per-hour; convert to per-minute for this call
       final decayRate = EvolutionSettings.moodDecayRates[trait]!;
-      final decayAmount = (hoursSinceUpdate * decayRate).round();
+      final decayAmount = (minutesSinceUpdate * decayRate / 60.0).round();
 
       if (current > baseline) {
         decayedMood[trait] = (current - decayAmount).clamp(baseline, 100);
@@ -225,6 +234,8 @@ class PersonalityService {
         decayedMood[trait] = (current + decayAmount).clamp(0, baseline);
       }
     }
+
+    print('🌊 [Mood] Decay applied after ${minutesSinceUpdate}m — $currentMood → $decayedMood');
     return decayedMood;
   }
 

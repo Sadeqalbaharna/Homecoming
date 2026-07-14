@@ -1,0 +1,30 @@
+{
+  "rules": {
+    "//": "REUSABLE GOD-MODEL TEMPLATE. Copy into firebase/<project>/database.rules.json when a project graduates to its own Firebase project (or adapt as a /projects/<id> subtree). GOD = you/Kai: full access. Bootstrap god by writing your uid to /config/god_uids/<uid>: true via the admin SDK (Cloud Function / Pi / a one-off admin script), or by minting a custom claim {god:true}. Admin-SDK callers bypass rules entirely and can seed /config.",
+
+    ".read": false,
+    ".write": false,
+
+    "config": {
+      ".read": false,
+      ".write": false
+    },
+
+    "public": {
+      ".read": true,
+      ".write": false
+    },
+
+    "users": {
+      "$uid": {
+        ".read":  "auth != null && (auth.uid === $uid || auth.token.god === true || root.child('config/god_uids').child(auth.uid).val() === true)",
+        ".write": "auth != null && (auth.uid === $uid || auth.token.god === true || root.child('config/god_uids').child(auth.uid).val() === true)"
+      }
+    },
+
+    "$rest": {
+      ".read":  "auth != null && (auth.token.god === true || root.child('config/god_uids').child(auth.uid).val() === true)",
+      ".write": "auth != null && (auth.token.god === true || root.child('config/god_uids').child(auth.uid).val() === true)"
+    }
+  }
+}

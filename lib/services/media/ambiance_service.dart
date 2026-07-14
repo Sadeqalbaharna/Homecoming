@@ -13,7 +13,9 @@ class AmbianceService {
   AmbianceService._internal();
 
   // Firebase configuration
-  static const String _personaId = "kai_persona_1";
+  // Unified to Kai's canonical brain id ('truekai') so ambiance shares the
+  // same persona as memory/personality/conversations (was "kai_persona_1").
+  static const String _personaId = "truekai";
   static const String _deviceId = "raspberry_pi_home";
 
   /// Send coordinated ambiance command (music + lighting)

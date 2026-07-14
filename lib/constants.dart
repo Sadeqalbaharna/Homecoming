@@ -10,8 +10,9 @@ const double kSpriteAlignY = 0.35;
 const bool   kAlwaysOnTop  = false;
 
 /// ===== Persona IDs =====
-const String kPersonaKai   = 'kai';
-const String kPersonaClone = 'clone';
+/// Kai's single canonical brain id. Everything that reads/writes Kai's
+/// memory, personality, conversations and ambiance must use this one value.
+const String kPersonaKai = 'truekai';
 
 /// ===== Timings =====
 const Duration kAttentionPulse = Duration(milliseconds: 1200);

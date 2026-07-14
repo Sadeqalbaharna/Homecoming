@@ -10,6 +10,7 @@
 library;
 
 import 'package:firebase_database/firebase_database.dart';
+import '../services/core/kai_db.dart';
 import '../services/core/brain_extraction_service.dart';
 import '../services/core/firebase_service.dart';
 
@@ -37,7 +38,7 @@ class BrainBackfill {
     onProgress?.call('Loading conversation history…');
 
     // Load raw conversation messages
-    final snap = await FirebaseDatabase.instance
+    final snap = await KaiDb.instance
         .ref('conversations/$personaId')
         .get();
 

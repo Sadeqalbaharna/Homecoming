@@ -17,11 +17,39 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
+    <!-- Kai agentic tools -->
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <uses-permission android:name="android.permission.WRITE_CALENDAR" />
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <uses-permission android:name="android.permission.SEND_SMS" />
+    <!-- Required for AlarmClock.ACTION_SET_ALARM with EXTRA_SKIP_UI=true -->
+    <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
+    <!-- Required for AlarmClock.ACTION_SET_TIMER with EXTRA_SKIP_UI=true -->
+    <uses-permission android:name="com.android.alarm.permission.SET_TIMER" />
+    <!-- Lets openApp() fuzzy-match installed app labels -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+
+    <!-- WorkManager: reschedule jobs after reboot -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- WorkManager: keep CPU alive during background job -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- NFC — read coin UIDs for Tavern guest registration -->
+    <uses-permission android:name="android.permission.NFC" />
+    <uses-feature android:name="android.hardware.nfc" android:required="false" />
+
+    <!-- Smart home: SSDP multicast discovery for TVs and devices on local WiFi -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
     <application
         android:name="${applicationName}"
         android:label="homecoming_app"
         android:icon="@mipmap/ic_launcher"
-        android:usesCleartextTraffic="false">
+        android:usesCleartextTraffic="true">
+        <!-- Flutter v2 embedding (v1 was removed in Flutter 3.x) -->
+        <meta-data android:name="flutterEmbedding" android:value="2" />
         <!-- usesCleartextTraffic=false is fine since you're using HTTPS.
              Set true only if you ever point to http:// during dev. -->
 
@@ -54,27 +82,37 @@
                 android:value="System overlay window for AI assistant" />
         </service>
 
-        <!-- Audio Recording Service - Foreground service for microphone access -->
+        <!-- Audio Recording Service — foreground service for microphone access -->
         <service
             android:name=".AudioRecordingService"
             android:exported="false"
             android:foregroundServiceType="microphone" />
 
-        <!-- This is required by Flutter to show a splash while launching -->
-        <meta-data
-            android:name="io.flutter.embedding.android.NormalTheme"
-            android:resource="@style/NormalTheme"
-            />
-        <meta-data
-            android:name="flutterEmbedding"
-            android:value="2" />
+        <!-- Kai Notification Listener — captures incoming notifications for read_notifications tool -->
+        <service
+            android:name=".KaiNotificationService"
+            android:exported="false"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
 
-        <!-- FCM: default notification channel for proactive messages -->
-        <meta-data
-            android:name="com.google.firebase.messaging.default_notification_channel_id"
-            android:value="kai_proactive" />
-        <meta-data
-            android:name="com.google.firebase.messaging.default_notification_icon"
-            android:resource="@mipmap/ic_launcher" />
+        <!-- Kai Accessibility Service — reads visible screen content for read_screen tool -->
+        <service
+            android:name=".KaiAccessibilityService"
+            android:exported="false"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:label="@string/app_name"
+            android:description="@string/accessibility_service_description">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/kai_accessibility_config" />
+        </service>
+
     </application>
+
 </manifest>

@@ -26,9 +26,11 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import '../ai/usage_tracking_service.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'kai_db.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'firebase_service.dart';
 import '../ai/ai_config.dart';
+import '../ai/local_llm_service.dart';
 
 class MemoryConsolidationService {
   static final MemoryConsolidationService _instance =
@@ -41,8 +43,8 @@ class MemoryConsolidationService {
   static const _turnsPerCycle = 20; // consolidate every N new turns
   static const _maxRawChars   = 6000; // chars of raw history to process
 
-  static FirebaseDatabase? get _db =>
-      FirebaseService.isAvailable ? FirebaseDatabase.instance : null;
+  static KaiDb? get _db =>
+      FirebaseService.isAvailable ? KaiDb.instance : null;
 
   // ── Public API ─────────────────────────────────────────────────────────────
 
@@ -131,6 +133,11 @@ Your job is to read recent conversation history and UPDATE (not replace)
 an existing memory record — adding new patterns, refining existing ones,
 and preserving important moments from the past.
 
+IMPORTANT — ignore noise in the history:
+Greetings ("hi", "hey", "good morning"), farewells, one-word replies ("ok", "sure", "lol"),
+pleasantries ("how are you", "I'm fine"), and generic filler add nothing to memory.
+Only extract what you'd still want to know about this person in a month.
+
 The memory has these fields:
 
 KEY_MOMENTS (list of up to 8 strings)
@@ -206,35 +213,55 @@ Update the memory by incorporating new patterns and moments from this history.
 Preserve important existing memories. Return only the JSON.
 ''';
 
-    try {
-      final response = await _dio.post(
-        'https://api.openai.com/v1/chat/completions',
-        options: Options(headers: {
-          'Authorization': 'Bearer $key',
-          'Content-Type': 'application/json',
-        }),
-        data: {
-          'model': 'gpt-4o-mini',
-          'messages': [
-            {'role': 'system', 'content': _systemPrompt},
-            {'role': 'user',   'content': userMessage},
-          ],
-          'max_tokens': 800,
-          'temperature': 0.3,
-          'response_format': {'type': 'json_object'},
-        },
-      );
+    // ── Try local Qwen first (no token cost for this heavy JSON task) ─────
+    String? raw = await LocalLLMService().complete(
+      system: _systemPrompt,
+      user: userMessage,
+      maxTokens: 800,
+      jsonMode: true,
+    );
 
-      final raw = (response.data['choices'] as List)[0]['message']['content']
-          as String? ?? '{}';
-      final _u = response.data['usage'];
-      if (_u != null) UsageTrackingService.trackOpenAI(
-        model: 'gpt-4o-mini', inputTokens: _u['prompt_tokens'] as int? ?? 0,
-        outputTokens: _u['completion_tokens'] as int? ?? 0, operation: 'consolidation',
-      ).catchError((_) {});
-      return Map<String, dynamic>.from(jsonDecode(raw));
+    // ── Fall back to OpenAI ────────────────────────────────────────────────
+    if (raw == null) {
+      try {
+        final response = await _dio.post(
+          'https://api.openai.com/v1/chat/completions',
+          options: Options(headers: {
+            'Authorization': 'Bearer $key',
+            'Content-Type': 'application/json',
+          }),
+          data: {
+            'model': 'gpt-4o-mini',
+            'messages': [
+              {'role': 'system', 'content': _systemPrompt},
+              {'role': 'user',   'content': userMessage},
+            ],
+            'max_tokens': 800,
+            'temperature': 0.3,
+            'response_format': {'type': 'json_object'},
+          },
+        );
+        raw = (response.data['choices'] as List)[0]['message']['content']
+            as String? ?? '{}';
+        final _u = response.data['usage'];
+        if (_u != null) {
+          UsageTrackingService.trackOpenAI(
+            model: 'gpt-4o-mini',
+            inputTokens: _u['prompt_tokens'] as int? ?? 0,
+            outputTokens: _u['completion_tokens'] as int? ?? 0,
+            operation: 'consolidation',
+          ).catchError((_) {});
+        }
+      } catch (e) {
+        print('🗜️ [Consolidation] GPT failed: $e');
+        return null;
+      }
+    }
+
+    try {
+      return Map<String, dynamic>.from(jsonDecode(raw ?? '{}'));
     } catch (e) {
-      print('🗜️ [Consolidation] GPT failed: $e');
+      print('🗜️ [Consolidation] JSON parse failed: $e');
       return null;
     }
   }

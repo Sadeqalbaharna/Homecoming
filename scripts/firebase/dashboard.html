@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>⚔ The Tavern — Dashboard</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:    #0a0805;
+  --bg2:   #120d08;
+  --bg3:   #1c1410;
+  --gold:  #c9a96e;
+  --gold2: #f0c060;
+  --dim:   #6a5a44;
+  --bord:  #2e2214;
+  --bord2: #3a2a18;
+  --nav-w: 76px;
+  --head:  44px;
+}
+
+html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(--gold); font-family: 'Georgia', serif; }
+
+/* ── Shell layout ─────────────────────────────────────────────────────────── */
+#shell { display: flex; flex-direction: column; height: 100vh; }
+
+/* ── Top bar ──────────────────────────────────────────────────────────────── */
+#topbar {
+  height: var(--head);
+  background: var(--bg2);
+  border-bottom: 1px solid var(--bord2);
+  display: flex; align-items: center;
+  padding: 0 16px; gap: 14px;
+  flex-shrink: 0; z-index: 10;
+}
+#topbar .logo {
+  font-size: 16px; font-weight: bold; letter-spacing: 2px;
+  color: var(--gold2); white-space: nowrap;
+}
+#topbar .logo span { color: var(--dim); font-size: 11px; font-weight: normal; letter-spacing: 1px; margin-left: 8px; }
+.spacer { flex: 1; }
+#live-badge {
+  display: flex; align-items: center; gap: 7px;
+  background: var(--bg3); border: 1px solid var(--bord2);
+  border-radius: 20px; padding: 4px 12px; font-size: 11px;
+  font-family: 'Courier New', monospace; letter-spacing: 1px;
+}
+#live-dot { width:7px; height:7px; border-radius:50%; background:#40c040; animation:blink 1.5s infinite; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+#live-count { color: var(--gold2); font-size: 12px; }
+#topbar-clock {
+  font-family: 'Courier New', monospace; font-size: 18px;
+  color: var(--gold2); letter-spacing: 3px; min-width: 60px; text-align: right;
+}
+#topbar-date { font-size: 10px; color: var(--dim); letter-spacing: 1px; min-width: 110px; text-align: right; }
+
+/* ── Body ──────────────────────────────────────────────────────────────────── */
+#body { display: flex; flex: 1; overflow: hidden; }
+
+/* ── Nav rail ─────────────────────────────────────────────────────────────── */
+nav {
+  width: var(--nav-w); background: var(--bg2);
+  border-right: 1px solid var(--bord2);
+  display: flex; flex-direction: column;
+  padding: 10px 0; gap: 2px; flex-shrink: 0; z-index: 9;
+}
+.nav-item {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 4px; padding: 10px 6px; cursor: pointer;
+  border-radius: 6px; margin: 0 6px;
+  border: 1px solid transparent;
+  transition: all .18s; user-select: none;
+  position: relative;
+}
+.nav-item:hover:not(.disabled) { background: var(--bg3); border-color: var(--bord2); }
+.nav-item.active { background: #221808; border-color: var(--gold); }
+.nav-icon { font-size: 22px; line-height: 1; }
+.nav-label {
+  font-family: 'Courier New', monospace; font-size: 8px;
+  letter-spacing: 1px; text-transform: uppercase; color: var(--dim);
+  text-align: center; line-height: 1.2;
+}
+.nav-item.active .nav-label { color: var(--gold2); }
+.nav-item.disabled { opacity: .35; cursor: not-allowed; }
+
+/* Badge on nav item */
+.nav-badge {
+  position: absolute; top: 6px; right: 8px;
+  background: #40c040; color: #000;
+  font-family: 'Courier New', monospace;
+  font-size: 8px; font-weight: bold;
+  width: 14px; height: 14px; border-radius: 7px;
+  display: flex; align-items: center; justify-content: center;
+  display: none;
+}
+.nav-badge.show { display: flex; }
+
+.nav-sep { height: 1px; background: var(--bord); margin: 6px 10px; }
+
+.coming-soon {
+  font-family: 'Courier New', monospace;
+  font-size: 7px; color: #4a3c28; letter-spacing: 0;
+  text-align: center;
+}
+
+/* ── Iframe container ─────────────────────────────────────────────────────── */
+#frames { flex: 1; position: relative; overflow: hidden; }
+
+iframe {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  border: none;
+  opacity: 0; pointer-events: none;
+  transition: opacity .2s;
+}
+iframe.active { opacity: 1; pointer-events: all; }
+
+/* ── Coming-soon overlay ──────────────────────────────────────────────────── */
+.placeholder {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 16px; background: var(--bg);
+  opacity: 0; pointer-events: none; transition: opacity .2s;
+}
+.placeholder.active { opacity: 1; pointer-events: all; }
+.placeholder .ph-icon { font-size: 52px; opacity: .25; }
+.placeholder h2 { font-size: 18px; color: var(--dim); letter-spacing: 3px; text-transform: uppercase; }
+.placeholder p { font-family: 'Courier New', monospace; font-size: 12px; color: #3a2c1e; letter-spacing: 1px; }
+</style>
+</head>
+<body>
+<div id="shell">
+
+  <!-- ── Top bar ── -->
+  <div id="topbar">
+    <div class="logo">⚔ THE TAVERN <span>management</span></div>
+    <div class="spacer"></div>
+    <div id="live-badge">
+      <span id="live-dot"></span>
+      <span id="live-count">0 guests</span>
+    </div>
+    <div id="topbar-date">---</div>
+    <div id="topbar-clock">--:--</div>
+  </div>
+
+  <div id="body">
+
+    <!-- ── Nav rail ── -->
+    <nav>
+
+      <div class="nav-item active" data-view="floor" onclick="show('floor')">
+        <span class="nav-icon">🗺</span>
+        <span class="nav-label">Floor<br>Live</span>
+        <span class="nav-badge" id="badge-floor"></span>
+      </div>
+
+      <div class="nav-item" data-view="menu" onclick="show('menu')">
+        <span class="nav-icon">📜</span>
+        <span class="nav-label">Menu</span>
+      </div>
+
+      <div class="nav-sep"></div>
+
+      <div class="nav-item disabled" data-view="orders" onclick="show('orders')">
+        <span class="nav-icon">🛎</span>
+        <span class="nav-label">Orders</span>
+        <span class="coming-soon">soon</span>
+      </div>
+
+      <div class="nav-item disabled" data-view="staff" onclick="show('staff')">
+        <span class="nav-icon">👤</span>
+        <span class="nav-label">Staff</span>
+        <span class="coming-soon">soon</span>
+      </div>
+
+      <div class="nav-item disabled" data-view="reports" onclick="show('reports')">
+        <span class="nav-icon">📊</span>
+        <span class="nav-label">Reports</span>
+        <span class="coming-soon">soon</span>
+      </div>
+
+      <div class="nav-sep"></div>
+
+      <div class="nav-item disabled" data-view="settings" onclick="show('settings')">
+        <span class="nav-icon">⚙</span>
+        <span class="nav-label">Settings</span>
+        <span class="coming-soon">soon</span>
+      </div>
+
+    </nav>
+
+    <!-- ── Frames ── -->
+    <div id="frames">
+      <!-- Real iframes — all loaded at boot so state is preserved on tab switch -->
+      <iframe id="frame-floor"  src="tavern_live.html"  class="active"></iframe>
+      <iframe id="frame-menu"   src="menu_manager.html"></iframe>
+
+      <!-- Placeholder screens for future views -->
+      <div class="placeholder" id="ph-orders">
+        <div class="ph-icon">🛎</div>
+        <h2>Orders</h2>
+        <p>Live order tracking per table — coming soon</p>
+      </div>
+      <div class="placeholder" id="ph-staff">
+        <div class="ph-icon">👤</div>
+        <h2>Staff</h2>
+        <p>Clock-in / clock-out, roster view — coming soon</p>
+      </div>
+      <div class="placeholder" id="ph-reports">
+        <div class="ph-icon">📊</div>
+        <h2>Reports</h2>
+        <p>Revenue, covers, busiest hours — coming soon</p>
+      </div>
+      <div class="placeholder" id="ph-settings">
+        <div class="ph-icon">⚙</div>
+        <h2>Settings</h2>
+        <p>RTDB config, table names, NFC mapping — coming soon</p>
+      </div>
+    </div>
+
+  </div><!-- /#body -->
+</div><!-- /#shell -->
+
+<script>
+const RTDB = 'https://kingdom-ac44f-default-rtdb.europe-west1.firebasedatabase.app';
+
+// ── View switching ─────────────────────────────────────────────────────────
+const FRAME_VIEWS = new Set(['floor', 'menu']);
+
+function show(view) {
+  // Don't switch to disabled items
+  const item = document.querySelector(`.nav-item[data-view="${view}"]`);
+  if(item?.classList.contains('disabled')) return;
+
+  // Update nav
+  document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+  item?.classList.add('active');
+
+  // Hide all frames + placeholders
+  document.querySelectorAll('iframe').forEach(f => f.classList.remove('active'));
+  document.querySelectorAll('.placeholder').forEach(p => p.classList.remove('active'));
+
+  if(FRAME_VIEWS.has(view)) {
+    const frame = document.getElementById(`frame-${view}`);
+    if(frame) frame.classList.add('active');
+  } else {
+    const ph = document.getElementById(`ph-${view}`);
+    if(ph) ph.classList.add('active');
+  }
+}
+
+// ── Top-bar live data (polls independently of child frames) ───────────────
+async function pollTopBar() {
+  try {
+    const [tr, gr] = await Promise.all([
+      fetch(`${RTDB}/tables.json`),
+      fetch(`${RTDB}/active_guests.json`),
+    ]);
+    const tables = await tr.json() || {};
+    const guests = await gr.json() || {};
+
+    const gCount  = Object.keys(guests).length;
+    const tCount  = Object.keys(tables).filter(k => tables[k]?.arrivedAt).length;
+
+    const countEl = document.getElementById('live-count');
+    const dotEl   = document.getElementById('live-dot');
+    const badge   = document.getElementById('badge-floor');
+
+    countEl.textContent = gCount === 0
+      ? 'No guests'
+      : `${gCount} guest${gCount !== 1 ? 's' : ''} · ${tCount} table${tCount !== 1 ? 's' : ''}`;
+
+    dotEl.style.background = '#40c040';
+
+    // Badge on floor icon when occupied
+    if(tCount > 0) {
+      badge.textContent = tCount;
+      badge.classList.add('show');
+    } else {
+      badge.classList.remove('show');
+    }
+  } catch(e) {
+    document.getElementById('live-dot').style.background = '#c04040';
+  }
+}
+
+// ── Clock ─────────────────────────────────────────────────────────────────
+function tick() {
+  const n  = new Date();
+  const hh = String(n.getHours()).padStart(2,'0');
+  const mm = String(n.getMinutes()).padStart(2,'0');
+  document.getElementById('topbar-clock').textContent = `${hh}:${mm}`;
+  document.getElementById('topbar-date').textContent  =
+    n.toLocaleDateString('en-GB', {weekday:'short', day:'numeric', month:'short'}).toUpperCase();
+}
+
+// ── Keyboard shortcuts ─────────────────────────────────────────────────────
+document.addEventListener('keydown', e => {
+  if(e.key === '1') show('floor');
+  if(e.key === '2') show('menu');
+});
+
+// ── Init ──────────────────────────────────────────────────────────────────
+tick(); setInterval(tick, 1000);
+pollTopBar(); setInterval(pollTopBar, 8000);
+</script>
+</body>
+</html>

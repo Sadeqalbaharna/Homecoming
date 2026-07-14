@@ -24,12 +24,22 @@ dependencies:
   intl: ^0.19.0
   # 3D Brain WebView
   webview_flutter: ^4.8.0
+  # Folder picker — code workspace (engineer mode)
+  file_picker: ^8.1.2
+  # Smart home — WebSocket TV control + SSDP discovery
+  web_socket_channel: ^3.0.1
   # Firebase
   firebase_core: ^3.6.0
+  firebase_auth: ^5.3.1
   firebase_database: ^11.1.4
   firebase_messaging: ^15.1.3
-  # Wake word detection
-  porcupine_flutter: ^3.0.3
+  # Wake word detection (on-device, no API key)
+  sherpa_onnx: ^1.10.30
+  # Tarball extraction for sherpa model download
+  archive: ^3.6.1
+  # PCM audio streaming — native EventChannel impl (no external package needed)
+  # NFC read/write
+  nfc_manager: ^3.3.0
   # Overlay window (local fork)
   flutter_overlay_window:
     path: packages/flutter_overlay_window
@@ -42,6 +52,7 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
+    - assets/brain/kai_cortex.html
     - assets/avatar/images/mage.png
     - assets/audio/record_start.wav
     - assets/audio/record_stop.wav
@@ -50,6 +61,8 @@ flutter:
     - assets/avatar/attention_frames/
     - assets/avatar/thinking_frames/
     - assets/avatar/speaking_frames/
-    # Porcupine wake word model
+    # Flame overlay animation frames (sleep mode)
+    - assets/avatar/flame_frames/
+    # Sherpa ONNX models downloaded at runtime — no bundled assets needed
     - assets/models/
 

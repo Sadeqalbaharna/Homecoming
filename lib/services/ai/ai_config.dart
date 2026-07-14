@@ -16,27 +16,35 @@ class AIConfig {
   static String? _cachedGoogleCseId;
   static String? _cachedAnthropicKey;
 
+  // Local brain (Ollama) endpoint cache
+  static String? _cachedLocalEndpoint;
+  static const _localEndpointKey = 'local_llm_endpoint';
+
   static Future<String> getOpenAIKey() async {
     if (_cachedOpenAIKey != null) return _cachedOpenAIKey!;
-    _cachedOpenAIKey = await _secureStorage.getOpenAIKey() ?? '';
+    final stored = await _secureStorage.getOpenAIKey() ?? '';
+    _cachedOpenAIKey = stored.isNotEmpty ? stored : kOpenAIKey;
     return _cachedOpenAIKey!;
   }
 
   static Future<String> getElevenLabsKey() async {
     if (_cachedElevenLabsKey != null) return _cachedElevenLabsKey!;
-    _cachedElevenLabsKey = await _secureStorage.getElevenLabsKey() ?? '';
+    final stored = await _secureStorage.getElevenLabsKey() ?? '';
+    _cachedElevenLabsKey = stored.isNotEmpty ? stored : kElevenLabsKey;
     return _cachedElevenLabsKey!;
   }
 
   static Future<String> getGoogleKey() async {
     if (_cachedGoogleKey != null) return _cachedGoogleKey!;
-    _cachedGoogleKey = await _secureStorage.getGoogleKey() ?? '';
+    final stored = await _secureStorage.getGoogleKey() ?? '';
+    _cachedGoogleKey = stored.isNotEmpty ? stored : kGoogleApiKey;
     return _cachedGoogleKey!;
   }
 
   static Future<String> getGoogleCseId() async {
     if (_cachedGoogleCseId != null) return _cachedGoogleCseId!;
-    _cachedGoogleCseId = await _secureStorage.getGoogleCseId() ?? '';
+    final stored = await _secureStorage.getGoogleCseId() ?? '';
+    _cachedGoogleCseId = stored.isNotEmpty ? stored : kGoogleCseId;
     return _cachedGoogleCseId!;
   }
 
@@ -46,6 +54,31 @@ class AIConfig {
     return _cachedAnthropicKey!;
   }
 
+  // ── Local brain (Ollama) ───────────────────────────────────────────────────
+
+  /// Returns the Ollama base URL (e.g. "http://192.168.1.42:11434"),
+  /// or null if not configured. Cached in memory after first read.
+  static Future<String?> getLocalEndpoint() async {
+    if (_cachedLocalEndpoint != null) {
+      return _cachedLocalEndpoint!.isEmpty ? null : _cachedLocalEndpoint;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    _cachedLocalEndpoint = prefs.getString(_localEndpointKey) ?? '';
+    return _cachedLocalEndpoint!.isEmpty ? null : _cachedLocalEndpoint;
+  }
+
+  /// Save (or clear) the Ollama endpoint. Pass null to disable local brain.
+  static Future<void> setLocalEndpoint(String? url) async {
+    final prefs = await SharedPreferences.getInstance();
+    final cleaned = url?.trim().replaceAll(RegExp(r'/$'), '') ?? '';
+    _cachedLocalEndpoint = cleaned;
+    if (cleaned.isEmpty) {
+      await prefs.remove(_localEndpointKey);
+    } else {
+      await prefs.setString(_localEndpointKey, cleaned);
+    }
+  }
+
   /// Clear cached keys (call after the user updates keys in Settings).
   static void clearCache() {
     _cachedOpenAIKey = null;
@@ -53,6 +86,7 @@ class AIConfig {
     _cachedGoogleKey = null;
     _cachedGoogleCseId = null;
     _cachedAnthropicKey = null;
+    _cachedLocalEndpoint = null;
   }
 
   // ElevenLabs voice settings

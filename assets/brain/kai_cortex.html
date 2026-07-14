@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"/>
+<title>Kai · Unified Cortex</title>
+<style>
+  :root{--l:#38e1ff;--r:#ff8a3d;--c:#ffcf6a;}
+  *{margin:0;padding:0;box-sizing:border-box;}
+  html,body{width:100%;height:100%;overflow:hidden;background:#02040a;
+    font-family:ui-monospace,'SF Mono',Menlo,monospace;color:#cfe3f5;user-select:none;}
+  #scene{position:fixed;inset:0;background:radial-gradient(ellipse at 50% 44%,#0a1522 0%,#05080f 55%,#02040a 100%);}
+  canvas{display:block;}
+  .hud{position:fixed;pointer-events:none;text-shadow:0 0 12px rgba(120,180,240,.6);}
+  #lblL{left:20px;top:18px;color:var(--l);}
+  #lblR{right:20px;top:18px;text-align:right;color:var(--r);}
+  #lblC{left:50%;top:18px;transform:translateX(-50%);text-align:center;color:var(--c);}
+  .name{font-size:12px;letter-spacing:2px;}
+  .sub{font-size:9px;letter-spacing:1px;opacity:.7;}
+  .dom{font-size:8.5px;letter-spacing:.5px;opacity:.55;margin-top:2px;}
+  .bar{margin-top:6px;width:130px;height:3px;background:rgba(120,180,240,.14);border-radius:2px;overflow:hidden;}
+  .bar>i{display:block;height:100%;width:10%;border-radius:2px;transition:width .12s;}
+  #barL>i{background:var(--l);box-shadow:0 0 8px var(--l);}
+  #barR{margin-left:auto;} #barR>i{background:var(--r);box-shadow:0 0 8px var(--r);}
+  #title{left:50%;bottom:20px;transform:translateX(-50%);text-align:center;}
+  #title .t{font-size:13px;letter-spacing:6px;color:#e9f4ff;}
+  #title .s{font-size:9.5px;letter-spacing:2px;color:#6f8296;margin-top:4px;}
+  #err{position:fixed;inset:0;display:none;align-items:center;justify-content:center;text-align:center;
+    color:#8fb0c8;font-size:13px;padding:40px;line-height:1.6;}
+</style>
+</head>
+<body>
+<div id="scene"></div>
+<div class="hud" id="lblL"><div class="name">OPENAI</div><div class="sub">GPT · LEFT HEMISPHERE</div><div class="dom">social · voice · images · web · actions</div><div class="bar" id="barL"><i></i></div></div>
+<div class="hud" id="lblR"><div class="name">ANTHROPIC</div><div class="sub">CLAUDE · RIGHT HEMISPHERE</div><div class="dom">code · reasoning · writing · analysis</div><div class="bar" id="barR"><i></i></div></div>
+<div class="hud" id="lblC"><div class="name">◇ SHARED MEMORY</div><div class="dom">people · facts · the tavern</div></div>
+<div class="hud" id="title"><div class="t">KAI · UNIFIED CORTEX</div><div class="s" id="status">initialising</div></div>
+<div id="err">Could not load the 3D engine.<br/>The cortex needs a network connection the first time (Three.js is fetched from a CDN).</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+<script>
+(function(){
+  if(!window.THREE){document.getElementById('err').style.display='flex';return;}
+  const HOST=document.getElementById('scene');
+  const statusEl=document.getElementById('status');
+  const barL=document.querySelector('#barL>i'), barR=document.querySelector('#barR>i');
+
+  // ── palette ────────────────────────────────────────────────────────────────
+  const COL={l:new THREE.Color(0x38e1ff), r:new THREE.Color(0xff8a3d), s:new THREE.Color(0xffcf6a)};
+  const GPT=['social','personable','banter','empathy','voice','images','vision','web','actions'];
+  const CLA=['code','reasoning','writing','analysis','planning','refactor','logic'];
+  const SHR=['people','memories','facts','the tavern','places','Sadeq'];
+  const rnd=(a,b)=>a+Math.random()*(b-a), pick=a=>a[(Math.random()*a.length)|0];
+
+  // ── renderer / scene / camera ────────────────────────────────────────────────
+  const renderer=new THREE.WebGLRenderer({antialias:true,alpha:true});
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2));
+  renderer.setClearColor(0x000000,0);
+  HOST.appendChild(renderer.domElement);
+  const scene=new THREE.Scene();
+  const camera=new THREE.PerspectiveCamera(52,1,0.1,3000);
+  camera.position.set(0,20,430);
+  const controls=new THREE.OrbitControls(camera,renderer.domElement);
+  controls.enableDamping=true;controls.dampingFactor=0.06;controls.enablePan=false;
+  controls.autoRotate=true;controls.autoRotateSpeed=0.55;
+  controls.minDistance=230;controls.maxDistance=760;
+
+  // soft round sprite for glowing points
+  function dotTexture(){
+    const c=document.createElement('canvas');c.width=c.height=64;const g=c.getContext('2d');
+    const rg=g.createRadialGradient(32,32,0,32,32,32);
+    rg.addColorStop(0,'rgba(255,255,255,1)');rg.addColorStop(0.35,'rgba(255,255,255,0.55)');
+    rg.addColorStop(1,'rgba(255,255,255,0)');g.fillStyle=rg;g.fillRect(0,0,64,64);
+    const t=new THREE.CanvasTexture(c);return t;
+  }
+  const DOT=dotTexture();
+
+  // ── brain group ──────────────────────────────────────────────────────────────
+  const brain=new THREE.Group();scene.add(brain);
+  let nodes=[], baseCol=[], pts, ptsGeo, ptsCol;
+  let segGroups={l:null,r:null,s:null,c:null};
+  const pulsePool=[]; const PULSES=70;
+  let labels=[];
+
+  function ellipsoidShellPoint(cx, rx,ry,rz){
+    // random direction, biased toward the shell, with gyri lumpiness
+    let u=Math.random()*2-1, th=Math.random()*Math.PI*2, k=Math.sqrt(1-u*u);
+    let dx=k*Math.cos(th), dy=u, dz=k*Math.sin(th);
+    const lump=1-0.12*Math.abs(Math.sin(dx*6)*Math.sin(dz*6));
+    const rad=rnd(0.72,1.0)*lump;
+    return [cx+dx*rx*rad, dy*ry*rad, dz*rz*rad];
+  }
+
+  function buildFromData(data){
+    // clear old
+    while(brain.children.length) brain.remove(brain.children[0]);
+    nodes=[];baseCol=[];labels=[];
+    const gap=10;
+    if(data && data.nodes && data.nodes.length){
+      // Real knowledge-graph nodes tagged with side (-1 gpt,0 shared,1 claude)
+      data.nodes.forEach(nd=>{
+        const side=nd.side||0;
+        const rx=(side===0?gap*2.4:70), ry=95, rz=80;
+        let p;
+        if(side===0){ p=[rnd(-gap*2.4,gap*2.4), rnd(-ry*0.82,ry*0.82), rnd(-rz*0.7,rz*0.7)]; }
+        else { p=ellipsoidShellPoint(side*(gap+70), 70,95,80); }
+        nodes.push({id:nd.id,x:p[0],y:p[1],z:p[2],side,imp:nd.importance||Math.random(),
+          cat:nd.cat||nd.label||'', ph:Math.random()*6.28, flare:0, lab:false});
+      });
+    } else {
+      // Self-generated demo brain
+      for(const side of [-1,1]){
+        for(let i=0;i<180;i++){
+          const p=ellipsoidShellPoint(side*(gap+70),70,95,80);
+          nodes.push({x:p[0],y:p[1],z:p[2],side,imp:Math.random(),cat:pick(side<0?GPT:CLA),ph:Math.random()*6.28,flare:0,lab:false});
+        }
+      }
+      for(let i=0;i<46;i++){
+        nodes.push({x:rnd(-gap*2.4,gap*2.4),y:rnd(-78,78),z:rnd(-56,56),side:0,imp:rnd(0.45,1),cat:pick(SHR),ph:Math.random()*6.28,flare:0,lab:false});
+      }
+    }
+
+    // points geometry
+    const pos=new Float32Array(nodes.length*3), col=new Float32Array(nodes.length*3), sz=new Float32Array(nodes.length);
+    nodes.forEach((n,i)=>{
+      pos[i*3]=n.x;pos[i*3+1]=n.y;pos[i*3+2]=n.z;
+      const base=n.side<0?COL.l:n.side>0?COL.r:COL.s; baseCol.push(base);
+      col[i*3]=base.r;col[i*3+1]=base.g;col[i*3+2]=base.b; sz[i]=3+n.imp*4;
+    });
+    ptsGeo=new THREE.BufferGeometry();
+    ptsGeo.setAttribute('position',new THREE.BufferAttribute(pos,3));
+    ptsGeo.setAttribute('color',ptsCol=new THREE.BufferAttribute(col,3));
+    const pmat=new THREE.PointsMaterial({size:5.5,map:DOT,vertexColors:true,transparent:true,
+      opacity:0.95,blending:THREE.AdditiveBlending,depthWrite:false,sizeAttenuation:true});
+    pts=new THREE.Points(ptsGeo,pmat);brain.add(pts);
+
+    // edges grouped: left, right, shared, callosum (cross-hemisphere)
+    const eL=[],eR=[],eS=[],eC=[];
+    const links=data&&(data.links||data.edges);
+    if(links&&links.length){
+      // Real mindmap links from the knowledge graph
+      const idx={};nodes.forEach((n,i)=>{if(n.id!=null)idx[n.id]=i;});
+      links.forEach(lk=>{
+        const a=idx[lk.source!=null?lk.source:lk.from], b=idx[lk.target!=null?lk.target:lk.to];
+        if(a==null||b==null||a===b)return;
+        const sa=nodes[a].side,sb=nodes[b].side;
+        if(sa<0&&sb<0)eL.push([a,b]);
+        else if(sa>0&&sb>0)eR.push([a,b]);
+        else if(sa*sb<0)eC.push([a,b]);   // genuine cross-hemisphere link → callosum
+        else eS.push([a,b]);               // touches the shared band
+      });
+    } else {
+      // Demo fallback: nearest-neighbour synapses + a synthetic callosum
+      const byside=(s)=>nodes.map((n,i)=>({n,i})).filter(o=>o.n.side===s);
+      const L=byside(-1),R=byside(1),S=byside(0);
+      const nn=(o,pool,k)=>pool.filter(p=>p!==o).sort((a,b)=>d2(o.n,a.n)-d2(o.n,b.n)).slice(0,k);
+      L.forEach(o=>nn(o,L,2).forEach(m=>eL.push([o.i,m.i])));
+      R.forEach(o=>nn(o,R,2).forEach(m=>eR.push([o.i,m.i])));
+      S.forEach(o=>{const l=nn(o,L,1)[0],r=nn(o,R,1)[0];if(l)eS.push([o.i,l.i]);if(r)eS.push([o.i,r.i]);});
+      const li=L.slice().sort((a,b)=>Math.abs(a.n.x)-Math.abs(b.n.x)).slice(0,16);
+      const ri=R.slice().sort((a,b)=>Math.abs(a.n.x)-Math.abs(b.n.x)).slice(0,16);
+      li.forEach(o=>eC.push([o.i, ri[(Math.random()*ri.length)|0].i]));
+    }
+
+    segGroups.l=makeSeg(eL,COL.l,0.10);
+    segGroups.r=makeSeg(eR,COL.r,0.10);
+    segGroups.s=makeSeg(eS,COL.s,0.09);
+    segGroups.c=makeSeg(eC,COL.s,0.14);
+    window._edges={l:eL,r:eR,s:eS,c:eC};
+
+    // labels — a few important nodes per region
+    const label=(arr,force,force2,force3)=>{arr.sort((a,b)=>b.n.imp-a.n.imp);
+      for(let i=0;i<Math.min(5,arr.length);i++){arr[i].n.lab=true;addLabel(arr[i].n);}
+      if(force&&arr[0])relabel(arr[0].n,force);
+      if(force2&&arr[1])relabel(arr[1].n,force2);
+      if(force3&&arr[2])relabel(arr[2].n,force3);};
+    if(!(data&&data.nodes&&data.nodes.length)){
+      label(L,'social','images','voice'); label(R,'code'); label(S,'people');
+    } else { label(L); label(R); label(S); }
+
+    pulsePool.length=0;
+    for(let i=0;i<PULSES;i++){const s=makeSprite(1);s.visible=false;brain.add(s);pulsePool.push({sp:s,active:false,a:0,b:0,t:0,spd:0});}
+  }
+  function d2(a,b){const dx=a.x-b.x,dy=a.y-b.y,dz=a.z-b.z;return dx*dx+dy*dy+dz*dz;}
+
+  function makeSeg(list,color,op){
+    if(!list.length)return null;
+    const pos=new Float32Array(list.length*6);
+    list.forEach((e,i)=>{const a=nodes[e[0]],b=nodes[e[1]];
+      pos[i*6]=a.x;pos[i*6+1]=a.y;pos[i*6+2]=a.z;pos[i*6+3]=b.x;pos[i*6+4]=b.y;pos[i*6+5]=b.z;});
+    const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.BufferAttribute(pos,3));
+    const m=new THREE.LineBasicMaterial({color:color,transparent:true,opacity:op,blending:THREE.AdditiveBlending,depthWrite:false});
+    const seg=new THREE.LineSegments(g,m);seg.userData.baseOp=op;brain.add(seg);return seg;
+  }
+  function makeSprite(scale){
+    const m=new THREE.SpriteMaterial({map:DOT,color:0xffffff,transparent:true,blending:THREE.AdditiveBlending,depthWrite:false});
+    const s=new THREE.Sprite(m);s.scale.set(14*scale,14*scale,1);return s;
+  }
+  function addLabel(n){
+    const c=document.createElement('canvas');c.width=256;c.height=64;const g=c.getContext('2d');
+    g.font='28px ui-monospace, Menlo, monospace';g.textAlign='center';g.textBaseline='middle';
+    const base=n.side<0?'#8fe8ff':n.side>0?'#ffc48f':'#ffe6a8';
+    g.fillStyle=base;g.shadowColor=base;g.shadowBlur=12;g.fillText(n.cat||'',128,34);
+    const t=new THREE.CanvasTexture(c);
+    const s=new THREE.Sprite(new THREE.SpriteMaterial({map:t,transparent:true,depthWrite:false,depthTest:false}));
+    s.scale.set(46,11.5,1);s.position.set(n.x,n.y+9,n.z);s.userData.node=n;brain.add(s);labels.push(s);
+    n._label=s;
+  }
+  function relabel(n,cat){n.cat=cat;if(n._label){brain.remove(n._label);const idx=labels.indexOf(n._label);if(idx>=0)labels.splice(idx,1);}addLabel(n);}
+
+  // ── holographic rings ────────────────────────────────────────────────────────
+  const ring1=new THREE.Mesh(new THREE.TorusGeometry(150,0.6,8,120),
+    new THREE.MeshBasicMaterial({color:0x5aa0d0,transparent:true,opacity:0.16,blending:THREE.AdditiveBlending}));
+  ring1.rotation.x=Math.PI/2;scene.add(ring1);
+  const ring2=new THREE.Mesh(new THREE.TorusGeometry(178,0.5,8,120),
+    new THREE.MeshBasicMaterial({color:0x88b8e0,transparent:true,opacity:0.10,blending:THREE.AdditiveBlending}));
+  ring2.rotation.x=Math.PI/2.4;ring2.rotation.z=0.4;scene.add(ring2);
+
+  // ── postprocessing (bloom = the hologram glow) ───────────────────────────────
+  let composer,bloom;
+  function setupComposer(w,h){
+    composer=new THREE.EffectComposer(renderer);
+    composer.addPass(new THREE.RenderPass(scene,camera));
+    bloom=new THREE.UnrealBloomPass(new THREE.Vector2(w,h),1.5,0.7,0.0);
+    composer.addPass(bloom);
+  }
+
+  function resize(){
+    const w=HOST.clientWidth,h=HOST.clientHeight;
+    renderer.setSize(w,h);camera.aspect=w/h;camera.updateProjectionMatrix();
+    if(composer)composer.setSize(w,h);
+  }
+
+  // ── activity state ───────────────────────────────────────────────────────────
+  let mode='idle',modeUntil=0,forced=0,actL=0.12,actR=0.12;
+  const STAT={idle:'idle · ambient hum',gpt:'OpenAI stem firing ▸ left',claude:'Claude stem firing ▸ right',collab:'cross-hemisphere link ▸ callosum'};
+  function setMode(m,dur){mode=m;modeUntil=performance.now()+(dur||2200);statusEl.textContent=STAT[m]||m;}
+  function auto(){const t=performance.now();if(forced>t)return;if(t>modeUntil){const r=Math.random();
+    if(mode==='idle')setMode(r<0.5?'gpt':'claude',rnd(1800,3400));
+    else if(mode==='collab')setMode('idle',rnd(1400,2600));
+    else setMode(r<0.55?'collab':'idle',rnd(1400,2600));}}
+  function spawn(list,color){
+    if(!list||!list.length)return; const p=pulsePool.find(x=>!x.active); if(!p)return;
+    const e=list[(Math.random()*list.length)|0]; p.active=true;p.a=e[0];p.b=e[1];p.t=0;p.spd=rnd(0.010,0.022);
+    p.sp.material.color.copy(color);p.sp.visible=true;
+  }
+  function flare(i,amt){if(nodes[i])nodes[i].flare=Math.min(1.6,nodes[i].flare+(amt||0.9));}
+
+  // ── public bridge API (Flutter → JS) ─────────────────────────────────────────
+  window.KaiCortex={
+    setGraph:function(json){try{const d=typeof json==='string'?JSON.parse(json):json;buildFromData(d);}catch(e){}},
+    event:function(ev){try{const e=typeof ev==='string'?JSON.parse(ev):ev;
+      if(e.type==='brain'){const m=e.brain==='gpt'?'gpt':e.brain==='claude'?'claude':'collab';setMode(m,e.ms||2600);forced=performance.now()+(e.ms||2600);}
+      else if(e.type==='memory'){ // flare a random node on a side (or by id later)
+        const cand=nodes.map((n,i)=>({n,i})).filter(o=>e.side==null||o.n.side===e.side);
+        if(cand.length){const c=cand[(Math.random()*cand.length)|0];flare(c.i,1.2);}}
+      else if(e.type==='reset'){setMode('idle',1500);forced=0;}
+    }catch(err){}},
+    setActivity:function(g,c){actL=g;actR=c;}
+  };
+  // click → tell Flutter (and flare)
+  renderer.domElement.addEventListener('pointerdown',ev=>{
+    const r=renderer.domElement.getBoundingClientRect();
+    setMode((ev.clientX-r.left)<r.width/2?'gpt':'claude',2200);forced=performance.now()+2200;
+    if(window.KaiBridge&&window.KaiBridge.postMessage){try{window.KaiBridge.postMessage(JSON.stringify({type:'tap'}));}catch(e){}}
+  });
+
+  // ── animation ────────────────────────────────────────────────────────────────
+  let t0=performance.now();
+  function animate(now){
+    requestAnimationFrame(animate);
+    const dt=Math.min(50,now-t0);t0=now;const tt=now/1000;auto();
+    const tL=(mode==='gpt'||mode==='collab')?1:0.12,tR=(mode==='claude'||mode==='collab')?1:0.12;
+    actL+=(tL-actL)*0.06;actR+=(tR-actR)*0.06;
+    barL.style.width=(8+actL*92)+'%';barR.style.width=(8+actR*92)+'%';
+    const cAct=Math.min(actL,actR),shAct=0.2+0.65*Math.max(actL,actR);
+
+    // spawn pulses along the active domain's edges
+    if(window._edges){
+      if(actL>0.4&&Math.random()<0.11*actL)spawn(window._edges.l,COL.l);
+      if(actR>0.4&&Math.random()<0.11*actR)spawn(window._edges.r,COL.r);
+      if(Math.max(actL,actR)>0.4&&Math.random()<0.06)spawn(window._edges.s,COL.s);
+      if(mode==='collab'&&Math.random()<0.16)spawn(window._edges.c,COL.s);
+    }
+
+    // node colour/brightness
+    if(ptsCol){const arr=ptsCol.array;
+      for(let i=0;i<nodes.length;i++){const n=nodes[i];const act=n.side<0?actL:n.side>0?actR:shAct;
+        const tw=0.55+0.45*Math.sin(tt*1.6+n.ph);
+        const b=(0.35+n.imp*0.45+act*0.6+n.flare)*tw; const base=baseCol[i];
+        arr[i*3]=Math.min(1,base.r*b+ n.flare*0.5);arr[i*3+1]=Math.min(1,base.g*b+n.flare*0.4);arr[i*3+2]=Math.min(1,base.b*b+n.flare*0.4);
+        n.flare*=0.93;}
+      ptsCol.needsUpdate=true;}
+
+    // edge group opacity by activity
+    if(segGroups.l)segGroups.l.material.opacity=0.04+actL*0.16;
+    if(segGroups.r)segGroups.r.material.opacity=0.04+actR*0.16;
+    if(segGroups.s)segGroups.s.material.opacity=0.03+shAct*0.12;
+    if(segGroups.c)segGroups.c.material.opacity=0.05+cAct*0.4;
+
+    // pulses
+    for(const p of pulsePool){if(!p.active)continue;p.t+=p.spd*(dt/16);
+      if(p.t>=1){p.active=false;p.sp.visible=false;flare(p.b,1.0);continue;}
+      const a=nodes[p.a],b=nodes[p.b];p.sp.position.set(a.x+(b.x-a.x)*p.t,a.y+(b.y-a.y)*p.t,a.z+(b.z-a.z)*p.t);}
+
+    // face labels toward camera handled by Sprite automatically; fade with distance
+    ring1.rotation.z+=0.0009*dt;ring2.rotation.z-=0.0006*dt;
+    controls.update();
+    if(composer)composer.render();else renderer.render(scene,camera);
+  }
+
+  // ── boot ──────────────────────────────────────────────────────────────────────
+  try{
+    buildFromData(null);
+    resize();setupComposer(HOST.clientWidth,HOST.clientHeight);
+    window.addEventListener('resize',resize);
+    setMode('idle',1500);requestAnimationFrame(animate);
+  }catch(e){document.getElementById('err').style.display='flex';document.getElementById('err').innerHTML='Cortex failed to start.<br/>'+(e&&e.message||e);}
+})();
+</script>
+</body>
+</html>

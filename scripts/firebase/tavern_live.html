@@ -1,0 +1,846 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>⚔ The Tavern — Live Floor</title>
+<link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
+<style>
+/* ── Graphics pass v3: wooden HUD + pixel-grid canvas art (logic untouched) ── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:#0d0a14;color:#e8d5a8;font-family:'VT323',monospace;font-size:17px;
+     display:flex;height:100vh;overflow:hidden;user-select:none}
+#wrap{flex:1;display:flex;flex-direction:column;align-items:center;
+      justify-content:center;gap:8px;padding:10px;overflow:hidden;
+      background:radial-gradient(ellipse at 50% 40%,#1a1322 0%,#0d0a14 70%)}
+#topbar{display:flex;flex-direction:column;gap:6px;align-items:center}
+#floor-btns,#add-tools{display:flex;gap:8px;align-items:center}
+#floor-btns button,#add-tools button{
+  background:linear-gradient(180deg,#6b4326,#4a2c18);border:2px solid #000;
+  box-shadow:inset 0 2px 0 #8a5a35,inset 0 -2px 0 #2b1810,0 2px 0 #000;
+  color:#e8d5a8;font-family:inherit;font-size:15px;padding:3px 14px 4px;cursor:pointer;letter-spacing:1px}
+#floor-btns button:hover,#add-tools button:hover{filter:brightness(1.15)}
+#floor-btns button.active{
+  background:linear-gradient(180deg,#c08a2c,#8a5a1e);color:#241505;
+  box-shadow:inset 0 2px 0 #ffdf8c,inset 0 -2px 0 #5c3a10,0 2px 0 #000}
+#add-tools{display:none;background:linear-gradient(180deg,#3a2415,#241505);
+  border:3px solid #000;box-shadow:inset 0 2px 0 #6b4326;padding:6px 10px}
+#add-tools .lbl{color:#9a7a4a;font-size:13px;letter-spacing:2px}
+#del-btn{background:linear-gradient(180deg,#8f2b33,#5c1a2a)!important;
+  box-shadow:inset 0 2px 0 #c04a3a,inset 0 -2px 0 #3a0f1a,0 2px 0 #000!important;color:#f0c0b0!important}
+#del-btn:hover{filter:brightness(1.2)}
+canvas{image-rendering:pixelated;image-rendering:crisp-edges;cursor:crosshair;
+       border:4px solid #000;outline:2px solid #3d2646;
+       box-shadow:0 0 60px rgba(200,120,30,.25),0 12px 40px rgba(0,0,0,.6)}
+#sidebar{width:220px;min-width:220px;background:linear-gradient(180deg,#241626,#170f1c);
+         border-left:3px solid #000;box-shadow:inset 2px 0 0 #3d2646;
+         padding:12px;overflow-y:auto;display:flex;flex-direction:column;gap:12px}
+#sidebar h1{font-size:18px;color:#ffdf8c;letter-spacing:3px;text-transform:uppercase;
+            border-bottom:2px solid #4a2c18;padding-bottom:6px;text-align:center;
+            text-shadow:1px 1px 0 #000,0 0 10px rgba(232,183,74,.35)}
+.sec{font-size:13px;color:#9a7a4a;letter-spacing:2px;text-transform:uppercase;margin-bottom:5px}
+.stat{display:flex;justify-content:space-between;font-size:16px;margin-bottom:2px;color:#c9b088}
+.stat-v{color:#ffdf8c}
+.ti{background:#160e0b;border:2px solid #241505;padding:6px;
+    margin-bottom:4px;font-size:14px;transition:all .25s}
+.ti.occ{border-color:#8a5a1e;background:#241708}
+.ti-name{color:#e8b74a;margin-bottom:2px}
+.ti-guest{color:#6cc987;font-size:14px}
+.ti-since{color:#7a6040;font-size:13px;margin-top:2px}
+.dot{display:inline-block;width:7px;height:7px;margin-right:4px;vertical-align:middle;border:1px solid #000}
+.dot.on{background:#63c57e;animation:blink 1.4s steps(2) infinite}
+.dot.off{background:#3a3a3a}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+#lasttap{background:#160e0b;border:2px solid #241505;padding:7px;font-size:14px;color:#c9a86a;line-height:1.4}
+#clock{font-size:30px;color:#ffdf8c;text-align:center;letter-spacing:4px;margin-top:4px;text-shadow:2px 2px 0 #000}
+#dateline{font-size:13px;color:#9a7a4a;text-align:center;letter-spacing:1px;margin-top:2px}
+#live-ind{font-size:14px;color:#63c57e;text-align:center;letter-spacing:2px}
+#tooltip{position:fixed;pointer-events:none;display:none;z-index:999;
+  background:rgba(18,10,18,.93);border:2px solid #c08a2c;color:#e8d5a8;
+  font:15px 'VT323',monospace;padding:7px 11px;line-height:1.6;
+  box-shadow:0 4px 14px rgba(0,0,0,.6)}
+</style>
+</head>
+<body>
+
+<div id="wrap">
+  <div id="topbar">
+    <div id="floor-btns">
+      <span style="color:#806040;font-size:10px;letter-spacing:1px">FLOOR:</span>
+      <button class="active" onclick="setFloor('gf')">Main Hall</button>
+      <button onclick="setFloor('ff')">First Floor</button>
+      <span id="live-ind">● LIVE</span>
+      <span style="width:14px"></span>
+      <button id="edit-btn" onclick="toggleEdit()">✎ Edit Layout</button>
+      <button id="save-btn" onclick="saveLayout()" style="display:none">💾 Save</button>
+      <button id="reset-btn" onclick="resetLayout()" style="display:none">↺ Reset</button>
+    </div>
+    <div id="add-tools">
+      <span class="lbl">ADD TABLE:</span>
+      <button onclick="addTable('2top')">2-Top</button>
+      <button onclick="addTable('4top')">4-Top</button>
+      <button onclick="addTable('communal')">Communal 6</button>
+      <button onclick="addTable('banquet')">Banquet 8</button>
+      <button onclick="addTable('wall2')">Nook 2</button>
+      <span style="width:8px"></span>
+      <button id="del-btn" onclick="deleteSelected()">🗑 Delete selected</button>
+      <span class="lbl" style="margin-left:6px">· double-click a table to rename · Save syncs to RTDB</span>
+    </div>
+  </div>
+  <canvas id="c"></canvas>
+</div>
+
+<div id="sidebar">
+  <h1>⚔ The Tavern</h1>
+  <div><div id="clock">--:--</div><div id="dateline">---</div></div>
+  <div>
+    <div class="sec">House</div>
+    <div class="stat"><span>Guests</span><span class="stat-v" id="s-guests">0</span></div>
+    <div class="stat"><span>Tables</span><span class="stat-v" id="s-tables">—</span></div>
+  </div>
+  <div><div class="sec">Tables</div><div id="tlist"></div></div>
+  <div><div class="sec">Last Tap</div><div id="lasttap">No taps yet</div></div>
+</div>
+
+<div id="tooltip"></div>
+
+<script>
+const RTDB='https://kingdom-ac44f-default-rtdb.europe-west1.firebasedatabase.app';
+
+/* ── Canvas ──────────────────────────────────────────────────────────────── */
+const canvas=document.getElementById('c');
+const ctx=canvas.getContext('2d');
+ctx.imageSmoothingEnabled=false;
+const CW=1056,CH=680;
+canvas.width=CW;canvas.height=CH;
+const WALL_H=128;
+
+/* ── Palette ─────────────────────────────────────────────────────────────── */
+/* ── Directional patron atlas — patrons_anim.png
+   Layout: 4 walk-frames wide × 24 rows tall (6 chars × 4 dirs)
+   Each frame: 35 × 34 px
+   Row order per char: down(0), up(1), left(2), right(3)         ── */
+const MS_FW=35,MS_FH=34,MS_FRAMES=4,MS_N=6;
+const MS_DIR={down:0,up:1,left:2,right:3};
+const msImg=new Image();let msReady=false;msImg.onload=function(){msReady=true;};
+msImg.src='patrons_anim.png';
+/* Graphics pass v3 — hue-shifted ramps (shadows→purple, highlights→yellow) */
+const WD=['#2e1a1e','#4a2c1c','#6d4526','#96632f','#bd8740','#e0ac55'];
+const RD=['#5c1a2a','#8f2b33','#c04a3a','#e07058','#f0907a'];
+const P={
+  wpA:'#c9b088',wpB:'#b8a078',wpC:'#a8906c',
+  fpA:'#754427',fpB:'#5a3122',fpC:'#8f5a2d',fpLine:'#2e1a1e',
+  wall:'#3a2018',wallHi:'#8a5a30',lanY:'#ffd95c',lanO:'#f59a23',
+  skin:'#eec39a',outline:'#1a0f14',
+  stone:['#241c30','#352a44','#493c58','#5e506e'],
+  gold:['#8a5a1e','#c08a2c','#e8b74a','#ffdf8c'],
+  flame:['#a12c1e','#d95b1f','#f59a23','#ffd95c','#fff3b0'],
+  chars:[['#5c2010','#2850a8','#3a4858'],['#f0c040','#38883a','#5a4028'],
+         ['#180e08','#a02020','#3c4020'],['#a08060','#703098','#283050'],
+         ['#c03010','#e07020','#4a3818']],
+};
+function seedRnd(seed){let s=seed%2147483647;if(s<=0)s+=2147483646;return()=>((s=s*16807%2147483647)-1)/2147483646;}
+function hashStr(s){let h=5381;for(const c of s)h=((h<<5)+h+c.charCodeAt(0))&0xffffffff;return Math.abs(h);}
+
+/* ── Drawing helpers ─────────────────────────────────────────────────────── */
+function R(x,y,w,h,fill,stroke,lw){x=Math.round(x);y=Math.round(y);w=Math.round(w);h=Math.round(h);
+  if(fill){ctx.fillStyle=fill;ctx.fillRect(x,y,w,h);} if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=lw||1;ctx.strokeRect(x+.5,y+.5,w-1,h-1);}}
+function gradV(x,y,w,h,c0,c1){x=Math.round(x);y=Math.round(y);w=Math.round(w);h=Math.round(h);
+  const g=ctx.createLinearGradient(0,y,0,y+h);g.addColorStop(0,c0);g.addColorStop(1,c1);ctx.fillStyle=g;ctx.fillRect(x,y,w,h);}
+function gradH(x,y,w,h,c0,c1){x=Math.round(x);y=Math.round(y);w=Math.round(w);h=Math.round(h);
+  const g=ctx.createLinearGradient(x,0,x+w,0);g.addColorStop(0,c0);g.addColorStop(.5,c1);g.addColorStop(1,c0);ctx.fillStyle=g;ctx.fillRect(x,y,w,h);}
+function contactShadow(cx,cy,rw,rh){ctx.save();ctx.globalAlpha=.3;ctx.fillStyle='#0d0616';
+  const w=Math.round(rw*2);ctx.fillRect(Math.round(cx-rw)+2,Math.round(cy)-2,Math.max(2,w-4),4);
+  ctx.fillRect(Math.round(cx-rw),Math.round(cy)-1,w,2);ctx.restore();}
+function candle(cx,cy){cx=Math.round(cx);cy=Math.round(cy);
+  R(cx-2,cy-4,6,10,'#e8e4d0',P.outline);ctx.fillStyle='#c9bda0';ctx.fillRect(cx-2,cy+3,6,2);
+  const on=(animFrame%8)<4;ctx.fillStyle=on?P.flame[3]:P.flame[2];ctx.fillRect(cx-1,cy-8,2,4);
+  ctx.fillStyle=P.flame[4];ctx.fillRect(cx-1,cy-8,2,2);}
+function glow(cx,cy,r){const g=ctx.createRadialGradient(cx,cy,0,cx,cy,r||9);g.addColorStop(0,'rgba(255,190,90,.38)');g.addColorStop(1,'rgba(255,190,90,0)');ctx.fillStyle=g;ctx.beginPath();ctx.arc(cx,cy,r||9,0,Math.PI*2);ctx.fill();}
+function plate(cx,cy){cx=Math.round(cx);cy=Math.round(cy);
+  ctx.fillStyle='#e8e4d0';ctx.fillRect(cx-5,cy-2,10,5);
+  ctx.fillStyle='#c9bda0';ctx.fillRect(cx-5,cy+1,10,2);
+  ctx.fillStyle='#c04a3a';ctx.fillRect(cx-2,cy-1,5,2);
+  ctx.strokeStyle=P.outline;ctx.lineWidth=1;ctx.strokeRect(cx-4.5,cy-1.5,9,4);}
+function mugProp(cx,cy){cx=Math.round(cx);cy=Math.round(cy);
+  R(cx-3,cy-4,6,8,P.gold[1],P.outline);ctx.fillStyle='#e8e4d0';ctx.fillRect(cx-2,cy-4,4,2);
+  ctx.fillStyle=P.gold[0];ctx.fillRect(cx+3,cy-2,2,4);}
+function chairBack(cx,y,w,h){const x=Math.round(cx-w/2),r=Math.max(2,Math.round(h/3));
+  R(x,y,w,r,WD[2],P.outline);ctx.fillStyle=WD[4];ctx.fillRect(x+1,Math.round(y)+1,Math.round(w)-2,1);
+  R(x,y+r,w,h-r,RD[1],P.outline);ctx.fillStyle=RD[3];ctx.fillRect(x+1,Math.round(y+r)+1,Math.round(w)-2,2);}
+function chairSeat(cx,y,w,h){const x=Math.round(cx-w/2);
+  R(x,y,w,h,RD[1],P.outline);ctx.fillStyle=RD[3];ctx.fillRect(x+1,Math.round(y)+1,Math.round(w)-2,2);
+  R(x,y+h,w,Math.max(2,h/3),WD[2],P.outline);
+  ctx.fillStyle=WD[0];ctx.fillRect(x+1,Math.round(y+h)+Math.round(h/3),2,4);ctx.fillRect(Math.round(x+w)-3,Math.round(y+h)+Math.round(h/3),2,4);}
+
+/* ── Scale config (px per mm; First Floor is rotated to fit, so larger) ──── */
+let PXMM=0.0961;
+const PXMM_GF=0.0961, PXMM_FF=0.055;   // FF natural orientation (full floor to scale)
+const GF_WALLS=[[26,128,1030,128],[26,128,26,629],[1030,128,1030,629],[26,629,1030,629],[349,128,349,548]];
+// A 4-top is two 2-tops pushed together; banquet vertical (rot:90); nook against wall.
+const GF_DEFAULT=[
+  {id:'T01',name:'Table 1',type:'4top',cx:90, cy:232,rot:0},
+  {id:'T02',name:'Table 2',type:'4top',cx:90, cy:419,rot:0},
+  {id:'T03',name:'Table 3',type:'2top',cx:320,cy:231,rot:0},
+  {id:'T04',name:'Table 4',type:'2top',cx:320,cy:409,rot:0},
+  {id:'T05',name:'Banquet',type:'banquet',cx:500,cy:347,rot:90},
+  {id:'T06',name:'Table 6',type:'4top',cx:697,cy:185,rot:0},
+  {id:'T07',name:'Table 7',type:'4top',cx:865,cy:185,rot:0},
+  {id:'T08',name:'Table 8',type:'4top',cx:697,cy:363,rot:0},
+  {id:'T09',name:'Table 9',type:'4top',cx:865,cy:363,rot:0},
+  {id:'T10',name:'Nook', type:'wall2', cx:1000,cy:347,rot:90},
+];
+// First floor: full floor to scale, natural orientation. Kitchen is blocked out
+// as one zone on the left; guest seating sits on the right.
+const FF_WALLS=[[164,128,892,128],[164,128,164,680],[892,128,892,680],[164,680,892,680],[657,128,657,680]];
+const FF_DEFAULT=[
+  {id:'F01',name:'Lounge 1',type:'4top',cx:699,cy:169,rot:0},
+  {id:'F02',name:'Lounge 2',type:'4top',cx:812,cy:169,rot:0},
+  {id:'F03',name:'Lounge 3',type:'2top',cx:711,cy:283,rot:90},
+  {id:'F04',name:'Lounge 4',type:'2top',cx:711,cy:429,rot:90},
+  {id:'F05',name:'Lounge 5',type:'4top',cx:834,cy:266,rot:0},
+  {id:'F06',name:'Lounge 6',type:'4top',cx:834,cy:473,rot:0},
+  {id:'F07',name:'Lounge 7',type:'4top',cx:752,cy:560,rot:0},
+  {id:'F08',name:'Lounge 8',type:'2top',cx:858,cy:360,rot:90},
+];
+let GF_TABLES=JSON.parse(JSON.stringify(GF_DEFAULT));
+let FF_TABLES=JSON.parse(JSON.stringify(FF_DEFAULT));
+
+let currentFloor='gf';
+let floorData={tables:{},guests:{}};
+let animFrame=0,lastRender=0,idSeq=1;
+
+/* ── Walk animation state ────────────────────────────────────────────────────
+   guestWalk: { uid → { state, x, y, ox, oy, tx, ty, name, startMs } }
+   state: 'walking_in' | 'seated' | 'walking_out'
+   Walk-in : terrace door → table  (WALK_MS_IN ms)
+   Seated  : sprite shown at table while visit is active
+   Walk-out: table → terrace door (WALK_MS_OUT ms), then entry deleted      */
+const WALK_MS_IN  = 2200;  // arrival walk duration
+const WALK_MS_OUT = 1800;  // departure walk duration (slightly faster)
+const SPAWN_X     = 1030;  // terrace door x
+const SPAWN_Y     = 755;   // terrace door centre y
+const guestWalk   = {};    // uid → walker entry
+
+function _tablePos(tableId){
+  const all=[...GF_TABLES,...FF_TABLES];
+  return all.find(t=>t.id===tableId)||null;
+}
+
+function _walkDir(dx,dy){
+  if(Math.abs(dx)>Math.abs(dy)) return dx<0?'left':'right';
+  return dy<0?'up':'down';
+}
+
+/** Call whenever active_guests snapshot changes. */
+function syncGuestWalk(newGuests){
+  const now=performance.now();
+
+  // ── Departures: start walk-out instead of instant delete ──────────────
+  for(const [uid,w] of Object.entries(guestWalk)){
+    if(newGuests[uid]) continue;              // still present
+    if(w.state==='walking_out') continue;     // already heading out
+    // Start walk-out from wherever they currently are
+    w.ox=w.x; w.oy=w.y;
+    w.tx=SPAWN_X; w.ty=SPAWN_Y;
+    w.state='walking_out';
+    w.startMs=now;
+  }
+
+  // ── Arrivals: spawn and begin walk-in ─────────────────────────────────
+  for(const [uid,g] of Object.entries(newGuests||{})){
+    if(guestWalk[uid]){
+      // Edge case: guest re-tapped while walking out — cancel exit walk
+      if(guestWalk[uid].state==='walking_out'){
+        const tbl=_tablePos(g.tableId);
+        if(tbl){
+          const w=guestWalk[uid];
+          w.ox=w.x; w.oy=w.y;
+          w.tx=tbl.cx; w.ty=tbl.cy;
+          w.state='walking_in';
+          w.startMs=now;
+        }
+      }
+      continue;
+    }
+    const tbl=_tablePos(g.tableId);
+    if(!tbl) continue;
+    guestWalk[uid]={
+      state:'walking_in',
+      x:SPAWN_X, y:SPAWN_Y,
+      ox:SPAWN_X, oy:SPAWN_Y,
+      tx:tbl.cx,  ty:tbl.cy,
+      name:g.name||g.guestName||'Guest',
+      startMs:now,
+    };
+  }
+}
+
+/** Advance all walkers one frame — call every render. */
+function stepGuests(){
+  const now=performance.now();
+  for(const uid of Object.keys(guestWalk)){
+    const w=guestWalk[uid];
+    if(w.state==='seated') continue;
+
+    const dur=w.state==='walking_in'?WALK_MS_IN:WALK_MS_OUT;
+    const t=Math.min(1,(now-w.startMs)/dur);
+    // smooth-step easing
+    const s=t<0.5?2*t*t:1-Math.pow(-2*t+2,2)/2;
+    w.x=w.ox+(w.tx-w.ox)*s;
+    w.y=w.oy+(w.ty-w.oy)*s;
+
+    if(t>=1){
+      if(w.state==='walking_in'){
+        w.x=w.tx; w.y=w.ty;
+        w.state='seated';
+      } else {
+        // reached exit — remove
+        delete guestWalk[uid];
+      }
+    }
+  }
+}
+
+/** Draw only moving walkers (walking_in / walking_out).
+ *  Seated guests are drawn by the table rendering once walk-in completes. */
+function drawWalkingGuests(){
+  for(const w of Object.values(guestWalk)){
+    if(w.state==='seated') continue;   // table renderer handles this
+    const dir = w.state==='walking_in'
+      ? _walkDir(w.tx-w.x, w.ty-w.y)
+      : _walkDir(SPAWN_X-w.x, SPAWN_Y-w.y);
+    drawGuest(w.x, w.y, w.name, dir);
+  }
+}
+function curTables(){return currentFloor==='gf'?GF_TABLES:FF_TABLES;}
+function setCurTables(a){if(currentFloor==='gf')GF_TABLES=a;else FF_TABLES=a;}
+function curWalls(){return currentFloor==='gf'?GF_WALLS:FF_WALLS;}
+function tableById(id){return curTables().find(t=>t.id===id)||null;}
+
+/* ── Footprint + hit-test bbox (canvas px) ───────────────────────────────── */
+const PAIR={W:480,D:600,gap:3};   // each half of a 4-top
+function tbbox(t){
+  const horiz=(t.rot%180)===0; let halfW,halfH;
+  if(t.type==='4top'){
+    const w=PAIR.W*PXMM, top=PAIR.D*PXMM*0.5, fh=750*PXMM*0.42, ch=430*PXMM*0.7;
+    const span=w*2+PAIR.gap, tall=(top+fh)+ch*2;
+    if(horiz){halfW=span/2+6; halfH=tall/2+6;} else {halfW=tall/2+6; halfH=span/2+6;}
+  }else if(t.type==='2top'){
+    const w=600*PXMM, top=600*PXMM*0.5, fh=750*PXMM*0.42, ch=430*PXMM*0.7;
+    if(horiz){halfW=w/2+6; halfH=(top+fh)/2+ch+6;} else {halfW=(top+fh)/2+ch+6; halfH=w/2+6;}
+  }else if(t.type==='banquet'){
+    const tw=900*PXMM, th=1700*PXMM, ext=430*PXMM*0.8;
+    if(horiz){halfW=th/2+ext; halfH=tw/2+34;} else {halfW=tw/2+ext; halfH=th/2+24;}
+  }else if(t.type==='communal'){
+    const tw=1900*PXMM, top=900*PXMM*0.5, fh=750*PXMM*0.42, ch=430*PXMM*0.7;
+    if(horiz){halfW=tw/2+6; halfH=(top+fh)/2+ch+6;} else {halfW=(top+fh)/2+ch+6; halfH=tw/2+6;}
+  }else if(t.type==='wall2'){
+    const tw=450*PXMM, th=1000*PXMM, ext=430*PXMM*0.8;
+    halfW=tw/2+ext; halfH=th/2+10;
+  }else{ // bar
+    const tw=420*PXMM*2.0; halfW=tw/2+4; halfH=40;
+  }
+  return {x0:t.cx-halfW,y0:t.cy-halfH,x1:t.cx+halfW,y1:t.cy+halfH};
+}
+
+/* ── Table renderers (param-based, oblique 2.5D) ─────────────────────────── */
+function tableH(cx,cy,Wmm,Dmm,seats,ends,occ,guests,tag){
+  const tw=Wmm*PXMM, top=Math.max(11,Dmm*PXMM*0.5), fh=Math.max(10,750*PXMM*0.42);
+  const x=cx-tw/2, yt=cy-(top+fh)/2;
+  const cw=tw/seats*0.74, cbh=Math.max(8,430*PXMM*0.7), csh=Math.max(7,430*PXMM*0.55);
+  contactShadow(cx,yt+top+fh+10,tw/2+6,6);
+  for(let i=0;i<seats;i++) chairBack(x+tw*(i+0.5)/seats,yt-cbh,cw,cbh);
+  if(ends) chairBack(cx,yt-cbh,tw*0.5,cbh);
+  R(x,yt,tw,top,WD[4],P.outline);
+  ctx.fillStyle=WD[5];ctx.fillRect(Math.round(x)+1,Math.round(yt)+1,Math.round(tw)-2,2);
+  {const gr=seedRnd(Math.round(cx*13+cy));                                 // wood grain flecks
+   for(let gx=x+4;gx<x+tw-6;gx+=8){if(gr()>.35)ctx.fillStyle=WD[3],ctx.fillRect(Math.round(gx),Math.round(yt+3+gr()*(top-6)),4,1);
+     if(gr()>.7)ctx.fillStyle=WD[2],ctx.fillRect(Math.round(gx)+2,Math.round(yt+2+gr()*(top-5)),2,1);}}
+  R(x,yt+top,tw,fh,WD[2],P.outline);
+  ctx.fillStyle=WD[0];ctx.fillRect(Math.round(x)+1,Math.round(yt+top),Math.round(tw)-2,2);
+  for(let vx=x+6;vx<x+tw-2;vx+=10){ctx.fillStyle=WD[1];ctx.fillRect(Math.round(vx),Math.round(yt+top)+2,2,Math.round(fh)-3);}
+  R(x+2,yt+top+fh,3,5,WD[1]);R(x+tw-5,yt+top+fh,3,5,WD[1]);
+  for(let i=0;i<seats;i++){const sx=x+tw*(i+0.5)/seats;(seats===1||i===Math.floor(seats/2))?candle(sx,yt+top/2):plate(sx,yt+top/2);}
+  if(occ&&tw>40)mugProp(x+tw*0.5+12,yt+top*0.35);
+  for(let i=0;i<seats;i++) chairSeat(x+tw*(i+0.5)/seats,yt+top+fh+2,cw,csh);
+  if(ends) chairSeat(cx,yt+top+fh+2,tw*0.5,csh);
+  for(let i=0;i<seats;i++) if(seats===1||i===Math.floor(seats/2)) glow(x+tw*(i+0.5)/seats,yt+top/2-2,9);
+  if(occ){let gi=0;const fy=yt+top+fh+csh+6;for(let i=0;i<seats&&gi<guests.length;i++) drawGuest(x+tw*(i+0.5)/seats,fy,guests[gi++],'up');}
+  if(occ&&tag) nameTag(cx,yt-cbh-10,tag);
+}
+function tableV(cx,cy,Wmm,Lmm,seats,ends,occ,guests,tag,leftOnly){
+  const tw=Wmm*PXMM, th=Lmm*PXMM, fh=Math.max(9,750*PXMM*0.40);
+  const x=cx-tw/2, y=cy-(th+fh)/2;
+  const chw=Math.max(8,430*PXMM*0.7), chh=th/seats*0.72;
+  contactShadow(cx,y+th+fh+6,tw/2+7,6);
+  for(let i=0;i<seats;i++){const sy=y+th*(i+0.5)/seats;chairSeat(x-chw/2-1,sy-chh/2,chw,chh);if(!leftOnly) chairSeat(x+tw+chw/2+1,sy-chh/2,chw,chh);}
+  R(x,y,tw,th,WD[4],P.outline);
+  ctx.fillStyle=WD[5];ctx.fillRect(Math.round(x)+1,Math.round(y)+1,Math.round(tw)-2,2);
+  ctx.fillStyle=WD[3];ctx.fillRect(Math.round(x)+1,Math.round(y)+1,2,Math.round(th)-2);
+  {const gr=seedRnd(Math.round(cx*17+cy));                                 // wood grain flecks
+   for(let gy2=y+4;gy2<y+th-6;gy2+=9){if(gr()>.4)ctx.fillStyle=WD[3],ctx.fillRect(Math.round(x+2+gr()*(tw-8)),Math.round(gy2),1,4);}}
+  if(ends){R(x+tw*0.26,y+2,tw*0.48,th-4,RD[1],P.gold[1]);
+    ctx.fillStyle=RD[2];ctx.fillRect(Math.round(x+tw*0.26)+1,Math.round(y)+3,Math.round(tw*0.48)-2,2);}
+  R(x,y+th,tw,fh,WD[2],P.outline);
+  ctx.fillStyle=WD[0];ctx.fillRect(Math.round(x)+1,Math.round(y+th),Math.round(tw)-2,2);
+  R(x+2,y+th+fh,3,5,WD[1]);R(x+tw-5,y+th+fh,3,5,WD[1]);
+  if(ends){chairBack(cx,y-chw,tw*0.6,chw);chairSeat(cx,y+th+fh+2,tw*0.6,chh*0.6);}
+  for(let i=0;i<seats;i++) candle(cx,y+th*(i+0.5)/seats);
+  for(let i=0;i<seats;i++) glow(cx,y+th*(i+0.5)/seats,8);
+  if(occ){let gi=0;for(let i=0;i<seats&&gi<guests.length;i++){drawGuest(x-chw/2-1,y+th*(i+0.5)/seats+8,guests[gi++],'right');if(gi<guests.length)drawGuest(x+tw+chw/2+1,y+th*(i+0.5)/seats+8,guests[gi++],'left');}}
+  if(occ&&tag) nameTag(cx,y-chw-6,tag);
+}
+function draw4Top(t,occ,guests){
+  const horiz=(t.rot%180)===0;
+  const w=PAIR.W*PXMM, off=(w+PAIR.gap)/2;
+  const g1=guests.slice(0,Math.ceil(guests.length/2)), g2=guests.slice(Math.ceil(guests.length/2));
+  if(horiz){tableH(t.cx-off,t.cy,PAIR.W,PAIR.D,1,false,occ,g1,'');tableH(t.cx+off,t.cy,PAIR.W,PAIR.D,1,false,occ,g2,'');}
+  else{const top=PAIR.D*PXMM*0.5,fh=750*PXMM*0.42,ch=430*PXMM*0.7;const offv=(top+fh)/2+ch/2+2;
+       tableH(t.cx,t.cy-offv,PAIR.W,PAIR.D,1,false,occ,g1,'');tableH(t.cx,t.cy+offv,PAIR.W,PAIR.D,1,false,occ,g2,'');}
+  if(occ){const b=tbbox(t);nameTag(t.cx,b.y0-2,t.name);}
+}
+function drawBar(t){
+  const tw=420*PXMM*2.0,TH=28,FH=24;const x=t.cx-tw/2,y=t.cy-(TH+FH)/2;
+  contactShadow(t.cx,y+TH+FH+6,tw/2,6);
+  R(x,y,tw,TH,WD[4],P.outline);
+  ctx.fillStyle=WD[5];ctx.fillRect(Math.round(x)+1,Math.round(y)+1,Math.round(tw)-2,2);
+  R(x,y+TH,tw,FH,WD[2],P.outline);
+  ctx.fillStyle=WD[0];ctx.fillRect(Math.round(x)+1,Math.round(y+TH),Math.round(tw)-2,2);
+  for(let px=x+12;px<x+tw-12;px+=46){R(px,y+TH+4,16,FH-8,WD[1],P.outline);
+    ctx.fillStyle=WD[3];ctx.fillRect(Math.round(px)+2,Math.round(y+TH)+6,2,FH-12);}
+  mugProp(x+tw*0.22,y+TH*0.45);mugProp(x+tw*0.72,y+TH*0.45);plate(x+tw*0.48,y+TH*0.5);
+  drawStanding(t.cx,y-6,'Kai');              // Kai the bartender — he/him/his
+  nameTag(t.cx,y-22,t.name);
+}
+function nameTag(cx,ty,label){ctx.font='14px VT323,monospace';ctx.textAlign='center';const tw=ctx.measureText(label).width+12;R(cx-tw/2,ty-2,tw,15,'rgba(18,10,18,.9)','#c08a2c',2);ctx.fillStyle='#ffdf8c';ctx.fillText(label,cx,ty+9);ctx.textAlign='left';}
+// To-scale customer sprite — [hair, skin, shirt, pants]
+const CPALS=[['#4a2a16','#f0c896','#2850a8','#3a4658'],['#1c1410','#d2966e','#a82828','#3c3c42'],
+             ['#d2aa46','#f4d2aa','#388c50','#5a422c'],['#967860','#be8260','#7846a0','#283450'],
+             ['#3c281e','#fad7b4','#d2782a','#463828']];
+function drawGuest(cx,gy,name,dir){   // directional patron sprite; procedural fallback below
+  if(msReady){
+    const ci=hashStr(name||'Guest')%MS_N;
+    const di=MS_DIR[dir]??0;
+    const wf=animFrame%MS_FRAMES;          // walk-cycle frame (0-3)
+    const sx=wf*MS_FW;                     // frame column
+    const sy=(ci*4+di)*MS_FH;             // character+direction row
+    const s=Math.max(1,Math.round(840*PXMM/MS_FH)),th=MS_FH*s,dw=MS_FW*s;  // integer scale = crisp pixels
+    ctx.drawImage(msImg,sx,sy,MS_FW,MS_FH,Math.round(cx-dw/2),Math.round(gy-th),dw,th);
+    return;
+  }
+  const p=CPALS[hashStr(name||'Guest')%CPALS.length],hair=p[0],skin=p[1],shirt=p[2],pants=p[3];
+  cx=Math.round(cx);gy=Math.round(gy);
+  ctx.save();ctx.globalAlpha=.22;ctx.fillStyle='#000';ctx.beginPath();ctx.ellipse(cx,gy,8,3,0,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1;ctx.restore();
+  R(cx-7,gy-9,14,8,pants,P.outline,.8);
+  R(cx-8,gy-22,16,14,shirt,P.outline,.9);ctx.fillStyle='rgba(255,255,255,.16)';ctx.fillRect(cx-7,gy-21,14,2);
+  R(cx-11,gy-20,4,11,shirt,P.outline,.7);R(cx+7,gy-20,4,11,shirt,P.outline,.7);
+  ctx.fillStyle=skin;ctx.fillRect(cx-2,gy-24,4,3);
+  ctx.fillStyle=skin;ctx.beginPath();ctx.arc(cx,gy-29,6,0,Math.PI*2);ctx.fill();ctx.strokeStyle=P.outline;ctx.lineWidth=.8;ctx.stroke();
+  ctx.fillStyle=hair;ctx.beginPath();ctx.arc(cx,gy-30,6,Math.PI,2*Math.PI);ctx.fill();ctx.fillRect(cx-6,gy-31,2,5);ctx.fillRect(cx+4,gy-31,2,5);
+  ctx.fillStyle='#1a1008';ctx.fillRect(cx-3,gy-30,1,2);ctx.fillRect(cx+2,gy-30,1,2);
+}
+function drawStanding(cx,gy,name){   // standing customer (e.g. Kai the bartender — he/him)
+  if(msReady){                       // use the real atlas, facing camera, static pose
+    const ci=hashStr(name||'Guest')%MS_N;
+    const s=Math.max(1,Math.round(840*PXMM/MS_FH)),th=MS_FH*s,dw=MS_FW*s;
+    ctx.drawImage(msImg,0,(ci*4+MS_DIR.down)*MS_FH,MS_FW,MS_FH,Math.round(cx-dw/2),Math.round(gy-th),dw,th);
+    return;
+  }
+  const p=CPALS[hashStr(name||'Guest')%CPALS.length],hair=p[0],skin=p[1],shirt=p[2],pants=p[3];
+  cx=Math.round(cx);gy=Math.round(gy);
+  ctx.save();ctx.globalAlpha=.22;ctx.fillStyle='#000';ctx.beginPath();ctx.ellipse(cx,gy,7,2.6,0,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1;ctx.restore();
+  R(cx-6,gy-13,5,12,pants,P.outline,.8);R(cx+1,gy-13,5,12,pants,P.outline,.8);
+  ctx.fillStyle='#241a10';ctx.fillRect(cx-6,gy-2,5,2);ctx.fillRect(cx+1,gy-2,5,2);
+  R(cx-8,gy-30,16,18,shirt,P.outline,.9);ctx.fillStyle='rgba(255,255,255,.16)';ctx.fillRect(cx-7,gy-29,14,2);
+  R(cx-11,gy-29,4,15,shirt,P.outline,.7);R(cx+7,gy-29,4,15,shirt,P.outline,.7);
+  ctx.fillStyle=skin;ctx.fillRect(cx-2,gy-33,4,3);
+  ctx.fillStyle=skin;ctx.beginPath();ctx.arc(cx,gy-38,6,0,Math.PI*2);ctx.fill();ctx.strokeStyle=P.outline;ctx.lineWidth=.8;ctx.stroke();
+  ctx.fillStyle=hair;ctx.beginPath();ctx.arc(cx,gy-39,6,Math.PI,2*Math.PI);ctx.fill();ctx.fillRect(cx-6,gy-40,2,5);ctx.fillRect(cx+4,gy-40,2,5);
+  ctx.fillStyle='#1a1008';ctx.fillRect(cx-3,gy-39,1,2);ctx.fillRect(cx+2,gy-39,1,2);
+}
+function drawTable(t){
+  const occ=!!(floorData.tables[t.id]&&floorData.tables[t.id].arrivedAt);
+  const guests=getGuests(t.id);const on=occ||guests.length>0;const horiz=(t.rot%180)===0;
+  if(t.type==='bar'){drawBar(t);return;}
+  if(t.type==='4top'){draw4Top(t,on,guests);return;}
+  if(t.type==='wall2'){tableV(t.cx,t.cy,450,1000,2,false,on,guests,t.name,true);return;}
+  if(t.type==='banquet'){horiz?tableH(t.cx,t.cy,1700,900,3,true,on,guests,t.name):tableV(t.cx,t.cy,900,1700,3,true,on,guests,t.name,false);return;}
+  if(t.type==='communal'){horiz?tableH(t.cx,t.cy,1900,900,3,false,on,guests,t.name):tableV(t.cx,t.cy,900,1900,3,false,on,guests,t.name,false);return;}
+  // 2top
+  horiz?tableH(t.cx,t.cy,600,600,1,false,on,guests,t.name):tableV(t.cx,t.cy,600,600,1,false,on,guests,t.name,false);
+}
+
+/* ── Back wall + floor ───────────────────────────────────────────────────── */
+function drawBackWall(fr){
+  // plaster field + noise
+  ctx.fillStyle=P.wpA;ctx.fillRect(0,0,CW,WALL_H);
+  {const gr=seedRnd(7);
+   for(let i=0;i<220;i++){ctx.fillStyle=P.wpC;ctx.fillRect((gr()*CW)|0,(gr()*(WALL_H-30))|0,3,2);}
+   for(let i=0;i<120;i++){ctx.fillStyle=P.wpB;ctx.fillRect((gr()*CW)|0,(gr()*(WALL_H-30))|0,2,2);}}
+  // top beam + vertical timber posts
+  R(0,0,CW,12,WD[1],P.outline);ctx.fillStyle=WD[3];ctx.fillRect(0,12,CW,3);
+  for(let x=24;x<CW;x+=168){R(x,0,10,WALL_H,WD[1]);ctx.fillStyle=WD[3];ctx.fillRect(x+2,0,3,WALL_H);ctx.fillStyle=WD[0];ctx.fillRect(x+8,0,2,WALL_H);}
+  drawPaintingLive(36,22);
+  drawWindowLive(170,16);
+  drawShelfLive(310,24);
+  drawBannerLive(478,16);
+  drawTrophyLive(646,22);
+  drawWindowLive(752,16);
+  drawHearthLive(896,fr);
+  [142,292,616,868].forEach(sx=>drawLantern(sx,44,fr));
+  // wainscot
+  R(0,WALL_H-24,CW,24,WD[2],P.outline);ctx.fillStyle=WD[4];ctx.fillRect(0,WALL_H-24,CW,3);
+  for(let x=14;x<CW;x+=52){ctx.fillStyle=WD[1];ctx.fillRect(x,WALL_H-19,2,15);}
+  ctx.fillStyle=WD[0];ctx.fillRect(0,WALL_H-4,CW,4);
+  ctx.fillStyle='rgba(13,6,22,.4)';ctx.fillRect(0,WALL_H,CW,4);   // contact shade onto floor
+}
+function drawWindowLive(x,y){
+  const w=104,h=78;
+  R(x-6,y+14,w+12,h-14,WD[1]);
+  ctx.fillStyle=WD[1];ctx.beginPath();ctx.arc(x+w/2,y+20,w/2+6,Math.PI,0);ctx.fill();
+  ctx.fillStyle='#3a4a3c';ctx.beginPath();ctx.arc(x+w/2,y+20,w/2-2,Math.PI,0);ctx.fill();
+  ctx.fillRect(x+2,y+20,w-4,h-24);
+  {const gr=seedRnd(x*31);
+   for(let i=0;i<40;i++){ctx.fillStyle='#4c5e4a';ctx.fillRect(x+4+(gr()*(w-10))|0,y+16+(gr()*(h-28))|0,4,2);}
+   for(let i=0;i<16;i++){ctx.fillStyle='#5e7258';ctx.fillRect(x+4+(gr()*(w-10))|0,y+16+(gr()*(h-28))|0,2,1);}}
+  for(let mx=x+16;mx<x+w-4;mx+=20){ctx.fillStyle=WD[1];ctx.fillRect(mx,y+8,4,h-12);}
+  ctx.fillStyle=WD[1];ctx.fillRect(x+2,y+38,w-4,4);ctx.fillRect(x+2,y+62,w-4,4);
+  R(x-10,y+h-4,w+20,8,WD[2]);ctx.fillStyle=WD[4];ctx.fillRect(x-10,y+h-4,w+20,2);   // sill
+  glow(x+w/2,y+h+10,44);
+}
+function drawShelfLive(x,y){
+  R(x,y+34,156,7,WD[2]);ctx.fillStyle=WD[4];ctx.fillRect(x,y+34,156,2);
+  R(x+6,y+74,144,7,WD[2]);ctx.fillStyle=WD[4];ctx.fillRect(x+6,y+74,144,2);
+  const cols=['#4a78a8','#4f9e59','#c04a3a','#e8b74a','#6e4a8c','#5e7258'];
+  const gr=seedRnd(99);
+  for(let i=0;i<11;i++){const bx=x+6+i*13,bh=16+((i*7)%3)*6;
+    R(bx,y+34-bh,9,bh,cols[i%6],P.outline);
+    ctx.fillStyle='rgba(255,255,255,.32)';ctx.fillRect(bx+2,y+36-bh,2,bh-4);
+    ctx.fillStyle=WD[2];ctx.fillRect(bx+2,y+30-bh,5,4);}
+  for(let i=0;i<7;i++){const bx=x+16+i*19;
+    R(bx,y+58,13,16,i%2?'#3a3a44':'#8a6a4a',P.outline);
+    ctx.fillStyle='rgba(255,255,255,.25)';ctx.fillRect(bx+2,y+60,3,4);}
+}
+function drawPaintingLive(x,y){
+  R(x,y,100,66,WD[2],P.outline);R(x+3,y+3,94,60,P.gold[0]);
+  ctx.fillStyle='#1e1a40';ctx.fillRect(x+7,y+7,86,52);
+  {const gr=seedRnd(5);for(let i=0;i<14;i++){ctx.fillStyle='#cdd7ff';ctx.fillRect(x+9+(gr()*82)|0,y+9+(gr()*48)|0,2,2);}}
+  ctx.fillStyle='#33507a';                                      // dragon silhouette
+  ctx.fillRect(x+24,y+28,52,12);ctx.fillRect(x+36,y+18,20,10);ctx.fillRect(x+68,y+22,16,6);
+  ctx.fillRect(x+16,y+34,8,6);ctx.fillRect(x+32,y+40,8,12);ctx.fillRect(x+56,y+40,8,12);
+  ctx.fillStyle=P.flame[3];ctx.fillRect(x+40,y+22,4,2);
+}
+function drawBannerLive(x,y){
+  const w=116,h=68;
+  R(x,y,w,h-16,RD[1],P.outline);
+  ctx.fillStyle=RD[1];
+  for(let i=0;i<5;i++){ctx.fillRect(x+i*24,y+h-16,24,(i%2)?8:16);}
+  ctx.fillStyle=P.gold[1];ctx.fillRect(x,y,w,8);
+  ctx.fillStyle=P.gold[0];ctx.fillRect(x+4,y+12,w-8,2);
+  ctx.fillStyle=RD[2];ctx.fillRect(x+2,y+2,w-4,3);
+  ctx.font='26px VT323,monospace';ctx.textAlign='center';
+  ctx.fillStyle='#2e0a10';ctx.fillText('THE TAVERN',x+w/2+2,y+38);
+  ctx.fillStyle=P.gold[3];ctx.fillText('THE TAVERN',x+w/2,y+36);
+  ctx.font='14px VT323,monospace';ctx.fillStyle=P.gold[2];ctx.fillText('· LIVE FLOOR ·',x+w/2,y+52);
+  ctx.textAlign='left';
+}
+function drawTrophyLive(x,y){
+  R(x,y,56,62,WD[2],P.outline);
+  R(x+8,y+8,40,30,RD[1],P.outline);ctx.fillStyle=RD[3];ctx.fillRect(x+11,y+11,34,5);
+  ctx.fillStyle=P.gold[2];ctx.fillRect(x+22,y+12,12,22);ctx.fillRect(x+16,y+19,24,8);
+  R(x+20,y+42,16,14,RD[0],P.outline);
+  ctx.fillStyle='#9aa4b8';                                      // crossed blades
+  ctx.fillRect(x-8,y-4,4,4);ctx.fillRect(x-4,y,4,4);ctx.fillRect(x,y+4,4,4);
+  ctx.fillRect(x+60,y-4,4,4);ctx.fillRect(x+56,y,4,4);ctx.fillRect(x+52,y+4,4,4);
+}
+function drawHearthLive(x,fr){
+  R(x-8,0,160,WALL_H,P.stone[2]);                               // chimney breast
+  {const gr=seedRnd(31);
+   for(let yy=0;yy<WALL_H;yy+=16)for(let xx=x-8;xx<x+150;xx+=32){
+     const off=(yy/16)%2?16:0;
+     ctx.fillStyle=P.stone[1];ctx.fillRect(xx-off,yy+14,32,2);ctx.fillRect(xx-off+30,yy,2,16);
+     if(gr()>.75){ctx.fillStyle=P.stone[3];ctx.fillRect(xx-off+4+(gr()*20)|0,yy+4+(gr()*8)|0,6,4);}}}
+  R(x-14,18,172,10,WD[2]);ctx.fillStyle=WD[4];ctx.fillRect(x-14,18,172,3);   // mantel
+  // mantel clutter
+  R(x+12,6,12,12,'#8a6a4a',P.outline);R(x+40,2,8,16,P.gold[2],P.outline);
+  R(x+68,8,16,10,'#3a3a44',P.outline);R(x+100,4,10,14,'#4a78a8',P.outline);R(x+126,8,14,10,'#8a6a4a',P.outline);
+  // arched firebox
+  ctx.fillStyle='#0e0810';ctx.fillRect(x+18,52,108,72);
+  ctx.beginPath();ctx.arc(x+72,56,54,Math.PI,0);ctx.fill();
+  ctx.strokeStyle=P.stone[0];ctx.lineWidth=4;ctx.strokeRect(x+18,38,108,86);
+  // logs + fire
+  ctx.fillStyle=WD[1];ctx.fillRect(x+34,112,76,8);ctx.fillStyle=WD[2];ctx.fillRect(x+48,104,48,8);
+  {const fg=seedRnd(1234+((fr>>2)%4)*77);
+   for(let i=0;i<32;i++){
+     const fx=x+30+fg()*84,base=112,fh=8+fg()*42,fw=4+fg()*8;
+     ctx.fillStyle=[P.flame[0],P.flame[1],P.flame[1],P.flame[2],P.flame[3]][Math.min(4,(fg()*5)|0)];
+     for(let s2=0;s2<fh;s2+=4){const ww=Math.max(2,fw*(1-s2/fh));ctx.fillRect(Math.round(fx-ww/2),Math.round(base-s2),Math.round(ww),4);}}}
+  ctx.fillStyle=P.flame[3];ctx.fillRect(x+52,100,40,8);ctx.fillStyle=P.flame[4];ctx.fillRect(x+62,92,20,6);
+  const flk=.8+.2*Math.sin(fr*.13);
+  const g2=ctx.createRadialGradient(x+72,110,0,x+72,110,110);
+  g2.addColorStop(0,'rgba(255,190,90,'+(.5*flk).toFixed(2)+')');g2.addColorStop(1,'rgba(255,190,90,0)');
+  ctx.fillStyle=g2;ctx.fillRect(x-40,0,230,230);
+}
+function drawLantern(cx,cy,fr){const flk=.7+.3*Math.sin(fr*.09+cx*.01);
+  const g=ctx.createRadialGradient(cx,cy+12,0,cx,cy+12,40);g.addColorStop(0,'rgba(255,190,90,'+(.3*flk).toFixed(2)+')');g.addColorStop(1,'rgba(255,190,90,0)');
+  ctx.fillStyle=g;ctx.fillRect(cx-40,cy-20,80,72);
+  ctx.fillStyle='#3a3a44';ctx.fillRect(cx-3,cy-8,6,6);
+  R(cx-10,cy-2,20,32,'#2b2130',P.outline);
+  ctx.fillStyle='rgba(255,170,60,'+(.8*flk).toFixed(2)+')';ctx.fillRect(cx-6,cy+2,12,24);
+  ctx.fillStyle=P.lanY;ctx.fillRect(cx-2,cy+12,4,10);ctx.fillStyle=P.lanO;ctx.fillRect(cx-4,cy+9,8,6);
+  ctx.fillStyle='#2b2130';ctx.fillRect(cx-10,cy+12,20,2);}
+function drawFloor(){
+  const cols=[P.fpA,P.fpB,P.fpC];const gr=seedRnd(42);let py=WALL_H,ri=0;
+  while(py<CH){
+    for(let x=-(ri%2?36:0);x<CW;x+=72){
+      ctx.fillStyle=cols[(gr()*2.4|0)%3];ctx.fillRect(x,py,72,22);
+      ctx.fillStyle=P.fpLine;ctx.fillRect(x,py,72,2);ctx.fillRect(x+70,py,2,22);
+      if(gr()>.8){ctx.fillStyle='#3c2020';ctx.fillRect(x+8+(gr()*52)|0,py+8+(gr()*8)|0,6,3);}          // knots
+      if(gr()>.86){ctx.fillStyle='rgba(255,220,150,.08)';ctx.fillRect(x+6+(gr()*56)|0,py+4+(gr()*12)|0,10,2);} // sheen
+      if(gr()>.9){ctx.fillStyle='#3c2020';ctx.fillRect(x+16+(gr()*40)|0,py+12,5,2);}                   // grain
+    }
+    py+=22;ri++;
+  }
+  [142,292,616,868].forEach(x=>glow(x,WALL_H+30,60));   // lantern light pools
+}
+function drawWalls(){for(const w of curWalls()){ctx.strokeStyle=P.wall;ctx.lineWidth=(w[0]===w[2]&&Math.round(w[0])===349)?9:7;ctx.lineCap='round';
+    ctx.beginPath();ctx.moveTo(w[0],w[1]);ctx.lineTo(w[2],w[3]);ctx.stroke();
+    ctx.strokeStyle=P.wallHi;ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(w[0],w[1]-2);ctx.lineTo(w[2],w[3]-2);ctx.stroke();}ctx.lineCap='butt';}
+
+/* ── Fixtures: doors, entrances, stairs ──────────────────────────────────── */
+// GF is to-scale (from the plan): stairs UP at the centre-left of the south
+// wall, 1500mm double-door out to the terrace on the right wall.
+const GF_FIX={stairs:[[134,260,629,'STAIRS ↑ 1F','up']],doorsV:[[1030,468,575,true,'TERRACE']]};
+// First floor (rotated): kitchen/pass/bar counter strip along the back wall,
+// stairs DOWN to GF on the right, kitchen door on the left.
+function drawFFExtras(){
+  // kitchen blocked out as one zone (left of the divider at x=657)
+  ctx.fillStyle=P.stone[1];ctx.fillRect(165,129,491,550);
+  {const gr=seedRnd(61);                                     // stone tile pattern
+   for(let ty=129;ty<679;ty+=24)for(let tx=165;tx<656;tx+=48){
+     const off=((ty-129)/24)%2?24:0;
+     ctx.fillStyle=P.stone[0];ctx.fillRect(tx-off,ty+22,48,2);ctx.fillRect(tx-off+46,ty,2,24);
+     if(gr()>.8){ctx.fillStyle=P.stone[2];ctx.fillRect(tx-off+6+(gr()*30)|0,ty+6+(gr()*12)|0,8,5);}}}
+  ctx.strokeStyle=P.stone[0];ctx.lineWidth=2;ctx.strokeRect(165,129,491,550);
+  ctx.fillStyle='#d6d9e2';ctx.textAlign='center';ctx.font='30px VT323,monospace';ctx.fillText('KITCHEN',410,395);
+  ctx.font='16px VT323,monospace';ctx.fillStyle='#9aa0ac';ctx.fillText('PASS · HOT PASS · BAR · PREP',410,418);ctx.textAlign='left';
+  // stairs down to GF (bottom-centre)
+  const sx0=372,sx1=600,sy=626;
+  for(let i=0;i<5;i++){ctx.strokeStyle=WD[1];ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(sx0,sy+i*9);ctx.lineTo(sx1,sy+i*9);ctx.stroke();}
+  ctx.strokeStyle=P.wallHi;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(sx0,sy);ctx.lineTo(sx0,sy+46);ctx.moveTo(sx1,sy);ctx.lineTo(sx1,sy+46);ctx.stroke();
+  const scx=(sx0+sx1)/2;ctx.fillStyle=P.gold[2];ctx.beginPath();ctx.moveTo(scx,sy+40);ctx.lineTo(scx-6,sy+28);ctx.lineTo(scx+6,sy+28);ctx.closePath();ctx.fill();
+  ctx.fillStyle=P.gold[3];ctx.font='14px VT323,monospace';ctx.textAlign='center';ctx.fillText('STAIRS ↓ GF',scx,sy+58);ctx.textAlign='left';
+  // entrance from kitchen/stairs into the seating (opening in the divider)
+  const dy0=486,dy1=566;ctx.fillStyle=P.fpA;ctx.fillRect(653,dy0,8,dy1-dy0);
+  ctx.strokeStyle=P.gold[2];ctx.lineWidth=2.5;ctx.beginPath();ctx.moveTo(657,dy1);ctx.lineTo(657+(dy1-dy0),dy1);ctx.stroke();
+  ctx.strokeStyle='rgba(232,183,74,.55)';ctx.lineWidth=1.5;ctx.setLineDash([4,3]);ctx.beginPath();ctx.arc(657,dy1,dy1-dy0,-Math.PI/2,0);ctx.stroke();ctx.setLineDash([]);
+  ctx.fillStyle=P.gold[3];ctx.font='14px VT323,monospace';ctx.textAlign='center';ctx.fillText('ENTRANCE',700,dy0-3);ctx.textAlign='left';
+}
+function drawStairs(x0,x1,wy,label,dir){
+  ctx.fillStyle=P.fpB;ctx.fillRect(x0,wy-4,x1-x0,8);
+  ctx.strokeStyle=P.wallHi;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(x0,wy);ctx.lineTo(x0,wy+46);ctx.moveTo(x1,wy);ctx.lineTo(x1,wy+46);ctx.stroke();
+  ctx.strokeStyle=WD[1];ctx.lineWidth=2;for(let i=1;i<=4;i++){const ty=wy+i*9;ctx.beginPath();ctx.moveTo(x0+2,ty);ctx.lineTo(x1-2,ty);ctx.stroke();}
+  const cx=(x0+x1)/2;ctx.fillStyle=P.gold[2];ctx.beginPath();
+  if(dir==='up'){ctx.moveTo(cx,wy+6);ctx.lineTo(cx-6,wy+18);ctx.lineTo(cx+6,wy+18);}else{ctx.moveTo(cx,wy+20);ctx.lineTo(cx-6,wy+8);ctx.lineTo(cx+6,wy+8);}
+  ctx.closePath();ctx.fill();
+  ctx.fillStyle=P.gold[3];ctx.font='14px VT323,monospace';ctx.textAlign='center';ctx.fillText(label,cx,wy+42);ctx.textAlign='left';
+}
+function drawDoorV(wx,a,b,inward,label){
+  const len=b-a;ctx.fillStyle=P.fpB;ctx.fillRect(wx-4,a,8,len);
+  ctx.strokeStyle=P.wall;ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(wx,a-4);ctx.lineTo(wx,a);ctx.moveTo(wx,b);ctx.lineTo(wx,b+4);ctx.stroke();
+  const dir=inward?-1:1;ctx.strokeStyle=P.gold[2];ctx.lineWidth=2.5;ctx.beginPath();ctx.moveTo(wx,a);ctx.lineTo(wx+dir*len,a);ctx.stroke();
+  ctx.strokeStyle='rgba(232,183,74,.5)';ctx.lineWidth=1.5;ctx.setLineDash([4,3]);ctx.beginPath();ctx.arc(wx,a,len,inward?Math.PI:0,Math.PI/2,inward);ctx.stroke();ctx.setLineDash([]);
+  ctx.fillStyle=P.gold[3];ctx.font='14px VT323,monospace';ctx.textAlign='center';ctx.save();ctx.translate(wx-dir*14,(a+b)/2);ctx.rotate(-Math.PI/2);ctx.fillText(label,0,0);ctx.restore();ctx.textAlign='left';
+}
+function drawFixtures(){
+  if(currentFloor==='ff'){drawFFExtras();return;}
+  (GF_FIX.stairs||[]).forEach(s=>drawStairs(s[0],s[1],s[2],s[3],s[4]));
+  (GF_FIX.doorsV||[]).forEach(d=>drawDoorV(d[0],d[1],d[2],d[3],d[4]));
+}
+
+/* ── Main render ─────────────────────────────────────────────────────────── */
+function render(ts){ts=ts||0;requestAnimationFrame(render);
+  if(ts-lastRender<80)return;lastRender=ts;animFrame++;
+  ctx.clearRect(0,0,CW,CH);ctx.fillStyle='#0d0a14';ctx.fillRect(0,0,CW,CH);
+  drawFloor();drawBackWall(animFrame);drawWalls();drawFixtures();
+  [...curTables()].sort((a,b)=>a.cy-b.cy).forEach(drawTable);
+  stepGuests();
+  drawWalkingGuests();
+  if(editMode)drawEditOverlay();}
+
+/* ── RTDB data ───────────────────────────────────────────────────────────── */
+// Suppress only actively-moving walkers (walker draws them); seated walkers are drawn by table
+function getGuests(id){
+  return Object.entries(floorData.guests||{})
+    .filter(([uid,g])=>g.tableId===id && !(guestWalk[uid]&&guestWalk[uid].state!=='seated'))
+    .map(([,g])=>g.name||g.guestName||'Guest');
+}
+
+function setLive(ok){const el=document.getElementById('live-ind');
+  el.textContent=ok?'● LIVE':'✕ ERR';el.style.color=ok?'#40c040':'#c04040';}
+
+/* Poll tables only (changes infrequently) */
+async function poll(){try{
+    const r=await fetch(RTDB+'/tables.json').then(r=>r.json());
+    floorData.tables=r||{};updateSidebar();setLive(true);
+  }catch(e){setLive(false);}}
+
+/* Real-time stream for active_guests via Firebase SSE */
+let _guestSrc=null;
+function startGuestStream(){
+  if(_guestSrc){_guestSrc.close();}
+  _guestSrc=new EventSource(RTDB+'/active_guests.json?stream=true');
+  _guestSrc.addEventListener('put',e=>{
+    try{
+      const d=JSON.parse(e.data);
+      if(d.path==='/'){floorData.guests=d.data||{};}
+      else{
+        const key=d.path.replace(/^\//,'');
+        if(d.data===null){delete floorData.guests[key];}
+        else{floorData.guests[key]=d.data;}
+      }
+      syncGuestWalk(floorData.guests);
+      updateSidebar();setLive(true);
+    }catch(_){}
+  });
+  _guestSrc.addEventListener('patch',e=>{
+    try{
+      const d=JSON.parse(e.data);
+      Object.assign(floorData.guests,d.data||{});
+      syncGuestWalk(floorData.guests);
+      updateSidebar();setLive(true);
+    }catch(_){}
+  });
+  _guestSrc.onerror=()=>{setLive(false);
+    // Reconnect after 3 s
+    setTimeout(startGuestStream,3000);};
+}
+
+/* ── Sidebar ─────────────────────────────────────────────────────────────── */
+function updateSidebar(){const tbl=floorData.tables||{},gs=floorData.guests||{};
+  const gNames=Object.values(gs).map(g=>g.name||g.guestName||'Guest');
+  const occIds=Object.keys(tbl).filter(k=>tbl[k]&&tbl[k].arrivedAt);
+  document.getElementById('s-guests').textContent=gNames.length||'0';
+  document.getElementById('s-tables').textContent=occIds.length?occIds.length+' / '+Object.keys(tbl).length:'—';
+  const tlist=document.getElementById('tlist');tlist.innerHTML='';
+  for(const t of curTables()){const td=tbl[t.id]||{};const occ=!!td.arrivedAt;const g=getGuests(t.id);
+    const div=document.createElement('div');div.className='ti'+(occ?' occ':'');
+    const since=td.arrivedAt?'Since '+new Date(td.arrivedAt).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}):'';
+    div.innerHTML='<div class="ti-name"><span class="dot '+(occ?'on':'off')+'"></span>'+t.name+'</div>'+
+      (occ?'<div class="ti-guest">'+(g.join(', ')||'Occupied')+'</div><div class="ti-since">'+since+'</div>':'<div style="color:#3a2a1a;font-size:8px">empty</div>');
+    tlist.appendChild(div);}
+  const lastG=Object.values(gs).sort((a,b)=>(b.arrivedAt||0)-(a.arrivedAt||0))[0];
+  if(lastG)document.getElementById('lasttap').innerHTML='<b style="color:#f0c060">'+(lastG.name||'Guest')+'</b><br>Table '+(lastG.tableId||'?')+'<br>'+(lastG.arrivedAt?new Date(lastG.arrivedAt).toLocaleTimeString('en-GB'):'');}
+
+/* ── Clock ───────────────────────────────────────────────────────────────── */
+function tick(){const n=new Date();document.getElementById('clock').textContent=String(n.getHours()).padStart(2,'0')+':'+String(n.getMinutes()).padStart(2,'0');
+  document.getElementById('dateline').textContent=n.toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short'}).toUpperCase();}
+
+/* ── Floor switch ────────────────────────────────────────────────────────── */
+function setFloor(f){currentFloor=f;PXMM=(f==='gf')?PXMM_GF:PXMM_FF;selectedId=null;hoverId=null;drag=null;
+  document.querySelectorAll('#floor-btns button').forEach((b,i)=>b.classList.toggle('active',i===(f==='gf'?0:1)));updateSidebar();}
+
+/* ── Edit mode + add/remove ──────────────────────────────────────────────── */
+const LS_KEY='tavern_layout_v3';
+let editMode=false,selectedId=null,hoverId=null,drag=null;
+function toggleEdit(){editMode=!editMode;selectedId=null;hoverId=null;drag=null;
+  document.getElementById('edit-btn').classList.toggle('active',editMode);
+  document.getElementById('save-btn').style.display=editMode?'':'none';
+  document.getElementById('reset-btn').style.display=editMode?'':'none';
+  document.getElementById('add-tools').style.display=editMode?'flex':'none';
+  canvas.style.cursor=editMode?'default':'crosshair';document.getElementById('tooltip').style.display='none';}
+const TYPE_LABEL={'2top':'2-Top','4top':'4-Top','communal':'Communal','banquet':'Banquet','wall2':'Nook'};
+function addTable(type){
+  if(!editMode)toggleEdit();
+  const id=(currentFloor==='gf'?'G':'F')+'N'+(idSeq++);
+  const rot=(type==='banquet'||type==='wall2')?90:0;
+  const t={id:id,name:(TYPE_LABEL[type]||'Table')+' '+idSeq,type:type,cx:CW/2,cy:Math.round((WALL_H+CH)/2),rot:rot};
+  curTables().push(t);selectedId=id;updateSidebar();}
+function deleteSelected(){if(!selectedId)return;setCurTables(curTables().filter(t=>t.id!==selectedId));selectedId=null;hoverId=null;drag=null;updateSidebar();}
+function snapshot(){const pick=a=>a.map(t=>({id:t.id,name:t.name,type:t.type,cx:Math.round(t.cx),cy:Math.round(t.cy),rot:t.rot}));return{gf:pick(GF_TABLES),ff:pick(FF_TABLES),seq:idSeq};}
+/* ── Rename + RTDB cloud sync ─────────────────────────────────────────────── */
+const LAYOUT_PATH=RTDB+'/tavern_layout';
+function renameTable(id){const t=tableById(id);if(!t)return;const v=prompt('Table name or number:',t.name);if(v!==null){const nv=String(v).trim();if(nv){t.name=nv;updateSidebar();}}}
+function tableConfig(t){return{name:t.name,type:t.type,cx:Math.round(t.cx),cy:Math.round(t.cy),rot:t.rot,floor:currentFloor};}
+async function cloudSave(){
+  const floor=currentFloor,data={};
+  for(const t of curTables())data[t.id]=tableConfig(t);
+  const reqs=[fetch(LAYOUT_PATH+'/'+floor+'.json',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)})];
+  // mirror the display name onto each /tables/{id} record (PATCH keeps occupancy)
+  for(const t of curTables())reqs.push(fetch(RTDB+'/tables/'+t.id+'.json',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:t.name})}));
+  const res=await Promise.all(reqs);
+  if(res.some(r=>!r.ok))throw new Error('HTTP '+(res.find(r=>!r.ok)||{}).status);
+}
+async function cloudLoad(){
+  let any=false;
+  for(const f of ['gf','ff']){
+    try{const d=await fetch(LAYOUT_PATH+'/'+f+'.json').then(r=>r.json());
+      if(d&&typeof d==='object'){
+        const arr=Object.keys(d).map(id=>({id:id,name:d[id].name||id,type:d[id].type||'2top',cx:+d[id].cx||CW/2,cy:+d[id].cy||CH/2,rot:+d[id].rot||0}));
+        if(arr.length){if(f==='gf')GF_TABLES=arr;else FF_TABLES=arr;any=true;}
+      }
+    }catch(e){/* offline / not yet saved → keep local */}
+  }
+  if(any)updateSidebar();
+}
+async function saveLayout(){
+  const b=document.getElementById('save-btn');
+  try{localStorage.setItem(LS_KEY,JSON.stringify(snapshot()));}catch(e){}
+  b.textContent='☁ Saving…';
+  try{await cloudSave();b.textContent='✓ Synced';}catch(e){console.warn('cloud save failed',e);b.textContent='✕ Cloud err';}
+  setTimeout(()=>{b.textContent='💾 Save';},1600);
+}
+function loadLayout(){try{const r=localStorage.getItem(LS_KEY);if(!r)return;const s=JSON.parse(r);
+  if(s.gf)GF_TABLES=s.gf;if(s.ff)FF_TABLES=s.ff;if(s.seq)idSeq=s.seq;}catch(e){}}
+function resetLayout(){GF_TABLES=JSON.parse(JSON.stringify(GF_DEFAULT));FF_TABLES=JSON.parse(JSON.stringify(FF_DEFAULT));
+  try{localStorage.removeItem(LS_KEY);}catch(e){}selectedId=null;updateSidebar();}
+
+/* ── Edit overlay (ring, rotate + delete handles) ────────────────────────── */
+const ROT_R=11,DEL_R=10;
+function rotHandle(t){const b=tbbox(t);return{x:(b.x0+b.x1)/2,y:b.y0-16};}
+function delHandle(t){const b=tbbox(t);return{x:b.x1+12,y:b.y0-2};}
+function drawEditOverlay(){
+  if(hoverId&&hoverId!==selectedId){const t=tableById(hoverId);if(t){const b=tbbox(t);ctx.save();ctx.strokeStyle='rgba(255,215,0,.4)';ctx.lineWidth=1.5;ctx.setLineDash([4,3]);ctx.strokeRect(b.x0+.5,b.y0+.5,b.x1-b.x0,b.y1-b.y0);ctx.restore();}}
+  const t=selectedId&&tableById(selectedId);if(!t)return;const b=tbbox(t);
+  ctx.save();ctx.strokeStyle='#ffd700';ctx.lineWidth=2;ctx.setLineDash([6,4]);ctx.strokeRect(b.x0+.5,b.y0+.5,b.x1-b.x0,b.y1-b.y0);ctx.setLineDash([]);
+  const h=rotHandle(t);ctx.strokeStyle='#ffd700';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo((b.x0+b.x1)/2,b.y0);ctx.lineTo(h.x,h.y+ROT_R);ctx.stroke();
+  ctx.fillStyle='#1a0f07';ctx.beginPath();ctx.arc(h.x,h.y,ROT_R,0,Math.PI*2);ctx.fill();ctx.stroke();
+  ctx.fillStyle='#ffd700';ctx.font='bold 12px monospace';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('↻',h.x,h.y+1);
+  const dh=delHandle(t);ctx.fillStyle='#1a0f07';ctx.strokeStyle='#e04828';ctx.lineWidth=2;ctx.beginPath();ctx.arc(dh.x,dh.y,DEL_R,0,Math.PI*2);ctx.fill();ctx.stroke();
+  ctx.fillStyle='#e87058';ctx.fillText('✕',dh.x,dh.y+1);ctx.textBaseline='alphabetic';ctx.textAlign='left';ctx.restore();}
+
+/* ── Tooltip + pointer ───────────────────────────────────────────────────── */
+const tooltip=document.getElementById('tooltip');
+function cpos(e){const r=canvas.getBoundingClientRect();return{mx:(e.clientX-r.left)*(CW/r.width),my:(e.clientY-r.top)*(CH/r.height)};}
+function tableHit(mx,my){const ts=[...curTables()].sort((a,b)=>b.cy-a.cy);for(const t of ts){const b=tbbox(t);if(mx>=b.x0&&mx<=b.x1&&my>=b.y0&&my<=b.y1)return t;}return null;}
+canvas.addEventListener('mousedown',e=>{if(!editMode)return;const p=cpos(e);const mx=p.mx,my=p.my;const sel=selectedId&&tableById(selectedId);
+  if(sel){const h=rotHandle(sel);if(Math.hypot(mx-h.x,my-h.y)<=ROT_R+3){sel.rot=(sel.rot+90)%360;drag=null;return;}
+    const dh=delHandle(sel);if(Math.hypot(mx-dh.x,my-dh.y)<=DEL_R+3){deleteSelected();return;}}
+  const t=tableHit(mx,my);if(t){selectedId=t.id;drag={id:t.id,dx:mx-t.cx,dy:my-t.cy};}else selectedId=null;});
+canvas.addEventListener('mousemove',e=>{const p=cpos(e);const mx=p.mx,my=p.my;
+  if(editMode){tooltip.style.display='none';
+    if(drag){const t=tableById(drag.id);if(t){t.cx=Math.max(40,Math.min(CW-40,Math.round(mx-drag.dx)));t.cy=Math.max(WALL_H,Math.min(CH-20,Math.round(my-drag.dy)));}return;}
+    const t=tableHit(mx,my);hoverId=t?t.id:null;
+    const sel=selectedId&&tableById(selectedId);
+    let cur='default';if(sel){const h=rotHandle(sel),dh=delHandle(sel);if(Math.hypot(mx-h.x,my-h.y)<=ROT_R+3)cur='grab';else if(Math.hypot(mx-dh.x,my-dh.y)<=DEL_R+3)cur='pointer';else if(t)cur='move';}else if(t)cur='move';
+    canvas.style.cursor=cur;return;}
+  const t=tableHit(mx,my);
+  if(t){const td=floorData.tables[t.id]||{};const g=getGuests(t.id);const occ=!!td.arrivedAt;
+    const since=td.arrivedAt?'Since '+new Date(td.arrivedAt).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}):' ';
+    tooltip.innerHTML='<b style="color:#ffd700">'+t.name+'</b><br>'+(occ?'Guests: '+(g.join(', ')||'Occupied')+'<br>'+since:'Available');
+    tooltip.style.display='block';tooltip.style.left=(e.clientX+14)+'px';tooltip.style.top=(e.clientY-8)+'px';
+  }else tooltip.style.display='none';});
+canvas.addEventListener('dblclick',e=>{if(!editMode)return;const p=cpos(e);const t=tableHit(p.mx,p.my);if(t){selectedId=t.id;renameTable(t.id);}});
+window.addEventListener('mouseup',()=>{drag=null;});
+canvas.addEventListener('mouseleave',()=>{tooltip.style.display='none';if(!drag)hoverId=null;});
+window.addEventListener('keydown',e=>{if(e.key==='Escape'){selectedId=null;drag=null;}
+  else if((e.key==='Delete'||e.key==='Backspace')&&editMode&&selectedId){e.preventDefault();deleteSelected();}});
+
+/* ── Boot ────────────────────────────────────────────────────────────────── */
+loadLayout();cloudLoad();tick();setInterval(tick,1000);
+poll();setInterval(poll,30000);   // tables rarely change
+startGuestStream();               // active_guests — real-time SSE
+requestAnimationFrame(render);
+</script>
+</body>
+</html>

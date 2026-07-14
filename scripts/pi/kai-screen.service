@@ -1,0 +1,23 @@
+[Unit]
+Description=Kai Screen — animated face display (frame player)
+After=local-fs.target
+
+[Service]
+Type=simple
+User=kai
+WorkingDirectory=/home/kai/tavern_station
+ExecStart=/usr/bin/python3 -u /home/kai/tavern_station/kai_screen.py
+# Crash-loop guard: if the display isn't wired up yet, _check_assets() exits
+# immediately every time — back off instead of hammering restarts.
+Restart=on-failure
+RestartSec=10
+Environment=PYTHONUNBUFFERED=1
+StandardOutput=append:/home/kai/tavern_station/kai_screen.log
+StandardError=append:/home/kai/tavern_station/kai_screen.log
+# Env overrides live here, not in the script — see kai_screen.py's docstring.
+# Uncomment/adjust once the DSI display + fbset are confirmed:
+# Environment=KAI_FB_DEVICE=/dev/fb0
+# Environment=KAI_FB_PIXFMT=bgra
+
+[Install]
+WantedBy=multi-user.target

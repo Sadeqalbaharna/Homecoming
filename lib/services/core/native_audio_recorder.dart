@@ -96,4 +96,15 @@ class NativeAudioRecorder {
   
   /// Get whether currently recording (cached value)
   bool get isCurrentlyRecording => _isRecording;
+
+  /// Get the current peak amplitude (0–32767). Resets after each call.
+  /// Returns 0 if not recording or on error.
+  Future<int> getAmplitude() async {
+    try {
+      final int? amp = await _channel.invokeMethod<int>('getAmplitude');
+      return amp ?? 0;
+    } catch (_) {
+      return 0;
+    }
+  }
 }

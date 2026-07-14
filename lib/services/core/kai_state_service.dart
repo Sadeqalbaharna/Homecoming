@@ -15,6 +15,7 @@ library;
 
 import 'dart:async';
 import 'package:firebase_database/firebase_database.dart';
+import 'kai_db.dart';
 import 'firebase_service.dart';
 
 const _moodKeys        = {'valence', 'energy', 'warmth', 'confidence', 'playfulness', 'focus'};
@@ -41,8 +42,8 @@ class KaiStateService {
   static String _personalityPath(String p) => 'kai/$p/state/personality';
   static String _metaPath(String p)        => 'kai/$p/state/meta';
 
-  static FirebaseDatabase? get _db =>
-      FirebaseService.isAvailable ? FirebaseDatabase.instance : null;
+  static KaiDb? get _db =>
+      FirebaseService.isAvailable ? KaiDb.instance : null;
 
   // ── Mood ───────────────────────────────────────────────────────────────────
 

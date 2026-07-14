@@ -7,23 +7,31 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'services/core/edit_gate.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 import 'services/ai/ai_service.dart';
 import 'services/core/firebase_service.dart';
 import 'services/core/memory_consolidation_service.dart';
 import 'services/automation/wake_on_lan_service.dart';
 import 'services/voice/voice_activation_service.dart';
+import 'services/voice/voice_service.dart';
+import 'services/voice/kai_quick_responses.dart';
+import 'services/core/native_audio_recorder.dart';
 import 'services/automation/home_automation_service.dart';
 import 'screens/home_remote_screen.dart';
 import 'screens/chaos_journal_screen.dart';
 import 'screens/mind_map_screen.dart';
 import 'screens/brain_3d_screen.dart';
 import 'screens/activity_feed_screen.dart';
+import 'screens/worlds_screen.dart';
+import 'screens/kai_desktop_shell.dart';
 import 'services/core/activity_card_service.dart';
 import 'firebase_options.dart';
 import 'widgets/debug_button.dart';
@@ -33,7 +41,20 @@ import 'services/core/emotional_event_service.dart';
 import 'services/core/memory_reflection_service.dart';
 import 'services/core/personality_drift_service.dart';
 import 'services/core/proactive_service.dart';
+import 'services/core/default_mode_service.dart';
+import 'services/ai/proactive_service.dart' as aiProactive;
+import 'services/voice/attention_sound_service.dart';
+import 'services/core/context_injection_service.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'services/ai/task_planner_service.dart';
+import 'services/ai/usage_tracking_service.dart';
+import 'services/core/tavern_service.dart';
+import 'services/core/tavern_menu_service.dart';
+import 'services/core/tavern_status_service.dart';
+import 'screens/tavern_register_screen.dart';
+import 'screens/tavern_link_screen.dart';
+import 'widgets/plan_card.dart';
 
 /// ===== Layout / Window =====
 const double kSpriteSize = 170;
@@ -95,6 +116,9 @@ Future<void> main() async {
     await FirebaseService.initialize();
     firebaseInitialized = true;
     print('✅ Firebase initialized successfully');
+    // Pre-warm Tavern caches (non-blocking)
+    TavernMenuService().prime().catchError((_) {});
+    TavernStatusService().getStatusBlock().catchError((_) {});
   } catch (e) {
     print('⚠️ Firebase initialization failed: $e');
     print('📱 App will continue with local storage only');
@@ -114,14 +138,24 @@ class KaiMobileApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Kai - AI Avatar',
+      navigatorKey: EditGate.navigatorKey,
       theme: ThemeData(
         scaffoldBackgroundColor: const Color(0xFF0D0A07),
         primarySwatch: Colors.amber,
         brightness: Brightness.dark,
       ),
-      home: _MobileKai(firebaseInitialized: firebaseInitialized),
+      // Kai has one brain but many presences. On a computer his home is the
+      // desktop shell (engineer + companion cockpit); on phones the app is a
+      // mobile presence into the same Kai.
+      home: _isDesktop
+          ? const KaiDesktopShell()
+          : _MobileKai(firebaseInitialized: firebaseInitialized),
     );
   }
+
+  /// True on Windows / macOS / Linux (not web, not mobile).
+  bool get _isDesktop =>
+      !kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux);
 }
 
 class _MobileKai extends StatefulWidget {
@@ -147,7 +181,7 @@ class _Floater {
 }
 
 class _MobileKaiState extends State<_MobileKai>
-    with TickerProviderStateMixin {
+    with TickerProviderStateMixin, WidgetsBindingObserver {
   // persona
   final String _personaId = kPersonaKai;
 
@@ -164,6 +198,21 @@ class _MobileKaiState extends State<_MobileKai>
 
   // true while the flame is (or should be) showing
   bool _isSleeping = false;
+
+  // true while the user is holding the avatar for hold-to-speak
+  bool _isHoldingToSpeak = false;
+
+  // Silence-detection timer used during wake-word-triggered auto-recording
+  Timer? _silenceTimer;
+
+  // Drag-guard for hold-to-speak: recording only starts after a still hold.
+  // If the finger moves > _kDragThreshold px before the timer fires, it's a
+  // drag and recording is suppressed entirely.
+  static const double _kDragThreshold = 10.0;  // px of movement = drag intent
+  static const Duration _kHoldDelay = Duration(milliseconds: 400); // must be still this long to activate mic
+  Offset? _pressOrigin;
+  bool _pressWasDrag = false;
+  Timer? _holdTimer;
 
   // fallback lifecycle observer — if the overlay "expand" message is dropped
   // (common when the engine is paused on physical devices), this catches the
@@ -182,7 +231,19 @@ class _MobileKaiState extends State<_MobileKai>
   final _focus = FocusNode();
   String? _reply;
   String? _error;
+  List<String>? _choices;
   bool _sending = false;
+  String? _activeToolName; // tool currently running in agentic loop
+  KaiPlan? _activePlan;   // multi-step plan being executed (null = no plan)
+  bool    _planExpanded = true;
+
+  // Proactive attention
+  aiProactive.ProactiveEvent? _pendingProactiveEvent;
+  bool _isAttentionSeeking = false;
+
+  // Tavern guest arrivals
+  TavernGuest? _tavernGuest;
+  String? _tavernBriefing;
   List<String> _memoriesUsed = []; // NEW: Track memories used in response
   Map<String, dynamic>? _debugInfo; // NEW: Track debug info from AI response
 
@@ -217,30 +278,125 @@ class _MobileKaiState extends State<_MobileKai>
 
   Future<void> _initialize() async {
     try {
-      // Close any overlay left over from a previous session / hot restart
-      try {
-        if (await FlutterOverlayWindow.isActive()) {
-          await FlutterOverlayWindow.closeOverlay();
-          print('🔵 [Init] Closed stale overlay from previous session');
+      // Close stale overlay from a previous session — but only if we're not
+      // intentionally in sleep mode (avoids killing a live overlay on hot restart)
+      if (!_isSleeping) {
+        try {
+          if (await FlutterOverlayWindow.isActive()) {
+            await FlutterOverlayWindow.closeOverlay();
+            print('🔵 [Init] Closed stale overlay from previous session');
+          }
+        } catch (_) {}
+      }
+
+      // 0 — request runtime permissions Kai needs (one-time, non-blocking)
+      unawaited(Future(() async {
+        await [
+          Permission.contacts,
+          Permission.calendar,
+        ].request();
+
+        // Check notification access — prompt user to grant it if missing
+        const channel = MethodChannel('com.homecoming.app/kai_tools');
+        final hasNotifAccess = await channel
+            .invokeMethod<bool>('checkNotificationAccess')
+            .catchError((_) => false);
+        if (hasNotifAccess == false && mounted) {
+          await showDialog(
+            context: context,
+            builder: (_) => AlertDialog(
+              title: const Text('Enable Notification Access'),
+              content: const Text(
+                'To let Kai read your WhatsApp messages and other notifications, '
+                'grant Notification Access.\n\n'
+                'Settings → Apps → Special app access → Notification access → Homecoming',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    channel.invokeMethod('openNotificationSettings');
+                  },
+                  child: const Text('Open Settings'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Later'),
+                ),
+              ],
+            ),
+          );
         }
-      } catch (_) {}
 
-      // 1 — avatar frames (the slow one)
+        // Check accessibility access — prompt user if missing (needed for read_screen)
+        final hasA11y = await channel
+            .invokeMethod<bool>('checkAccessibilityAccess')
+            .catchError((_) => false);
+        if (hasA11y == false && mounted) {
+          await showDialog(
+            context: context,
+            builder: (_) => AlertDialog(
+              title: const Text('Enable Screen Reading'),
+              content: const Text(
+                'To let Kai read your screen and help with emails, messages, '
+                'and anything you\'re looking at, enable Accessibility access.\n\n'
+                'Settings → Accessibility → Installed apps → Homecoming → enable',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    channel.invokeMethod('openAccessibilitySettings');
+                  },
+                  child: const Text('Open Settings'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Later'),
+                ),
+              ],
+            ),
+          );
+        }
+
+        // Pre-warm context cache after permissions may have been granted
+        unawaited(ContextInjectionService().prime());
+      }));
+
+      // 1 — avatar frames (kick off async, don't block showing the UI)
       _setStep('Loading avatar…');
-      await _precacheAnimation(kAvatarIdleFrameDir, kIdleFrameCount);
-      if (mounted) _switchToAnimation('idle');
+      _precacheAnimation(kAvatarIdleFrameDir, kIdleFrameCount)
+          .then((_) { if (mounted) _switchToAnimation('idle'); })
+          .catchError((e) => print('⚠️ [Init] Frame precache: $e'));
 
-      // 2 — warm up the AI persona
+      // 1b — sign in anonymously so Firebase rules accept our reads/writes
+      _setStep('Connecting…');
+      try {
+        final auth = FirebaseAuth.instance;
+        if (auth.currentUser == null) {
+          await auth.signInAnonymously();
+          print('🔐 [Auth] Signed in anonymously: ${auth.currentUser?.uid}');
+        } else {
+          print('🔐 [Auth] Already signed in: ${auth.currentUser?.uid}');
+        }
+      } catch (e) {
+        print('⚠️ [Auth] Anonymous sign-in failed: $e');
+      }
+
+      // 2 — warm up the AI persona (3s max — Firebase permission errors fail fast anyway)
       _setStep('Waking Kai…');
       await aiService.bootstrapPersona(_personaId)
+          .timeout(const Duration(seconds: 3), onTimeout: () {})
           .catchError((e) => print('⚠️ [Bootstrap] $e'));
 
-      // 3 — check for a message Kai left while we were away
+      // 3 — check for a message Kai left while we were away (3s max)
       _setStep('Checking messages…');
       await ProactiveService().initialize(_personaId)
+          .timeout(const Duration(seconds: 3), onTimeout: () {})
           .catchError((e) => print('⚠️ [Proactive] $e'));
       final pending = await ProactiveService()
           .checkPendingMessage(_personaId)
+          .timeout(const Duration(seconds: 3), onTimeout: () => null)
           .catchError((e) { print('⚠️ [Proactive] $e'); return null; });
       if (pending != null && mounted) {
         await ProactiveService().markDelivered(_personaId, pending.id);
@@ -248,16 +404,57 @@ class _MobileKaiState extends State<_MobileKai>
         _setBubble(true);
       }
 
+      // 3b — watch Tavern door for NFC guest arrivals
+      if (widget.firebaseInitialized) {
+        TavernService().startWatching(
+          onArrival: _onTavernArrival,
+        );
+      }
+
+      // 4 — wake word detection
+      unawaited(VoiceActivationService().initialize()
+          .catchError((e) => print('⚠️ [WakeWord] $e')));
+
+      // 4b — pre-generate / load Kai quick-response clips (yes?, hmm?, etc.)
+      unawaited(KaiQuickResponses.instance.initialize()
+          .catchError((e) => print('⚠️ [QuickResponses] $e')));
+
+      // 5 — proactive Kai (attention sounds + contextual messages)
+      unawaited(AttentionSoundService().prime()
+          .catchError((e) => print('⚠️ [AttentionSound] $e')));
+      final proactiveSvc = aiProactive.ProactiveService();
+      proactiveSvc.onProactiveEvent = _onProactiveEvent;
+      unawaited(proactiveSvc.initialize(_personaId)
+          .catchError((e) => print('⚠️ [Proactive] $e')));
+
       // Done — show UI immediately, other animations load on first use
       if (mounted) setState(() => _isLoading = false);
       MemoryReflectionService().maybeReflect(personaId: _personaId)
           .catchError((e) => print('⚠️ [Reflection] $e'));
       PersonalityDriftService().maybeDrift(personaId: _personaId)
           .catchError((e) => print('⚠️ [Drift] $e'));
+      // first-run only: offer to link the customer's NFC badge to their account
+      unawaited(_maybePromptTavernLink());
     } catch (e) {
       print('❌ [Init] $e');
       // Don't block the user — just open the app
       if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  /// On first launch (once), prompt the hero to tap their NFC badge so it gets
+  /// bound to their account via /nfc_links. No-op after a successful link.
+  Future<void> _maybePromptTavernLink() async {
+    try {
+      if (await TavernLink.isLinked()) return;
+      if (FirebaseAuth.instance.currentUser == null) return;
+      await Future.delayed(const Duration(milliseconds: 600));
+      if (!mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const TavernLinkScreen()),
+      );
+    } catch (e) {
+      print('⚠️ [TavernLink] $e');
     }
   }
 
@@ -266,11 +463,11 @@ class _MobileKaiState extends State<_MobileKai>
     _resetIdleTimer();
   }
 
-  void _setBubble(bool open) {
+  Future<void> _setBubble(bool open) async {
     if (_showBubble == open) return;
     setState(() => _showBubble = open);
     if (open) {
-      VoiceActivationService().pause();
+      await VoiceActivationService().pause();
     } else {
       VoiceActivationService().resume();
     }
@@ -388,6 +585,7 @@ class _MobileKaiState extends State<_MobileKai>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     KaiStateService().setSurface('mobile');
     EmotionalEventService().setSurface('mobile');
     _glowCtrl =
@@ -399,18 +597,23 @@ class _MobileKaiState extends State<_MobileKai>
 
     WidgetsBinding.instance.addPostFrameCallback((_) => _initialize());
 
-    _stateSub = _player.onPlayerStateChanged.listen((s) {
+    _stateSub = _player.onPlayerStateChanged.listen((s) async {
       _currentState = s;
 
       // Switch animation based on audio state
       if (s == PlayerState.playing) {
         _switchToAnimation('speaking');
         print('🔇 [MAIN_MOBILE] Audio playing - PAUSING voice activation');
-        VoiceActivationService().pause();
+        await VoiceActivationService().pause();
       } else if (s == PlayerState.stopped || s == PlayerState.completed) {
         _switchToAnimation('idle');
-        print('🔊 [MAIN_MOBILE] Audio stopped/completed - RESUMING voice activation (with buffer)');
-        VoiceActivationService().resume();
+        // Don't resume VAS if hold-to-speak is active — the mic belongs to the recorder
+        if (!_isHoldingToSpeak) {
+          print('🔊 [MAIN_MOBILE] Audio stopped/completed - RESUMING voice activation');
+          VoiceActivationService().resume();
+        } else {
+          print('🔊 [MAIN_MOBILE] Audio stopped/completed - hold-to-speak active, skipping VAS resume');
+        }
       }
       
       if (mounted) setState(() {});
@@ -430,21 +633,68 @@ class _MobileKaiState extends State<_MobileKai>
     );
 
     // Listen for messages from the flame overlay
-    _overlayMsgSub = FlutterOverlayWindow.overlayListener.listen((data) {
+    _overlayMsgSub = FlutterOverlayWindow.overlayListener.listen((data) async {
       if (data is! Map) return;
       final action = data['action'];
       if (action == 'expand') {
         // Tap: expand the app normally
         _exitBackground();
       } else if (action == 'pauseVoice') {
-        // Long press step 1: pause Porcupine so Android SpeechRecognizer can take the mic
-        VoiceActivationService().pause();
+        // Legacy compat
+        await VoiceActivationService().pause();
+      } else if (action == 'startRecording') {
+        // Flame hold-to-speak ↓: release mic from sherpa, then open recorder
+        await VoiceActivationService().pause();
+        setState(() => _isHoldingToSpeak = true);
+        final started = await VoiceService().startRecording();
+        if (!started) {
+          setState(() => _isHoldingToSpeak = false);
+          print('❌ [HoldToSpeak-flame] Failed to start recording');
+        } else {
+          print('🎤 [HoldToSpeak-flame] Recording started');
+        }
+      } else if (action == 'stopRecording') {
+        // Flame push-to-talk ↑: stop recording and decide: tap vs voice.
+        // Recording starts immediately on press-down, so a quick tap produces
+        // a tiny file (<8 KB ≈ <0.7s). Treat that as a tap → expand the app.
+        print('🎤 [HoldToSpeak-flame] Stopping recording…');
+        setState(() => _isHoldingToSpeak = false);
+        final path = await VoiceService().stopRecording();
+        VoiceActivationService().resume();
+        if (path == null) {
+          print('⚠️ [HoldToSpeak-flame] No audio file — treating as tap → expand');
+          _exitBackground();
+        } else {
+          final fileSize = await File(path).length().catchError((_) => 0);
+          if (fileSize < 8000) {
+            // Too short (~<0.7s) → quick tap, not a voice message → expand
+            print('⚠️ [HoldToSpeak-flame] File too small ($fileSize B) → tap → expand');
+            await File(path).delete().catchError((_) {});
+            _exitBackground();
+          } else {
+            print('🎤 [HoldToSpeak-flame] Transcribing $path ($fileSize B)…');
+            final transcript = await VoiceService().transcribeAudio(path);
+            if (transcript != null && transcript.trim().isNotEmpty && mounted) {
+              print('🎤 [HoldToSpeak-flame] Transcript: "$transcript"');
+              _exitBackground(); // bring app forward, then inject the message
+              // Small delay so the UI is fully visible before _send() runs
+              await Future.delayed(const Duration(milliseconds: 300));
+              if (mounted) {
+                _controller.text = transcript.trim();
+                _setBubble(true);
+                _send();
+              }
+            } else {
+              print('⚠️ [HoldToSpeak-flame] Empty transcript — not sending');
+            }
+          }
+        }
       } else if (action == 'message') {
-        // Long press step 2: transcript arrived — send silently, resume wake word
+        // Legacy: plain-text transcript from old code path
         final text = (data['text'] as String? ?? '').trim();
         if (text.isNotEmpty) {
           _controller.text = text;
-          _send(); // runs in background; TTS plays the response
+          _send();
         }
         VoiceActivationService().resume();
       }
@@ -452,8 +702,10 @@ class _MobileKaiState extends State<_MobileKai>
 
     // Subscribe to wake-word events (VoiceActivationService singleton)
     _wakeWordSub = VoiceActivationService().onWakeWordDetected.listen((transcript) {
-      // Wake word brings the app back from background if the overlay is active
-      if (mounted) _exitBackground(initialMessage: transcript);
+      if (!mounted) return;
+      // VAS always emits 'hey kai' — it's the raw wake trigger.
+      _exitBackground();
+      _handleWakeWordActivation();
     });
 
     // Start 3-minute idle-to-background timer
@@ -462,6 +714,9 @@ class _MobileKaiState extends State<_MobileKai>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    aiProactive.ProactiveService().stop();
+    _holdTimer?.cancel();
     _lifecycleListener?.dispose();
     _glowCtrl.dispose();
     _frameAnimController?.dispose();
@@ -471,6 +726,7 @@ class _MobileKaiState extends State<_MobileKai>
     _wakeWordSub?.cancel();
     _overlayMsgSub?.cancel();
     _idleBackgroundTimer?.cancel();
+    _silenceTimer?.cancel();
     _player.dispose();
     for (final f in _floaters) {
       f.ctrl.dispose();
@@ -617,6 +873,129 @@ class _MobileKaiState extends State<_MobileKai>
     }
   }
 
+  // ── Wake-word auto-record flow ─────────────────────────────────────────────
+
+  /// Called when "Hey Kai" fires. Plays a voice ack ("yes?"), then
+  /// auto-records until 3 s of silence, transcribes, and sends.
+  Future<void> _handleWakeWordActivation() async {
+    if (!mounted) return;
+
+    // Release the KWS mic immediately — must happen before any recording attempt,
+    // and before audio playback (which would also try to pause, but async).
+    await VoiceActivationService().pause();
+
+    // Mark recording BEFORE playing TTS so the stateSub doesn't resume VAS
+    // when the "yes?" audio completes.
+    setState(() {
+      _isHoldingToSpeak = true;
+      _showBubble = true;
+    });
+    _switchToAnimation('attention');
+
+    // ── 1. Say "yes?" — instant from local cache ─────────────────────────
+    try {
+      await KaiQuickResponses.instance.play('yes', _player);
+    } catch (e) {
+      print('⚠️ [WakeWord] Quick response playback failed: $e');
+    }
+
+    if (!mounted) return;
+
+    // ── 2. Start recording (mic is free — VAS already paused) ────────────
+    _switchToAnimation('attention');
+    final started = await VoiceService().startRecording();
+    if (!started) {
+      print('❌ [WakeWord] Could not start recording');
+      setState(() => _isHoldingToSpeak = false);
+      VoiceActivationService().resume();
+      _switchToAnimation('idle');
+      return;
+    }
+    print('🎤 [WakeWord] Recording — waiting for your command…');
+
+    // ── 3. Silence detection ─────────────────────────────────────────────
+    _startWakeSilenceDetection();
+  }
+
+  void _startWakeSilenceDetection() {
+    // MediaRecorder amplitude is a 0-32767 peak-since-last-call meter.
+    // Anything below ~500 is background noise / silence.
+    const int kSilenceThreshold = 500;
+    const int kPollMs          = 300;   // poll every 300 ms
+    const int kSilenceDurationMs = 3000; // 3 s of silence → stop
+    const int kMinRecordMs     = 800;   // don't cut off immediately
+
+    int silentMs  = 0;
+    int elapsedMs = 0;
+
+    _silenceTimer?.cancel();
+    _silenceTimer = Timer.periodic(const Duration(milliseconds: kPollMs), (timer) async {
+      if (!mounted || !_isHoldingToSpeak) {
+        timer.cancel();
+        return;
+      }
+
+      elapsedMs += kPollMs;
+
+      int amplitude = 0;
+      try {
+        amplitude = await NativeAudioRecorder().getAmplitude();
+      } catch (_) {}
+
+      if (amplitude < kSilenceThreshold) {
+        silentMs += kPollMs;
+        if (silentMs >= kSilenceDurationMs && elapsedMs >= kMinRecordMs) {
+          timer.cancel();
+          await _finishWakeRecording();
+        }
+      } else {
+        silentMs = 0; // voice detected — reset silence counter
+      }
+    });
+  }
+
+  Future<void> _finishWakeRecording() async {
+    if (!_isHoldingToSpeak) return;
+    setState(() => _isHoldingToSpeak = false);
+    _switchToAnimation('thinking');
+
+    final path = await VoiceService().stopRecording();
+    // VAS resume is handled by stateSub after Kai's TTS response completes.
+    // If we bail early, resume manually below.
+
+    if (path == null || !mounted) {
+      _switchToAnimation('idle');
+      VoiceActivationService().resume();
+      return;
+    }
+
+    final fileSize = await File(path).length().catchError((_) => 0);
+    if (fileSize < 4000) {
+      // Too short — background noise, not a real command
+      await File(path).delete().catchError((_) {});
+      print('⚠️ [WakeWord] Recording too short ($fileSize B) — ignoring');
+      _switchToAnimation('idle');
+      VoiceActivationService().resume();
+      return;
+    }
+
+    print('🎤 [WakeWord] Transcribing ($fileSize B)…');
+    final transcript = await VoiceService().transcribeAudio(path);
+
+    if (transcript != null && transcript.trim().isNotEmpty && mounted) {
+      print('🎤 [WakeWord] Transcript: "$transcript"');
+      setState(() => _controller.text = transcript.trim());
+      await _setBubble(true);
+      _send();
+    } else {
+      print('⚠️ [WakeWord] Empty transcript — resuming VAS');
+      _switchToAnimation('idle');
+      VoiceActivationService().resume();
+    }
+  }
+
+  // ── End wake-word auto-record flow ────────────────────────────────────────
+
   void _spawnDeltas(Map<String, int> deltas) {
     final items = deltas.entries.where((e) => e.value.abs() > 0).toList();
     final capped = items.take(6).toList();
@@ -674,6 +1053,14 @@ class _MobileKaiState extends State<_MobileKai>
     final text = _controller.text.trim();
     if (text.isEmpty || _sending) return;
     _controller.clear(); // clear immediately so double-taps don't re-send
+    // Clear any pending proactive state — user is now active
+    if (_isAttentionSeeking) {
+      setState(() {
+        _isAttentionSeeking = false;
+        _pendingProactiveEvent = null;
+      });
+    }
+    unawaited(aiProactive.ProactiveService().stampInteraction());
     _switchToAnimation('thinking');
     setState(() {
       _sending = true;
@@ -682,6 +1069,9 @@ class _MobileKaiState extends State<_MobileKai>
       _ttsPath = null;
       _devOpen = false;
       _memoriesUsed = []; // Clear previous memories
+      _activePlan = null;
+      _planExpanded = true;
+      _choices = null;
     });
     try {
       final resp = await aiService.sendMessage(
@@ -690,11 +1080,32 @@ class _MobileKaiState extends State<_MobileKai>
         model: _modelId,
         adaptUser: _adaptToUser,
         ctxTurns: _ctxTurns,
+        onToolCall: (toolName) {
+          if (mounted) setState(() => _activeToolName = toolName);
+        },
+        onPlanUpdate: (plan) {
+          if (mounted) setState(() => _activePlan = plan);
+        },
       );
       setState(() {
-        _reply = resp.reply.isEmpty ? "(no reply)" : resp.reply;
+        // Parse and strip [CHOICES: A | B | C] from the reply
+        final rawReply = resp.reply.isEmpty ? "(no reply)" : resp.reply;
+        final choiceMatch = RegExp(r'\[CHOICES:\s*([^\]]+)\]').firstMatch(rawReply);
+        if (choiceMatch != null) {
+          _choices = choiceMatch.group(1)!
+              .split('|')
+              .map((s) => s.trim())
+              .where((s) => s.isNotEmpty)
+              .toList();
+          _reply = rawReply.replaceAll(choiceMatch.group(0)!, '').trim();
+        } else {
+          _choices = null;
+          _reply = rawReply;
+        }
         _memoriesUsed = resp.memoriesUsed; // NEW: Track memories used
         _debugInfo = resp.debugInfo; // NEW: Track debug info
+        // Collapse plan card once Kai's reply is ready; keep it visible
+        if (_activePlan != null) _planExpanded = false;
         print('🔍 [DEBUG] debugInfo captured: ${_debugInfo != null ? "YES" : "NO"}');
         if (_debugInfo != null) {
           print('🔍 [DEBUG] debugInfo keys: ${_debugInfo!.keys.join(", ")}');
@@ -738,8 +1149,85 @@ class _MobileKaiState extends State<_MobileKai>
       if (!_isSpeaking) _switchToAnimation('idle');
       setState(() {
         _sending = false;
+        _activeToolName = null;
       });
     }
+  }
+
+  // ── Lifecycle observer ────────────────────────────────────────────────────
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _drainWorkerProactive();
+    } else if (state == AppLifecycleState.paused) {
+      // DMN: trigger Kai's mind-wandering when the app backgrounds.
+      // Fire-and-forget — never blocks the UI. Stores a thought in Firebase
+      // that gets consumed naturally at the next session start.
+      DefaultModeService().runWandering(_personaId)
+          .catchError((e) => print('⚠️ [DMN] $e'));
+    }
+  }
+
+  /// Check if WorkManager left a proactive message while the app was closed.
+  Future<void> _drainWorkerProactive() async {
+    try {
+      const ch = MethodChannel('com.homecoming.app/activity');
+      final raw = await ch.invokeMethod<Map>('consumePendingProactive');
+      if (raw == null || !mounted) return;
+      final mood    = raw['mood'] as String? ?? 'curious';
+      final message = raw['message'] as String? ?? '';
+      final trigger = raw['trigger'] as String? ?? 'worker';
+      if (message.isEmpty) return;
+      _onProactiveEvent(aiProactive.ProactiveEvent(
+        mood:    mood == 'worried' ? AttentionMood.worried : AttentionMood.curious,
+        message: message,
+        trigger: trigger,
+      ));
+    } catch (_) {}
+  }
+
+  // ── Proactive attention ───────────────────────────────────────────────────
+
+  /// Called by TavernService when a guest taps in via NFC.
+  void _onTavernArrival(TavernGuest guest, String briefing) {
+    if (!mounted) return;
+    AttentionSoundService().play(AttentionMood.curious);
+    setState(() {
+      _tavernGuest    = guest;
+      _tavernBriefing = briefing;
+    });
+    _pulseAttention();
+  }
+
+  /// Called by ProactiveService when Kai has something to say.
+  void _onProactiveEvent(aiProactive.ProactiveEvent event) {
+    if (!mounted) return;
+    // Play the mood-appropriate attention sound
+    AttentionSoundService().play(event.mood);
+    // Store the pending message and pulse avatar in amber
+    setState(() {
+      _pendingProactiveEvent = event;
+      _isAttentionSeeking = true;
+    });
+    // Make sure the glow is looping so the amber pulse is animated
+    if (!_glowCtrl.isAnimating) _glowCtrl.repeat(reverse: true);
+    _switchToAnimation('attention');
+  }
+
+  /// Called when the user taps the avatar while attention-seeking.
+  void _deliverPendingProactive() {
+    final event = _pendingProactiveEvent;
+    if (event == null) return;
+    setState(() {
+      _pendingProactiveEvent = null;
+      _isAttentionSeeking = false;
+    });
+    HapticFeedback.lightImpact();
+    _setBubble(true);
+    // Inject as a Kai-initiated opening line — agentic loop continues naturally
+    setState(() => _controller.text = '(proactive) ${event.message}');
+    _send();
   }
 
   Future<String> _writeTempMp3(Uint8List bytes) async {
@@ -1400,13 +1888,212 @@ class _MobileKaiState extends State<_MobileKai>
         child: SingleChildScrollView(
           child: Column(
             children: [
+              // ── Tavern arrival banner ──────────────────────────────────────
+              if (_tavernGuest != null)
+                GestureDetector(
+                  onTap: () {
+                    final guest    = _tavernGuest!;
+                    final briefing = _tavernBriefing ?? '';
+                    setState(() { _tavernGuest = null; _tavernBriefing = null; });
+                    // Feed briefing into the chat so Kai can discuss the guest
+                    _controller.text = '(tavern) ${guest.name} just arrived — visit #${guest.visitCount}. $briefing';
+                    _setBubble(true);
+                    _send();
+                  },
+                  child: Container(
+                    margin: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF3D1A00).withOpacity(0.9),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFFD4AF37).withOpacity(0.6)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Text('🍺', style: TextStyle(fontSize: 20)),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '${_tavernGuest!.name} just arrived',
+                                style: const TextStyle(
+                                  color: Color(0xFFFFE7B0),
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 13,
+                                ),
+                              ),
+                              if (_tavernBriefing != null && _tavernBriefing!.isNotEmpty)
+                                Text(
+                                  _tavernBriefing!,
+                                  style: const TextStyle(color: Color(0x99FFE7B0), fontSize: 11),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                            ],
+                          ),
+                        ),
+                        const Icon(Icons.chevron_right, color: Color(0xFFD4AF37), size: 18),
+                      ],
+                    ),
+                  ),
+                ),
+
+              // ── Monthly cost banner ────────────────────────────────────────
+              FutureBuilder<Map<String, dynamic>>(
+                future: UsageTrackingService.getMonthlyStats(),
+                builder: (context, snap) {
+                  final cost = (snap.data?['cost'] as double?) ?? 0.0;
+                  final calls = (snap.data?['calls'] as int?) ?? 0;
+                  final month = snap.data?['month'] as String? ?? '';
+                  return Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFFE7B0).withOpacity(0.08),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(
+                              color: const Color(0xFFFFE7B0).withOpacity(0.2),
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.attach_money,
+                                  color: Color(0xFFFFE7B0), size: 13),
+                              const SizedBox(width: 4),
+                              Text(
+                                snap.connectionState == ConnectionState.waiting
+                                    ? 'Loading…'
+                                    : '$month  •  ${UsageTrackingService.formatCost(cost)}  •  $calls calls',
+                                style: const TextStyle(
+                                  color: Color(0xFFFFE7B0),
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+
               // Avatar section
               SizedBox(
                 height: 300,
-                child: Center(
-                  child: GestureDetector(
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                  Center(
+                  child: Listener(
+                    // ── Raw pointer events ─────────────────────────────────
+                    // Using Listener (not GestureDetector callbacks) so we get
+                    // every move event before the gesture arena resolves anything.
+                    // This lets us kill the hold-timer the instant the finger
+                    // drifts, guaranteeing a drag never activates the mic.
+
+                    onPointerDown: (e) {
+                      _holdTimer?.cancel();
+                      _pressOrigin   = e.localPosition;
+                      _pressWasDrag  = false;
+
+                      // Wait _kHoldDelay before starting the mic — gives the
+                      // gesture arena time to detect a drag intent first.
+                      _holdTimer = Timer(_kHoldDelay, () async {
+                        if (_pressWasDrag || !mounted) return;
+                        _markInteraction();
+                        _switchToAnimation('attention');
+                        HapticFeedback.mediumImpact();
+                        await VoiceActivationService().pause();
+                        final started = await VoiceService().startRecording();
+                        if (started && mounted) {
+                          setState(() => _isHoldingToSpeak = true);
+                          print('🎤 [HoldToSpeak] Recording started');
+                        } else if (mounted) {
+                          _switchToAnimation('idle');
+                          VoiceActivationService().resume();
+                        }
+                      });
+                    },
+
+                    onPointerMove: (e) {
+                      if (_pressOrigin == null || _pressWasDrag) return;
+                      final dist = (e.localPosition - _pressOrigin!).distance;
+                      if (dist > _kDragThreshold) {
+                        // Finger moved — this is a drag, not a hold-to-speak
+                        _pressWasDrag = true;
+                        _holdTimer?.cancel();
+                        if (_isHoldingToSpeak) {
+                          // Recording already started — cancel it silently
+                          setState(() => _isHoldingToSpeak = false);
+                          VoiceService().cancelRecording();
+                          VoiceActivationService().resume();
+                          _switchToAnimation('idle');
+                          print('⚠️ [HoldToSpeak] Cancelled — drag detected');
+                        }
+                      }
+                    },
+
+                    onPointerUp: (_) async {
+                      _holdTimer?.cancel();
+                      if (!_isHoldingToSpeak) return; // tap handled by onTap below
+                      HapticFeedback.lightImpact();
+                      setState(() => _isHoldingToSpeak = false);
+                      print('🎤 [HoldToSpeak] Stopping recording on release…');
+                      final path = await VoiceService().stopRecording();
+                      VoiceActivationService().resume();
+                      if (!mounted) return;
+                      if (path == null) {
+                        _switchToAnimation('idle');
+                        return;
+                      }
+                      final fileSize = await File(path).length().catchError((_) => 0);
+                      if (fileSize < 8000) {
+                        print('⚠️ [HoldToSpeak] Too short ($fileSize bytes) — ignoring');
+                        await File(path).delete().catchError((_) {});
+                        _switchToAnimation('idle');
+                        return;
+                      }
+                      _switchToAnimation('thinking');
+                      final transcript = await VoiceService().transcribeAudio(path);
+                      if (transcript != null && transcript.trim().isNotEmpty && mounted) {
+                        print('🎤 [HoldToSpeak] Transcript: "$transcript"');
+                        setState(() => _controller.text = transcript.trim());
+                        _setBubble(true);
+                        _send();
+                      } else {
+                        print('⚠️ [HoldToSpeak] Empty transcript');
+                        _switchToAnimation('idle');
+                      }
+                    },
+
+                    onPointerCancel: (_) {
+                      _holdTimer?.cancel();
+                      if (!_isHoldingToSpeak) return;
+                      setState(() => _isHoldingToSpeak = false);
+                      VoiceService().cancelRecording();
+                      VoiceActivationService().resume();
+                      _switchToAnimation('idle');
+                      print('⚠️ [HoldToSpeak] Cancelled (pointer cancel)');
+                    },
+
+                    child: GestureDetector(
+                    // Tap (quick press+release, no mic involved) → toggle bubble
                     onTap: () {
+                      if (_isHoldingToSpeak) return;
                       _markInteraction();
+                      // Kai is seeking attention — deliver his pending message on tap
+                      if (_isAttentionSeeking && _pendingProactiveEvent != null) {
+                        _deliverPendingProactive();
+                        return;
+                      }
                       _pulseAttention();
                       _setBubble(!_showBubble);
                     },
@@ -1417,6 +2104,7 @@ class _MobileKaiState extends State<_MobileKai>
                           alignment: Alignment.center,
                           children: [
                             // Glow effect
+                            // Amber pulse when Kai wants attention, normal glow otherwise
                             Container(
                               width: kSpriteSize + kRingPadding * 2,
                               height: kSpriteSize + kRingPadding * 2,
@@ -1424,9 +2112,11 @@ class _MobileKaiState extends State<_MobileKai>
                                 shape: BoxShape.circle,
                                 boxShadow: [
                                   BoxShadow(
-                                    color: stroke.withOpacity(0.3 * _glow.value),
-                                    blurRadius: 20,
-                                    spreadRadius: 5,
+                                    color: _isAttentionSeeking
+                                        ? Colors.amber.withOpacity(0.55 + 0.35 * _glow.value)
+                                        : stroke.withOpacity(0.3 * _glow.value),
+                                    blurRadius: _isAttentionSeeking ? 28 : 20,
+                                    spreadRadius: _isAttentionSeeking ? 8 : 5,
                                   ),
                                 ],
                               ),
@@ -1475,10 +2165,38 @@ class _MobileKaiState extends State<_MobileKai>
                           ],
                         );
                       },
+                    ),        // closes AnimatedBuilder
+                  ),          // closes GestureDetector
+                  ),          // closes Listener
+                ),            // closes Center — item in outer Stack.children
+
+              // ── Hold-to-speak listening indicator ───────────────────────────
+              if (_isHoldingToSpeak)
+                Positioned(
+                  bottom: 4,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1A1A2E).withOpacity(0.85),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: const Color(0xFF3D9BFF), width: 1.5),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.mic, color: Color(0xFF3D9BFF), size: 16),
+                        SizedBox(width: 6),
+                        Text(
+                          'Listening… release to send',
+                          style: TextStyle(color: Color(0xFF3D9BFF), fontSize: 12),
+                        ),
+                      ],
                     ),
                   ),
                 ),
-              ),
+            ], // closes outer Stack children
+          ), // closes outer Stack
+          ), // closes SizedBox
 
               // Name badge
               Container(
@@ -1567,10 +2285,47 @@ class _MobileKaiState extends State<_MobileKai>
                       ),
                     ),
                   ),
+                  _MobileButton(
+                    icon: Icons.public,
+                    label: 'Worlds',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const WorldsScreen(),
+                      ),
+                    ),
+                  ),
                 ],
               ),
 
               const SizedBox(height: 20),
+
+              // Plan card — shown while a multi-step plan is executing
+              if (_activePlan != null)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: PlanCard(
+                    plan: _activePlan!,
+                    isExpanded: _planExpanded,
+                    onToggle: () => setState(() => _planExpanded = !_planExpanded),
+                  ),
+                ),
+
+              // Choice buttons — shown when Kai needs the user to pick from a list
+              if (_choices != null && _choices!.isNotEmpty && _showBubble)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: _ChoiceButtons(
+                    choices: _choices!,
+                    onChoiceTap: (choice) {
+                      setState(() {
+                        _controller.text = choice;
+                        _choices = null;
+                      });
+                      _send();
+                    },
+                  ),
+                ),
 
               // Chat section
               if (_showBubble)
@@ -1578,6 +2333,7 @@ class _MobileKaiState extends State<_MobileKai>
                   padding: const EdgeInsets.all(16),
                   child: _MobileChatBubble(
                     sending: _sending,
+                    activeToolName: _activeToolName,
                     reply: _reply,
                     error: _error,
                     memoriesUsed: _memoriesUsed, // NEW: Pass memories used
@@ -1626,6 +2382,82 @@ class _MobileKaiState extends State<_MobileKai>
   }
 }
 
+// ---------------------------------------------------------------------------
+// Choice buttons — floating pill buttons shown when Kai presents a list
+// ---------------------------------------------------------------------------
+class _ChoiceButtons extends StatelessWidget {
+  final List<String> choices;
+  final ValueChanged<String> onChoiceTap;
+
+  const _ChoiceButtons({required this.choices, required this.onChoiceTap});
+
+  @override
+  Widget build(BuildContext context) {
+    const stroke = Color(0xFFFFE7B0);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A1510),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: stroke.withOpacity(0.25)),
+        boxShadow: [
+          BoxShadow(
+            color: stroke.withOpacity(0.08),
+            blurRadius: 12,
+            offset: const Offset(0, -2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(left: 8, bottom: 8),
+            child: Text(
+              'Choose one:',
+              style: TextStyle(
+                color: stroke.withOpacity(0.5),
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+                letterSpacing: 0.5,
+              ),
+            ),
+          ),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: choices.map((choice) {
+              return GestureDetector(
+                onTap: () => onChoiceTap(choice),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                  decoration: BoxDecoration(
+                    color: stroke.withOpacity(0.10),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: stroke.withOpacity(0.45)),
+                  ),
+                  child: Text(
+                    choice,
+                    style: const TextStyle(
+                      color: stroke,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+
 class _MobileButton extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -1670,6 +2502,7 @@ class _MobileButton extends StatelessWidget {
 
 class _MobileChatBubble extends StatelessWidget {
   final bool sending;
+  final String? activeToolName;
   final String? reply;
   final String? error;
   final List<String> memoriesUsed; // NEW: Memories referenced in response
@@ -1693,8 +2526,28 @@ class _MobileChatBubble extends StatelessWidget {
   final Stream<PlayerState> playingStream;
   final String personaId;
 
+  static const _toolLabels = {
+    'get_current_time':      '🕐 Checking time…',
+    'web_search':            '🔍 Searching the web…',
+    'get_weather':           '🌤 Checking weather…',
+    'set_alarm':             '⏰ Setting alarm…',
+    'set_timer':             '⏱ Starting timer…',
+    'read_calendar':         '📅 Reading calendar…',
+    'open_app':              '📱 Opening app…',
+    'send_whatsapp':         '💬 Sending WhatsApp…',
+    'create_calendar_event': '📅 Creating event…',
+    'call_contact':          '📞 Dialling…',
+    'play_music':            '🎵 Starting music…',
+    'navigate_to':           '🗺 Opening navigation…',
+    'send_sms':              '💬 Opening SMS…',
+    'set_reminder':          '🔔 Setting reminder…',
+    'read_notifications':    '📲 Reading notifications…',
+    'read_screen':           '👁 Reading screen…',
+  };
+
   const _MobileChatBubble({
     required this.sending,
+    this.activeToolName,
     required this.reply,
     required this.error,
     required this.memoriesUsed,
@@ -1823,6 +2676,46 @@ class _MobileChatBubble extends StatelessWidget {
             ],
           ),
 
+          // Tool-in-progress pill — shown while Kai is executing an agentic tool
+          if (sending && activeToolName != null) ...[
+            const SizedBox(height: 10),
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 300),
+              child: Container(
+                key: ValueKey(activeToolName),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFE7B0).withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: const Color(0xFFFFE7B0).withOpacity(0.35),
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const SizedBox(
+                      width: 10,
+                      height: 10,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 1.5,
+                        color: Color(0xFFFFE7B0),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      _toolLabels[activeToolName] ?? '⚙️ Running tool…',
+                      style: const TextStyle(
+                        color: Color(0xFFFFE7B0),
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+
           // Reply section
           if (error != null) ...[
             const SizedBox(height: 12),
@@ -1884,6 +2777,8 @@ class _MobileChatBubble extends StatelessWidget {
                   Text(
                     reply!,
                     style: const TextStyle(color: Colors.white, height: 1.4),
+                    softWrap: true,
+                    overflow: TextOverflow.clip,
                   ),
                   const SizedBox(height: 12),
                   Row(
@@ -1918,13 +2813,12 @@ class _MobileChatBubble extends StatelessWidget {
                       ),
                       if (debugInfo != null) ...[
                         const SizedBox(width: 8),
-                        DebugButton(
-                          debugInfo: debugInfo!,
-                          personaId: personaId,
+                        Flexible(
+                          child: DebugButton(
+                            debugInfo: debugInfo!,
+                            personaId: personaId,
+                          ),
                         ),
-                      ] else ...[
-                        // Debug: Show why button isn't appearing
-                        const Text('No debug', style: TextStyle(color: Colors.red, fontSize: 10)),
                       ],
                     ],
                   ),
@@ -2714,6 +3608,41 @@ class _GmKaiSheet extends StatelessWidget {
                     Text('Home Remote Control',
                         style: TextStyle(
                             color: stroke, fontSize: 14, fontWeight: FontWeight.w600)),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          // ── Tavern ───────────────────────────────────────────────────────
+          const SizedBox(height: 20),
+          const Text('TAVERN', style: TextStyle(color: dim, fontSize: 11, letterSpacing: 1.2)),
+          const SizedBox(height: 10),
+          GestureDetector(
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(context, MaterialPageRoute(
+                builder: (_) => const TavernRegisterScreen(),
+              ));
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              decoration: BoxDecoration(
+                color: const Color(0xFF3D1A00).withOpacity(0.4),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0xFFD4AF37).withOpacity(0.5)),
+              ),
+              child: const Center(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('🪙', style: TextStyle(fontSize: 20)),
+                    SizedBox(width: 10),
+                    Text('Register NFC Coin',
+                        style: TextStyle(
+                            color: Color(0xFFD4AF37),
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600)),
                   ],
                 ),
               ),

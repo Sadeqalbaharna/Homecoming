@@ -13,6 +13,7 @@ library;
 import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'kai_db.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../models/knowledge_node.dart';
 import 'firebase_service.dart';
@@ -72,11 +73,11 @@ class MemoryReflectionService {
 
     // 1. Load existing graph
     final graphSnap =
-        await FirebaseDatabase.instance.ref('knowledge_graph/$personaId').get();
+        await KaiDb.instance.ref('knowledge_graph/$personaId').get();
     final graphSummary = _summariseGraph(graphSnap.value);
 
     // 2. Load recent conversations (last 30 messages)
-    final convSnap = await FirebaseDatabase.instance
+    final convSnap = await KaiDb.instance
         .ref('conversations/$personaId')
         .get();
     final recentConv = _extractRecentMessages(convSnap.value, limit: 30);
@@ -196,7 +197,7 @@ If you have nothing genuinely new to add, return: {"nodes": [], "edges": []}
     List<Map<String, dynamic>> newEdges,
     Object? existingValue,
   ) async {
-    final ref = FirebaseDatabase.instance.ref('knowledge_graph/$personaId');
+    final ref = KaiDb.instance.ref('knowledge_graph/$personaId');
 
     // Load current graph data
     List<dynamic> nodes = [];

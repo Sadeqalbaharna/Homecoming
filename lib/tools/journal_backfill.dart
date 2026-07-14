@@ -6,6 +6,7 @@
 // Usage: call JournalBackfill.run(personaId) from a debug screen or initState.
 
 import 'package:firebase_database/firebase_database.dart';
+import '../services/core/kai_db.dart';
 import '../services/core/journal_service.dart';
 import '../services/core/firebase_service.dart';
 
@@ -28,7 +29,7 @@ class JournalBackfill {
     print('📓 [Backfill] Starting journal backfill for $personaId...');
 
     // ── 1. Load all past conversations ─────────────────────────────────────
-    final db = FirebaseDatabase.instance;
+    final db = KaiDb.instance;
     // No orderByChild — avoids requiring a server-side index.
     // We sort client-side below anyway.
     final snap = await db.ref('conversations/$personaId').get();

@@ -1,0 +1,27 @@
+{
+  "rules": {
+    "//": "Kingdom (kingdom-ac44f) — tavern spoke. BOOTSTRAP posture: authenticated users keep full access (matches today's app), unauthenticated drive-by is closed. Public read is preserved ONLY for non-sensitive guest-facing display paths. Tighten to per-uid scoping later using firebase/_template.",
+
+    ".read": "auth != null",
+    ".write": "auth != null",
+
+    "config": {
+      ".read": false,
+      ".write": false
+    },
+
+    "menu":          { ".read": true },
+    "daily_quests":  { ".read": true },
+    "tavern_layout": { ".read": true },
+
+    "tables":                   { ".indexOn": ["arrivedAt"] },
+    "visits":                   { ".indexOn": ["status", "openedAt"] },
+    "active_guests":            { ".read": "auth != null", ".write": "auth != null" },
+    "tavern_guests":            { ".read": "auth != null", ".write": "auth != null" },
+    "nfc_links":                { ".read": "auth != null", ".write": "auth != null" },
+    "staff":                    { ".read": "auth != null", ".write": "auth != null" },
+    "staff_table_assignments":  { ".read": "auth != null", ".write": "auth != null" },
+    "kitchen_orders":           { ".read": "auth != null", ".write": "auth != null" },
+    "avatars":                  { ".read": "auth != null", ".write": "auth != null" }
+  }
+}

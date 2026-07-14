@@ -17,6 +17,7 @@
 library;
 
 import 'package:firebase_database/firebase_database.dart';
+import 'kai_db.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'firebase_service.dart';
 
@@ -39,8 +40,8 @@ class ProactiveService {
   factory ProactiveService() => _instance;
   ProactiveService._internal();
 
-  static FirebaseDatabase? get _db =>
-      FirebaseService.isAvailable ? FirebaseDatabase.instance : null;
+  static KaiDb? get _db =>
+      FirebaseService.isAvailable ? KaiDb.instance : null;
 
   // ── Initialise (call once on app start) ───────────────────────────────────
 

@@ -16,6 +16,7 @@ library;
 
 import 'dart:async';
 import 'package:firebase_database/firebase_database.dart';
+import 'kai_db.dart';
 import 'firebase_service.dart';
 
 // ─── Model ──────────────────────────────────────────────────────────────────
@@ -86,8 +87,8 @@ class EmotionalEventService {
   static String _eventsPath(String personaId) =>
       'kai/$personaId/emotional_events';
 
-  static FirebaseDatabase? get _db =>
-      FirebaseService.isAvailable ? FirebaseDatabase.instance : null;
+  static KaiDb? get _db =>
+      FirebaseService.isAvailable ? KaiDb.instance : null;
 
   // ── Classify & log ─────────────────────────────────────────────────────────
 
@@ -205,42 +206,10 @@ class EmotionalEventService {
     required String aiReply,
     required Map<String, int> moodDeltas,
   }) {
-    final warmthDelta   = moodDeltas['warmth']      ?? 0;
-    final valenceDelta  = moodDeltas['valence']     ?? 0;
-    final energyDelta   = moodDeltas['energy']      ?? 0;
-    final focusDelta    = moodDeltas['focus']       ?? 0;
-    final playDelta     = moodDeltas['playfulness'] ?? 0;
-
-    final totalMagnitude = moodDeltas.values.fold(0, (sum, v) => sum + v.abs());
-
-    EmotionalEventType type;
-    int intensity;
-
-    if (totalMagnitude >= 30 && valenceDelta >= 0) {
-      // Many traits shifted positively — significant exchange
-      type = EmotionalEventType.deep;
-      intensity = (valenceDelta + warmthDelta + (energyDelta ~/ 2)).clamp(-100, 100);
-    } else if (warmthDelta >= 8) {
-      type = EmotionalEventType.warmth;
-      intensity = warmthDelta.clamp(0, 100);
-    } else if (valenceDelta <= -8) {
-      type = EmotionalEventType.conflict;
-      intensity = valenceDelta.clamp(-100, 0);
-    } else if (playDelta >= 6) {
-      type = EmotionalEventType.playful;
-      intensity = playDelta.clamp(0, 100);
-    } else if (focusDelta >= 6 || energyDelta >= 6) {
-      type = EmotionalEventType.intellectual;
-      intensity = ((focusDelta + energyDelta) ~/ 2).clamp(0, 100);
-    } else {
-      type = EmotionalEventType.neutral;
-      intensity = valenceDelta.clamp(-20, 20);
-    }
-
+    final (type, intensity) = classifySync(moodDeltas);
     final topic = userMessage.length > 60
         ? userMessage.substring(0, 60)
         : userMessage;
-
     return EmotionalEvent(
       id: '',
       type: type,
@@ -249,6 +218,45 @@ class EmotionalEventService {
       timestamp: DateTime.now(),
       source: _surface,
     );
+  }
+
+  /// Synchronous classification from mood deltas — no Firebase, no async.
+  /// Call this to decide extraction depth BEFORE awaiting classifyAndLog.
+  static (EmotionalEventType type, int intensity) classifySync(
+    Map<String, int> moodDeltas,
+  ) {
+    final warmthDelta  = moodDeltas['warmth']      ?? 0;
+    final valenceDelta = moodDeltas['valence']     ?? 0;
+    final energyDelta  = moodDeltas['energy']      ?? 0;
+    final focusDelta   = moodDeltas['focus']       ?? 0;
+    final playDelta    = moodDeltas['playfulness'] ?? 0;
+
+    final totalMagnitude = moodDeltas.values.fold(0, (sum, v) => sum + v.abs());
+
+    EmotionalEventType type;
+    int intensity;
+
+    if (totalMagnitude >= 30 && valenceDelta >= 0) {
+      type      = EmotionalEventType.deep;
+      intensity = (valenceDelta + warmthDelta + (energyDelta ~/ 2)).clamp(-100, 100);
+    } else if (warmthDelta >= 8) {
+      type      = EmotionalEventType.warmth;
+      intensity = warmthDelta.clamp(0, 100);
+    } else if (valenceDelta <= -8) {
+      type      = EmotionalEventType.conflict;
+      intensity = valenceDelta.clamp(-100, 0);
+    } else if (playDelta >= 6) {
+      type      = EmotionalEventType.playful;
+      intensity = playDelta.clamp(0, 100);
+    } else if (focusDelta >= 6 || energyDelta >= 6) {
+      type      = EmotionalEventType.intellectual;
+      intensity = ((focusDelta + energyDelta) ~/ 2).clamp(0, 100);
+    } else {
+      type      = EmotionalEventType.neutral;
+      intensity = valenceDelta.clamp(-20, 20);
+    }
+
+    return (type, intensity);
   }
 
   /// Which mood traits an event type primarily affects on replay.

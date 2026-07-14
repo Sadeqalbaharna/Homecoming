@@ -9,7 +9,9 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:firebase_database/firebase_database.dart';
+import '../services/core/kai_db.dart';
 import '../services/core/firebase_service.dart';
+import '../services/core/brain_extraction_service.dart';
 import '../tools/brain_backfill.dart';
 import 'chatgpt_import_screen.dart';
 
@@ -36,24 +38,8 @@ class _Brain3DScreenState extends State<Brain3DScreen> {
   bool _backfilling = false;
   String? _backfillStatus;
 
-  // Node type → hex color (matches Obsidian-style palette)
-  static const _nodeColors = {
-    'concept':    '#7EC8E3', // sky blue
-    'emotion':    '#FFB347', // amber
-    'belief':     '#B8A9FF', // violet
-    'memory':     '#B8E994', // mint
-    'question':   '#FFE066', // gold
-    'goal':       '#D4A5C9', // rose
-    'preference': '#E88080', // coral
-    'insight':    '#9EB8D9', // steel blue
-    'person':     '#FFFFFF', // white
-    'topic':      '#7EC8E3', // sky blue
-    'value':      '#FFB34799', // amber dim
-    'pattern':    '#B8A9FF99', // violet dim
-    'fact':       '#AAAAAA', // grey
-    'event':      '#98FB98', // pale green
-    'location':   '#F0E68C', // khaki
-  };
+  // Label overlay toggle
+  bool _showLabels = false;
 
   @override
   void initState() {
@@ -128,12 +114,45 @@ class _Brain3DScreenState extends State<Brain3DScreen> {
     }
   }
 
+  Future<void> _runPrune() async {
+    if (_backfilling) return;
+    setState(() {
+      _backfilling = true;
+      _backfillStatus = 'Pruning noise nodes…';
+    });
+    try {
+      final removed = await BrainExtractionService().pruneGraph(widget.personaId);
+      if (mounted) {
+        setState(() {
+          _backfilling = false;
+          _backfillStatus = removed > 0
+              ? 'Pruned $removed noise nodes.'
+              : 'Nothing to prune — graph is clean.';
+        });
+        if (removed > 0) {
+          await Future.delayed(const Duration(seconds: 2));
+          if (mounted) {
+            setState(() { _backfillStatus = null; _loading = true; });
+            _initGraph();
+          }
+        } else {
+          await Future.delayed(const Duration(seconds: 2));
+          if (mounted) setState(() => _backfillStatus = null);
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() { _backfilling = false; _backfillStatus = 'Error: $e'; });
+      }
+    }
+  }
+
   Future<Map<String, dynamic>> _loadGraphData() async {
     if (!FirebaseService.isAvailable) {
       return {'nodes': [], 'links': []};
     }
 
-    final snap = await FirebaseDatabase.instance
+    final snap = await KaiDb.instance
         .ref('knowledge_graph/${widget.personaId}')
         .get();
 
@@ -147,11 +166,15 @@ class _Brain3DScreenState extends State<Brain3DScreen> {
     final nodes = <Map<String, dynamic>>[];
     for (final n in _asList(raw['nodes'])) {
       final m = Map<String, dynamic>.from(n as Map);
+      final meta = m['metadata'] as Map?;
       nodes.add({
         'id':         m['id'],
         'label':      m['label'] ?? '',
         'type':       m['type'] ?? 'concept',
         'importance': (m['importance'] as num?)?.toDouble() ?? 0.5,
+        // Age data — used for vitality-based brightness in the 3D renderer
+        'lastSeen':   meta?['lastSeen'],  // ms epoch of last access
+        'timestamp':  m['timestamp'],      // ms epoch of creation
       });
     }
 
@@ -172,7 +195,6 @@ class _Brain3DScreenState extends State<Brain3DScreen> {
 
   String _buildHtml(Map<String, dynamic> graphData) {
     final jsonData = jsonEncode(graphData);
-    final colorsJson = jsonEncode(_nodeColors);
     final nodeCount = (graphData['nodes'] as List).length;
 
     return '''<!DOCTYPE html>
@@ -239,10 +261,89 @@ class _Brain3DScreenState extends State<Brain3DScreen> {
 
 <script src="https://unpkg.com/3d-force-graph@1.73.4/dist/3d-force-graph.min.js"></script>
 <script>
-const nodeColors = $colorsJson;
-const graphData  = $jsonData;
+const graphData = $jsonData;
 
 const tooltip = document.getElementById('tooltip');
+
+// Label visibility state — toggled by toggleLabels()
+let showLabels = false;
+
+// ── Vitality-based node color ──────────────────────────────────────────────
+// Each node's color is determined by two factors:
+//   • Type (sets the hue — preserves color identity)
+//   • Vitality (sets saturation + lightness — newest/most-important = bright,
+//     oldest/forgotten = dim)
+//
+// Vitality = weighted blend of importance (0.65) + freshness (0.35)
+// Freshness decays linearly over 45 days of no access.
+//
+// Result: nodes glow gold-bright when fresh; fade to dim blue-gray when stale.
+
+const typeHues = {
+  concept:    200,  // sky blue
+  emotion:    35,   // amber
+  belief:     260,  // violet
+  memory:     120,  // mint green
+  question:   50,   // gold
+  goal:       300,  // rose
+  preference: 5,    // coral
+  insight:    210,  // steel blue
+  person:     0,    // achromatic (white → dark gray)
+  topic:      200,  // sky blue
+  value:      35,   // amber
+  pattern:    260,  // violet
+  fact:       0,    // gray
+  event:      130,  // pale green
+  location:   55,   // khaki
+};
+
+function nodeVitality(node) {
+  const imp      = node.importance || 0.5;
+  const lastSeen = node.lastSeen || node.timestamp || Date.now();
+  const ageDays  = Math.max(0, (Date.now() - lastSeen) / 86400000);
+  const fresh    = Math.max(0, 1.0 - ageDays / 45.0); // 1.0 → 0.0 over 45 days
+  return Math.min(1.0, imp * 0.65 + fresh * 0.35);
+}
+
+function nodeColorFn(node) {
+  const v = nodeVitality(node);
+  const hue = typeHues[node.type] || 200;
+  if (node.type === 'person' || node.type === 'fact') {
+    // Achromatic: bright white → dark charcoal
+    const l = Math.round(18 + v * 67);
+    return \`hsl(0, 0%, \${l}%)\`;
+  }
+  const sat   = Math.round(45 + v * 45);   // 45 % dim → 90 % vivid
+  const light = Math.round(18 + v * 52);   // 18 % dark → 70 % bright
+  return \`hsl(\${hue}, \${sat}%, \${light}%)\`;
+}
+
+// ── Canvas-based text sprite ───────────────────────────────────────────────
+// No external three-spritetext dependency — uses THREE directly (which 3d-force-graph
+// exposes globally as window.THREE in its UMD build).
+function makeTextSprite(text) {
+  if (!window.THREE) return null;
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  const fontSize = 26;
+  const pad = 6;
+  ctx.font = '600 ' + fontSize + 'px -apple-system, Helvetica Neue, sans-serif';
+  const textW = Math.ceil(ctx.measureText(text).width);
+  canvas.width  = textW + pad * 2;
+  canvas.height = fontSize + pad * 2;
+  // Redraw after canvas resize (resize clears the context state)
+  ctx.font = '600 ' + fontSize + 'px -apple-system, Helvetica Neue, sans-serif';
+  ctx.fillStyle = 'rgba(0,0,17,0.60)';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#FFE7B0';
+  ctx.fillText(text, pad, fontSize + pad * 0.55);
+  const texture  = new THREE.CanvasTexture(canvas);
+  const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false });
+  const sprite   = new THREE.Sprite(material);
+  const aspect   = canvas.width / canvas.height;
+  sprite.scale.set(aspect * 9, 9, 1);
+  return sprite;
+}
 
 const Graph = ForceGraph3D()(document.getElementById('graph'))
   .backgroundColor('#000011')
@@ -250,21 +351,42 @@ const Graph = ForceGraph3D()(document.getElementById('graph'))
 
   // Nodes
   .nodeId('id')
-  .nodeLabel('label')
-  .nodeColor(n => nodeColors[n.type] || '#888888')
+  .nodeLabel('')          // suppress the built-in hover tooltip (we tap to inspect)
+  .nodeColor(nodeColorFn)
   .nodeVal(n => Math.pow((n.importance || 0.5) * 6, 2))
   .nodeOpacity(0.92)
   .nodeResolution(12)
 
-  // Links
+  // Label sprites — canvas-based THREE.Sprite floating above each node.
+  // nodeThreeObjectExtend(true) keeps the default sphere; returning null is safe.
+  .nodeThreeObjectExtend(true)
+  .nodeThreeObject(node => {
+    try {
+      const sprite = makeTextSprite(node.label || node.id || '');
+      if (!sprite) return null;
+      const r = Math.pow((node.importance || 0.5) * 6, 2);
+      sprite.position.set(0, Math.sqrt(r) + 5, 0);
+      sprite.visible = showLabels;
+      return sprite;
+    } catch (_) {
+      return null;  // fall back to default sphere — never crash node rendering
+    }
+  })
+
+  // Links — width and opacity both scale with strength so weak links fade into
+  // the background and strong connections stand clearly visible.
   .linkSource('source')
   .linkTarget('target')
-  .linkColor(() => 'rgba(255,231,176,0.15)')
-  .linkWidth(l => (l.strength || 0.5) * 1.5)
-  .linkOpacity(0.6)
+  .linkColor(l => {
+    const s = l.strength || 0.5;
+    // Weak links (0.1) → barely visible; strong links (1.0) → clearly amber
+    return \`rgba(255, 231, 176, \${(0.06 + s * 0.70).toFixed(2)})\`;
+  })
+  .linkWidth(l => Math.max(0.4, (l.strength || 0.5) * 3.5))
+  .linkOpacity(1.0)   // opacity handled per-link via linkColor rgba
   .linkDirectionalParticles(l => Math.ceil((l.strength || 0.3) * 3))
-  .linkDirectionalParticleWidth(l => (l.strength || 0.3) * 1.5)
-  .linkDirectionalParticleColor(() => 'rgba(255,231,176,0.8)')
+  .linkDirectionalParticleWidth(l => (l.strength || 0.3) * 2.0)
+  .linkDirectionalParticleColor(() => 'rgba(255,231,176,0.85)')
   .linkDirectionalParticleSpeed(0.004)
 
   // Interaction
@@ -279,7 +401,10 @@ const Graph = ForceGraph3D()(document.getElementById('graph'))
         ? (l.target.label || l.target) : (l.source.label || l.source);
       return \`\${l.relation || '→'} \${other}\`;
     }).slice(0, 5).join('<br>');
-    tooltip.innerHTML = \`<b>\${node.label}</b><br><span style="opacity:0.6">\${node.type}</span>\${connected ? '<br><br>' + connected : ''}\`;
+    const v = nodeVitality(node);
+    const imp = ((node.importance || 0.5) * 100).toFixed(0);
+    const vPct = (v * 100).toFixed(0);
+    tooltip.innerHTML = \`<b>\${node.label}</b><br><span style="opacity:0.6">\${node.type} · imp \${imp}% · vitality \${vPct}%</span>\${connected ? '<br><br>' + connected : ''}\`;
     tooltip.style.display = 'block';
     setTimeout(() => tooltip.style.display = 'none', 3000);
   })
@@ -326,6 +451,15 @@ document.getElementById('fit-btn').addEventListener('touchend', e => {
 document.getElementById('zoom-in').addEventListener('click', () => zoomBy(0.7));
 document.getElementById('zoom-out').addEventListener('click', () => zoomBy(1.4));
 document.getElementById('fit-btn').addEventListener('click', () => Graph.zoomToFit(600, 60));
+
+// ── Label toggle — called from Flutter via runJavaScript ──────────────────
+window.toggleLabels = function() {
+  showLabels = !showLabels;
+  // Walk the scene and flip visibility on every sprite
+  Graph.scene().traverse(obj => {
+    if (obj.isSprite) obj.visible = showLabels;
+  });
+};
 </script>
 </body>
 </html>''';
@@ -375,6 +509,28 @@ document.getElementById('fit-btn').addEventListener('click', () => Graph.zoomToF
                     color: Color(0x88FFE7B0), size: 20),
             tooltip: 'Build from history',
             onPressed: _backfilling ? null : _runBackfill,
+          ),
+          // Prune noise nodes
+          IconButton(
+            icon: const Icon(Icons.auto_fix_high_outlined,
+                color: Color(0x66FFE7B0), size: 20),
+            tooltip: 'Prune noise nodes',
+            onPressed: _backfilling ? null : _runPrune,
+          ),
+          // Node label toggle
+          IconButton(
+            icon: Icon(
+              _showLabels ? Icons.label_rounded : Icons.label_outline,
+              color: _showLabels
+                  ? const Color(0xFFFFE7B0)
+                  : const Color(0x55FFE7B0),
+              size: 20,
+            ),
+            tooltip: _showLabels ? 'Hide labels' : 'Show labels',
+            onPressed: () {
+              setState(() => _showLabels = !_showLabels);
+              _controller?.runJavaScript('toggleLabels()');
+            },
           ),
           IconButton(
             icon: const Icon(Icons.fit_screen_outlined,

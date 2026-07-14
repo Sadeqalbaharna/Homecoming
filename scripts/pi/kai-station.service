@@ -1,0 +1,18 @@
+[Unit]
+Description=Kai Station — GPIO device control (Firebase RTDB listener)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=kai
+WorkingDirectory=/home/kai/tavern_station
+ExecStart=/usr/bin/python3 -u /home/kai/tavern_station/kai_station.py
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+StandardOutput=append:/home/kai/tavern_station/kai_station.log
+StandardError=append:/home/kai/tavern_station/kai_station.log
+
+[Install]
+WantedBy=multi-user.target

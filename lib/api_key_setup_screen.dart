@@ -24,14 +24,12 @@ class _ApiKeySetupScreenState extends State<ApiKeySetupScreen> {
   final _elevenlabsController = TextEditingController();
   final _voiceIdController = TextEditingController();
   final _anthropicController = TextEditingController();
-  final _picovoiceController = TextEditingController();
 
   bool _saving = false;
   String? _error;
   bool _showOpenAI = false;
   bool _showElevenLabs = false;
   bool _showAnthropic = false;
-  bool _showPicovoice = false;
 
   @override
   void initState() {
@@ -43,7 +41,6 @@ class _ApiKeySetupScreenState extends State<ApiKeySetupScreen> {
     final openai = await _secureStorage.getOpenAIKey();
     final elevenlabs = await _secureStorage.getElevenLabsKey();
     final anthropic = await _secureStorage.getAnthropicKey();
-    final picovoice = await _rawStorage.read(key: 'picovoice');
     final prefs = await SharedPreferences.getInstance();
     final voiceId = prefs.getString('selected_voice_id') ?? '';
 
@@ -55,9 +52,6 @@ class _ApiKeySetupScreenState extends State<ApiKeySetupScreen> {
     }
     if (anthropic != null && anthropic.isNotEmpty) {
       _anthropicController.text = anthropic;
-    }
-    if (picovoice != null && picovoice.isNotEmpty) {
-      _picovoiceController.text = picovoice;
     }
     if (voiceId.isNotEmpty) {
       _voiceIdController.text = voiceId;
@@ -95,10 +89,6 @@ class _ApiKeySetupScreenState extends State<ApiKeySetupScreen> {
         await _secureStorage.setAnthropicKey(anthropicKey);
       }
 
-      final picovoiceKey = _picovoiceController.text.trim();
-      if (picovoiceKey.isNotEmpty) {
-        await _rawStorage.write(key: 'picovoice', value: picovoiceKey);
-      }
 
       final voiceId = _voiceIdController.text.trim();
       if (voiceId.isNotEmpty) {
@@ -121,7 +111,6 @@ class _ApiKeySetupScreenState extends State<ApiKeySetupScreen> {
     _elevenlabsController.dispose();
     _voiceIdController.dispose();
     _anthropicController.dispose();
-    _picovoiceController.dispose();
     super.dispose();
   }
 
@@ -326,52 +315,49 @@ class _ApiKeySetupScreenState extends State<ApiKeySetupScreen> {
 
               const SizedBox(height: 24),
 
-              // Picovoice Access Key (on-device "Hey Kai" wake word)
-              Row(
-                children: [
-                  const Icon(Icons.mic_none, color: Color(0xFF3D9BFF), size: 18),
-                  const SizedBox(width: 8),
-                  const Text(
-                    'Picovoice Access Key (Optional)',
-                    style: TextStyle(
-                      color: Color(0xFFFFE7B0),
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: _picovoiceController,
-                obscureText: !_showPicovoice,
-                style: const TextStyle(color: Colors.white),
-                decoration: InputDecoration(
-                  hintText: 'Leave empty to disable "Hey Kai" wake word',
-                  hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
-                  filled: true,
-                  fillColor: const Color(0xFF2A2119),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide.none,
-                  ),
-                  suffixIcon: IconButton(
-                    icon: Icon(
-                      _showPicovoice ? Icons.visibility_off : Icons.visibility,
-                      color: Colors.white.withOpacity(0.5),
-                    ),
-                    onPressed: () =>
-                        setState(() => _showPicovoice = !_showPicovoice),
+              // Sherpa-ONNX wake word info (no key needed)
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0D2A1A),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: const Color(0xFF2ECC71).withOpacity(0.35),
                   ),
                 ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Enables on-device "Hey Kai" detection — zero API cost, ~1% CPU.\n'
-                '1. Sign up free at console.picovoice.ai\n'
-                '2. Copy your Access Key here\n'
-                '3. Train "Hey Kai" → Export → put .ppn in assets/models/',
-                style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 12),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(Icons.mic, color: Color(0xFF2ECC71), size: 20),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            '"Hey Kai" — Built-in, No Key Required',
+                            style: TextStyle(
+                              color: Color(0xFF2ECC71),
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            'Wake word detection runs on-device using sherpa-onnx. '
+                            'Enable it in Settings → Voice Controls. '
+                            'The model (~11 MB) downloads automatically on first use.',
+                            style: TextStyle(
+                              color: Colors.white.withOpacity(0.6),
+                              fontSize: 12,
+                              height: 1.4,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
 
               const SizedBox(height: 32),

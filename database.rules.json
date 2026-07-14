@@ -1,91 +1,60 @@
 {
   "rules": {
+    ".read": false,
+    ".write": false,
+
+    "config": {
+      ".read": false,
+      ".write": false
+    },
+
+    "projects": {
+      ".read": "auth != null",
+      "$projectId": {
+        ".write": "auth != null"
+      }
+    },
+
     "conversations": {
       "$personaId": {
-        ".read": true,
-        ".write": true,
+        ".read": "auth != null",
+        ".write": "auth != null",
         ".indexOn": ["timestamp"],
         "$conversationId": {
           ".validate": "newData.hasChildren(['userMessage', 'aiResponse', 'timestamp'])"
         }
       }
     },
-    "knowledge_graphs": {
-      "$personaId": {
-        ".read": true,
-        ".write": true
-      }
-    },
     "knowledge_graph": {
-      "$personaId": {
-        ".read": true,
-        ".write": true
-      }
+      "$personaId": { ".read": "auth != null", ".write": "auth != null" }
+    },
+    "knowledge_graphs": {
+      "$personaId": { ".read": "auth != null", ".write": "auth != null" }
     },
     "personalities": {
-      "$personaId": {
-        ".read": true,
-        ".write": true
-      }
+      "$personaId": { ".read": "auth != null", ".write": "auth != null" }
     },
     "memory": {
-      "buffers": {
-        "$personaId": {
-          ".read": true,
-          ".write": true
-        }
-      },
-      "shards": {
-        "$personaId": {
-          ".read": true,
-          ".write": true
-        }
-      },
-      "embeddings": {
-        "$personaId": {
-          ".read": true,
-          ".write": true
-        }
-      },
-      "facts": {
-        "$personaId": {
-          ".read": true,
-          ".write": true
-        }
-      },
-      "daily": {
-        "$personaId": {
-          ".read": true,
-          ".write": true
-        }
-      }
+      "buffers":    { "$personaId": { ".read": "auth != null", ".write": "auth != null" } },
+      "shards":     { "$personaId": { ".read": "auth != null", ".write": "auth != null" } },
+      "embeddings": { "$personaId": { ".read": "auth != null", ".write": "auth != null" } },
+      "facts":      { "$personaId": { ".read": "auth != null", ".write": "auth != null" } },
+      "daily":      { "$personaId": { ".read": "auth != null", ".write": "auth != null" } }
     },
     "kai": {
       "$personaId": {
-        ".read": true,
-        ".write": true,
-        "journal": {
-          ".indexOn": ["timestamp"]
-        },
-        "emotional_events": {
-          ".indexOn": ["timestamp"]
-        },
-        "state": {
-          ".read": true,
-          ".write": true
-        },
-        "proactive_queue": {
-          ".indexOn": ["delivered"]
-        }
+        ".read": "auth != null",
+        ".write": "auth != null",
+        "journal":          { ".indexOn": ["timestamp"] },
+        "emotional_events": { ".indexOn": ["timestamp"] },
+        "proactive_queue":  { ".indexOn": ["delivered"] }
       }
     },
-    "analytics": {
-      ".read": true,
-      ".write": true
-    },
     "home_automation": {
-      ".read": true,
-      ".write": true
-    }
+      "$personaId": { ".read": "auth != null", ".write": "auth != null" }
+    },
+    "devices":   { ".read": "auth != null", ".write": "auth != null" },
+    "usage":     { ".read": "auth != null", ".write": "auth != null" },
+    "analytics": { ".read": "auth != null", ".write": "auth != null" }
   }
 }

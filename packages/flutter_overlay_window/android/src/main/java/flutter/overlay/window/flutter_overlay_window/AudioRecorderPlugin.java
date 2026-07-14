@@ -163,6 +163,10 @@ public class AudioRecorderPlugin {
                     Boolean isRec = (Boolean) audioService.getClass().getMethod("isRecording").invoke(audioService);
                     result.success(isRec);
                     break;
+                case "getAmplitude":
+                    Integer amp = (Integer) audioService.getClass().getMethod("getAmplitude").invoke(audioService);
+                    result.success(amp != null ? amp : 0);
+                    break;
                 default:
                     result.notImplemented();
                     break;

@@ -1,0 +1,627 @@
+// Brain3DScreen
+// Renders Kai's knowledge graph as an interactive 3D force-directed graph
+// using Three.js via WebView. Touch to rotate, pinch to zoom, tap nodes to inspect.
+//
+// Uses 3d-force-graph (vasturiano) — Three.js + OrbitControls under the hood.
+// Graph data is loaded from Firebase and injected into the HTML at render time.
+
+import 'dart:convert';
+import 'package:flutter/material.dart';
+import 'package:webview_flutter/webview_flutter.dart';
+import 'package:firebase_database/firebase_database.dart';
+import '../services/core/firebase_service.dart';
+import '../services/core/brain_extraction_service.dart';
+import '../tools/brain_backfill.dart';
+import 'chatgpt_import_screen.dart';
+
+List<dynamic> _asList(dynamic v) {
+  if (v is List) return v;
+  if (v is Map) return v.values.toList();
+  return [];
+}
+
+class Brain3DScreen extends StatefulWidget {
+  final String personaId;
+  const Brain3DScreen({super.key, required this.personaId});
+
+  @override
+  State<Brain3DScreen> createState() => _Brain3DScreenState();
+}
+
+class _Brain3DScreenState extends State<Brain3DScreen> {
+  WebViewController? _controller;
+  bool _loading = true;
+  String? _error;
+
+  // Backfill state
+  bool _backfilling = false;
+  String? _backfillStatus;
+
+  // Label overlay toggle
+  bool _showLabels = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _initGraph();
+  }
+
+  Future<void> _initGraph() async {
+    try {
+      final graphData = await _loadGraphData();
+      final html = _buildHtml(graphData);
+
+      final controller = WebViewController()
+        ..setJavaScriptMode(JavaScriptMode.unrestricted)
+        ..setBackgroundColor(const Color(0xFF000011))
+        ..loadHtmlString(html, baseUrl: 'https://localhost');
+
+      if (mounted) {
+        setState(() {
+          _controller = controller;
+          _loading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _error = e.toString();
+          _loading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _runBackfill() async {
+    if (_backfilling) return;
+    setState(() {
+      _backfilling = true;
+      _backfillStatus = 'Starting…';
+    });
+
+    try {
+      final result = await BrainBackfill.run(
+        widget.personaId,
+        onProgress: (msg) {
+          if (mounted) setState(() => _backfillStatus = msg);
+        },
+      );
+
+      if (mounted) {
+        setState(() {
+          _backfilling = false;
+          _backfillStatus =
+              'Done — ${result.written} turns extracted, ${result.skipped} skipped.';
+        });
+        // Reload the graph to show new nodes
+        await Future.delayed(const Duration(seconds: 2));
+        if (mounted) {
+          setState(() {
+            _backfillStatus = null;
+            _loading = true;
+          });
+          _initGraph();
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _backfilling = false;
+          _backfillStatus = 'Error: $e';
+        });
+      }
+    }
+  }
+
+  Future<void> _runPrune() async {
+    if (_backfilling) return;
+    setState(() {
+      _backfilling = true;
+      _backfillStatus = 'Pruning noise nodes…';
+    });
+    try {
+      final removed = await BrainExtractionService().pruneGraph(widget.personaId);
+      if (mounted) {
+        setState(() {
+          _backfilling = false;
+          _backfillStatus = removed > 0
+              ? 'Pruned $removed noise nodes.'
+              : 'Nothing to prune — graph is clean.';
+        });
+        if (removed > 0) {
+          await Future.delayed(const Duration(seconds: 2));
+          if (mounted) {
+            setState(() { _backfillStatus = null; _loading = true; });
+            _initGraph();
+          }
+        } else {
+          await Future.delayed(const Duration(seconds: 2));
+          if (mounted) setState(() => _backfillStatus = null);
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() { _backfilling = false; _backfillStatus = 'Error: $e'; });
+      }
+    }
+  }
+
+  Future<Map<String, dynamic>> _loadGraphData() async {
+    if (!FirebaseService.isAvailable) {
+      return {'nodes': [], 'links': []};
+    }
+
+    final snap = await FirebaseDatabase.instance
+        .ref('knowledge_graph/${widget.personaId}')
+        .get();
+
+    if (!snap.exists || snap.value == null) {
+      return {'nodes': [], 'links': []};
+    }
+
+    final raw = Map<String, dynamic>.from(snap.value as Map);
+
+    // Build nodes list
+    final nodes = <Map<String, dynamic>>[];
+    for (final n in _asList(raw['nodes'])) {
+      final m = Map<String, dynamic>.from(n as Map);
+      final meta = m['metadata'] as Map?;
+      nodes.add({
+        'id':         m['id'],
+        'label':      m['label'] ?? '',
+        'type':       m['type'] ?? 'concept',
+        'importance': (m['importance'] as num?)?.toDouble() ?? 0.5,
+        // Age data — used for vitality-based brightness in the 3D renderer
+        'lastSeen':   meta?['lastSeen'],  // ms epoch of last access
+        'timestamp':  m['timestamp'],      // ms epoch of creation
+      });
+    }
+
+    // Build links list (3d-force-graph uses 'source'/'target')
+    final links = <Map<String, dynamic>>[];
+    for (final e in _asList(raw['edges'])) {
+      final m = Map<String, dynamic>.from(e as Map);
+      links.add({
+        'source':   m['fromId'],
+        'target':   m['toId'],
+        'relation': m['label'] ?? '',
+        'strength': (m['strength'] as num?)?.toDouble() ?? 0.5,
+      });
+    }
+
+    return {'nodes': nodes, 'links': links};
+  }
+
+  String _buildHtml(Map<String, dynamic> graphData) {
+    final jsonData = jsonEncode(graphData);
+    final nodeCount = (graphData['nodes'] as List).length;
+
+    return '''<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000011; overflow: hidden; font-family: -apple-system, sans-serif; }
+  #graph { width: 100vw; height: 100vh; }
+  #info {
+    position: fixed; top: 12px; left: 12px;
+    color: rgba(255,231,176,0.4); font-size: 11px; letter-spacing: 1px;
+    pointer-events: none;
+  }
+  #tooltip {
+    position: fixed; display: none;
+    background: rgba(10,8,5,0.92); border: 1px solid rgba(255,231,176,0.3);
+    color: #FFE7B0; padding: 10px 14px; border-radius: 10px;
+    font-size: 13px; pointer-events: none; max-width: 220px;
+    bottom: 100px; left: 50%; transform: translateX(-50%);
+  }
+  /* Zoom controls bottom-right */
+  #zoom-controls {
+    position: fixed; bottom: 32px; right: 20px;
+    display: flex; flex-direction: column; gap: 8px;
+    z-index: 100;
+  }
+  .zoom-btn {
+    width: 44px; height: 44px;
+    background: rgba(13,10,7,0.85);
+    border: 1px solid rgba(255,231,176,0.35);
+    border-radius: 12px;
+    color: #FFE7B0; font-size: 20px; line-height: 44px; text-align: center;
+    cursor: pointer; user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .zoom-btn:active { background: rgba(255,231,176,0.15); }
+  /* Fit-all button bottom-left */
+  #fit-btn {
+    position: fixed; bottom: 32px; left: 20px;
+    background: rgba(13,10,7,0.85);
+    border: 1px solid rgba(255,231,176,0.35);
+    border-radius: 12px;
+    color: rgba(255,231,176,0.8); font-size: 11px; letter-spacing: 0.5px;
+    padding: 10px 14px; cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    z-index: 100;
+  }
+  #fit-btn:active { background: rgba(255,231,176,0.15); }
+</style>
+</head>
+<body>
+<div id="graph"></div>
+<div id="info">${nodeCount} nodes</div>
+<div id="tooltip"></div>
+
+<div id="zoom-controls">
+  <div class="zoom-btn" id="zoom-in">+</div>
+  <div class="zoom-btn" id="zoom-out">−</div>
+</div>
+<div id="fit-btn">⊙ Fit all</div>
+
+<script src="https://unpkg.com/3d-force-graph@1.73.4/dist/3d-force-graph.min.js"></script>
+<script>
+const graphData = $jsonData;
+
+const tooltip = document.getElementById('tooltip');
+
+// Label visibility state — toggled by toggleLabels()
+let showLabels = false;
+
+// ── Vitality-based node color ──────────────────────────────────────────────
+// Each node's color is determined by two factors:
+//   • Type (sets the hue — preserves color identity)
+//   • Vitality (sets saturation + lightness — newest/most-important = bright,
+//     oldest/forgotten = dim)
+//
+// Vitality = weighted blend of importance (0.65) + freshness (0.35)
+// Freshness decays linearly over 45 days of no access.
+//
+// Result: nodes glow gold-bright when fresh; fade to dim blue-gray when stale.
+
+const typeHues = {
+  concept:    200,  // sky blue
+  emotion:    35,   // amber
+  belief:     260,  // violet
+  memory:     120,  // mint green
+  question:   50,   // gold
+  goal:       300,  // rose
+  preference: 5,    // coral
+  insight:    210,  // steel blue
+  person:     0,    // achromatic (white → dark gray)
+  topic:      200,  // sky blue
+  value:      35,   // amber
+  pattern:    260,  // violet
+  fact:       0,    // gray
+  event:      130,  // pale green
+  location:   55,   // khaki
+};
+
+function nodeVitality(node) {
+  const imp      = node.importance || 0.5;
+  const lastSeen = node.lastSeen || node.timestamp || Date.now();
+  const ageDays  = Math.max(0, (Date.now() - lastSeen) / 86400000);
+  const fresh    = Math.max(0, 1.0 - ageDays / 45.0); // 1.0 → 0.0 over 45 days
+  return Math.min(1.0, imp * 0.65 + fresh * 0.35);
+}
+
+function nodeColorFn(node) {
+  const v = nodeVitality(node);
+  const hue = typeHues[node.type] || 200;
+  if (node.type === 'person' || node.type === 'fact') {
+    // Achromatic: bright white → dark charcoal
+    const l = Math.round(18 + v * 67);
+    return \`hsl(0, 0%, \${l}%)\`;
+  }
+  const sat   = Math.round(45 + v * 45);   // 45 % dim → 90 % vivid
+  const light = Math.round(18 + v * 52);   // 18 % dark → 70 % bright
+  return \`hsl(\${hue}, \${sat}%, \${light}%)\`;
+}
+
+// ── Canvas-based text sprite ───────────────────────────────────────────────
+// No external three-spritetext dependency — uses THREE directly (which 3d-force-graph
+// exposes globally as window.THREE in its UMD build).
+function makeTextSprite(text) {
+  if (!window.THREE) return null;
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  const fontSize = 26;
+  const pad = 6;
+  ctx.font = '600 ' + fontSize + 'px -apple-system, Helvetica Neue, sans-serif';
+  const textW = Math.ceil(ctx.measureText(text).width);
+  canvas.width  = textW + pad * 2;
+  canvas.height = fontSize + pad * 2;
+  // Redraw after canvas resize (resize clears the context state)
+  ctx.font = '600 ' + fontSize + 'px -apple-system, Helvetica Neue, sans-serif';
+  ctx.fillStyle = 'rgba(0,0,17,0.60)';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#FFE7B0';
+  ctx.fillText(text, pad, fontSize + pad * 0.55);
+  const texture  = new THREE.CanvasTexture(canvas);
+  const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false });
+  const sprite   = new THREE.Sprite(material);
+  const aspect   = canvas.width / canvas.height;
+  sprite.scale.set(aspect * 9, 9, 1);
+  return sprite;
+}
+
+const Graph = ForceGraph3D()(document.getElementById('graph'))
+  .backgroundColor('#000011')
+  .showNavInfo(false)
+
+  // Nodes
+  .nodeId('id')
+  .nodeLabel('')          // suppress the built-in hover tooltip (we tap to inspect)
+  .nodeColor(nodeColorFn)
+  .nodeVal(n => Math.pow((n.importance || 0.5) * 6, 2))
+  .nodeOpacity(0.92)
+  .nodeResolution(12)
+
+  // Label sprites — canvas-based THREE.Sprite floating above each node.
+  // nodeThreeObjectExtend(true) keeps the default sphere; returning null is safe.
+  .nodeThreeObjectExtend(true)
+  .nodeThreeObject(node => {
+    try {
+      const sprite = makeTextSprite(node.label || node.id || '');
+      if (!sprite) return null;
+      const r = Math.pow((node.importance || 0.5) * 6, 2);
+      sprite.position.set(0, Math.sqrt(r) + 5, 0);
+      sprite.visible = showLabels;
+      return sprite;
+    } catch (_) {
+      return null;  // fall back to default sphere — never crash node rendering
+    }
+  })
+
+  // Links — width and opacity both scale with strength so weak links fade into
+  // the background and strong connections stand clearly visible.
+  .linkSource('source')
+  .linkTarget('target')
+  .linkColor(l => {
+    const s = l.strength || 0.5;
+    // Weak links (0.1) → barely visible; strong links (1.0) → clearly amber
+    return \`rgba(255, 231, 176, \${(0.06 + s * 0.70).toFixed(2)})\`;
+  })
+  .linkWidth(l => Math.max(0.4, (l.strength || 0.5) * 3.5))
+  .linkOpacity(1.0)   // opacity handled per-link via linkColor rgba
+  .linkDirectionalParticles(l => Math.ceil((l.strength || 0.3) * 3))
+  .linkDirectionalParticleWidth(l => (l.strength || 0.3) * 2.0)
+  .linkDirectionalParticleColor(() => 'rgba(255,231,176,0.85)')
+  .linkDirectionalParticleSpeed(0.004)
+
+  // Interaction
+  .onNodeClick(node => {
+    const links = graphData.links.filter(
+      l => l.source === node.id || l.target === node.id ||
+           (l.source && l.source.id === node.id) ||
+           (l.target && l.target.id === node.id)
+    );
+    const connected = links.map(l => {
+      const other = (l.source.id || l.source) === node.id
+        ? (l.target.label || l.target) : (l.source.label || l.source);
+      return \`\${l.relation || '→'} \${other}\`;
+    }).slice(0, 5).join('<br>');
+    const v = nodeVitality(node);
+    const imp = ((node.importance || 0.5) * 100).toFixed(0);
+    const vPct = (v * 100).toFixed(0);
+    tooltip.innerHTML = \`<b>\${node.label}</b><br><span style="opacity:0.6">\${node.type} · imp \${imp}% · vitality \${vPct}%</span>\${connected ? '<br><br>' + connected : ''}\`;
+    tooltip.style.display = 'block';
+    setTimeout(() => tooltip.style.display = 'none', 3000);
+  })
+  .onBackgroundClick(() => { tooltip.style.display = 'none'; })
+
+  .graphData(graphData);
+
+// ── Force tuning: spread nodes out ────────────────────────────────────────
+Graph.d3Force('charge').strength(-200);        // stronger repulsion
+Graph.d3Force('link').distance(80);            // longer links
+Graph.d3Force('link').strength(0.15);          // softer link pull
+
+// No auto-rotation — it fights with mobile touch controls
+Graph.controls().autoRotate = false;
+
+// Fit all nodes into view after the simulation settles
+Graph.onEngineStop(() => {
+  Graph.zoomToFit(600, 60);
+});
+
+// ── Zoom buttons ──────────────────────────────────────────────────────────
+function zoomBy(factor) {
+  const cam = Graph.camera();
+  const controls = Graph.controls();
+  const pos = cam.position;
+  const dist = pos.length();
+  const newDist = Math.max(50, Math.min(2000, dist * factor));
+  const scale = newDist / dist;
+  cam.position.set(pos.x * scale, pos.y * scale, pos.z * scale);
+  controls.update();
+}
+
+document.getElementById('zoom-in').addEventListener('touchend', e => {
+  e.preventDefault(); zoomBy(0.7);
+}, { passive: false });
+document.getElementById('zoom-out').addEventListener('touchend', e => {
+  e.preventDefault(); zoomBy(1.4);
+}, { passive: false });
+document.getElementById('fit-btn').addEventListener('touchend', e => {
+  e.preventDefault(); Graph.zoomToFit(600, 60);
+}, { passive: false });
+
+// Also wire click for desktop/WebView testing
+document.getElementById('zoom-in').addEventListener('click', () => zoomBy(0.7));
+document.getElementById('zoom-out').addEventListener('click', () => zoomBy(1.4));
+document.getElementById('fit-btn').addEventListener('click', () => Graph.zoomToFit(600, 60));
+
+// ── Label toggle — called from Flutter via runJavaScript ──────────────────
+window.toggleLabels = function() {
+  showLabels = !showLabels;
+  // Walk the scene and flip visibility on every sprite
+  Graph.scene().traverse(obj => {
+    if (obj.isSprite) obj.visible = showLabels;
+  });
+};
+</script>
+</body>
+</html>''';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF000011),
+      extendBodyBehindAppBar: true,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new,
+              color: Color(0x88FFE7B0), size: 18),
+          onPressed: () => Navigator.pop(context),
+        ),
+        actions: [
+          // Import ChatGPT memories
+          IconButton(
+            icon: const Icon(Icons.cloud_download_outlined,
+                color: Color(0x88FFE7B0), size: 20),
+            tooltip: 'Import ChatGPT memories',
+            onPressed: () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) =>
+                      ChatGPTImportScreen(personaId: widget.personaId),
+                ),
+              );
+              // Reload graph after returning in case new nodes were added
+              setState(() => _loading = true);
+              _initGraph();
+            },
+          ),
+          // Retro-populate from conversation history
+          IconButton(
+            icon: _backfilling
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                        color: Color(0xFFFFE7B0), strokeWidth: 1.5))
+                : const Icon(Icons.history_edu_outlined,
+                    color: Color(0x88FFE7B0), size: 20),
+            tooltip: 'Build from history',
+            onPressed: _backfilling ? null : _runBackfill,
+          ),
+          // Prune noise nodes
+          IconButton(
+            icon: const Icon(Icons.auto_fix_high_outlined,
+                color: Color(0x66FFE7B0), size: 20),
+            tooltip: 'Prune noise nodes',
+            onPressed: _backfilling ? null : _runPrune,
+          ),
+          // Node label toggle
+          IconButton(
+            icon: Icon(
+              _showLabels ? Icons.label_rounded : Icons.label_outline,
+              color: _showLabels
+                  ? const Color(0xFFFFE7B0)
+                  : const Color(0x55FFE7B0),
+              size: 20,
+            ),
+            tooltip: _showLabels ? 'Hide labels' : 'Show labels',
+            onPressed: () {
+              setState(() => _showLabels = !_showLabels);
+              _controller?.runJavaScript('toggleLabels()');
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.fit_screen_outlined,
+                color: Color(0x88FFE7B0), size: 20),
+            tooltip: 'Fit all nodes',
+            onPressed: () => _controller?.runJavaScript('Graph.zoomToFit(600, 60)'),
+          ),
+          IconButton(
+            icon: const Icon(Icons.refresh,
+                color: Color(0x66FFE7B0), size: 20),
+            tooltip: 'Reload graph',
+            onPressed: () {
+              setState(() => _loading = true);
+              _initGraph();
+            },
+          ),
+        ],
+      ),
+      body: Stack(
+        children: [
+          if (_loading)
+            const Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  CircularProgressIndicator(
+                      color: Color(0xFFFFE7B0), strokeWidth: 1),
+                  SizedBox(height: 20),
+                  Text('Building brain…',
+                      style: TextStyle(
+                          color: Color(0x66FFE7B0),
+                          fontSize: 12,
+                          letterSpacing: 2)),
+                ],
+              ),
+            )
+          else if (_error != null)
+            Center(
+              child: Text(_error!,
+                  style: const TextStyle(color: Colors.redAccent)))
+          else
+            WebViewWidget(controller: _controller!),
+
+          // Backfill status banner
+          if (_backfillStatus != null)
+            Positioned(
+              bottom: 32,
+              left: 16,
+              right: 16,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.85),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                      color: const Color(0x44FFE7B0), width: 0.5),
+                ),
+                child: Row(
+                  children: [
+                    if (_backfilling)
+                      const Padding(
+                        padding: EdgeInsets.only(right: 10),
+                        child: SizedBox(
+                          width: 12,
+                          height: 12,
+                          child: CircularProgressIndicator(
+                              color: Color(0xFFFFE7B0), strokeWidth: 1.5),
+                        ),
+                      ),
+                    Expanded(
+                      child: Text(
+                        _backfillStatus!,
+                        style: const TextStyle(
+                            color: Color(0xAAFFE7B0),
+                            fontSize: 12,
+                            letterSpacing: 0.5),
+                      ),
+                    ),
+                    if (!_backfilling)
+                      GestureDetector(
+                        onTap: () =>
+                            setState(() => _backfillStatus = null),
+                        child: const Icon(Icons.close,
+                            color: Color(0x66FFE7B0), size: 16),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}

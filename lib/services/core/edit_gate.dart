@@ -1,0 +1,325 @@
+// EditGate — the permission gate for Kai's engineer mode (Phase 2).
+//
+// Every file mutation the Claude agent wants to make stops here first. The gate
+// computes a diff, shows an approve/reject dialog, and only writes to disk if
+// you say yes. Nothing is applied without explicit approval — and if no UI is
+// available to approve (e.g. a headless/background run), it defaults to REJECT.
+//
+// "Approve & trust this session" seeds Phase 3: it sets a per-run flag so the
+// agent can keep working in the same workspace without a prompt per edit. It
+// resets on app restart.
+
+import 'dart:math' as math;
+import 'package:flutter/material.dart';
+import 'code_workspace_service.dart';
+
+enum EditKind { create, overwrite, edit }
+
+class EditProposal {
+  final String path;
+  final EditKind kind;
+  final String? oldContent;
+  final String newContent;
+  EditProposal({
+    required this.path,
+    required this.kind,
+    required this.oldContent,
+    required this.newContent,
+  });
+}
+
+class EditGate {
+  static final EditGate instance = EditGate._();
+  EditGate._();
+
+  /// Registered on the app's MaterialApp so the gate can surface a dialog.
+  static final GlobalKey<NavigatorState> navigatorKey =
+      GlobalKey<NavigatorState>();
+
+  /// Set by "Approve & trust this session" — auto-approves for the rest of the
+  /// run. Resets on restart. (Phase 3 will make this a scoped, opt-in mode.)
+  bool trustSession = false;
+
+  // ── Public: what the agent's write/edit tools call ──────────────────────────
+  Future<String> proposeWrite(String rel, String content) async {
+    final ws = CodeWorkspaceService.instance;
+    final current = await ws.readRaw(rel);
+    final kind = current == null ? EditKind.create : EditKind.overwrite;
+    final ok = await _approve(EditProposal(
+        path: rel, kind: kind, oldContent: current, newContent: content));
+    if (!ok) return 'REJECTED by user — no changes made to $rel.';
+    return ws.writeRaw(rel, content);
+  }
+
+  Future<String> proposeEdit(String rel, String oldStr, String newStr) async {
+    final ws = CodeWorkspaceService.instance;
+    final current = await ws.readRaw(rel);
+    if (current == null) return 'Cannot edit — file not found/unreadable: $rel';
+    if (oldStr.isEmpty) return 'edit_file needs a non-empty old_string.';
+    final count = oldStr.allMatches(current).length;
+    if (count == 0) {
+      return 'old_string not found in $rel — read the file and copy the exact text.';
+    }
+    if (count > 1) {
+      return 'old_string appears $count times in $rel — add surrounding context '
+          'so it is unique.';
+    }
+    final updated = current.replaceFirst(oldStr, newStr);
+    final ok = await _approve(EditProposal(
+        path: rel, kind: EditKind.edit, oldContent: current, newContent: updated));
+    if (!ok) return 'REJECTED by user — no changes made to $rel.';
+    return ws.writeRaw(rel, updated);
+  }
+
+  // ── Commands (Phase 3) ───────────────────────────────────────────────────────
+  // Read-only commands run automatically; anything else needs approval (unless
+  // the session is trusted). Commands run without a shell, so the whitelist is a
+  // simple executable/subcommand check.
+  bool _isSafeCommand(String command, List<String> args) {
+    final c = command.toLowerCase();
+    final sub = args.isNotEmpty ? args.first.toLowerCase() : '';
+    if (c == 'git') {
+      return {'status', 'diff', 'log', 'show', 'branch', 'remote'}.contains(sub);
+    }
+    if (c == 'flutter' || c == 'dart') return sub == 'analyze';
+    return {'ls', 'dir', 'pwd', 'cat', 'type', 'head', 'tail'}.contains(c);
+  }
+
+  Future<String> proposeCommand(String command, List<String> args) async {
+    if (!CodeWorkspaceService.shellSupported) {
+      return 'Shell commands are only available on desktop.';
+    }
+    final line = ([command, ...args]).join(' ');
+    if (!trustSession && !_isSafeCommand(command, args)) {
+      final ctx = navigatorKey.currentContext;
+      if (ctx == null) return 'REJECTED — no UI to approve: $line';
+      final res = await showDialog<String>(
+        context: ctx,
+        barrierDismissible: false,
+        builder: (_) => _CommandDialog(line: line),
+      );
+      if (res == 'trust') {
+        trustSession = true;
+      } else if (res != 'approve') {
+        return 'REJECTED by user — command not run: $line';
+      }
+    }
+    return CodeWorkspaceService.instance.runCommandRaw(command, args);
+  }
+
+  // ── Approval ────────────────────────────────────────────────────────────────
+  Future<bool> _approve(EditProposal p) async {
+    if (trustSession) return true;
+    final ctx = navigatorKey.currentContext;
+    if (ctx == null) return false; // no UI → safe reject
+    final res = await showDialog<String>(
+      context: ctx,
+      barrierDismissible: false,
+      builder: (_) => _ApprovalDialog(proposal: p),
+    );
+    if (res == 'trust') {
+      trustSession = true;
+      return true;
+    }
+    return res == 'approve';
+  }
+}
+
+// ── Command approval dialog ─────────────────────────────────────────────────
+class _CommandDialog extends StatelessWidget {
+  final String line;
+  const _CommandDialog({required this.line});
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: const Color(0xFF12161F),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(color: Colors.amber.withOpacity(0.4)),
+      ),
+      title: Row(
+        children: const [
+          Icon(Icons.terminal, color: Color(0xFFFFBF47), size: 20),
+          SizedBox(width: 8),
+          Text('Kai wants to run a command',
+              style: TextStyle(color: Colors.white, fontSize: 15)),
+        ],
+      ),
+      content: Container(
+        width: 520,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: const Color(0xFF0A0D14),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.white10),
+        ),
+        child: Text(
+          '\$ $line',
+          style: const TextStyle(
+              color: Color(0xFF9BD0FF), fontFamily: 'monospace', fontSize: 12.5),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop('reject'),
+          child: const Text('Reject', style: TextStyle(color: Colors.white54)),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop('trust'),
+          child: const Text('Run & trust session',
+              style: TextStyle(color: Color(0xFF9BD0FF))),
+        ),
+        ElevatedButton(
+          onPressed: () => Navigator.of(context).pop('approve'),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFFFFBF47),
+            foregroundColor: const Color(0xFF12161F),
+          ),
+          child: const Text('Run'),
+        ),
+      ],
+    );
+  }
+}
+
+// ── Diff ──────────────────────────────────────────────────────────────────────
+class _DiffLine {
+  final String sign; // ' ' | '-' | '+'
+  final String text;
+  _DiffLine(this.sign, this.text);
+}
+
+List<_DiffLine> _computeDiff(String? oldC, String newC) {
+  final o = (oldC ?? '').split('\n');
+  final n = newC.split('\n');
+  if (oldC == null) return [for (final l in n) _DiffLine('+', l)];
+  int p = 0;
+  while (p < o.length && p < n.length && o[p] == n[p]) {
+    p++;
+  }
+  int s = 0;
+  while (s < o.length - p && s < n.length - p && o[o.length - 1 - s] == n[n.length - 1 - s]) {
+    s++;
+  }
+  final out = <_DiffLine>[];
+  for (int i = math.max(0, p - 2); i < p; i++) {
+    out.add(_DiffLine(' ', o[i]));
+  }
+  for (int i = p; i < o.length - s; i++) {
+    out.add(_DiffLine('-', o[i]));
+  }
+  for (int i = p; i < n.length - s; i++) {
+    out.add(_DiffLine('+', n[i]));
+  }
+  for (int i = o.length - s; i < math.min(o.length, o.length - s + 2); i++) {
+    out.add(_DiffLine(' ', o[i]));
+  }
+  if (out.length > 400) {
+    return [...out.take(400), _DiffLine(' ', '… (diff truncated)')];
+  }
+  return out;
+}
+
+class _ApprovalDialog extends StatelessWidget {
+  final EditProposal proposal;
+  const _ApprovalDialog({required this.proposal});
+
+  @override
+  Widget build(BuildContext context) {
+    final diff = _computeDiff(proposal.oldContent, proposal.newContent);
+    final kindLabel = {
+      EditKind.create: 'CREATE',
+      EditKind.overwrite: 'OVERWRITE',
+      EditKind.edit: 'EDIT',
+    }[proposal.kind]!;
+    final added = diff.where((d) => d.sign == '+').length;
+    final removed = diff.where((d) => d.sign == '-').length;
+
+    return AlertDialog(
+      backgroundColor: const Color(0xFF12161F),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(color: Colors.amber.withOpacity(0.4)),
+      ),
+      title: Row(
+        children: [
+          const Icon(Icons.shield_outlined, color: Color(0xFFFFBF47), size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text('Kai wants to $kindLabel a file',
+                style: const TextStyle(color: Colors.white, fontSize: 15)),
+          ),
+        ],
+      ),
+      content: SizedBox(
+        width: 560,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(proposal.path,
+                style: const TextStyle(
+                    color: Color(0xFFFFE7B0),
+                    fontFamily: 'monospace',
+                    fontSize: 12.5)),
+            const SizedBox(height: 4),
+            Text('+$added  −$removed',
+                style: const TextStyle(color: Colors.white54, fontSize: 11)),
+            const SizedBox(height: 10),
+            Container(
+              constraints: const BoxConstraints(maxHeight: 320),
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0A0D14),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.white10),
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    for (final d in diff)
+                      Text(
+                        '${d.sign} ${d.text}',
+                        style: TextStyle(
+                          fontFamily: 'monospace',
+                          fontSize: 11.5,
+                          height: 1.35,
+                          color: d.sign == '+'
+                              ? const Color(0xFF7EE787)
+                              : d.sign == '-'
+                                  ? const Color(0xFFFF7B72)
+                                  : Colors.white38,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop('reject'),
+          child: const Text('Reject', style: TextStyle(color: Colors.white54)),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop('trust'),
+          child: const Text('Approve & trust session',
+              style: TextStyle(color: Color(0xFF9BD0FF))),
+        ),
+        ElevatedButton(
+          onPressed: () => Navigator.of(context).pop('approve'),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFFFFBF47),
+            foregroundColor: const Color(0xFF12161F),
+          ),
+          child: const Text('Approve'),
+        ),
+      ],
+    );
+  }
+}

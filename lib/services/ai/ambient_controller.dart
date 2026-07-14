@@ -206,7 +206,7 @@ class AmbientController {
 
       print('🎵 [AMBIENT] Extracted YouTube search: "$searchQuery"');
       await HomeAutomationService().sendCommand(
-        personaId: 'kai',
+        personaId: 'truekai',
         deviceId: 'raspberry_pi_home',
         target: 'music',
         action: 'play_youtube',
@@ -276,7 +276,7 @@ class AmbientController {
       }
 
       await HomeAutomationService().sendCommand(
-        personaId: 'kai',
+        personaId: 'truekai',
         deviceId: 'raspberry_pi_home',
         target: 'music',
         action: action,
@@ -335,7 +335,7 @@ class AmbientController {
 
       print('🎨 [AMBIENT] Detected color: $detectedColor');
       await HomeAutomationService().sendCommand(
-        personaId: 'kai',
+        personaId: 'truekai',
         deviceId: 'raspberry_pi_home',
         target: 'lights',
         action: 'set_lighting',
@@ -447,7 +447,7 @@ class AmbientController {
       print('❌ [DYNAMIC_AMBIENT] HTTP command failed: $e — trying Firebase fallback');
       try {
         await HomeAutomationService().sendCommand(
-          personaId: 'kai',
+          personaId: 'truekai',
           deviceId: 'led_strip_main',
           target: 'lighting',
           action: 'dynamic_ambient',
@@ -554,7 +554,7 @@ class AmbientController {
       print('❌ [DYNAMIC_AMBIENT] Audio HTTP command failed: $e — trying Firebase fallback');
       try {
         await HomeAutomationService().sendCommand(
-          personaId: 'kai',
+          personaId: 'truekai',
           deviceId: 'pi_audio_system',
           target: 'audio',
           action: 'play_ambient_video',

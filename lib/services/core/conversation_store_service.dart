@@ -14,6 +14,7 @@
 library;
 
 import 'package:firebase_database/firebase_database.dart';
+import 'kai_db.dart';
 import 'firebase_service.dart';
 
 class ConversationStoreService {
@@ -28,8 +29,8 @@ class ConversationStoreService {
   final Map<String, List<String>> _sessionBuffer = {};
   final Map<String, bool> _loaded = {};
 
-  static FirebaseDatabase? get _db =>
-      FirebaseService.isAvailable ? FirebaseDatabase.instance : null;
+  static KaiDb? get _db =>
+      FirebaseService.isAvailable ? KaiDb.instance : null;
 
   static String _path(String personaId) => 'conversations/$personaId';
 

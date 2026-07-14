@@ -10,6 +10,7 @@ library;
 
 import 'package:dio/dio.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'kai_db.dart';
 import 'firebase_service.dart';
 import '../ai/ai_config.dart';
 import '../ai/usage_tracking_service.dart';
@@ -102,8 +103,8 @@ class JournalService {
 
   final _dio = Dio();
 
-  static FirebaseDatabase? get _db =>
-      FirebaseService.isAvailable ? FirebaseDatabase.instance : null;
+  static KaiDb? get _db =>
+      FirebaseService.isAvailable ? KaiDb.instance : null;
 
   static String _path(String personaId) => 'kai/$personaId/journal';
 

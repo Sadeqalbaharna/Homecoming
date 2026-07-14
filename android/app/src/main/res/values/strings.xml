@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Homecoming</string>
+    <string name="accessibility_service_description">
+        Lets Kai read what\'s on your screen so he can help you with emails,
+        messages, articles, and anything else you\'re looking at.
+    </string>
+</resources>

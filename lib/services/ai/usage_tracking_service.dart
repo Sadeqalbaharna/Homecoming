@@ -5,6 +5,7 @@
 import 'dart:async' show unawaited;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_database/firebase_database.dart';
+import '../core/kai_db.dart';
 import '../core/firebase_service.dart';
 
 class UsageTrackingService {
@@ -77,9 +78,9 @@ class UsageTrackingService {
   }
 
   /// Firebase ref for a monthly field. Path: usage/monthly/{YYYY-MM}/{field}
-  static DatabaseReference? _fbMonthly(String monthKey, String field) {
+  static KaiRef? _fbMonthly(String monthKey, String field) {
     if (!FirebaseService.isAvailable) return null;
-    return FirebaseDatabase.instance.ref('usage/monthly/$monthKey/$field');
+    return KaiDb.instance.ref('usage/monthly/$monthKey/$field');
   }
 
   /// Atomically increment a numeric Firebase field (safe across devices).
@@ -97,7 +98,7 @@ class UsageTrackingService {
     // Read from Firebase (source of truth across devices)
     if (FirebaseService.isAvailable) {
       try {
-        final snap = await FirebaseDatabase.instance
+        final snap = await KaiDb.instance
             .ref('usage/monthly/$key')
             .get();
         if (snap.exists && snap.value != null) {

@@ -15,7 +15,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 
-import 'widgets/flame_avatar.dart';
+import 'widgets/flame_frame_animation.dart';
 
 @pragma('vm:entry-point')
 void overlayMain() {
@@ -65,14 +65,14 @@ class _FlameOverlayState extends State<_FlameOverlay> {
 
   @override
   Widget build(BuildContext context) {
-    // No Scaffold or Material — just the flame on a fully transparent canvas.
+    // No Scaffold or Material — just the animation on a fully transparent canvas.
     return Material(
       color: Colors.transparent,
-      child: Center(
-        child: FlameAvatarCompact(
-          size: 64,
+      child: GestureDetector(
+        onTap: _onTap,
+        child: FlameFrameAnimation(
+          size: 90,
           urgent: _hasPending,
-          onTap: _onTap,
         ),
       ),
     );

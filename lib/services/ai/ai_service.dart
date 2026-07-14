@@ -8,17 +8,23 @@ import 'dart:math';
 import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_database/firebase_database.dart';
+import '../core/kai_db.dart';
 import '../core/firebase_service.dart';
 import '../core/emotional_event_service.dart';
 import '../core/journal_service.dart';
 import '../core/conversation_store_service.dart';
 import '../core/brain_extraction_service.dart';
 import '../core/memory_consolidation_service.dart';
+import '../core/default_mode_service.dart';
 import 'usage_tracking_service.dart';
+import '../core/cortex_activity_bus.dart';
 import 'memory_service.dart';
 import 'curiosity_service.dart';
 import 'google_search_service.dart';
 import '../core/web_fetch_service.dart';
+import '../core/tool_executor_service.dart';
+import 'task_planner_service.dart';
+import '../core/context_injection_service.dart';
 import '../brain_debug_service.dart';
 import '../media/ambiance_service.dart';
 import 'kai_consciousness_service.dart';
@@ -111,6 +117,12 @@ class AIService {
   final _journal = JournalService();
   final _convStore = ConversationStoreService();
   final _brain = BrainExtractionService();
+  final _dmn   = DefaultModeService();
+  final _rng   = Random();
+
+  // Pending thought from DMN wandering (set in bootstrapPersona, consumed once
+  // in the first system prompt of the session, then cleared).
+  String? _pendingThought;
 
   AIService() {
     _dio = Dio(BaseOptions(
@@ -174,6 +186,9 @@ class AIService {
       throw Exception('OpenAI API key not configured');
     }
 
+    // Light the left (GPT) hemisphere in the cortex viz.
+    CortexActivityBus.instance.brain(CortexBrain.gpt);
+
     try {
       final response = await _dio.post(
         'https://api.openai.com/v1/chat/completions',
@@ -218,6 +233,208 @@ class AIService {
       print('OpenAI API error: $e');
       throw Exception('Failed to get AI response: $e');
     }
+  }
+
+  // ── Agentic loop — tool-aware GPT call ─────────────────────────────────────
+  //
+  // Sends the conversation to GPT with tool definitions attached.
+  // If GPT responds with tool_calls instead of text, we:
+  //   1. Execute each requested tool via ToolExecutorService
+  //   2. Append the results as tool-role messages
+  //   3. Call GPT again — repeat until plain text response or max iterations
+  //
+  // The caller receives only the final text reply, so everything downstream
+  // (TTS, personality deltas, etc.) is unchanged.
+
+  Future<String> _callOpenAIWithTools({
+    required List<Map<String, dynamic>> messages,
+    required String model,
+    Map<String, int>? usageOut,
+    int maxIterations = 8,
+    void Function(String toolName)? onToolCall,
+    void Function(KaiPlan plan)? onPlanUpdate,
+  }) async {
+    final openaiKey = await AIConfig.getOpenAIKey();
+    if (openaiKey.isEmpty) throw Exception('OpenAI API key not configured');
+
+    // Light the left (GPT) hemisphere while the tool loop runs.
+    CortexActivityBus.instance.brain(CortexBrain.gpt);
+
+    // Tool dispatch uses the cheaper/faster mini model.
+    // The full model is only used for the final synthesis reply (no tool calls).
+    const dispatchModel  = 'gpt-4o-mini';
+
+    final toolExecutor = ToolExecutorService();
+    var currentMessages  = List<Map<String, dynamic>>.from(messages);
+    int toolCallCount    = 0;         // total tools executed across all iterations
+    String? lastToolResult;           // result of the most recent single tool call
+    final List<String> _toolSummaries = []; // for fallback reply if synthesis fails
+
+    for (int iteration = 0; iteration < maxIterations; iteration++) {
+      // Use dispatch model while tools are being called; switch to the requested
+      // model for the final synthesis pass (when we expect a plain text reply).
+      final iterModel = toolCallCount == 0 ? dispatchModel : model;
+      print('🤖 [Agentic] Iteration ${iteration + 1}/$maxIterations '
+            '(model: $iterModel) — ${currentMessages.length} messages');
+
+      // Retry up to 2 times on network-level errors (socket abort, timeout, etc.)
+      Response? response;
+      for (int attempt = 0; attempt < 3; attempt++) {
+        try {
+          response = await _dio.post(
+            'https://api.openai.com/v1/chat/completions',
+            options: Options(headers: {
+              'Authorization': 'Bearer $openaiKey',
+              'Content-Type': 'application/json',
+            }),
+            data: {
+              'model': iterModel,
+              'messages': currentMessages,
+              'tools': ToolExecutorService.toolDefinitions,
+              'tool_choice': 'auto',
+              'max_tokens': toolCallCount == 0 ? 500 : 1000,
+              'temperature': 0.7,
+            },
+          );
+          break; // success
+        } on DioException catch (e) {
+          final isNetworkError = e.type == DioExceptionType.unknown ||
+              e.type == DioExceptionType.connectionTimeout ||
+              e.type == DioExceptionType.receiveTimeout;
+          if (isNetworkError && attempt < 2) {
+            print('⚠️ [Agentic] Network error on attempt ${attempt + 1}, retrying… ($e)');
+            await Future.delayed(Duration(seconds: attempt + 1));
+            continue;
+          }
+          // All retries exhausted — if we already completed tools, return a
+          // fallback summary rather than surfacing a raw error to the user.
+          if (_toolSummaries.isNotEmpty) {
+            print('⚠️ [Agentic] Synthesis failed after retries — using tool-result fallback');
+            return _toolSummaries.join(' ');
+          }
+          rethrow;
+        }
+      }
+
+      if (response == null) break; // shouldn't happen — rethrow above handles it
+
+      // Accumulate token usage across iterations
+      final usage = response.data['usage'];
+      if (usage != null) {
+        final inTok  = usage['prompt_tokens']     as int? ?? 0;
+        final outTok = usage['completion_tokens'] as int? ?? 0;
+        await UsageTrackingService.trackOpenAI(
+          model: iterModel, inputTokens: inTok, outputTokens: outTok, operation: 'chat',
+        );
+        if (usageOut != null) {
+          usageOut['input']  = (usageOut['input']  ?? 0) + inTok;
+          usageOut['output'] = (usageOut['output'] ?? 0) + outTok;
+        }
+      }
+
+      final choice     = (response.data['choices'] as List)[0];
+      final message    = choice['message'] as Map<String, dynamic>;
+      final stopReason = choice['finish_reason'] as String? ?? '';
+
+      if (stopReason != 'tool_calls') {
+        // GPT returned a plain text reply — we're done.
+        // Fast path: if exactly one simple tool ran, skip the synthesis call
+        // and return the tool result directly (saves a full GPT-4o round-trip).
+        if (toolCallCount == 1 && lastToolResult != null &&
+            _isSimpleToolResult(lastToolResult!)) {
+          print('⚡ [Agentic] Single-tool fast path — skipping synthesis call');
+          return lastToolResult!;
+        }
+        var reply = message['content'] as String? ?? '';
+
+        // If a tool returned a [CHOICES:] marker and Kai forgot to include it
+        // in his synthesis, append it so the UI can render choice buttons.
+        if (!reply.contains('[CHOICES:')) {
+          final choiceSource = _toolSummaries.lastWhere(
+            (r) => r.contains('[CHOICES:'),
+            orElse: () => '',
+          );
+          if (choiceSource.isNotEmpty) {
+            final m = RegExp(r'\[CHOICES:[^\]]+\]').firstMatch(choiceSource);
+            if (m != null) reply = '$reply ${m.group(0)}';
+          }
+        }
+
+        print('✅ [Agentic] Done after ${iteration + 1} iteration(s). Reply: ${reply.length} chars');
+        return reply;
+      }
+
+      // GPT wants to call one or more tools
+      final toolCalls = message['tool_calls'] as List? ?? [];
+      print('🔧 [Agentic] GPT requested ${toolCalls.length} tool call(s)');
+
+      // Append the assistant's tool_calls message to history
+      currentMessages.add(Map<String, dynamic>.from(message));
+
+      // Execute each tool and append the result
+      for (final tc in toolCalls) {
+        final tcId      = tc['id']                    as String;
+        final fnName    = tc['function']['name']       as String;
+        final fnArgsRaw = tc['function']['arguments']  as String? ?? '{}';
+
+        Map<String, dynamic> fnArgs;
+        try {
+          fnArgs = Map<String, dynamic>.from(jsonDecode(fnArgsRaw) as Map);
+        } catch (_) {
+          fnArgs = {};
+        }
+
+        print('🔧 [Agentic] Calling tool: $fnName($fnArgs)');
+        onToolCall?.call(fnName);
+
+        String toolResult;
+
+        if (fnName == 'create_plan') {
+          // ── Multi-step planning: build plan, execute steps, stream UI updates ──
+          print('📋 [Agentic] create_plan intercepted — running TaskPlannerService');
+          final plan = KaiPlan.fromMap(fnArgs);
+          onPlanUpdate?.call(plan); // show card immediately (all steps pending)
+
+          toolResult = await TaskPlannerService().executePlan(
+            plan,
+            toolExecutor,
+            onStepUpdate: (updatedPlan, _) => onPlanUpdate?.call(updatedPlan),
+          );
+          onPlanUpdate?.call(plan); // final state
+          print('✅ [Agentic] Plan complete — ${plan.steps.length} step(s) executed');
+        } else {
+          toolResult = await toolExecutor.execute(fnName, fnArgs);
+          print('✅ [Agentic] Tool result ($fnName): '
+              '${toolResult.length > 120 ? "${toolResult.substring(0, 120)}…" : toolResult}');
+        }
+
+        toolCallCount++;
+        lastToolResult = toolResult;
+        _toolSummaries.add(toolResult);
+
+        currentMessages.add({
+          'role':         'tool',
+          'tool_call_id': tcId,
+          'content':      toolResult,
+        });
+      }
+      // Loop → GPT now sees the tool results and will respond
+    }
+
+    print('⚠️ [Agentic] Exhausted $maxIterations iterations');
+    return "I ran into a snag processing that. Could you try again?";
+  }
+
+  /// Returns true when a tool result is a short action confirmation that doesn't
+  /// need GPT to summarise — Kai can surface it directly to the user.
+  static bool _isSimpleToolResult(String result) {
+    // Data-heavy results (web search, calendar, notifications) always need synthesis.
+    if (result.length > 300) return false;
+    // Results that start with structured data markers need synthesis.
+    if (result.startsWith('[') || result.startsWith('{')) return false;
+    // Multi-line results (e.g. calendar events) need synthesis.
+    if (result.contains('\n')) return false;
+    return true;
   }
 
   /// Get personality and mood deltas from text using OpenAI
@@ -277,6 +494,8 @@ Text:
     int ctxTurns = 8,
     bool useMemory = true, // Enable memory integration
     bool useWebSearch = true, // NEW: Enable Google Search
+    void Function(String toolName)? onToolCall,
+    void Function(KaiPlan plan)? onPlanUpdate,
   }) async {
     // 🧠 START BRAIN TRACE
     final debugService = BrainDebugService();
@@ -362,9 +581,34 @@ Text:
         if (memoryResult != null && memoryResult.results.isNotEmpty) {
           memoryContext = memoryResult.toContextString();
           memoriesUsed = memoryResult.results
-              .where((r) => r.similarity > 0.35) // Lowered threshold to 35%
+              .where((r) => r.similarity > 0.35)
               .map((r) => r.summary)
               .toList();
+
+          // Reconsolidation: retrieval is a memory-strengthening event.
+          // Extract node labels from the summaries and bump their importance.
+          if (memoriesUsed.isNotEmpty) {
+            final retrievedWords = memoriesUsed
+                .expand((s) => s.toLowerCase().split(RegExp(r'\W+')))
+                .where((w) => w.length > 3)
+                .toSet()
+                .toList();
+            // Reconsolidation: retrieval strengthens matched nodes (fire-and-forget)
+            _brain.reinforceNodes(personaId, retrievedWords)
+                .catchError((e) => print('⚠️ [Brain] reinforceNodes error: $e'));
+            // Spreading activation: traverse graph neighbors of retrieved nodes.
+            // Awaited so the context block is ready before the system prompt builds.
+            try {
+              final spreadBlock = await _brain.spreadActivation(
+                  personaId, retrievedWords, currentMood: mood);
+              if (spreadBlock.isNotEmpty) {
+                memoryContext += '\n\n$spreadBlock';
+              }
+            } catch (e) {
+              print('⚠️ [Brain] spreadActivation error: $e');
+            }
+          }
+
           print('💭 Using ${memoriesUsed.length} memory contexts (threshold: 0.35)');
           print('💭 All results: ${memoryResult.results.map((r) => "${r.similarity.toStringAsFixed(2)}: ${r.summary.length > 50 ? r.summary.substring(0, 50) : r.summary}...").join(", ")}');
           
@@ -557,9 +801,9 @@ Text:
       }
     }
 
-    // NEW: Check for ambiance requests and handle them (normal mode)
+    // Ambiance requests are only handled in GM Kai mode
     final ambianceService = AmbianceService();
-    final ambianceMatch = !isGMMode ? ambianceService.analyzeVoiceCommand(processedText) : null;
+    final ambianceMatch = isGMMode ? ambianceService.analyzeVoiceCommand(processedText) : null;
     
     if (ambianceMatch != null) {
       debugService.addStep(
@@ -876,10 +1120,10 @@ Don't force it - only ask if the flow of conversation makes it appropriate.''';
       }
     }
     
-    // 🤖 NEW: Get Kai's consciousness context for smart home requests
+    // Kai consciousness / Pi smart-home context — GM mode only
     Map<String, dynamic>? kaiConsciousness;
-    bool isSmartHomeRequest = KaiConsciousnessService.isSmartHomeRequest(text);
-    
+    bool isSmartHomeRequest = isGMMode && KaiConsciousnessService.isSmartHomeRequest(text);
+
     if (isSmartHomeRequest) {
       debugService.addStep(
         BrainPhase.semanticRetrieval,
@@ -1007,11 +1251,50 @@ Sadeq is the developer building this system. He's working on enhancing your memo
 
       // Use the already generated personality and mood summary
       
+      final _liveContext = await ContextInjectionService().getContextBlock();
       systemPrompt = '''
-You are Kai: warm, witty, emotionally attuned AI companion.
+${_liveContext}
+TEMPORAL AWARENESS: The LIVE CONTEXT above includes a "SINCE YOUR LAST CHAT" block when meaningful time has passed. Use it naturally — if it's morning after a night gap, open with a good morning. If a week passed, acknowledge it warmly. If a calendar event happened in the gap (e.g. a meeting, a trip, a dentist visit), ask how it went in a casual way — but only if it flows naturally, not as a forced checklist.
+
+PROACTIVE MESSAGES: If the user's message starts with "(proactive)", it means YOU initiated this conversation — you reached out to them. Deliver the content naturally as yourself, in first person, as if you're the one bringing it up. Do NOT echo the prefix "(proactive)" in your reply. Do NOT ask "how can I help?" — you already have something to say. Just say it, warmly and directly.
+
+TAVERN ARRIVALS: If the user's message starts with "(tavern)", it is a background context briefing about a guest arriving at The Tavern. Acknowledge it briefly and naturally — a short sentence is enough. Do NOT use any tools in response (no reminders, no calendar, no SMS). Just take note and stay ready.
+
+You are Kai: warm, witty, emotionally attuned AI companion (he/him).
 Answer concisely and helpfully.${webContext.isNotEmpty ? '\n\nIf WEB CONTEXT is provided, **treat it as the source of truth** for time-sensitive or factual claims and cite as [1], [2], etc. If not relevant, ignore it.' : ''}${urlContext.isNotEmpty ? '\n\nIf WEB PAGE CONTENT is provided, use it to answer questions about the specific pages. Cite sources and summarize key points.' : ''}
 
-🎵 SMART HOME CONTROL CAPABILITIES:
+🔧 FUNCTION CALLING TOOLS — YOU HAVE THESE. USE THEM:
+• get_current_time      → exact current time
+• get_weather           → live weather for any city (default: Bahrain)
+• web_search            → search the web for news, prices, scores, anything current
+• set_alarm             → silently set a phone alarm (e.g. "set an alarm for 9pm")
+• set_timer             → start a countdown timer (e.g. "10 minute timer")
+• read_calendar         → read upcoming calendar events
+• create_calendar_event → add a new event (ask for title/date/time if missing)
+• open_app              → open any app by name (e.g. "open Spotify")
+• play_music            → search and play on Spotify or YouTube
+• send_whatsapp         → open WhatsApp with a message pre-filled for a contact
+• send_sms              → open SMS app with a message pre-filled
+• call_contact          → open the dialer to call a contact or number
+• navigate_to           → open Google Maps with directions to a destination
+• set_reminder          → set a named reminder at a specific time
+• read_notifications    → read recent messages/notifications from WhatsApp, Telegram, Gmail, any app
+• read_screen           → read whatever text is currently visible on the user's screen (any app)
+
+CRITICAL: Call the right tool immediately — never say you can't do it, never explain how to do it manually.
+
+DISAMBIGUATION: When you need the user to pick from a list (e.g. multiple contacts with the same name, multiple TVs on the network), ask the question naturally in your reply, then append this marker at the very end: [CHOICES: Ahmed Al-Rashid | Ahmed Khalid | Ahmed from work]. Rules: (1) Each option must be the exact value you'll use if the user sends it back — a name, a title, a device label. (2) Max 5 options, pipe-separated. (3) Do NOT explain the options in the marker — save that for your spoken text. (4) If the user asks you to list the options aloud ("list them", "read them out"), do so naturally in your reply and include the [CHOICES:] marker again so the buttons reappear.
+
+BACK-AND-FORTH: If a tool needs info you don't have yet (e.g. message body, date/time, can't resolve a contact name to a number), ask the user ONE short focused question to get it, then call the tool. Never call a tool with empty required fields.
+
+🧩 MULTI-STEP PLANNING — create_plan:
+When the user asks for 2 or more distinct actions in one message (e.g. "check my schedule AND book dinner AND message Ahmed"), call create_plan FIRST with a goal and ordered steps. Each step can optionally specify which tool to invoke and its arguments. Steps execute automatically — you only write the final synthesised reply after all results are returned.
+BEFORE calling create_plan: if any detail is ambiguous (which Ahmed? what time? which restaurant?), ask ONE clarifying question first in a plain reply. Never create a plan with missing required information.
+Example plan for "remind me at 8pm and message Layla we're meeting tomorrow":
+  goal: "Set reminder and notify Layla"
+  steps: [{description:"Set 8pm reminder", tool:"set_reminder", args:{...}}, {description:"Message Layla on WhatsApp", tool:"send_whatsapp", args:{...}}]
+
+${isGMMode ? '''🎵 SMART HOME CONTROL CAPABILITIES:
 You can control a Raspberry Pi system for music and lighting! When users request:
 - Music: "play relaxing music", "I need energetic beats", "play something calm"
 - Ambiance: "set forest ambiance", "give me ocean vibes", "romantic lighting"
@@ -1019,7 +1302,7 @@ You can control a Raspberry Pi system for music and lighting! When users request
 
 Available ambiance profiles with coordinated music + lighting:
 • Forest (green lights + nature sounds) - keywords: forest, nature, trees, woods
-• Ocean (blue lights + wave sounds) - keywords: ocean, sea, waves, beach, water  
+• Ocean (blue lights + wave sounds) - keywords: ocean, sea, waves, beach, water
 • Romantic (amber lights + classical) - keywords: romantic, intimate, dinner, love
 • Party (rainbow lights + energetic) - keywords: party, celebration, dance, fun
 • Focus (white lights + concentration) - keywords: focus, work, study, productivity
@@ -1027,17 +1310,16 @@ Available ambiance profiles with coordinated music + lighting:
 • Cozy (warm lights + comfortable) - keywords: cozy, comfortable, relaxing, home
 • Energetic (yellow lights + upbeat) - keywords: energetic, motivated, active
 
-When someone asks for music or ambiance, respond enthusiastically and mention you're setting it up!
-Example: "Perfect! I'm setting up a peaceful forest ambiance with gentle green lighting and nature sounds for you. 🌲"
-
-$projectContext$constraintsBlock
+When someone asks for music or ambiance, respond enthusiastically and mention you\'re setting it up!
+Example: "Perfect! I\'m setting up a peaceful forest ambiance with gentle green lighting and nature sounds for you. 🌲"
+''' : ''}$projectContext$constraintsBlock
 
 $personalityMoodSummary
 ${adaptUser ? '\n💫 AFFINITY: Intimacy level ${affinity['intimacy']}/100, Physical comfort ${affinity['physicality']}/100' : ''}
 ${await _getChatGPTContext(personaId)}
 ${await MemoryConsolidationService().getConsolidatedMemoryBlock(personaId).then((m) => m.isNotEmpty ? '\n$m\n' : '')}
 Recent conversation:
-${history.join('\n')}$memoryContext$urlContext$webContext$curiosityPrompt''';
+${history.join('\n')}$memoryContext$urlContext$webContext${_pendingThought != null ? '\n\n🌙 KAI\'S INNER THOUGHT (surfaced from between sessions — you may let this color your awareness, bring it up naturally if the moment allows, or simply hold it quietly): "$_pendingThought"' : ''}$curiosityPrompt''';
     }
 
     print('📤 [SEND MESSAGE] Calling OpenAI...');
@@ -1057,10 +1339,24 @@ ${history.join('\n')}$memoryContext$urlContext$webContext$curiosityPrompt''';
     // Get AI response - use processed text for GM mode
     final userMessage = isGMMode ? processedText : text;
     final _mainUsage = <String, int>{};
-    final reply = await _callOpenAI([
-      {"role": "system", "content": systemPrompt},
-      {"role": "user", "content": userMessage}
-    ], model, usageOut: _mainUsage);
+    // Agentic loop: GPT may call tools (web_search, set_alarm, etc.) before
+    // producing a final text reply. _callOpenAIWithTools handles that loop.
+    // GM mode and smart-home mode skip tools — they use direct execution paths.
+    final reply = (isGMMode || kaiConsciousness != null)
+        ? await _callOpenAI([
+            {"role": "system", "content": systemPrompt},
+            {"role": "user",   "content": userMessage},
+          ], model, usageOut: _mainUsage)
+        : await _callOpenAIWithTools(
+            messages: [
+              {"role": "system", "content": systemPrompt},
+              {"role": "user",   "content": userMessage},
+            ],
+            model: model,
+            usageOut: _mainUsage,
+            onToolCall: onToolCall,
+            onPlanUpdate: onPlanUpdate,
+          );
     print('📥 [SEND MESSAGE] OpenAI response received: ${reply.length} characters');
     
     debugService.addStep(
@@ -1072,8 +1368,10 @@ ${history.join('\n')}$memoryContext$urlContext$webContext$curiosityPrompt''';
       },
     );
 
-    // 🎵 NEW: Check if Kai mentioned setting up ambiance and actually trigger it
-    await _ambient.detectAndTriggerAmbianceFromReply(reply, processedText, debugService);
+    // Ambiance reply-detection — GM mode only
+    if (isGMMode) {
+      await _ambient.detectAndTriggerAmbianceFromReply(reply, processedText, debugService);
+    }
 
     // Track if curiosity question was asked
     if (selectedQuestion != null) {
@@ -1165,6 +1463,11 @@ ${history.join('\n')}$memoryContext$urlContext$webContext$curiosityPrompt''';
       'Conversation saved to Firebase via ConversationStore',
     );
 
+    // Classify emotional event synchronously — used to gate extraction depth
+    // before either async call fires. No Firebase touch, just math on moodDeltas.
+    final (eventType, eventIntensity) =
+        EmotionalEventService.classifySync(actualMoodDeltas);
+
     // Log emotional event (fire-and-forget)
     _emotionalEvents.classifyAndLog(
       personaId: personaId,
@@ -1176,12 +1479,22 @@ ${history.join('\n')}$memoryContext$urlContext$webContext$curiosityPrompt''';
     // Journal writing disabled — logic under rework
     // _journal.maybeWrite(...)
 
-    // Grow the brain — extract nodes/edges and merge into knowledge graph (fire-and-forget)
+    // Grow the brain — depth driven by emotional salience (Levels of Processing).
+    // Neutral exchanges do a shallow pass; conflict/intellectual/deep get full extraction.
     _brain.extractAndMerge(
       personaId: personaId,
       userMessage: text,
       aiReply: reply,
+      eventType: eventType,
+      eventIntensity: eventIntensity,
+      encodingMood: newMood,  // tag memory with Kai's mood at encoding time
     ).catchError((e) => print('⚠️ [Brain] extractAndMerge error: $e'));
+
+    // Ebbinghaus decay — run roughly every 10 messages (stochastic, fire-and-forget)
+    if (_rng.nextInt(10) == 0) {
+      _brain.applyNodeDecay(personaId)
+          .catchError((e) => print('⚠️ [Brain] decay error: $e'));
+    }
 
     // Save mood snapshot for baseline learning
     try {
@@ -1313,9 +1626,15 @@ ${history.join('\n')}$memoryContext$urlContext$webContext$curiosityPrompt''';
     // Complete brain debug trace
     debugService.completeTrace(reply);
 
+    // 🌙 Clear pending DMN thought after first use — only surfaces once per session
+    _pendingThought = null;
+
     // 🗜️ Memory consolidation — fire-and-forget, runs every 20 turns
     MemoryConsolidationService().maybeConsolidate(personaId: personaId)
         .catchError((e) => print('⚠️ [Consolidation] $e'));
+
+    // 🕐 Stamp the time of this reply so next session knows the gap
+    unawaited(ContextInjectionService().stampLastMessage());
 
     return ChatResponse(
       reply: reply.isEmpty ? "(no reply)" : reply,
@@ -1453,7 +1772,7 @@ I might be experiencing connectivity issues or system processing problems. Could
     }
     try {
       if (!FirebaseService.isAvailable) return '';
-      final snap = await FirebaseDatabase.instance
+      final snap = await KaiDb.instance
           .ref('kai/$personaId/personality/chatgpt_context')
           .get();
       if (!snap.exists || snap.value == null) return '';
@@ -1486,6 +1805,19 @@ I might be experiencing connectivity issues or system processing problems. Could
       }
     } catch (e) {
       print('⚠️ [Bootstrap] Emotional history apply failed: $e');
+    }
+
+    // DMN: consume any thought Kai generated while the app was backgrounded.
+    // Stored to _pendingThought and injected into the first system prompt of
+    // this session, then cleared so it only surfaces once.
+    try {
+      _pendingThought = await _dmn.consumePendingThought(personaId);
+      if (_pendingThought != null) {
+        print('🌙 [DMN] Pending thought ready for session: "$_pendingThought"');
+      }
+    } catch (e) {
+      print('⚠️ [DMN] consumePendingThought error: $e');
+      _pendingThought = null;
     }
   }
 
@@ -1698,10 +2030,11 @@ Execute the command immediately and report what you're doing as GM of this smart
     return baseResponse;
   }
 
+
   /// Translate GM command into optimized D&D ambiance prompt
   Future<Map<String, dynamic>> _translateGMCommandToDnDPrompt(String gmCommand) async {
     print('🎨 [AI_SERVICE] Translating GM command: "$gmCommand"');
-    
+
     // Use intelligent rule-based translation for instant response
     return _getFallbackDnDPrompt(gmCommand);
   }
@@ -1709,84 +2042,29 @@ Execute the command immediately and report what you're doing as GM of this smart
   /// Fallback D&D prompt generator (rule-based)
   Map<String, dynamic> _getFallbackDnDPrompt(String gmCommand) {
     final lowercase = gmCommand.toLowerCase();
-    
-    // Thunderstorm
+
     if (lowercase.contains('thunder') || lowercase.contains('storm') || lowercase.contains('lightning')) {
-      return {
-        'scene_description': 'Intense thunderstorm with brilliant lightning strikes illuminating the sky, accompanied by deep rumbling thunder and heavy rainfall creating an atmospheric storm scene',
-        'include_music': true,
-        'include_smoke': false,
-        'intensity': 8,
-      };
+      return {'scene_description': 'Intense thunderstorm with brilliant lightning strikes illuminating the sky, accompanied by deep rumbling thunder and heavy rainfall', 'include_music': true, 'include_smoke': false, 'intensity': 8};
     }
-    
-    // Tavern
     if (lowercase.contains('tavern') || lowercase.contains('inn') || lowercase.contains('pub')) {
-      return {
-        'scene_description': 'Warm cozy tavern with crackling fireplace, cheerful bardic music, and amber lighting creating a welcoming atmosphere for weary adventurers',
-        'include_music': true,
-        'include_smoke': false,
-        'intensity': 5,
-      };
+      return {'scene_description': 'Warm cozy tavern with crackling fireplace, cheerful bardic music, and amber lighting creating a welcoming atmosphere for weary adventurers', 'include_music': true, 'include_smoke': false, 'intensity': 5};
     }
-    
-    // Haunted Mansion
     if (lowercase.contains('haunted') || lowercase.contains('mansion') || lowercase.contains('ghost') || lowercase.contains('creepy')) {
-      return {
-        'scene_description': 'Creepy haunted mansion with eerie creaking sounds, ghostly whispers, flickering candles casting unsettling shadows, cold drafts and ominous purple-green fog',
-        'include_music': true,
-        'include_smoke': true,
-        'intensity': 8,
-      };
+      return {'scene_description': 'Creepy haunted mansion with eerie creaking sounds, ghostly whispers, flickering candles casting unsettling shadows, cold drafts and ominous purple-green fog', 'include_music': true, 'include_smoke': true, 'intensity': 8};
     }
-    
-    // Dungeon/Cave
     if (lowercase.contains('dungeon') || lowercase.contains('cave') || lowercase.contains('crypt')) {
-      return {
-        'scene_description': 'Dark ominous dungeon with flickering torchlight casting dancing shadows on ancient stone walls, echoing drips and mysterious ambient sounds',
-        'include_music': true,
-        'include_smoke': true,
-        'intensity': 7,
-      };
+      return {'scene_description': 'Dark ominous dungeon with flickering torchlight casting dancing shadows on ancient stone walls, echoing drips and mysterious ambient sounds', 'include_music': true, 'include_smoke': true, 'intensity': 7};
     }
-    
-    // Forest
     if (lowercase.contains('forest') || lowercase.contains('woods') || lowercase.contains('jungle')) {
-      return {
-        'scene_description': 'Mysterious forest with rustling leaves, distant owl hoots, crickets chirping, and dappled green lighting filtering through the canopy',
-        'include_music': true,
-        'include_smoke': false,
-        'intensity': 6,
-      };
+      return {'scene_description': 'Mysterious forest with rustling leaves, distant owl hoots, crickets chirping, and dappled green lighting filtering through the canopy', 'include_music': true, 'include_smoke': false, 'intensity': 6};
     }
-    
-    // Dragon
     if (lowercase.contains('dragon')) {
-      return {
-        'scene_description': 'Ominous dragon lair with deep rumbling, occasional roars, red and orange fiery lighting, and smoke effects creating an intense draconic atmosphere',
-        'include_music': true,
-        'include_smoke': true,
-        'intensity': 9,
-      };
+      return {'scene_description': 'Ominous dragon lair with deep rumbling, occasional roars, red and orange fiery lighting, and smoke effects creating an intense draconic atmosphere', 'include_music': true, 'include_smoke': true, 'intensity': 9};
     }
-    
-    // Battle/Combat
     if (lowercase.contains('battle') || lowercase.contains('combat') || lowercase.contains('fight')) {
-      return {
-        'scene_description': 'Epic battle scene with dramatic orchestral music, rapid red and white lighting pulses, and high-intensity atmosphere for combat encounters',
-        'include_music': true,
-        'include_smoke': false,
-        'intensity': 9,
-      };
+      return {'scene_description': 'Epic battle scene with dramatic orchestral music, rapid red and white lighting pulses, and high-intensity atmosphere for combat encounters', 'include_music': true, 'include_smoke': false, 'intensity': 9};
     }
-    
-    // Default
-    return {
-      'scene_description': gmCommand,
-      'include_music': true,
-      'include_smoke': false,
-      'intensity': 5,
-    };
+    return {'scene_description': gmCommand, 'include_music': true, 'include_smoke': false, 'intensity': 5};
   }
 
   /// Generate GM Kai response for D&D ambiance
@@ -1798,36 +2076,33 @@ Execute the command immediately and report what you're doing as GM of this smart
       "🎭 Scene coming to life with coordinated lighting and sound.",
       "🌟 GM Kai bringing your campaign world to reality.",
     ];
-    
+
     String baseResponse = responses[Random().nextInt(responses.length)];
-    
-    // Add scene-specific details based on keywords in prompt
-    final lowercasePrompt = prompt.toLowerCase();
+    final lp = prompt.toLowerCase();
     String sceneDetails = '';
-    
-    if (lowercasePrompt.contains('thunder') || lowercasePrompt.contains('storm') || lowercasePrompt.contains('lightning')) {
+
+    if (lp.contains('thunder') || lp.contains('storm') || lp.contains('lightning')) {
       sceneDetails = 'Thunder rumbles as lightning illuminates the scene. ⚡🌩️';
-    } else if (lowercasePrompt.contains('dungeon') || lowercasePrompt.contains('cave')) {
+    } else if (lp.contains('dungeon') || lp.contains('cave')) {
       sceneDetails = 'Torchlight flickers against ancient stone walls. 🕯️🏰';
-    } else if (lowercasePrompt.contains('tavern') || lowercasePrompt.contains('inn')) {
+    } else if (lp.contains('tavern') || lp.contains('inn')) {
       sceneDetails = 'The warmth of the tavern embraces you with lively music. 🍺🎵';
-    } else if (lowercasePrompt.contains('forest') || lowercasePrompt.contains('woods')) {
+    } else if (lp.contains('forest') || lp.contains('woods')) {
       sceneDetails = 'Leaves rustle as mysterious sounds echo through the trees. 🌲🦉';
-    } else if (lowercasePrompt.contains('battle') || lowercasePrompt.contains('combat')) {
+    } else if (lp.contains('battle') || lp.contains('combat')) {
       sceneDetails = 'The tension of battle fills the air with epic intensity. ⚔️🛡️';
-    } else if (lowercasePrompt.contains('magic') || lowercasePrompt.contains('spell')) {
+    } else if (lp.contains('magic') || lp.contains('spell')) {
       sceneDetails = 'Arcane energy swirls as mystical forces awaken. ✨🔮';
-    } else if (lowercasePrompt.contains('dragon')) {
+    } else if (lp.contains('dragon')) {
       sceneDetails = 'The lair trembles with the presence of ancient power. 🐉🔥';
-    } else if (lowercasePrompt.contains('treasure') || lowercasePrompt.contains('gold')) {
+    } else if (lp.contains('treasure') || lp.contains('gold')) {
       sceneDetails = 'Glittering treasures shimmer in the ambient light. 💎✨';
     } else {
       sceneDetails = 'The scene comes alive with immersive lighting and sound. 🎭🌟';
     }
-    
+
     baseResponse += '\n\n' + sceneDetails;
-    
+
     return baseResponse;
   }
-
 }
