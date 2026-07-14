@@ -116,6 +116,19 @@ Future<void> main() async {
     await FirebaseService.initialize();
     firebaseInitialized = true;
     print('✅ Firebase initialized successfully');
+    // Sign in anonymously so RTDB rules (auth != null) accept reads/writes on
+    // EVERY platform. The desktop shell bypasses the mobile widget's own init.
+    try {
+      final a = FirebaseAuth.instance;
+      if (a.currentUser == null) {
+        await a.signInAnonymously();
+        print('🔐 [Auth] Signed in anonymously: ${a.currentUser?.uid}');
+      } else {
+        print('🔐 [Auth] Already signed in: ${a.currentUser?.uid}');
+      }
+    } catch (e) {
+      print('⚠️ [Auth] main() sign-in failed: $e');
+    }
     // Pre-warm Tavern caches (non-blocking)
     TavernMenuService().prime().catchError((_) {});
     TavernStatusService().getStatusBlock().catchError((_) {});

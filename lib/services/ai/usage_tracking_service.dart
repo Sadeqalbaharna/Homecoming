@@ -71,6 +71,40 @@ class UsageTrackingService {
     await _incrementDouble(prefs, '${_pfxSession}cost', totalCost);
   }
 
+  /// Track an Anthropic (Claude) API call. Mirrors [trackOpenAI].
+  static Future<void> trackAnthropic({
+    required String model,
+    required int inputTokens,
+    required int outputTokens,
+    String operation = 'chat',
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final inputCost = (inputTokens / 1000) * (_inputCostPer1k[model] ?? 0.003);
+    final outputCost = (outputTokens / 1000) * (_outputCostPer1k[model] ?? 0.015);
+    final totalCost = inputCost + outputCost;
+
+    await _increment(prefs, '${_pfx}anthropic_calls', 1);
+    await _increment(prefs, '${_pfx}anthropic_input_tokens', inputTokens);
+    await _increment(prefs, '${_pfx}anthropic_output_tokens', outputTokens);
+    await _incrementDouble(prefs, '${_pfx}anthropic_cost', totalCost);
+    await _increment(prefs, '${_pfx}total_tokens', inputTokens + outputTokens);
+    await _incrementDouble(prefs, '${_pfx}total_cost', totalCost);
+
+    final monthKey = _currentMonthKey();
+    unawaited(_fbIncrement(monthKey, 'cost',           totalCost));
+    unawaited(_fbIncrement(monthKey, 'anthropic_cost', totalCost));
+    unawaited(_fbIncrement(monthKey, 'calls',          1));
+    unawaited(_fbIncrement(monthKey, 'tokens',         inputTokens + outputTokens));
+    await _incrementDouble(prefs, 'monthly_${monthKey}_cost',           totalCost);
+    await _incrementDouble(prefs, 'monthly_${monthKey}_anthropic_cost', totalCost);
+    await _increment(prefs, 'monthly_${monthKey}_calls',  1);
+    await _increment(prefs, 'monthly_${monthKey}_tokens', inputTokens + outputTokens);
+
+    await _increment(prefs, '${_pfxSession}anthropic_calls', 1);
+    await _increment(prefs, '${_pfxSession}tokens', inputTokens + outputTokens);
+    await _incrementDouble(prefs, '${_pfxSession}cost', totalCost);
+  }
+
   // ── Monthly stats — Firebase (cross-device) ───────────────────────────────
   static String _currentMonthKey() {
     final now = DateTime.now();

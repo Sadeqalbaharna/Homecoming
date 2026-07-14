@@ -195,6 +195,14 @@ class _RestRef implements KaiRef {
         if (t != null && t.isNotEmpty) params['auth'] = t;
       } catch (_) {}
     }
+    if (!params.containsKey('orderBy') &&
+        (params.containsKey('limitToLast') ||
+            params.containsKey('limitToFirst') ||
+            params.containsKey('equalTo') ||
+            params.containsKey('startAt') ||
+            params.containsKey('endAt'))) {
+      params['orderBy'] = '"\$key"';
+    }
     return Uri.parse('$_base/$_path.json').replace(
         queryParameters: params.isEmpty ? null : params);
   }

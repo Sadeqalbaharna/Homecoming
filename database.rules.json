@@ -34,6 +34,9 @@
     "personalities": {
       "$personaId": { ".read": "auth != null", ".write": "auth != null" }
     },
+    "personas": {
+      "$personaId": { ".read": "auth != null", ".write": "auth != null" }
+    },
     "memory": {
       "buffers":    { "$personaId": { ".read": "auth != null", ".write": "auth != null" } },
       "shards":     { "$personaId": { ".read": "auth != null", ".write": "auth != null" } },
