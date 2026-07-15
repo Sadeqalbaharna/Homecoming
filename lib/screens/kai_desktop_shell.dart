@@ -179,7 +179,10 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
   Widget _projectsPanel() {
     return Container(
       width: 210,
-      color: Colors.black.withOpacity(0.32),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.34),
+        border: Border(right: BorderSide(color: kGpt.withOpacity(0.35))),
+      ),
       padding: const EdgeInsets.fromLTRB(10, 14, 10, 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -232,7 +235,7 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
         decoration: BoxDecoration(
           color: const Color(0xFF0C1622),
           borderRadius: BorderRadius.circular(9),
-          border: Border.all(color: active ? const Color(0xFF2F4F66) : const Color(0xFF182838)),
+          border: Border.all(color: active ? kGpt.withOpacity(0.6) : const Color(0xFF182838)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -337,29 +340,39 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
 
   Widget _bubble(_ChatMsg m, {bool dim = false}) {
     final isUser = m.user;
+    final accent = isUser ? kGpt : kClaude;
     return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
-      child: Row(
-        mainAxisAlignment: isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
-        crossAxisAlignment: CrossAxisAlignment.start,
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Column(
+        crossAxisAlignment:
+            isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
         children: [
-          if (!isUser) _avatar('🧠', const [Color(0x3338E1FF), Color(0x33FF8A3D)]),
-          if (!isUser) const SizedBox(width: 10),
-          Flexible(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              decoration: BoxDecoration(
-                color: isUser ? const Color(0xFF14283A) : const Color(0xFF0D1622),
-                borderRadius: BorderRadius.circular(13),
-                border: Border.all(color: isUser ? const Color(0xFF1F3A52) : const Color(0xFF182838)),
-              ),
-              child: Text(m.text,
-                  style: TextStyle(
-                      color: dim ? Colors.white38 : const Color(0xFFDBE7F2), fontSize: 13.5, height: 1.5)),
-            ),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4, left: 3, right: 3),
+            child: Text(isUser ? 'YOU /' : 'KAI /',
+                style: TextStyle(
+                    color: accent,
+                    fontSize: 9,
+                    letterSpacing: 2,
+                    fontFamily: 'monospace',
+                    fontWeight: FontWeight.w700,
+                    shadows: [Shadow(color: accent.withOpacity(0.6), blurRadius: 8)])),
           ),
-          if (isUser) const SizedBox(width: 10),
-          if (isUser) _avatar('🧑', const [Color(0xFF14283A), Color(0xFF14283A)]),
+          Container(
+            constraints: const BoxConstraints(maxWidth: 580),
+            padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 11),
+            decoration: BoxDecoration(
+              color: accent.withOpacity(0.06),
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(color: accent.withOpacity(0.4)),
+              boxShadow: [BoxShadow(color: accent.withOpacity(0.12), blurRadius: 14)],
+            ),
+            child: Text(m.text,
+                style: TextStyle(
+                    color: dim ? Colors.white38 : const Color(0xFFE4EEF6),
+                    fontSize: 13.5,
+                    height: 1.5)),
+          ),
         ],
       ),
     );
@@ -383,9 +396,10 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 15),
       child: Container(
         decoration: BoxDecoration(
-          color: const Color(0xFF0D1622),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: const Color(0xFF1D2C3C)),
+          color: Colors.black.withOpacity(0.4),
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: kClaude.withOpacity(0.45)),
+          boxShadow: [BoxShadow(color: kClaude.withOpacity(0.15), blurRadius: 14)],
         ),
         padding: const EdgeInsets.fromLTRB(14, 4, 6, 4),
         child: Row(
@@ -405,7 +419,7 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
               ),
             ),
             IconButton(
-              icon: const Icon(Icons.arrow_upward, color: Colors.white, size: 18),
+              icon: const Icon(Icons.arrow_upward, color: kClaude, size: 18),
               onPressed: _sending ? null : () => _send(),
             ),
           ],
@@ -418,8 +432,8 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
     return Container(
       width: 300,
       decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.32),
-        border: const Border(left: BorderSide(color: Color(0xFF14202C))),
+        color: Colors.black.withOpacity(0.34),
+        border: Border(left: BorderSide(color: kClaude.withOpacity(0.35))),
       ),
       child: KaiVitals(personaId: _kPersona),
     );

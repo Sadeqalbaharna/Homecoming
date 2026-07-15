@@ -18,6 +18,7 @@ import '../ai/contemplation_service.dart';
 import '../ai/google_search_service.dart';
 import 'cortex_activity_bus.dart';
 import 'code_workspace_service.dart';
+import 'edit_gate.dart';
 import '../smarthome/network_discovery_service.dart';
 import '../smarthome/smart_tv_service.dart';
 
@@ -512,6 +513,54 @@ class ToolExecutorService {
         },
       },
     },
+    // ── Engineer toolset: read is free; writes/commands need your approval ─────
+    { 'type': 'function', 'function': {
+        'name': 'read_file',
+        'description': 'Read a file from the active code workspace (read-only).',
+        'parameters': { 'type': 'object', 'properties': {
+          'path': {'type': 'string', 'description': 'Workspace-relative file path.'} },
+          'required': ['path'] } } },
+    { 'type': 'function', 'function': {
+        'name': 'list_dir',
+        'description': 'List a directory in the active code workspace (read-only).',
+        'parameters': { 'type': 'object', 'properties': {
+          'path': {'type': 'string', 'description': 'Workspace-relative dir path (empty = root).'} },
+          'required': ['path'] } } },
+    { 'type': 'function', 'function': {
+        'name': 'search_code',
+        'description': 'Grep the workspace for a regex/text pattern (read-only).',
+        'parameters': { 'type': 'object', 'properties': {
+          'pattern': {'type': 'string', 'description': 'Regex or text to search for.'},
+          'glob': {'type': 'string', 'description': 'Optional file glob filter, e.g. **/*.dart'} },
+          'required': ['pattern'] } } },
+    { 'type': 'function', 'function': {
+        'name': 'find_files',
+        'description': 'Find files in the workspace matching a glob (read-only).',
+        'parameters': { 'type': 'object', 'properties': {
+          'glob': {'type': 'string', 'description': 'Glob pattern, e.g. lib/**/*.dart'} },
+          'required': ['glob'] } } },
+    { 'type': 'function', 'function': {
+        'name': 'write_file',
+        'description': 'Create or overwrite a workspace file with full contents. Shown as a diff and applied only after the user approves. Prefer edit_file for small changes.',
+        'parameters': { 'type': 'object', 'properties': {
+          'path': {'type': 'string', 'description': 'Workspace-relative file path.'},
+          'content': {'type': 'string', 'description': 'The full new file contents.'} },
+          'required': ['path', 'content'] } } },
+    { 'type': 'function', 'function': {
+        'name': 'edit_file',
+        'description': 'Surgically edit a workspace file by replacing an exact unique snippet. old_string must appear exactly once. Shown as a diff, applied only after approval.',
+        'parameters': { 'type': 'object', 'properties': {
+          'path': {'type': 'string', 'description': 'Workspace-relative file path.'},
+          'old_string': {'type': 'string', 'description': 'Exact existing text to replace (unique).'},
+          'new_string': {'type': 'string', 'description': 'Replacement text.'} },
+          'required': ['path', 'old_string', 'new_string'] } } },
+    { 'type': 'function', 'function': {
+        'name': 'run_command',
+        'description': 'Run a command in the workspace (desktop only, no shell). Read-only commands (git status/diff/log, ls, dart/flutter analyze) run directly; anything else needs the user to approve.',
+        'parameters': { 'type': 'object', 'properties': {
+          'command': {'type': 'string', 'description': 'Executable, e.g. git, dart, flutter, ls.'},
+          'args': {'type': 'array', 'items': {'type': 'string'}, 'description': 'Argument list.'} },
+          'required': ['command'] } } },
   ];
 
   // ── Tool dispatch ─────────────────────────────────────────────────────────
@@ -569,6 +618,44 @@ class ToolExecutorService {
               ? 'Code workspace cleared.'
               : 'Code workspace set to: $wsPath — I can now read and search that '
                   'repo (read-only) when you ask about code.';
+
+        case 'read_file':
+          return await CodeWorkspaceService.instance
+              .readFile((args['path'] as String?)?.trim() ?? '');
+
+        case 'list_dir':
+          return await CodeWorkspaceService.instance
+              .listDir((args['path'] as String?)?.trim() ?? '');
+
+        case 'search_code':
+          return await CodeWorkspaceService.instance.searchCode(
+            (args['pattern'] as String?) ?? '',
+            glob: args['glob'] as String?,
+          );
+
+        case 'find_files':
+          return await CodeWorkspaceService.instance
+              .findFiles((args['glob'] as String?) ?? '');
+
+        case 'write_file':
+          return await EditGate.instance.proposeWrite(
+            (args['path'] as String?)?.trim() ?? '',
+            args['content'] as String? ?? '',
+          );
+
+        case 'edit_file':
+          return await EditGate.instance.proposeEdit(
+            (args['path'] as String?)?.trim() ?? '',
+            args['old_string'] as String? ?? '',
+            args['new_string'] as String? ?? '',
+          );
+
+        case 'run_command':
+          return await EditGate.instance.proposeCommand(
+            (args['command'] as String?)?.trim() ?? '',
+            ((args['args'] as List?)?.map((e) => e.toString()).toList()) ??
+                const <String>[],
+          );
 
         // ── Android-side tools (via KaiToolsPlugin) ────────────────────────
 
