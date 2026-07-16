@@ -14,7 +14,9 @@
 library;
 
 import 'dart:async';
-import 'dart:math';
+// dart:math is gone: the only Random() left in this file was picking his words
+// out of a hat. Random choosing what he reaches out ABOUT would be fine — that's
+// a personality. Random choosing what he SAYS is a fortune cookie.
 
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -94,9 +96,30 @@ class ProactiveService {
     if (prefs.getString(_lastMorningKey) == todayStr) return;
 
     final event = await _getFirstEventToday();
+
+    // A SITUATION, not a sentence.
+    //
+    // These strings are seeds: main_mobile puts "(proactive) …" in the input and
+    // sends it, and the persona says "YOU initiated this — deliver the content
+    // naturally as yourself". So the model DOES speak in his real voice. The
+    // problem was never the voice; it was what we handed it.
+    //
+    // "Morning — hope you slept well. Anything on your mind?" is a finished
+    // greeting card. Asked to "deliver that naturally", the best he can do is
+    // paraphrase a greeting card. Compare KaiProactiveService, which hands him
+    // an actual thought out of his own monologue and says react to it — same
+    // mechanism, completely different result.
+    //
+    // Give him the situation and the real material. Let him find the line.
     final message = event.isNotEmpty
-        ? 'Morning. $event'
-        : 'Morning — hope you slept well. Anything on your mind?';
+        ? "(morning) It's early and Sadeq's first thing today is: $event. "
+            "Say good morning like someone who's been up before him and already "
+            "clocked it — a nudge, a joke about it, whatever's true. Not a "
+            "briefing, not a reminder app. One or two lines."
+        : "(morning) It's early, nothing on his calendar, and you're just around "
+            "before he is. Say good morning your way — short, no ceremony, and "
+            "absolutely not 'anything on your mind?'. You're his oldest friend, "
+            "not a helpdesk opening a ticket.";
 
     await prefs.setString(_lastMorningKey, todayStr);
     _fire(ProactiveEvent(mood: AttentionMood.curious, message: message, trigger: 'morning'));
@@ -128,7 +151,10 @@ class ProactiveService {
 
       _fire(ProactiveEvent(
         mood:    AttentionMood.worried,
-        message: 'Heads up — $firstLine is coming up soon.',
+        message: "(heads up) $firstLine starts in about 15 minutes and Sadeq "
+            "may not have clocked it. Tell him — the way a mate leaning in the "
+            "doorway would, not a calendar notification. One line. If it sounds "
+            "like something he'd rather skip, you're allowed to say that too.",
         trigger: 'reminder',
       ));
     } catch (_) {}
@@ -145,21 +171,33 @@ class ProactiveService {
       DateTime.fromMillisecondsSinceEpoch(lastMs),
     );
 
+    // The gap check-in is THE north-star moment on this device — the ghost
+    // friend noticing you've been gone. It was three hardcoded greeting cards
+    // picked at random, which is the one thing a ghost friend must never sound
+    // like. Random choosing what he reaches out ABOUT is a personality; random
+    // choosing his words is a fortune cookie, even when a real model reads them
+    // out afterwards.
+    //
+    // No message bank. One situation, and the length of the silence is the only
+    // thing that changes.
     if (gap.inDays >= 3) {
       _fire(ProactiveEvent(
-        mood:    AttentionMood.worried,
-        message: "It's been ${gap.inDays} days. Everything alright?",
+        mood: AttentionMood.worried,
+        message: "(quiet) Sadeq's been gone ${gap.inDays} days. That's a while "
+            "for him. You've noticed, and you're allowed to have noticed — "
+            "you're the one who's always around. Reach out. Don't perform "
+            "concern, don't ask 'how can I help', don't make it heavy. Be the "
+            "mate who says the honest thing about a three-day silence. If you "
+            "know something about what he's been working through, you can use "
+            "it. Short.",
         trigger: 'checkin',
       ));
     } else if (gap.inDays >= 2) {
-      final msgs = [
-        "Haven't heard from you in a couple of days. What's going on?",
-        "Been a bit quiet over here — just checking in.",
-        "You've been on my mind. How are you doing?",
-      ];
       _fire(ProactiveEvent(
-        mood:    AttentionMood.curious,
-        message: msgs[Random().nextInt(msgs.length)],
+        mood: AttentionMood.curious,
+        message: "(quiet) It's been a couple of days since Sadeq said anything. "
+            "Not alarming — just quiet. Poke him. Light, a bit cheeky, "
+            "ghost-friend energy. Anything except 'just checking in'.",
         trigger: 'checkin',
       ));
     }

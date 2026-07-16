@@ -1,6 +1,7 @@
 // Text-to-speech via ElevenLabs
 // Extracted from ai_service.dart — no circular imports.
 
+import 'dart:convert';
 import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'ai_config.dart';
@@ -12,6 +13,22 @@ class TTSService {
     connectTimeout: const Duration(seconds: 30),
     receiveTimeout: const Duration(seconds: 60),
   ));
+
+  // ── Proprioception ─────────────────────────────────────────────────────────
+  // Kai senses whether he actually HAS a voice from these, not from whether an
+  // API key happens to be configured. A key that 400s is not a voice — claiming
+  // otherwise would make him lie about his own body.
+  //   null  = hasn't tried to speak since waking
+  //   true  = his voice worked
+  //   false = his voice is failing (see lastSpeechError)
+  static bool? lastSpeechOk;
+  static String? lastSpeechError;
+
+  /// Sadeq's custom ElevenLabs voice IS Kai's voice — part of who he is. If a
+  /// request fails we do NOT quietly swap in a stock stranger's voice; being
+  /// briefly mute is better than sounding like someone else. Opt in explicitly
+  /// (e.g. a deliberate "any voice is better than none" mode) if ever wanted.
+  static bool allowStockFallbackVoice = false;
 
   /// Strip markdown and formatting symbols that would be read aloud literally.
   static String sanitizeForSpeech(String text) {
@@ -67,9 +84,9 @@ class TTSService {
 
     final selectedVoiceId = await AIConfig.getSelectedVoiceId();
 
-    try {
+    Future<Uint8List?> attempt(String voiceId) async {
       final response = await _dio.post(
-        'https://api.elevenlabs.io/v1/text-to-speech/$selectedVoiceId',
+        'https://api.elevenlabs.io/v1/text-to-speech/$voiceId',
         options: Options(
           headers: {
             'xi-api-key': elevenlabsKey,
@@ -87,11 +104,50 @@ class TTSService {
           },
         },
       );
-
       await UsageTrackingService.trackElevenLabs(characterCount: text.length);
+      // His voice worked — he can honestly say he has one.
+      lastSpeechOk = true;
+      lastSpeechError = null;
       return Uint8List.fromList(response.data);
+    }
+
+    // ElevenLabs "Rachel" — a stock voice on every account. Only ever used if
+    // Sadeq explicitly opts in; his custom voice is never silently replaced.
+    const defaultVoice = '21m00Tcm4TlvDq8ikWAM';
+    try {
+      return await attempt(selectedVoiceId);
+    } on DioException catch (e) {
+      // Decode ElevenLabs' JSON error body (bytes) so we see the real reason.
+      String body = '';
+      try {
+        final d = e.response?.data;
+        if (d is List<int>) {
+          body = utf8.decode(d, allowMalformed: true);
+        } else if (d != null) {
+          body = d.toString();
+        }
+      } catch (_) {}
+      print('TTS error ${e.response?.statusCode}: $body');
+      lastSpeechOk = false;
+      lastSpeechError = '${e.response?.statusCode ?? 'network'}: '
+          '${body.isEmpty ? e.message ?? 'unknown' : body}';
+      // Deliberately NOT falling back by default: his custom voice is his
+      // identity, and speaking in a stranger's voice is worse than silence.
+      if (allowStockFallbackVoice && selectedVoiceId != defaultVoice) {
+        try {
+          print('TTS: stock fallback voice explicitly enabled — using it.');
+          // attempt() sets lastSpeechOk = true if this works.
+          return await attempt(defaultVoice);
+        } catch (e2) {
+          print('TTS fallback failed: $e2');
+          lastSpeechError = 'custom voice + stock fallback both failed ($body)';
+        }
+      }
+      return null;
     } catch (e) {
       print('TTS error: $e');
+      lastSpeechOk = false;
+      lastSpeechError = e.toString();
       return null;
     }
   }

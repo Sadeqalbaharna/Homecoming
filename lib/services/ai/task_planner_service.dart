@@ -1,4 +1,4 @@
-// task_planner_service.dart
+// lib/services/ai/task_planner_service.dart
 //
 // Multi-step plan model + sequential executor.
 //
@@ -13,6 +13,7 @@
 library;
 
 import '../core/tool_executor_service.dart';
+import '../core/tool_policy_service.dart';
 
 // ── Data model ────────────────────────────────────────────────────────────────
 
@@ -20,11 +21,11 @@ enum StepStatus { pending, running, done, failed }
 
 class PlanStep {
   final String description;
-  final String? tool;          // optional: exact tool name to invoke
+  final String? tool; // optional: exact tool name to invoke
   final Map<String, dynamic> args;
 
   StepStatus status;
-  String? result;              // filled after execution
+  String? result; // filled after execution
 
   PlanStep({
     required this.description,
@@ -36,9 +37,10 @@ class PlanStep {
 
   factory PlanStep.fromMap(Map<String, dynamic> m) => PlanStep(
         description: m['description'] as String? ?? '',
-        tool:        m['tool']        as String?,
-        args:        Map<String, dynamic>.from(
-                       (m['args'] as Map?)?.cast<String, dynamic>() ?? {}),
+        tool: m['tool'] as String?,
+        args: Map<String, dynamic>.from(
+          (m['args'] as Map?)?.cast<String, dynamic>() ?? {},
+        ),
       );
 }
 
@@ -49,7 +51,7 @@ class KaiPlan {
   KaiPlan({required this.goal, required this.steps});
 
   factory KaiPlan.fromMap(Map<String, dynamic> m) => KaiPlan(
-        goal:  m['goal']  as String? ?? '',
+        goal: m['goal'] as String? ?? '',
         steps: (m['steps'] as List? ?? [])
             .map((s) => PlanStep.fromMap(Map<String, dynamic>.from(s as Map)))
             .toList(),
@@ -85,49 +87,43 @@ class TaskPlannerService {
     buf.writeln('PLAN RESULTS — Goal: "${plan.goal}"');
     buf.writeln('─' * 48);
 
-    // Detect which steps are independent (no tool, or tool that doesn't produce
-    // data another step depends on). We use a simple heuristic: steps whose
-    // tool is a pure "action" (alarm, timer, SMS, WhatsApp, call, navigate,
-    // play_music, open_app) are side-effect-only and can run in parallel.
-    // Steps that return data (web_search, get_weather, read_calendar,
-    // read_notifications, read_screen, get_current_time) must run first so
-    // GPT can use their results in synthesis.
-    const _dataTools = {
-      'web_search', 'get_weather', 'get_current_time',
-      'read_calendar', 'read_notifications', 'read_screen',
-      'create_calendar_event', // may return data GPT needs
-    };
+    // Detect independent steps using the deterministic tool policy registry.
+    // The old version carried a duplicate hand-written list of data tools here,
+    // which is how planners rot. One source of truth, tiny goblin discipline.
+    bool isParallelSafe(PlanStep s) => ToolPolicyService.isParallelSafe(s.tool);
 
-    bool _isParallelSafe(PlanStep s) =>
-        s.tool != null && !_dataTools.contains(s.tool);
-
-    // Split into groups: data-gathering steps run sequentially first,
-    // then all pure-action steps run in parallel.
-    final dataSteps   = <int>[];
+    // Split into groups: data-gathering / reasoning steps run sequentially first,
+    // then pure side-effect action steps can run in parallel.
+    final dataSteps = <int>[];
     final actionSteps = <int>[];
     for (int i = 0; i < plan.steps.length; i++) {
-      if (_isParallelSafe(plan.steps[i])) {
+      if (isParallelSafe(plan.steps[i])) {
         actionSteps.add(i);
       } else {
         dataSteps.add(i);
       }
     }
 
-    // ── Phase 1: sequential data steps ──────────────────────────────────────
+    // ── Phase 1: sequential data/reasoning steps ─────────────────────────────
     for (final i in dataSteps) {
       await _runStep(plan, i, executor, onStepUpdate);
     }
 
     // ── Phase 2: parallel action steps ──────────────────────────────────────
     if (actionSteps.isNotEmpty) {
-      // Mark all as running first so the UI shows them simultaneously
+      // Mark all as running first so the UI shows them simultaneously.
       for (final i in actionSteps) {
         plan.steps[i].status = StepStatus.running;
         onStepUpdate?.call(plan, i);
       }
       await Future.wait(
-        actionSteps.map((i) => _runStep(plan, i, executor, onStepUpdate,
-            alreadyMarkedRunning: true)),
+        actionSteps.map((i) => _runStep(
+              plan,
+              i,
+              executor,
+              onStepUpdate,
+              alreadyMarkedRunning: true,
+            )),
       );
     }
 
@@ -168,8 +164,10 @@ class TaskPlannerService {
         result = '[reasoning step — no tool required]';
       }
       step.result = result;
-      step.status = StepStatus.done;
-      print('✅ [Planner] Step ${i + 1} done: '
+      step.status = result.startsWith('Tool call blocked:')
+          ? StepStatus.failed
+          : StepStatus.done;
+      print('✅ [Planner] Step ${i + 1} ${step.status.name}: '
           '${result.length > 80 ? result.substring(0, 80) : result}');
     } catch (e) {
       step.result = 'Error: $e';

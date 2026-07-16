@@ -33,6 +33,17 @@ class ClaudeResult {
   });
 }
 
+/// Claude failed, but in a way callers may want to surface instead of treating
+/// as a normal fallback. Contemplate mode especially should not quietly print
+/// "the Architect fell silent" when the real problem is an invalid key/model.
+class ClaudeException implements Exception {
+  final String message;
+  const ClaudeException(this.message);
+
+  @override
+  String toString() => message;
+}
+
 class ClaudeService {
   static final ClaudeService _instance = ClaudeService._internal();
   factory ClaudeService() => _instance;
@@ -42,7 +53,10 @@ class ClaudeService {
 
   // ── Models ─────────────────────────────────────────────────────────────────
   static const String opus   = 'claude-opus-4-8';
-  static const String sonnet = 'claude-sonnet-5';
+  // Keep this as the model id we actually send to Anthropic. If Claude fails,
+  // callers like contemplate now surface the real API error instead of hiding it
+  // behind "the Architect fell silent".
+  static const String sonnet = 'claude-sonnet-4-6';
   static const String haiku  = 'claude-haiku-4-5-20251001';
 
   static const String _endpoint = 'https://api.anthropic.com/v1/messages';
@@ -132,10 +146,22 @@ class ClaudeService {
 
       if (text.isEmpty) return null;
       return ClaudeResult(text: text, inputTokens: inTok, outputTokens: outTok);
+    } on DioException catch (e) {
+      final status = e.response?.statusCode;
+      final body = e.response?.data;
+      final detail = body is Map && body['error'] is Map
+          ? (body['error']['message'] ?? body['error']).toString()
+          : (body?.toString() ?? e.message ?? e.toString());
+      final msg = status == null
+          ? 'Claude $operation failed: $detail'
+          : 'Claude $operation failed ($status): $detail';
+      // ignore: avoid_print
+      print('WARN [ClaudeService] $msg');
+      throw ClaudeException(msg);
     } catch (e) {
       // ignore: avoid_print
-      print('⚠️ [ClaudeService] $operation failed: $e');
-      return null;
+      print('WARN [ClaudeService] $operation failed: $e');
+      throw ClaudeException('Claude $operation failed: $e');
     }
   }
 

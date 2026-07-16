@@ -1,11 +1,13 @@
 // Long-term memory: embedding-based retrieval backed by Firebase RTDB.
 // Stores conversation summaries as shards; queries by cosine similarity.
 
+import 'dart:async'; // unawaited — reinforcement must never block a reply
 import 'dart:convert';
 import 'dart:math';
 import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/firebase_service.dart';
+import '../core/kai_db.dart'; // desktop-safe RTDB (REST) — the write path
 import 'ai_config.dart';
 
 /// A single memory result from a similarity search.
@@ -46,6 +48,13 @@ class MemoryQueryResult {
   }
 }
 
+typedef MemoryEmbeddingProvider = Future<List<double>?> Function(String text);
+typedef MemoryShardLoader = Future<List<Map<String, dynamic>>> Function(
+  String personaId,
+);
+
+enum MemoryQuerySideEffects { enabled, disabled }
+
 class MemoryService {
   static final Dio _dio = Dio(BaseOptions(
     connectTimeout: const Duration(seconds: 15),
@@ -59,22 +68,29 @@ class MemoryService {
     required String personaId,
     required String query,
     int limit = 5,
+    MemoryEmbeddingProvider? embeddingProvider,
+    MemoryShardLoader? shardLoader,
+    MemoryQuerySideEffects sideEffects = MemoryQuerySideEffects.enabled,
   }) async {
     try {
-      // Get embedding for the query
-      final queryEmbedding = await _getEmbedding(query);
+      // Tests can inject deterministic embeddings so recall quality is verified
+      // offline, without OpenAI or secure-storage plugins.
+      final queryEmbedding = await (embeddingProvider ?? _getEmbedding)(query);
       if (queryEmbedding == null) return null;
 
-      // Load all memory shards from Firebase / local cache
-      final shards = await _loadShards(personaId);
+      // Tests can inject fixed shards so golden tests do not need Firebase.
+      final shards = await (shardLoader ?? _loadShards)(personaId);
       if (shards.isEmpty) return MemoryQueryResult(results: [], query: query);
 
-      // Score each shard
+      // Score each shard. Existing data and the remember() write path may name
+      // the vector either `embedding` or `vector`; accept both so stored memories
+      // do not silently disappear from recall.
       final scored = <MemoryResult>[];
       for (final shard in shards) {
-        final embedding = shard['embedding'];
-        if (embedding == null) continue;
-        final vec = List<double>.from(embedding as List);
+        final rawVector = shard['embedding'] ?? shard['vector'];
+        if (rawVector is! List) continue;
+
+        final vec = rawVector.map((v) => (v as num).toDouble()).toList();
         final sim = _cosineSimilarity(queryEmbedding, vec);
         scored.add(MemoryResult(
           id: shard['id']?.toString() ?? '',
@@ -86,10 +102,21 @@ class MemoryService {
         ));
       }
 
-      // Sort by similarity descending, take top [limit]
+      // Sort by similarity descending, take top [limit].
       scored.sort((a, b) => b.similarity.compareTo(a.similarity));
+      final top = scored.take(limit).toList();
+
+      // Retrieval is a memory-strengthening event. Offline evals disable this
+      // side effect so tests never touch Firebase/cache mutation.
+      if (sideEffects == MemoryQuerySideEffects.enabled) {
+        for (final r in top) {
+          if (r.similarity < 0.30) continue;
+          unawaited(_strengthen(personaId, r.shardId));
+        }
+      }
+
       return MemoryQueryResult(
-        results: scored.take(limit).toList(),
+        results: top,
         query: query,
       );
     } catch (e) {
@@ -146,6 +173,210 @@ class MemoryService {
 
   // ── Internals ─────────────────────────────────────────────────────────────
 
+  /// Form a memory. THE WRITE PATH — which did not exist.
+  ///
+  /// This is the bug under every other bug. `MemoryService` could query, pin and
+  /// dismiss… and never *remember*. The whole index was built once by a Cloud
+  /// Function out of third-person recaps ("In the conversation, the user
+  /// initiates contact with Kai…"), and the app added nothing to it, ever.
+  ///
+  /// Two consequences, both fatal:
+  ///  1. He formed NO new memories. Every conversation was gone the moment it
+  ///     scrolled away — which is exactly why he re-derived that 7-layer roadmap
+  ///     from the code in front of him and graded himself 7/7. He wasn't lying;
+  ///     he had nothing to check against.
+  ///  2. Those recaps all share a boilerplate prefix, so every vector was
+  ///     dominated by the template — all ~0.22 similarity to everything, i.e.
+  ///     equidistant from every query. No threshold can rescue that. Retrieval
+  ///     "found 5, used 0" on every single turn.
+  ///
+  /// So we embed the REAL exchange, in the words that were actually said. A
+  /// question about "the opening line" now matches a memory that literally
+  /// contains those words, instead of a recap *about* a conversation.
+  ///
+  /// Fire-and-forget by design: forming a memory must never delay or break a
+  /// reply. Costs one `text-embedding-3-small` call (~$0.00002).
+  ///
+  /// Returns the new shard's id, or null if nothing was written.
+  ///
+  /// The id matters: it's the address of the actual words that were said, at
+  /// `memory/embeddings/{persona}/{id}`. BrainExtractionService runs on the
+  /// SAME exchange and stores this id on every node and edge it produces — so
+  /// his knowledge can point at the memory that formed it. Those two systems
+  /// have existed side by side this whole time without one reference between
+  /// them: he knew things, and he remembered things, and nothing connected the
+  /// two. This return value is that nerve.
+  static Future<String?> remember({
+    required String personaId,
+    required String userText,
+    required String kaiReply,
+  }) async {
+    try {
+      final u = userText.trim();
+      final r = kaiReply.trim();
+      if (u.isEmpty && r.isEmpty) return null;
+
+      // Skip his own machinery — a proactive seed is an instruction to himself,
+      // not a thing Sadeq said, and it must never become a "memory" of him.
+      if (u.startsWith('(proactive)') || u.startsWith('(tavern)')) return null;
+
+      // ── Don't remember nothing ───────────────────────────────────────────
+      // The cheapest prune is the one that never writes. Most turns are not
+      // memories: "ok", "do it", "yes", "keep going". Storing those is how you
+      // end up with ten thousand shards of noise that dilute every search — the
+      // exact failure we just dug out of, where 5 results came back and none of
+      // them meant anything.
+      //
+      // A person doesn't remember every "mhm" either. They remember the turn
+      // where something was actually said.
+      if (!_worthRemembering(u)) {
+        print('🧠 [MemoryService] Not worth remembering: "$u"');
+        return null;
+      }
+
+      // First person, real words, no template. This is what gets embedded AND
+      // what he reads back, so it has to sound like a memory, not a report.
+      final text = 'Sadeq said: $u\nI said: $r';
+
+      final vector = await _getEmbedding(text);
+      if (vector == null) return null;
+
+      final ref = KaiDb.instance.ref('memory/embeddings/$personaId').push();
+      await ref.set({
+        // Same shape _loadShards already reads (vector + summary), so old
+        // Cloud-Function shards and new ones coexist. The old ones will simply
+        // lose — they can't beat a memory that contains the actual words.
+        'vector': vector,
+        'summary': text.length > 1200 ? '${text.substring(0, 1200)}…' : text,
+        'timestamp': DateTime.now().toIso8601String(),
+        'source': 'live', // distinguishable from the legacy backfill
+        // Decay-by-use. A memory is born at full strength and fades from there
+        // unless he actually needs it — retrieval resets the clock (see
+        // _strengthen). This is why he won't drown in himself: the stuff that
+        // matters keeps getting refreshed, the rest quietly goes.
+        'strength': 1.0,
+        'lastAccessed': DateTime.now().millisecondsSinceEpoch,
+        'hits': 0,
+      });
+      print('🧠 [MemoryService] Remembered: ${u.length > 60 ? "${u.substring(0, 60)}…" : u}');
+      return ref.key;
+    } catch (e) {
+      print('⚠️ [MemoryService] remember failed: $e');
+      return null;
+    }
+  }
+
+  // ── Decay by use ───────────────────────────────────────────────────────────
+  //
+  // Forgetting isn't a cleanup job bolted on the side — it's how memory works.
+  // You don't remember last Tuesday's lunch because you never once needed it.
+  // So: strength fades with time, and RETRIEVAL RESETS THE CLOCK. What he uses,
+  // he keeps. What he never reaches for, he loses. No cron, no quota, no
+  // arbitrary "keep 5000 rows" — the same rule a person runs on.
+
+  /// Half-life in days. At 45, a memory untouched for ~6 months is at ~6%
+  /// strength and gets swept; one he touches monthly effectively never fades.
+  static const double _halfLifeDays = 45.0;
+
+  /// Strength after time-decay since it was last actually needed.
+  static double decayedStrength(double strength, int lastAccessedMs) {
+    if (lastAccessedMs <= 0) return strength; // legacy shard, no clock — leave it
+    final days = (DateTime.now().millisecondsSinceEpoch - lastAccessedMs) /
+        86400000.0;
+    if (days <= 0) return strength;
+    // `dart:math` is imported unprefixed in this file — `pow`, not `math.pow`.
+    return strength * pow(0.5, days / _halfLifeDays).toDouble();
+  }
+
+  /// Retrieval is a memory-strengthening event. Fire-and-forget: reinforcement
+  /// must never slow down a reply.
+  static Future<void> _strengthen(String personaId, String shardId) async {
+    if (shardId.isEmpty) return;
+    try {
+      final ref = KaiDb.instance.ref('memory/embeddings/$personaId/$shardId');
+      final snap = await ref.get();
+      final m = snap.value;
+      if (m is! Map) return;
+      final s = (m['strength'] is num) ? (m['strength'] as num).toDouble() : 1.0;
+      await ref.update({
+        // Cap it: a memory he hits constantly shouldn't become immortal and
+        // crowd out everything else. Strong is enough; permanent is a fact,
+        // and facts live somewhere else.
+        'strength': (s + 0.35).clamp(0.0, 4.0),
+        'lastAccessed': DateTime.now().millisecondsSinceEpoch,
+        'hits': ((m['hits'] is int) ? m['hits'] as int : 0) + 1,
+      });
+    } catch (_) {
+      // A missed reinforcement is fine — it just fades a little sooner.
+    }
+  }
+
+  /// Let go of what he hasn't needed. Returns how many he forgot.
+  ///
+  /// Deliberately timid: nothing under [minAgeDays] old is even considered, no
+  /// matter how weak — a memory needs a fair chance to be needed before it can
+  /// be lost. We can always prune harder later; we can never get one back.
+  static Future<int> forgetWeak(
+    String personaId, {
+    double floor = 0.12,
+    int minAgeDays = 30,
+  }) async {
+    try {
+      final shards = await _loadShards(personaId);
+      if (shards.length < 200) return 0; // nothing to prune yet — don't bother
+      final now = DateTime.now().millisecondsSinceEpoch;
+      var forgotten = 0;
+
+      for (final s in shards) {
+        final id = s['shardId']?.toString() ?? '';
+        if (id.isEmpty) continue;
+        final last = (s['lastAccessed'] is int) ? s['lastAccessed'] as int : 0;
+        if (last <= 0) continue; // legacy/no clock — leave it alone
+        final ageDays = (now - last) / 86400000.0;
+        if (ageDays < minAgeDays) continue; // too young to forget
+
+        final str = (s['strength'] is num) ? (s['strength'] as num).toDouble() : 1.0;
+        if (decayedStrength(str, last) >= floor) continue;
+
+        await KaiDb.instance
+            .ref('memory/embeddings/$personaId/$id')
+            .remove();
+        forgotten++;
+      }
+      if (forgotten > 0) {
+        print('🍂 [MemoryService] Let go of $forgotten memories he never needed.');
+      }
+      return forgotten;
+    } catch (e) {
+      print('⚠️ [MemoryService] forgetWeak failed: $e');
+      return 0;
+    }
+  }
+
+  /// Is this turn actually a memory, or just conversational grease?
+  ///
+  /// Deliberately conservative: it only rejects things that are *obviously*
+  /// nothing. A memory system that forgets too eagerly is worse than one that
+  /// keeps a bit of junk — we can prune junk later, but we can't recover a
+  /// thought he threw away. When in doubt, remember.
+  static bool _worthRemembering(String userText) {
+    final t = userText.trim().toLowerCase();
+    if (t.length < 12) return false; // "ok", "do it", "yes", "go on"
+
+    // Pure acknowledgement, nothing else in it.
+    const filler = {
+      'ok', 'okay', 'yes', 'yeah', 'yep', 'no', 'nope', 'sure', 'thanks',
+      'thank you', 'do it', 'go', 'go on', 'go ahead', 'keep going', 'continue',
+      'nice', 'cool', 'great', 'perfect', 'lol', 'haha', 'hmm', 'k', 'kk',
+      'do all', 'do all of it', 'do all the above', 'do it all', 'there you go',
+      'and', 'and?', 'next', 'now what',
+    };
+    final stripped = t.replaceAll(RegExp(r'[^a-z ?]'), '').trim();
+    if (filler.contains(stripped)) return false;
+
+    return true;
+  }
+
   static Future<List<double>?> _getEmbedding(String text) async {
     try {
       final apiKey = await AIConfig.getOpenAIKey();
@@ -188,6 +419,12 @@ class MemoryService {
               'summary': m['summary'] ?? '',
               'shardRef': m['shardRef'] ?? '/memory/shards/$personaId/${e.key}',
               'timestamp': (m['timestamp'] ?? m['createdAt'] ?? '').toString(),
+              // Decay-by-use bookkeeping. Legacy Cloud-Function shards have
+              // none of this — they get strength 1.0 and no clock, which means
+              // they're never swept (we won't delete history we didn't author).
+              'strength': m['strength'] ?? 1.0,
+              'lastAccessed': m['lastAccessed'] ?? 0,
+              'hits': m['hits'] ?? 0,
             };
           }).toList();
         }

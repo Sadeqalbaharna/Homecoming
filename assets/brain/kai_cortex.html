@@ -68,9 +68,15 @@
   const camera=new THREE.PerspectiveCamera(52,1,0.1,3000);
   camera.position.set(0,20,430);
   const controls=new THREE.OrbitControls(camera,renderer.domElement);
-  controls.enableDamping=true;controls.dampingFactor=0.06;controls.enablePan=false;
+  controls.enableDamping=true;controls.dampingFactor=0.06;
+  // Pan on, and let the camera get close: this is a map to explore, not a logo
+  // to admire from a fixed orbit. minDistance 230 kept you outside your own head.
+  controls.enablePan=true;
   controls.autoRotate=true;controls.autoRotateSpeed=0.55;
-  controls.minDistance=230;controls.maxDistance=760;
+  controls.minDistance=40;controls.maxDistance=900;
+  // Stop spinning the moment you grab it — autorotate fighting your drag is
+  // maddening when you're trying to read a label.
+  controls.addEventListener('start',()=>{controls.autoRotate=false;});
 
   // soft round sprite for glowing points
   function dotTexture(){
@@ -88,6 +94,7 @@
   let segGroups={l:null,r:null,s:null,c:null};
   const pulsePool=[]; const PULSES=70;
   let labels=[];
+  let edgeLabels=[];   // "cares for" — the relation sprites on each link
 
   function ellipsoidShellPoint(cx, rx,ry,rz){
     // random direction, biased toward the shell, with gyri lumpiness
@@ -98,20 +105,72 @@
     return [cx+dx*rx*rad, dy*ry*rad, dz*rz*rad];
   }
 
+  // ── 3D force-directed layout ─────────────────────────────────────────────────
+  //
+  // This is the whole point of the map. Positions used to be thrown away and
+  // replaced with rnd() on a brain-shaped shell — real nodes, fake structure, so
+  // the picture said nothing. Now the SHAPE COMES FROM THE LINKS: things end up
+  // near each other because they're actually related, not because someone filed
+  // them under the same heading.
+  //
+  // Fruchterman–Reingold, 3D, O(n²) repulsion. That's fine — the graph is capped
+  // upstream at ~120 nodes, and this runs once per graph change, not per frame.
+  function layoutGraph(ns, edges){
+    const n=ns.length; if(!n) return;
+    // Seed on a Fibonacci sphere: deterministic, so a reload doesn't reshuffle
+    // his whole head and make you re-learn where everything lives.
+    ns.forEach((o,i)=>{
+      const y=1-(i/Math.max(1,n-1))*2, r=Math.sqrt(Math.max(0,1-y*y)), th=i*2.399963229;
+      o.x=Math.cos(th)*r*120; o.y=y*120; o.z=Math.sin(th)*r*120;
+      o.vx=0;o.vy=0;o.vz=0;
+    });
+    const K=68, ITER=320;
+    for(let it=0; it<ITER; it++){
+      const t=1-it/ITER; // cooling
+      for(let i=0;i<n;i++){
+        for(let j=i+1;j<n;j++){
+          let dx=ns[i].x-ns[j].x, dy=ns[i].y-ns[j].y, dz=ns[i].z-ns[j].z;
+          let dd=dx*dx+dy*dy+dz*dz;
+          if(dd<0.01){dx=Math.random()-0.5;dy=Math.random()-0.5;dz=Math.random()-0.5;dd=0.01;}
+          const d=Math.sqrt(dd), f=(K*K)/dd, ux=dx/d, uy=dy/d, uz=dz/d;
+          ns[i].vx+=ux*f; ns[i].vy+=uy*f; ns[i].vz+=uz*f;
+          ns[j].vx-=ux*f; ns[j].vy-=uy*f; ns[j].vz-=uz*f;
+        }
+      }
+      // Attraction along REAL edges. A stronger relationship pulls harder, so
+      // "cares for" sits tighter than "mentioned once".
+      edges.forEach(e=>{
+        const a=ns[e[0]], b=ns[e[1]]; if(!a||!b) return;
+        const dx=a.x-b.x, dy=a.y-b.y, dz=a.z-b.z;
+        const d=Math.sqrt(dx*dx+dy*dy+dz*dz)||0.01;
+        const f=(d*d)/K*(0.4+(e[3]||0.5)), ux=dx/d, uy=dy/d, uz=dz/d;
+        a.vx-=ux*f; a.vy-=uy*f; a.vz-=uz*f;
+        b.vx+=ux*f; b.vy+=uy*f; b.vz+=uz*f;
+      });
+      for(let i=0;i<n;i++){
+        const o=ns[i];
+        o.vx-=o.x*0.012; o.vy-=o.y*0.012; o.vz-=o.z*0.012; // gravity: don't drift off
+        const sp=Math.sqrt(o.vx*o.vx+o.vy*o.vy+o.vz*o.vz)||1;
+        const cap=Math.min(sp, 12*t+0.6)/sp;
+        o.x+=o.vx*cap; o.y+=o.vy*cap; o.z+=o.vz*cap;
+        o.vx*=0.55;o.vy*=0.55;o.vz*=0.55;
+      }
+    }
+    let max=1; ns.forEach(o=>{max=Math.max(max, Math.sqrt(o.x*o.x+o.y*o.y+o.z*o.z));});
+    const s=150/max; ns.forEach(o=>{o.x*=s;o.y*=s;o.z*=s;});
+  }
+
   function buildFromData(data){
     // clear old
     while(brain.children.length) brain.remove(brain.children[0]);
-    nodes=[];baseCol=[];labels=[];
+    nodes=[];baseCol=[];labels=[];edgeLabels=[];
     const gap=10;
-    if(data && data.nodes && data.nodes.length){
-      // Real knowledge-graph nodes tagged with side (-1 gpt,0 shared,1 claude)
+    const real=!!(data && data.nodes && data.nodes.length);
+    if(real){
+      // Real knowledge-graph nodes tagged with side (-1 gpt,0 shared,1 claude).
+      // Positions come from layoutGraph() below — NOT from a random scatter.
       data.nodes.forEach(nd=>{
-        const side=nd.side||0;
-        const rx=(side===0?gap*2.4:70), ry=95, rz=80;
-        let p;
-        if(side===0){ p=[rnd(-gap*2.4,gap*2.4), rnd(-ry*0.82,ry*0.82), rnd(-rz*0.7,rz*0.7)]; }
-        else { p=ellipsoidShellPoint(side*(gap+70), 70,95,80); }
-        nodes.push({id:nd.id,x:p[0],y:p[1],z:p[2],side,imp:nd.importance||Math.random(),
+        nodes.push({id:nd.id,x:0,y:0,z:0,side:nd.side||0,imp:nd.importance||0.5,
           cat:nd.cat||nd.label||'', ph:Math.random()*6.28, flare:0, lab:false});
       });
     } else {
@@ -127,6 +186,48 @@
       }
     }
 
+    // Hemisphere buckets.
+    //
+    // These used to be `const` declared INSIDE the demo-edges `else` block below
+    // and then read from outside it, at the labels step. Block-scoped const →
+    // `ReferenceError: L is not defined` → thrown out of buildFromData → caught
+    // by the boot try/catch → requestAnimationFrame(animate) never ran. That is
+    // why this scene has never rendered a single frame, in either branch.
+    const byside=(s)=>nodes.map((n,i)=>({n,i})).filter(o=>o.n.side===s);
+    const L=byside(-1),R=byside(1),S=byside(0);
+
+    // edges grouped: left, right, shared, callosum (cross-hemisphere)
+    const eL=[],eR=[],eS=[],eC=[];
+    const rel=[];  // [aIdx, bIdx, relationText, strength] — real graph only
+    const links=data&&(data.links||data.edges);
+    if(links&&links.length){
+      // Real mindmap links from the knowledge graph
+      const idx={};nodes.forEach((n,i)=>{if(n.id!=null)idx[n.id]=i;});
+      links.forEach(lk=>{
+        const a=idx[lk.source!=null?lk.source:lk.from], b=idx[lk.target!=null?lk.target:lk.to];
+        if(a==null||b==null||a===b)return;
+        // The relation ("cares for") — the thing this whole map exists to show.
+        rel.push([a,b,lk.relation||lk.label||'',(lk.strength==null?0.5:lk.strength)]);
+        const sa=nodes[a].side,sb=nodes[b].side;
+        if(sa<0&&sb<0)eL.push([a,b]);
+        else if(sa>0&&sb>0)eR.push([a,b]);
+        else if(sa*sb<0)eC.push([a,b]);   // genuine cross-hemisphere link → callosum
+        else eS.push([a,b]);               // touches the shared band
+      });
+    } else {
+      // Demo fallback: nearest-neighbour synapses + a synthetic callosum
+      const nn=(o,pool,k)=>pool.filter(p=>p!==o).sort((a,b)=>d2(o.n,a.n)-d2(o.n,b.n)).slice(0,k);
+      L.forEach(o=>nn(o,L,2).forEach(m=>eL.push([o.i,m.i])));
+      R.forEach(o=>nn(o,R,2).forEach(m=>eR.push([o.i,m.i])));
+      S.forEach(o=>{const l=nn(o,L,1)[0],r=nn(o,R,1)[0];if(l)eS.push([o.i,l.i]);if(r)eS.push([o.i,r.i]);});
+      const li=L.slice().sort((a,b)=>Math.abs(a.n.x)-Math.abs(b.n.x)).slice(0,16);
+      const ri=R.slice().sort((a,b)=>Math.abs(a.n.x)-Math.abs(b.n.x)).slice(0,16);
+      li.forEach(o=>{const pick2=ri[(Math.random()*ri.length)|0];if(pick2)eC.push([o.i,pick2.i]);});
+    }
+
+    // Shape from the links. Must run before any geometry reads a position.
+    if(real) layoutGraph(nodes, rel);
+
     // points geometry
     const pos=new Float32Array(nodes.length*3), col=new Float32Array(nodes.length*3), sz=new Float32Array(nodes.length);
     nodes.forEach((n,i)=>{
@@ -141,49 +242,29 @@
       opacity:0.95,blending:THREE.AdditiveBlending,depthWrite:false,sizeAttenuation:true});
     pts=new THREE.Points(ptsGeo,pmat);brain.add(pts);
 
-    // edges grouped: left, right, shared, callosum (cross-hemisphere)
-    const eL=[],eR=[],eS=[],eC=[];
-    const links=data&&(data.links||data.edges);
-    if(links&&links.length){
-      // Real mindmap links from the knowledge graph
-      const idx={};nodes.forEach((n,i)=>{if(n.id!=null)idx[n.id]=i;});
-      links.forEach(lk=>{
-        const a=idx[lk.source!=null?lk.source:lk.from], b=idx[lk.target!=null?lk.target:lk.to];
-        if(a==null||b==null||a===b)return;
-        const sa=nodes[a].side,sb=nodes[b].side;
-        if(sa<0&&sb<0)eL.push([a,b]);
-        else if(sa>0&&sb>0)eR.push([a,b]);
-        else if(sa*sb<0)eC.push([a,b]);   // genuine cross-hemisphere link → callosum
-        else eS.push([a,b]);               // touches the shared band
-      });
-    } else {
-      // Demo fallback: nearest-neighbour synapses + a synthetic callosum
-      const byside=(s)=>nodes.map((n,i)=>({n,i})).filter(o=>o.n.side===s);
-      const L=byside(-1),R=byside(1),S=byside(0);
-      const nn=(o,pool,k)=>pool.filter(p=>p!==o).sort((a,b)=>d2(o.n,a.n)-d2(o.n,b.n)).slice(0,k);
-      L.forEach(o=>nn(o,L,2).forEach(m=>eL.push([o.i,m.i])));
-      R.forEach(o=>nn(o,R,2).forEach(m=>eR.push([o.i,m.i])));
-      S.forEach(o=>{const l=nn(o,L,1)[0],r=nn(o,R,1)[0];if(l)eS.push([o.i,l.i]);if(r)eS.push([o.i,r.i]);});
-      const li=L.slice().sort((a,b)=>Math.abs(a.n.x)-Math.abs(b.n.x)).slice(0,16);
-      const ri=R.slice().sort((a,b)=>Math.abs(a.n.x)-Math.abs(b.n.x)).slice(0,16);
-      li.forEach(o=>eC.push([o.i, ri[(Math.random()*ri.length)|0].i]));
-    }
-
     segGroups.l=makeSeg(eL,COL.l,0.10);
     segGroups.r=makeSeg(eR,COL.r,0.10);
     segGroups.s=makeSeg(eS,COL.s,0.09);
     segGroups.c=makeSeg(eC,COL.s,0.14);
     window._edges={l:eL,r:eR,s:eS,c:eC};
 
-    // labels — a few important nodes per region
-    const label=(arr,force,force2,force3)=>{arr.sort((a,b)=>b.n.imp-a.n.imp);
-      for(let i=0;i<Math.min(5,arr.length);i++){arr[i].n.lab=true;addLabel(arr[i].n);}
-      if(force&&arr[0])relabel(arr[0].n,force);
-      if(force2&&arr[1])relabel(arr[1].n,force2);
-      if(force3&&arr[2])relabel(arr[2].n,force3);};
-    if(!(data&&data.nodes&&data.nodes.length)){
+    if(real){
+      // A map you READ, not a mood light. Every node gets its name and every
+      // link gets its relation, so you can actually see "Sadeq —cares for→ Kai"
+      // instead of an anonymous glowing thread. Both fade with camera distance
+      // in animate() — all of them at once is spaghetti.
+      nodes.forEach(n=>{n.lab=true;addLabel(n);});
+      rel.forEach(e=>addEdgeLabel(nodes[e[0]],nodes[e[1]],e[2]));
+      statusEl.textContent=nodes.length+' nodes · '+rel.length+' links · live';
+    } else {
+      // Demo brain: label a few important nodes per region.
+      const label=(arr,force,force2,force3)=>{arr.sort((a,b)=>b.n.imp-a.n.imp);
+        for(let i=0;i<Math.min(5,arr.length);i++){arr[i].n.lab=true;addLabel(arr[i].n);}
+        if(force&&arr[0])relabel(arr[0].n,force);
+        if(force2&&arr[1])relabel(arr[1].n,force2);
+        if(force3&&arr[2])relabel(arr[2].n,force3);};
       label(L,'social','images','voice'); label(R,'code'); label(S,'people');
-    } else { label(L); label(R); label(S); }
+    }
 
     pulsePool.length=0;
     for(let i=0;i<PULSES;i++){const s=makeSprite(1);s.visible=false;brain.add(s);pulsePool.push({sp:s,active:false,a:0,b:0,t:0,spd:0});}
@@ -214,6 +295,23 @@
     n._label=s;
   }
   function relabel(n,cat){n.cat=cat;if(n._label){brain.remove(n._label);const idx=labels.indexOf(n._label);if(idx>=0)labels.splice(idx,1);}addLabel(n);}
+
+  // The relation sprite that sits on a link — "cares for", "built", "fears".
+  // GPT has been extracting these all along (brain_extraction_service stores it
+  // as edge.label); nothing has ever drawn one. This draws it.
+  function addEdgeLabel(a,b,text){
+    if(!a||!b||!text) return;
+    const t=String(text).trim(); if(!t) return;
+    const c=document.createElement('canvas');c.width=256;c.height=40;const g=c.getContext('2d');
+    g.font='20px ui-monospace, Menlo, monospace';g.textAlign='center';g.textBaseline='middle';
+    g.fillStyle='#a8c6de';g.shadowColor='#5f93bd';g.shadowBlur=7;
+    g.fillText(t.length>22?t.slice(0,21)+'…':t,128,21);
+    const tex=new THREE.CanvasTexture(c);
+    const s=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,transparent:true,opacity:0,depthWrite:false,depthTest:false}));
+    s.scale.set(34,5.3,1);
+    s.position.set((a.x+b.x)/2,(a.y+b.y)/2,(a.z+b.z)/2);
+    brain.add(s);edgeLabels.push(s);
+  }
 
   // ── holographic rings ────────────────────────────────────────────────────────
   const ring1=new THREE.Mesh(new THREE.TorusGeometry(150,0.6,8,120),
@@ -310,7 +408,27 @@
       if(p.t>=1){p.active=false;p.sp.visible=false;flare(p.b,1.0);continue;}
       const a=nodes[p.a],b=nodes[p.b];p.sp.position.set(a.x+(b.x-a.x)*p.t,a.y+(b.y-a.y)*p.t,a.z+(b.z-a.z)*p.t);}
 
-    // face labels toward camera handled by Sprite automatically; fade with distance
+    // Sprites face the camera on their own. The fade, however, did NOT exist —
+    // this comment claimed it for who knows how long. Now it's real:
+    //
+    //   node names  — legible from the resting orbit, gone at the far end
+    //   relations   — hidden until you fly in close
+    //
+    // That split is deliberate. 120 node labels plus every "cares for" at full
+    // opacity from across the room is an unreadable hairball; the map should
+    // tell you WHAT is in there from outside, and WHY things are connected only
+    // when you go and look.
+    for(let i=0;i<labels.length;i++){
+      const s=labels[i], d=camera.position.distanceTo(s.position);
+      const o=Math.max(0,Math.min(1,1-(d-300)/300));
+      s.material.opacity=o; s.visible=o>0.02;
+    }
+    for(let i=0;i<edgeLabels.length;i++){
+      const s=edgeLabels[i], d=camera.position.distanceTo(s.position);
+      const o=Math.max(0,Math.min(0.92,1-(d-120)/140));
+      s.material.opacity=o; s.visible=o>0.02;
+    }
+
     ring1.rotation.z+=0.0009*dt;ring2.rotation.z-=0.0006*dt;
     controls.update();
     if(composer)composer.render();else renderer.render(scene,camera);

@@ -293,7 +293,29 @@ class KnowledgeEdge {
   final double strength; // 0-1, affects edge thickness/opacity
   final DateTime timestamp;
   final String? label;
-  
+
+  /// Memory shard ids this claim came from — `memory/embeddings/{persona}/{id}`,
+  /// which holds the actual words that were said.
+  ///
+  /// Without this the graph is a rumour with good styling: it asserts things
+  /// about Sadeq and cannot say why. With it, Kai can answer "because you told
+  /// me, on the 3rd" — and a wrong belief can be corrected at its source
+  /// instead of merely deleted.
+  ///
+  /// It is also the nerve between his two memory systems. `MemoryService`
+  /// (episodics, vectors) and this graph (entities, claims) are built from the
+  /// SAME exchange and, until now, had never once referenced each other.
+  final List<String> sources;
+
+  /// When this claim stopped being true. Null = still believed.
+  ///
+  /// Facts change — he moves, he changes his mind, the Tavern opens. Nothing
+  /// used to retire a claim; it just decayed, so his graph could only ever be a
+  /// snapshot of now with no memory of having been wrong. Superseded edges are
+  /// never deleted: they are what makes this a mind that changed rather than a
+  /// mind that was always right.
+  final DateTime? supersededAt;
+
   KnowledgeEdge({
     required this.fromId,
     required this.toId,
@@ -301,7 +323,30 @@ class KnowledgeEdge {
     required this.strength,
     required this.timestamp,
     this.label,
+    this.sources = const [],
+    this.supersededAt,
   });
+
+  /// A claim he currently holds.
+  bool get isActive => supersededAt == null;
+
+  KnowledgeEdge copyWith({
+    EdgeType? type,
+    double? strength,
+    String? label,
+    List<String>? sources,
+    DateTime? supersededAt,
+  }) =>
+      KnowledgeEdge(
+        fromId: fromId,
+        toId: toId,
+        type: type ?? this.type,
+        strength: strength ?? this.strength,
+        timestamp: timestamp,
+        label: label ?? this.label,
+        sources: sources ?? this.sources,
+        supersededAt: supersededAt ?? this.supersededAt,
+      );
   
   /// Get color based on edge type
   Color get color {
@@ -373,9 +418,17 @@ class KnowledgeEdge {
       strength: (json['strength'] as num?)?.toDouble() ?? 0.5,
       timestamp: DateTime.fromMillisecondsSinceEpoch(json['timestamp'] as int),
       label: json['label'] as String?,
+      // Legacy edges have neither — they predate provenance and supersession.
+      // Absent sources means "we don't know where this came from", which is the
+      // honest reading of every edge written before today.
+      sources: (json['sources'] as List?)?.map((e) => e.toString()).toList() ??
+          const [],
+      supersededAt: json['supersededAt'] is int
+          ? DateTime.fromMillisecondsSinceEpoch(json['supersededAt'] as int)
+          : null,
     );
   }
-  
+
   /// Convert to JSON
   Map<String, dynamic> toJson() => {
     'fromId': fromId,
@@ -384,6 +437,8 @@ class KnowledgeEdge {
     'strength': strength,
     'timestamp': timestamp.millisecondsSinceEpoch,
     'label': label,
+    if (sources.isNotEmpty) 'sources': sources,
+    if (supersededAt != null) 'supersededAt': supersededAt!.millisecondsSinceEpoch,
   };
 }
 

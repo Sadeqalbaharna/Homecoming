@@ -78,15 +78,19 @@ class ContemplationService {
   }
 
   Future<String> _claude(String system, String user) async {
-    final r = await ClaudeService().complete(
-      prompt: user,
-      system: system,
-      model: ClaudeService.sonnet,
-      maxTokens: 650,
-      temperature: 0.7,
-      operation: 'contemplate',
-    );
-    return r?.text ?? '(the Architect fell silent)';
+    try {
+      final r = await ClaudeService().complete(
+        prompt: user,
+        system: system,
+        model: ClaudeService.sonnet,
+        maxTokens: 650,
+        temperature: 0.7,
+        operation: 'contemplate',
+      );
+      return r?.text ?? '(the Architect fell silent — no text returned)';
+    } on ClaudeException catch (e) {
+      return '(the Architect failed: ${e.message})';
+    }
   }
 
   /// Run the dual-brain contemplation. Returns the transcript + synthesis.

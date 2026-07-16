@@ -2,13 +2,16 @@
 // Executes golden test set and reports results
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:homecoming_app/services/memory_service.dart';
+import 'package:homecoming_app/services/ai/memory_service.dart';
 import 'memory_golden_test.dart';
 
 /// Run all golden tests and return results
 Future<List<MemoryTestResult>> runGoldenTests({
   required String personaId,
   String version = 'unknown',
+  MemoryEmbeddingProvider? embeddingProvider,
+  MemoryShardLoader? shardLoader,
+  MemoryQuerySideEffects sideEffects = MemoryQuerySideEffects.enabled,
 }) async {
   final results = <MemoryTestResult>[];
   
@@ -21,6 +24,9 @@ Future<List<MemoryTestResult>> runGoldenTests({
         personaId: personaId,
         query: test.query,
         limit: 5,
+        embeddingProvider: embeddingProvider,
+        shardLoader: shardLoader,
+        sideEffects: sideEffects,
       );
       
       // Check if we got results
@@ -132,6 +138,8 @@ void printTestResults(List<MemoryTestResult> results, String version) {
 
 /// Main test function for Flutter test framework
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   group('Memory Golden Tests', () {
     test('Run all golden tests', () async {
       final results = await runGoldenTests(

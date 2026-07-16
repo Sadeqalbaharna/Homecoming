@@ -292,6 +292,66 @@ class CodeWorkspaceService {
   }
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
+  /// Open a visible terminal window in the active workspace. This is separate
+  /// from [runCommandRaw]: it gives Sadeq a real terminal to watch/use while Kai
+  /// keeps using headless, captured commands for verified work.
+  Future<String> openTerminalRaw() async {
+    if (_root == null) return 'No workspace configured.';
+    if (!shellSupported) {
+      return 'Terminal is only available on desktop (not this platform).';
+    }
+
+    try {
+      if (Platform.isWindows) {
+        final wt = await Process.run('where', ['wt'], runInShell: true);
+        if (wt.exitCode == 0) {
+          await Process.start(
+            'wt',
+            ['-d', _root!],
+            mode: ProcessStartMode.detached,
+            runInShell: true,
+          );
+          return 'Opened Windows Terminal in $_root';
+        }
+
+        await Process.start(
+          'powershell',
+          ['-NoExit', '-Command', 'Set-Location -LiteralPath ${_psQuote(_root!)}'],
+          mode: ProcessStartMode.detached,
+          runInShell: true,
+        );
+        return 'Opened PowerShell in $_root';
+      }
+
+      if (Platform.isMacOS) {
+        await Process.start(
+          'open',
+          ['-a', 'Terminal', _root!],
+          mode: ProcessStartMode.detached,
+        );
+        return 'Opened Terminal in $_root';
+      }
+
+      final candidates = <List<String>>[
+        ['x-terminal-emulator', '--working-directory=$_root'],
+        ['gnome-terminal', '--working-directory=$_root'],
+        ['konsole', '--workdir', _root!],
+        ['xfce4-terminal', '--working-directory=$_root'],
+      ];
+      for (final c in candidates) {
+        try {
+          await Process.start(c.first, c.skip(1).toList(), mode: ProcessStartMode.detached);
+          return 'Opened ${c.first} in $_root';
+        } catch (_) {}
+      }
+      return 'Could not find a supported Linux terminal emulator.';
+    } catch (e) {
+      return 'Failed to open terminal: $e';
+    }
+  }
+
+  static String _psQuote(String value) => "'${value.replaceAll("'", "''")}'";
+
   Stream<File> _walk(Directory d) async* {
     List<FileSystemEntity> ents;
     try {

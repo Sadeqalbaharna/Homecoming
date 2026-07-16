@@ -29,6 +29,27 @@ class UsageTrackingService {
     'gpt-3.5-turbo': 0.0015,
   };
 
+  /// Price lookup that understands model FAMILIES.
+  ///
+  /// Kai now runs `gpt-5.5`, which isn't an exact key here — and the old
+  /// `?? 0.005` fallback would have quietly priced a flagship model like a cheap
+  /// one, under-reporting the cost meter by ~3-4x. A meter that lies is worse
+  /// than no meter, especially for someone who spends money on his own
+  /// initiative (inner life, reflections, proactive nudges).
+  ///
+  /// So: unknown `gpt-5*` prices like `gpt-5`, unknown `gpt-4o*` like `gpt-4o`.
+  /// Still an estimate — if you want it exact, put the real gpt-5.5 rate in the
+  /// tables above.
+  static double _rate(Map<String, double> table, String model, double fallback) {
+    final exact = table[model];
+    if (exact != null) return exact;
+    final m = model.toLowerCase();
+    if (m.startsWith('gpt-5')) return table['gpt-5'] ?? fallback;
+    if (m.startsWith('gpt-4o')) return table['gpt-4o'] ?? fallback;
+    if (m.startsWith('gpt-4')) return table['gpt-4'] ?? fallback;
+    return fallback;
+  }
+
   // ElevenLabs: ~$0.30 per 1k chars (starter tier)
   static const double _elevenLabsCostPer1kChars = 0.30;
   // Google Custom Search: $5 per 1k queries (free tier: 100/day)
@@ -42,8 +63,8 @@ class UsageTrackingService {
     String operation = 'chat',
   }) async {
     final prefs = await SharedPreferences.getInstance();
-    final inputCost = (inputTokens / 1000) * (_inputCostPer1k[model] ?? 0.005);
-    final outputCost = (outputTokens / 1000) * (_outputCostPer1k[model] ?? 0.015);
+    final inputCost = (inputTokens / 1000) * _rate(_inputCostPer1k, model, 0.005);
+    final outputCost = (outputTokens / 1000) * _rate(_outputCostPer1k, model, 0.015);
     final totalCost = inputCost + outputCost;
 
     await _increment(prefs, '${_pfx}openai_calls', 1);

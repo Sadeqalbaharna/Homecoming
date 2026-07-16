@@ -13,6 +13,7 @@
 
 import 'package:dio/dio.dart';
 import 'ai_config.dart';
+import 'claude_service.dart'; // single source of truth for Claude model ids
 import 'usage_tracking_service.dart';
 import '../core/cortex_activity_bus.dart';
 import '../core/code_workspace_service.dart';
@@ -24,7 +25,9 @@ class ClaudeCodeAgent {
 
   static const _endpoint = 'https://api.anthropic.com/v1/messages';
   static const _version = '2023-06-01';
-  static const _model = 'claude-sonnet-5';
+  // Same phantom as ClaudeService: 'claude-sonnet-5' does not exist, so every
+  // code_task delegation to the Claude hemisphere 400'd too.
+  static const _model = ClaudeService.sonnet;
   static const _maxIterations = 8;
 
   static const _system =

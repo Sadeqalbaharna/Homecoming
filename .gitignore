@@ -58,3 +58,22 @@ assets/config/api_keys.json
 
 # Firebase service account credentials — never commit
 **/serviceAccountKey.json
+
+# FUSE mount artifacts — never source.
+#
+# A network/FUSE mount (Cowork, WSL) leaves these behind when a file is deleted
+# or replaced while something still has it open. They are stale COPIES of real
+# source: lib/services/ai/.fuse_hidden000000770000004a is an old ai_service.dart.
+#
+# 115 of them were sitting in the repo and every one was already staged — one
+# `git commit` from being in your history forever. They also poison every search:
+# grep for a symbol and you get hits from three dead versions of the same file,
+# which is exactly the kind of thing that makes you doubt a correct result.
+.fuse_hidden*
+
+# Build output anywhere, not just root
+build/
+
+# scratch
+_probe.txt
+tmp_*.patch

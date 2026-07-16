@@ -30,17 +30,21 @@ class _KaiPresenceState extends State<KaiPresence> {
   String _thought = '';
   Timer? _clock;
   DateTime _now = DateTime.now();
+  // Held so they can be cancelled — an uncancelled stream keeps this State (and
+  // its RTDB listener) alive after the widget is gone.
+  StreamSubscription<Map<String, int>>? _moodSub;
+  StreamSubscription<KaiEvent>? _thoughtSub;
 
   @override
   void initState() {
     super.initState();
-    _state.moodStream(widget.personaId).listen((m) {
+    _moodSub = _state.moodStream(widget.personaId).listen((m) {
       if (mounted && m.isNotEmpty) setState(() => _mood = m);
     });
     _state.getMood(widget.personaId).then((m) {
       if (mounted && m != null && m.isNotEmpty && _mood.isEmpty) setState(() => _mood = m);
     });
-    KaiDb.instance
+    _thoughtSub = KaiDb.instance
         .ref('kai/${widget.personaId}/inner_monologue')
         .limitToLast(1)
         .onValue
@@ -58,6 +62,8 @@ class _KaiPresenceState extends State<KaiPresence> {
 
   @override
   void dispose() {
+    _moodSub?.cancel();
+    _thoughtSub?.cancel();
     _clock?.cancel();
     super.dispose();
   }

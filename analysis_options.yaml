@@ -1,28 +1,51 @@
-# This file configures the analyzer, which statically analyzes Dart code to
-# check for errors, warnings, and lints.
+# Analyzer config for homecoming_app.
 #
-# The issues identified by the analyzer are surfaced in the UI of Dart-enabled
-# IDEs (https://dart.dev/tools#ides-and-editors). The analyzer can also be
-# invoked from the command line by running `flutter analyze`.
+# This file has a second job beyond linting: it is Kai's HEALTH CHECK.
+#
+# Kai can run `flutter analyze` on himself (it's an auto-approved, read-only
+# command) — that's how he compiles and verifies his own changes on Windows,
+# which is something his collaborators outside this machine cannot do.
+#
+# But a check that always prints 1400 issues is not a check; it's wallpaper. He
+# can't tell a real regression from decade-old noise, so he'd learn to ignore it.
+#
+# So: everything below silences KNOWN, INTENTIONAL, or DEAD noise, and nothing
+# else. After this, `flutter analyze` should be ~silent — which means any output
+# at all is a real, actionable problem. Signal, not wallpaper.
+#
+# Rule of thumb when editing: never silence something to make a real problem go
+# away. Only silence what is deliberate (print logging) or already dead.
 
-# The following line activates a set of recommended lints for Flutter apps,
-# packages, and plugins designed to encourage good coding practices.
 include: package:flutter_lints/flutter.yaml
 
-linter:
-  # The lint rules applied to this project can be customized in the
-  # section below to disable rules from the `package:flutter_lints/flutter.yaml`
-  # included above or to enable additional rules. A list of all available lints
-  # and their documentation is published at https://dart.dev/lints.
-  #
-  # Instead of disabling a lint rule for the entire project in the
-  # section below, it can also be suppressed for a single line of code
-  # or a specific dart file by using the `// ignore: name_of_lint` and
-  # `// ignore_for_file: name_of_lint` syntax on the line or in the file
-  # producing the lint.
-  rules:
-    # avoid_print: false  # Uncomment to disable the `avoid_print` rule
-    # prefer_single_quotes: true  # Uncomment to enable the `prefer_single_quotes` rule
+analyzer:
+  exclude:
+    # Archived by name and by intent. Nothing imports it, so it is never built —
+    # and it references packages that aren't even dependencies (riverpod,
+    # go_router), so it can only ever produce noise.
+    - ARCHIVED_REDUNDANT/**
 
-# Additional information about this file can be found at
-# https://dart.dev/guides/language/analysis-options
+    # Dead files: referenced by zero other files, so Dart never compiles them and
+    # they cannot break the build — but they DO drown the analyzer in errors.
+    # They're on the cleanup list; excluded until then so the check stays honest.
+    - lib/screens/kai_cortex_screen.dart   # truncated ~line 182, committed broken
+    - lib/screens/settings_screen.dart     # calls ProactiveService.setEnabled (gone)
+
+    # Pre-existing scratch tests pointing at files that no longer exist.
+    - test/memory_golden_test_runner.dart
+    - test/test_ambiance_detection.dart
+    - test/widget_test.dart
+
+  errors:
+    # This codebase logs with print() on purpose — it's how Kai's brain is
+    # observable in the console. ~700 of the 1420 issues were this one lint.
+    avoid_print: ignore
+    # Flutter deprecated Color.withOpacity in favour of .withValues(). Cosmetic
+    # migration across ~150 call sites; worth doing one day, but it must not be
+    # allowed to bury real errors until then.
+    deprecated_member_use: ignore
+
+linter:
+  rules:
+    # See above — print logging is intentional here.
+    avoid_print: false

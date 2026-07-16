@@ -25,6 +25,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final VoiceActivationService _voiceActivation = VoiceActivationService();
   bool _proactiveEnabled = true;
   bool _voiceActivationEnabled = false;
+  bool _ttsEnabled = false;
   bool _isLoading = true;
 
   // Local brain (Ollama)
@@ -56,6 +57,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() {
       _proactiveEnabled = prefs.getBool('proactive_enabled') ?? true;
       _voiceActivationEnabled = prefs.getBool('voice_activation_enabled') ?? true;
+      _ttsEnabled = prefs.getBool('tts_enabled') ?? false;
       _localEndpointCtrl.text = savedEndpoint ?? '';
       _localStatus = savedEndpoint != null ? 'ok' : 'unchecked';
       _workspaceRoot = CodeWorkspaceService.instance.root;
@@ -150,6 +152,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Future<void> _toggleTts(bool value) async {
+    setState(() => _ttsEnabled = value);
+    await AIConfig.setTtsEnabled(value);
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(value
+              ? '🔊 Kai will speak replies again'
+              : '🔇 Kai will stay text-only'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
   Future<void> _toggleVoiceActivation(bool value) async {
     setState(() {
       _voiceActivationEnabled = value;
@@ -214,6 +232,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 _buildSectionTitle('🎤 Voice Controls'),
                 const SizedBox(height: 8),
                 _buildVoiceActivationToggle(),
+                const SizedBox(height: 12),
+                _buildTtsToggle(),
                 const SizedBox(height: 12),
                 _buildVoiceTrainingOption(),
                 const SizedBox(height: 24),

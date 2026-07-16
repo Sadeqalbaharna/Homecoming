@@ -9,9 +9,11 @@
 // agent can keep working in the same workspace without a prompt per edit. It
 // resets on app restart.
 
+import 'dart:async'; // unawaited — recording a rejection must never cause one
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'code_workspace_service.dart';
+import 'kai_craft_service.dart';
 
 enum EditKind { create, overwrite, edit }
 
@@ -47,7 +49,18 @@ class EditGate {
     final kind = current == null ? EditKind.create : EditKind.overwrite;
     final ok = await _approve(EditProposal(
         path: rel, kind: kind, oldContent: current, newContent: content));
-    if (!ok) return 'REJECTED by user — no changes made to $rel.';
+    if (!ok) {
+      // Sadeq looked at the diff and said no. That's a judgement on the work
+      // itself, from the one person who can make it — worth as much as any
+      // compile error and previously kept nowhere.
+      unawaited(KaiCraftService.instance
+          .record('truekai',
+              signal: CraftSignal.editRejected,
+              detail: 'Rejected a $kind to $rel',
+              context: rel)
+          .catchError((_) {}));
+      return 'REJECTED by user — no changes made to $rel.';
+    }
     return ws.writeRaw(rel, content);
   }
 
@@ -56,7 +69,40 @@ class EditGate {
     final current = await ws.readRaw(rel);
     if (current == null) return 'Cannot edit — file not found/unreadable: $rel';
     if (oldStr.isEmpty) return 'edit_file needs a non-empty old_string.';
-    final count = oldStr.allMatches(current).length;
+
+    var count = oldStr.allMatches(current).length;
+
+    // ── The CRLF ghost ───────────────────────────────────────────────────────
+    // These files are CRLF on disk; language models emit LF. So a snippet Kai
+    // copied *correctly* out of a file he'd just read would fail to match, and
+    // edit_file would tell him "not found — copy the exact text" when he had.
+    //
+    // He'd then (reasonably) route around the broken tool with
+    // `run_command python -c "...write the file..."` — which skips this gate
+    // entirely: no diff, no approval. The safety hole wasn't a hole in policy,
+    // it was a bug in the tool the policy depends on.
+    //
+    // So: adapt the needle to whatever the FILE uses, rather than normalising
+    // the file to match the needle — rewriting a whole file's line endings would
+    // turn a two-line edit into a thousand-line diff.
+    if (count == 0 && current.contains('\r\n')) {
+      String toCrlf(String s) =>
+          s.replaceAll('\r\n', '\n').replaceAll('\n', '\r\n');
+      final oldCrlf = toCrlf(oldStr);
+      final crlfCount = oldCrlf.allMatches(current).length;
+      if (crlfCount > 0) {
+        oldStr = oldCrlf;
+        newStr = toCrlf(newStr);
+        count = crlfCount;
+      }
+    }
+    // And the reverse, for the rare LF file receiving CRLF text.
+    if (count == 0 && !current.contains('\r\n') && oldStr.contains('\r\n')) {
+      oldStr = oldStr.replaceAll('\r\n', '\n');
+      newStr = newStr.replaceAll('\r\n', '\n');
+      count = oldStr.allMatches(current).length;
+    }
+
     if (count == 0) {
       return 'old_string not found in $rel — read the file and copy the exact text.';
     }
@@ -67,7 +113,15 @@ class EditGate {
     final updated = current.replaceFirst(oldStr, newStr);
     final ok = await _approve(EditProposal(
         path: rel, kind: EditKind.edit, oldContent: current, newContent: updated));
-    if (!ok) return 'REJECTED by user — no changes made to $rel.';
+    if (!ok) {
+      unawaited(KaiCraftService.instance
+          .record('truekai',
+              signal: CraftSignal.editRejected,
+              detail: 'Rejected an edit to $rel',
+              context: rel)
+          .catchError((_) {}));
+      return 'REJECTED by user — no changes made to $rel.';
+    }
     return ws.writeRaw(rel, updated);
   }
 

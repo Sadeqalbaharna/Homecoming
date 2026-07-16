@@ -268,6 +268,13 @@ Preserve important existing memories. Return only the JSON.
 
   // ── Format for system prompt injection ────────────────────────────────────
 
+  /// Pure seam for offline regression tests. Keeps episodic memory prompt
+  /// formatting testable without Firebase, SharedPreferences, local LLM, or
+  /// OpenAI.
+  String formatForPromptForTesting(Map<String, dynamic> data) {
+    return _formatForPrompt(data);
+  }
+
   String _formatForPrompt(Map<String, dynamic> data) {
     final buf = StringBuffer();
     buf.writeln('🧠 EPISODIC MEMORY (Kai\'s compressed history with this user):');

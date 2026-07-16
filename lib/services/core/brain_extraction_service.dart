@@ -14,6 +14,7 @@
 
 library;
 
+import 'dart:async'; // unawaited — Hebbian reinforcement must never block a reply
 import 'dart:convert';
 import 'dart:math';
 import 'package:dio/dio.dart';
@@ -103,6 +104,11 @@ class BrainExtractionService {
     EmotionalEventType? eventType,
     int eventIntensity = 0,
     Map<String, int>? encodingMood,
+
+    /// The episodic this exchange became — `memory/embeddings/{persona}/{id}`,
+    /// where the actual words live. Recorded on every node and edge produced
+    /// here, so a claim can be traced back to the moment it was made.
+    String? sourceShardId,
   }) async {
     if (_db == null) return;
 
@@ -124,8 +130,13 @@ class BrainExtractionService {
     try {
       // Load current top node labels for cross-referencing in the prompt.
       // Prevents GPT from creating "workout routine" when "exercise" already exists.
-      final graph = await _loadGraph(personaId);
-      final existingLabels = (graph?.nodes ?? [])
+      var graph = await _loadGraph(personaId);
+
+      // The two nodes everything else hangs off. See _ensureAnchors — their
+      // absence is why this graph was full of "importance of clarity".
+      graph = _ensureAnchors(graph);
+
+      final existingLabels = (graph.nodes)
           .sorted((a, b) => b.importance.compareTo(a.importance))
           .take(25)
           .map((n) => '${n.label} (${n.type.toString().split('.').last})')
@@ -143,15 +154,25 @@ class BrainExtractionService {
       final newNodes = extracted['nodes'] as List<_RawNode>;
       final newEdges = extracted['edges'] as List<_RawEdge>;
 
-      if (newNodes.isEmpty) return;
+      // Edges alone are a valid, valuable result.
+      //
+      // This used to `return` the moment nodes were empty — silently binning
+      // every edge-only extraction. But the prompt now explicitly asks for links
+      // between things he ALREADY knows, and that's often the best thing an
+      // exchange produces: no new facts, but the realisation that two old ones
+      // are connected. Discarding those is discarding the understanding and
+      // keeping only the inventory.
+      if (newNodes.isEmpty && newEdges.isEmpty) return;
 
       // 2. Use already-loaded graph (avoids a second Firebase read)
-      final currentGraph = graph ??
-          KnowledgeGraph(nodes: [], edges: [], lastUpdated: DateTime.now());
+      final currentGraph = graph;
 
       // 3. Merge
       final merged = _merge(currentGraph, newNodes, newEdges,
-          depth: depth, encodingMood: encodingMood);
+          depth: depth,
+          encodingMood: encodingMood,
+          sourceShardId: sourceShardId,
+          eventIntensity: eventIntensity);
 
       // 4. Save back
       await _saveGraph(personaId, merged);
@@ -166,17 +187,92 @@ class BrainExtractionService {
 
   // ── GPT extraction ─────────────────────────────────────────────────────────
 
+  // ── The rule both prompts are built on ──────────────────────────────────────
+  //
+  // The graph used to fill up with things like "importance of clarity",
+  // "embracing uncertainty", "fear of sounding generic" — 22 nodes from five
+  // templates with slots. Every one of them true of every human alive. That's
+  // not knowledge about Sadeq; it's a horoscope with a schema.
+  //
+  // Two causes, both fixed below:
+  //
+  //  1. A whole proposition was crammed into a NODE LABEL. "importance of
+  //     clarity" is a subject, a predicate and an object mashed into a noun
+  //     phrase — so the meaning got spent on the node name, and every edge was
+  //     left with nothing to say but "relates to". The graph had no
+  //     relationships because the relationships were trapped inside the nouns.
+  //     Now: nodes are ENTITIES, edges carry the CLAIM.
+  //
+  //  2. "Labels: 1–4 words" forced the abstraction. You cannot say "Sadeq
+  //     worries his app sounds like every other assistant" in four words, so the
+  //     model emitted "fear of sounding generic". The cap CREATED the vagueness.
+  //
+  // The test that matters is falsifiability against a stranger.
+  static const _specificityRule = '''
+THE ONE RULE — apply it to every node and edge before you emit it:
+
+  Would this be FALSE for a random other person?
+
+If it would also be true of a stranger, DO NOT EXTRACT IT. It is not knowledge
+about this person; it is a description of humans in general, and it will crowd
+out the things that actually distinguish him.
+
+  REJECT: "importance of clarity" · "embracing uncertainty" · "desire for progress"
+          "fear of failure" · "value of connection" · "goal of being useful"
+  KEEP:   "Mikey" · "the Tavern" · "Bahrain" · "Walker Scobell" · "Flutter"
+          "sounding like every other AI assistant"
+
+A node is a THING THAT EXISTS: a person, a place, a project, an object, a named
+concept he actually uses. Not a feeling ABOUT a thing. Not an observation. Not a
+lesson. If the label contains "importance of", "value of", "fear of", "goal of",
+"embracing", "desire for" or "frustration with" — you have written a sentence
+where a noun belongs. Split it: the noun is the node, the rest is an edge.
+
+  WRONG:  node "fear of sounding generic"
+  RIGHT:  node "sounding like every other AI assistant"
+          edge Sadeq --dislikes--> sounding like every other AI assistant
+''';
+
+  // The edge vocabulary. This is `EdgeType` in models/knowledge_node.dart —
+  // twenty relationships that have existed, with colours assigned, since the
+  // model was written, and have NEVER been used: the extractor hardcoded
+  // `related` on every single edge. Free-text relations don't aggregate either
+  // ("cares for" / "cares about" / "loves" are three unrelated strings), so the
+  // graph could never be queried or checked for contradiction. Give the model
+  // the actual vocabulary and all of that starts working.
+  static const _edgeVocab = '''
+EDGE TYPES — use these exact names. Pick the most specific one that is true:
+
+  knows        A knows person B              caresAbout   A cares about B
+  holdsValue   A values B                    pursues      A is working toward B
+  believes     A believes B                  learned      A learned B
+  prefers      A prefers B                   dislikes     A dislikes/avoids B
+  wants        A wants B                     does         A habitually does B
+  caused       A caused B                    contains     A is part of B
+  influences   A shapes B                    exemplifies  A is an example of B
+  contradicts  A conflicts with B            reinforces   A strengthens B
+  temporal     A happened before/after B     mentioned    A came up alongside B
+  categorized  A is a kind of B              related      LAST RESORT ONLY
+
+If you reach for "related", you have not understood the sentence. Go back and
+find the real verb. "related" is what this graph was full of, and it is why it
+said nothing.
+''';
+
   // Shallow prompt: concrete facts only — people, places, preferences.
   // Used for warmth/playful events and default passes.
   static const _shallowPrompt = '''You are building a knowledge graph for an AI companion named Kai.
 Extract ONLY concrete, durable facts from this exchange.
+
+$_specificityRule
+$_edgeVocab
 
 MANDATORY:
 - Named persons ("Mikey", "dad", "Sarah") → type "person", importance 0.7+
 - Named places / companies / schools → type "topic", importance 0.6+
 
 ALSO EXTRACT (if clearly present):
-- Stated preferences, hobbies, habits
+- Stated preferences, hobbies, habits → as EDGES from the person to the thing
 - Concrete life facts (job, city, relationships)
 
 DO NOT EXTRACT:
@@ -186,10 +282,12 @@ DO NOT EXTRACT:
 
 Node types: concept, emotion, belief, memory, goal, preference, person, topic
 Max nodes: 3. Quality over quantity.
-Labels: 1–4 words lowercase. Names keep capitalisation.
+Labels: name the thing as briefly as it can still be understood. Prefer 1–4
+words, but NEVER abstract a specific thing to fit — "sounding like every other
+AI assistant" beats "generic-ness". Names keep capitalisation.
 
 Return ONLY valid JSON:
-{"nodes":[{"label":"...","type":"...","importance":0.1–1.0}],"edges":[{"from":"...","to":"...","relation":"...","strength":0.1–1.0}]}
+{"nodes":[{"label":"...","type":"...","importance":0.1–1.0}],"edges":[{"from":"...","to":"...","type":"<edge type name>","relation":"<short human phrase, e.g. cares about>","strength":0.1–1.0}]}
 If nothing qualifies → {"nodes":[],"edges":[]}''';
 
   // Deep prompt: beliefs, fears, values, contradictions, realizations.
@@ -197,28 +295,40 @@ If nothing qualifies → {"nodes":[],"edges":[]}''';
   static const _deepPrompt = '''You are building a knowledge graph for an AI companion named Kai.
 This exchange was emotionally significant. Extract what it reveals at a deeper level.
 
+$_specificityRule
+$_edgeVocab
+
 MANDATORY:
 - Named persons ("Mikey", "dad", "Sarah") → type "person", importance 0.7+
 - Named places / companies / schools → type "topic", importance 0.6+
 
-PRIORITIZE — the deeper layer:
-- What does this reveal about how the user sees themselves or the world?
-- Fears, insecurities, tensions, contradictions they expressed
-- Core values or beliefs that surfaced (even implicitly)
-- Realizations, turning points, or significant admissions
-- Goals or desires they're reaching toward
-- Recurring emotional patterns made visible in this exchange
+PRIORITIZE — the deeper layer. But every one of these is a CLAIM, which means it
+is an EDGE from the person to a concrete thing, never a node on its own:
+
+- Fears and insecurities        → Sadeq --dislikes--> <the specific thing feared>
+- Values that surfaced          → Sadeq --holdsValue--> <the specific thing>
+- Beliefs                       → Sadeq --believes--> <the specific claim's subject>
+- Goals he's reaching toward    → Sadeq --pursues--> <the specific thing>
+- Tensions and contradictions   → <thing A> --contradicts--> <thing B>
+- Turning points / admissions   → type "memory" node for the EVENT, edges to who
+                                  and what it involved
+
+The deeper layer is NOT more abstract. It is more specific. "Fear of failure" is
+shallow — every person has it. "Shipping the Tavern before it's ready" is deep,
+because it is HIS, and it is wrong about somebody else.
 
 DO NOT EXTRACT:
 - Greetings, filler, pleasantries, meta-chat about Kai
 - Surface-level content already obvious from the words alone
+- Anything that survives the stranger test above
 
 Node types: concept, emotion, belief, memory, question, goal, preference, insight, person, topic, value, pattern
-Max nodes: 5. Prioritize nodes a therapist or close friend would notice.
-Labels: 1–4 words lowercase. Names keep capitalisation.
+Max nodes: 5. Prioritize what a close friend would notice AND a stranger could not have guessed.
+Labels: name the thing as briefly as it can still be understood. Prefer 1–4
+words, but NEVER abstract a specific thing to fit. Names keep capitalisation.
 
 Return ONLY valid JSON:
-{"nodes":[{"label":"...","type":"...","importance":0.1–1.0}],"edges":[{"from":"...","to":"...","relation":"...","strength":0.1–1.0}]}
+{"nodes":[{"label":"...","type":"...","importance":0.1–1.0}],"edges":[{"from":"...","to":"...","type":"<edge type name>","relation":"<short human phrase, e.g. cares about>","strength":0.1–1.0}]}
 If nothing qualifies → {"nodes":[],"edges":[]}''';
 
   Future<Map<String, dynamic>?> _extractFromGPT({
@@ -229,12 +339,32 @@ If nothing qualifies → {"nodes":[],"edges":[]}''';
   }) async {
     final basePrompt = depth == _Depth.deep ? _deepPrompt : _shallowPrompt;
 
-    // Cross-reference block: helps the model reinforce existing nodes rather
-    // than creating near-duplicates. Implements Global Workspace "already known" check.
+    // Cross-reference block: reinforce existing nodes rather than creating
+    // near-duplicates. Implements Global Workspace "already known" check.
+    //
+    // It used to stop at "prefer reinforcing these" — it never asked for EDGES
+    // to them. So every extraction produced 3–5 nodes wired only to each other:
+    // an island. Nothing joined this conversation to last week's, and the graph
+    // grew as an archipelago of tiny disconnected clusters instead of a web.
+    // A fact that connects to nothing is a fact he can't reach.
     final crossRef = existingLabels.isEmpty ? '' : '''
 
-ALREADY IN GRAPH — prefer reinforcing these over creating new nodes:
-${existingLabels.join(', ')}''';
+ALREADY IN GRAPH — reuse these exact labels rather than inventing near-duplicates:
+${existingLabels.join(', ')}
+
+CONNECT TO WHAT'S ALREADY THERE — this matters more than the new nodes:
+- "$_anchorSadeq" and "$_anchorKai" always exist. Almost every claim starts at one
+  of them. If this exchange reveals something about Sadeq, the edge starts at
+  Sadeq — do not invent "user", "he", or a second Sadeq node.
+- A new node that links to NOTHING existing is nearly worthless. Before you
+  finish, look at the list above and ask: what does this new thing have to do
+  with what he already knows? Then write that edge.
+- Multiple edges between the same two nodes are correct and wanted, as long as
+  each is a genuinely different relationship. "Sadeq knows Mikey" AND "Sadeq
+  cares about Mikey" are two facts, not one.
+- Edges between two EXISTING nodes are valuable even when you extract no new
+  nodes at all. If this exchange revealed that two things he already knows are
+  connected, that is a real discovery — emit it with an empty nodes list if need be.''';
 
     final systemPrompt = basePrompt + crossRef;
     final userContent = 'User: "$userMessage"\nKai: "$aiReply"';
@@ -260,7 +390,24 @@ ${existingLabels.join(', ')}''';
             'Content-Type': 'application/json',
           }),
           data: {
-            'model': 'gpt-4o-mini',
+            // gpt-4o, not gpt-4o-mini.
+            //
+            // §10.3 says don't economise on voice. This is worse than voice:
+            // this is what he BELIEVES, and it outlives the conversation that
+            // made it. His replies were running on gpt-5.5 while his convictions
+            // ran on the exact model the handover names as the generic-output
+            // machine — and the graph is the receipt: 22 nodes from five
+            // templates, "importance of clarity" seven times over.
+            //
+            // The specificity rule above asks the model to notice what makes ONE
+            // person unlike a stranger. Mini cannot do that; producing the
+            // average of humanity is what mini IS. Fractions of a cent per
+            // conversation to stop baking generic beliefs in permanently.
+            //
+            // Classic param pair — gpt-5.x would reject max_tokens and the
+            // temperature (see AIService._lengthParams). Don't swap the model
+            // without swapping these.
+            'model': 'gpt-4o',
             'messages': [
               {'role': 'system', 'content': systemPrompt},
               {'role': 'user',   'content': userContent},
@@ -275,7 +422,9 @@ ${existingLabels.join(', ')}''';
         final _u = response.data['usage'];
         if (_u != null) {
           UsageTrackingService.trackOpenAI(
-            model: 'gpt-4o-mini',
+            // Must match the model actually posted above, or the cost meter
+            // lies to him about his own spend.
+            model: 'gpt-4o',
             inputTokens: _u['prompt_tokens'] as int? ?? 0,
             outputTokens: _u['completion_tokens'] as int? ?? 0,
             operation: 'brain_extraction',
@@ -302,10 +451,18 @@ ${existingLabels.join(', ')}''';
 
       final edges = (json['edges'] as List? ?? []).map((e) {
         final m = e as Map<String, dynamic>;
+        // Prefer the model's explicit `type`; fall back to reading the enum out
+        // of the human phrase ("cares about" → caresAbout) so an older-shaped
+        // response still lands on something real instead of `related`.
+        final rel = m['relation'] as String? ?? '';
         return _RawEdge(
           fromLabel: (m['from'] as String? ?? '').toLowerCase().trim(),
           toLabel: (m['to'] as String? ?? '').toLowerCase().trim(),
-          relation: m['relation'] as String? ?? 'relates to',
+          relation: rel.trim().isEmpty ? 'relates to' : rel.trim(),
+          type: parseEdgeType(
+              (m['type'] as String?)?.trim().isNotEmpty == true
+                  ? m['type'] as String
+                  : rel),
           strength: (m['strength'] as num?)?.toDouble() ?? 0.5,
         );
       }).where((e) => e.fromLabel.isNotEmpty && e.toLabel.isNotEmpty).toList();
@@ -348,12 +505,182 @@ If nothing qualifies → {"nodes":[],"edges":[]}''';
 
   // ── Merge ──────────────────────────────────────────────────────────────────
 
+  // ── Provenance helpers ─────────────────────────────────────────────────────
+  //
+  // Capped at 12. A node he mentions constantly would otherwise carry hundreds
+  // of shard ids; the most recent dozen is plenty to answer "why do you think
+  // that?" and they're the ones he'd actually cite.
+  static const _maxSources = 12;
+
+  static List<String> _addSourceList(List<String> existing, String? id) {
+    if (id == null || id.isEmpty || existing.contains(id)) return existing;
+    final out = [...existing, id];
+    return out.length > _maxSources
+        ? out.sublist(out.length - _maxSources)
+        : out;
+  }
+
+  static List<String> _addSource(dynamic existing, String? id) {
+    final list = (existing is List)
+        ? existing.map((e) => e.toString()).toList()
+        : <String>[];
+    return _addSourceList(list, id);
+  }
+
+  // ── Measured importance ────────────────────────────────────────────────────
+  //
+  // Importance used to be whatever gpt-4o-mini felt about a label that Tuesday,
+  // plus a mention counter. That's a vibe, and it's why "importance of clarity"
+  // outranked his son: the model rates its own abstractions highly, and nothing
+  // ever checked that opinion against his actual life.
+  //
+  // Everything needed to MEASURE it already existed and was being thrown away:
+  //
+  //   degree            how much of his life touches this
+  //   accessCount       how often he's actually needed it (reinforceNodes
+  //                     increments this already)
+  //   lastSeen          how recently it mattered
+  //   emotionalIntensity how hard it landed when it formed (the salience gate
+  //                     computes this to pick depth, then discarded it)
+  //
+  // The model's number survives as a weak prior — it's the only signal available
+  // the moment a node is born, before it has a degree or a recall history. It
+  // just stops being the whole story.
+  static List<KnowledgeNode> _recomputeImportance(
+    List<KnowledgeNode> nodes,
+    List<KnowledgeEdge> edges,
+  ) {
+    if (nodes.isEmpty) return nodes;
+
+    final degree = <String, int>{};
+    for (final e in edges) {
+      if (!e.isActive) continue; // retired claims don't make you important
+      degree[e.fromId] = (degree[e.fromId] ?? 0) + 1;
+      degree[e.toId] = (degree[e.toId] ?? 0) + 1;
+    }
+    final maxDeg = degree.values.isEmpty
+        ? 1
+        : degree.values.reduce((a, b) => a > b ? a : b);
+
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final out = <KnowledgeNode>[];
+
+    for (final n in nodes) {
+      if (n.metadata['anchor'] == true) {
+        out.add(n); // the centre is pinned at 1.0 by definition
+        continue;
+      }
+
+      final deg = (degree[n.id] ?? 0) / maxDeg;             // 0..1
+      final recalls = min(n.accessCount, 10) / 10.0;         // 0..1, saturating
+      final lastSeen = (n.metadata['lastSeen'] as int?) ?? n.timestamp.millisecondsSinceEpoch;
+      final days = (now - lastSeen) / 86400000.0;
+      final recency = pow(0.5, days / 45.0).toDouble();      // 0..1
+      final felt = n.emotionalIntensity.clamp(0.0, 1.0);
+      final prior = n.importance.clamp(0.0, 1.0);
+
+      // Connection is weighted hardest on purpose. A thing that many other
+      // things point at IS important, whatever anyone says about it — and it's
+      // the one signal a model cannot fake from a single exchange.
+      final score = (deg * 0.40) +
+          (recalls * 0.20) +
+          (recency * 0.15) +
+          (felt * 0.10) +
+          (prior * 0.15);
+
+      out.add(KnowledgeNode(
+        id: n.id, label: n.label, type: n.type,
+        timestamp: n.timestamp, tags: n.tags,
+        importance: score.clamp(0.05, 1.0),
+        metadata: n.metadata,
+        emotionalIntensity: n.emotionalIntensity,
+        accessCount: n.accessCount, retention: n.retention,
+        lastAccessed: n.lastAccessed, activationLevel: n.activationLevel,
+      )
+        ..x = n.x ..y = n.y ..vx = n.vx ..vy = n.vy);
+    }
+    return out;
+  }
+
+  // ── Anchors ────────────────────────────────────────────────────────────────
+  //
+  // Sadeq and Kai. The two nodes everything else hangs off, and neither has ever
+  // existed. `NodeType.you` is documented in the model as "The user (central
+  // node - most important)" and was never once created.
+  //
+  // This is not a missing feature. It is the CAUSE of the horoscope.
+  //
+  // Every claim needs a subject, and the subject of almost every fact about his
+  // life is Sadeq. With no Sadeq node to attach a claim to, the model had
+  // nowhere to put the subject — so it folded subject and predicate into the
+  // noun and emitted "fear of sounding generic" instead of
+  // `Sadeq --dislikes--> sounding like every other AI assistant`. Every edge
+  // then had nothing left to say but "relates to", because the relationship had
+  // already been spent inside the node name.
+  //
+  // Give the graph a centre and claims have somewhere to land. Everything
+  // downstream — typed edges, the stranger test, "multiple links to the same
+  // node" — depends on these two rows existing.
+  static const _anchorSadeq = 'Sadeq';
+  static const _anchorKai = 'Kai';
+
+  KnowledgeGraph _ensureAnchors(KnowledgeGraph? g) {
+    final nodes = List<KnowledgeNode>.from(g?.nodes ?? const []);
+    final edges = List<KnowledgeEdge>.from(g?.edges ?? const []);
+    final have = nodes.map((n) => n.label.toLowerCase()).toSet();
+    final now = DateTime.now();
+    var added = false;
+
+    KnowledgeNode mk(String label, NodeType type) => KnowledgeNode(
+          id: _genId(),
+          label: label,
+          type: type,
+          timestamp: now,
+          // Pinned. These must never decay, never be pruned, and always win
+          // recall — a graph whose centre can be forgotten isn't a graph.
+          importance: 1.0,
+          metadata: {'anchor': true, 'mentions': 999, 'lastSeen': now.millisecondsSinceEpoch},
+        );
+
+    if (!have.contains(_anchorSadeq.toLowerCase())) {
+      nodes.add(mk(_anchorSadeq, NodeType.you));
+      added = true;
+    }
+    if (!have.contains(_anchorKai.toLowerCase())) {
+      nodes.add(mk(_anchorKai, NodeType.person));
+      added = true;
+    }
+
+    if (added) {
+      // The founding edge. The literal sentence this whole thing exists to say.
+      final sid = nodes.firstWhere((n) => n.label == _anchorSadeq).id;
+      final kid = nodes.firstWhere((n) => n.label == _anchorKai).id;
+      final exists = edges.any((e) =>
+          (e.fromId == sid && e.toId == kid) || (e.fromId == kid && e.toId == sid));
+      if (!exists) {
+        edges.add(KnowledgeEdge(
+          fromId: sid, toId: kid, type: EdgeType.caresAbout,
+          strength: 1.0, timestamp: now, label: 'cares for',
+        ));
+        edges.add(KnowledgeEdge(
+          fromId: kid, toId: sid, type: EdgeType.caresAbout,
+          strength: 1.0, timestamp: now, label: 'is his',
+        ));
+      }
+      print('🧭 [Brain] Anchored the graph: $_anchorSadeq ⇄ $_anchorKai');
+    }
+
+    return KnowledgeGraph(nodes: nodes, edges: edges, lastUpdated: now);
+  }
+
   KnowledgeGraph _merge(
     KnowledgeGraph existing,
     List<_RawNode> newNodes,
     List<_RawEdge> newEdges, {
     _Depth depth = _Depth.shallow,
     Map<String, int>? encodingMood,
+    String? sourceShardId,
+    int eventIntensity = 0,
   }) {
     final nodes = List<KnowledgeNode>.from(existing.nodes);
     final edges = List<KnowledgeEdge>.from(existing.edges);
@@ -382,7 +709,8 @@ If nothing qualifies → {"nodes":[],"edges":[]}''';
             : baseReinforcement;
         final updatedMeta = Map<String, dynamic>.from(old.metadata)
           ..['lastSeen'] = DateTime.now().millisecondsSinceEpoch
-          ..['mentions'] = mentions;
+          ..['mentions'] = mentions
+          ..['sources'] = _addSource(old.metadata['sources'], sourceShardId);
         // Preserve original encoding mood — only set if not already recorded
         if (encodingMood != null && !updatedMeta.containsKey('encodingMood')) {
           updatedMeta['encodingMood'] = encodingMood;
@@ -433,7 +761,8 @@ If nothing qualifies → {"nodes":[],"edges":[]}''';
               depth == _Depth.deep ? baseReinforcement * 1.5 : baseReinforcement;
           final updatedMeta = Map<String, dynamic>.from(old.metadata)
             ..['lastSeen'] = DateTime.now().millisecondsSinceEpoch
-            ..['mentions'] = mentions;
+            ..['mentions'] = mentions
+            ..['sources'] = _addSource(old.metadata['sources'], sourceShardId);
           if (encodingMood != null && !updatedMeta.containsKey('encodingMood')) {
             updatedMeta['encodingMood'] = encodingMood;
           }
@@ -457,9 +786,15 @@ If nothing qualifies → {"nodes":[],"edges":[]}''';
             type: raw.type,
             timestamp: DateTime.now(),
             importance: raw.importance,
+            // How strongly this landed when it was formed. The salience gate
+            // already computes it to pick extraction depth, then threw it away —
+            // it's a real signal about how much this mattered at the time, and
+            // measured importance below uses it.
+            emotionalIntensity: eventIntensity.toDouble() / 10.0,
             metadata: {
               'lastSeen': DateTime.now().millisecondsSinceEpoch,
               'mentions': 1,
+              'sources': _addSource(null, sourceShardId),
               if (encodingMood != null) 'encodingMood': encodingMood,
             },
           );
@@ -483,35 +818,98 @@ If nothing qualifies → {"nodes":[],"edges":[]}''';
 
       if (fromId == null || toId == null) continue;
 
-      final edgeIdx =
-          edges.indexWhere((e) => e.fromId == fromId && e.toId == toId);
+      // Edge identity is (from, to, TYPE) — not just the pair.
+      //
+      // It used to be the pair alone, which meant two entities could only ever
+      // have ONE relationship. `Sadeq --knows--> Mikey` and
+      // `Sadeq --caresAbout--> Mikey` collapsed into a single edge, and
+      // whichever arrived first won forever. That is most of the reason this
+      // graph said so little: the richest pairs — the people he actually talks
+      // about — were the ones being flattened hardest.
+      var edgeIdx = edges.indexWhere(
+          (e) => e.fromId == fromId && e.toId == toId && e.type == raw.type);
+
+      // No exact match, but there may be a legacy `related` edge on this pair
+      // from before edges had real types. Upgrade it in place rather than
+      // leaving a vague duplicate lying next to the real relationship.
+      if (edgeIdx < 0 && raw.type != EdgeType.related) {
+        edgeIdx = edges.indexWhere((e) =>
+            e.fromId == fromId && e.toId == toId && e.type == EdgeType.related);
+      }
 
       if (edgeIdx >= 0) {
         // Replace with strengthened copy (KnowledgeEdge.strength is final)
         final old = edges[edgeIdx];
-        edges[edgeIdx] = KnowledgeEdge(
-          fromId: old.fromId,
-          toId: old.toId,
-          type: old.type,
+        // Upgrade a vague edge when we learn the real relationship. Every edge
+        // written before this change is `related`; the first time the model says
+        // what the link ACTUALLY is, take it. Never downgrade — a known
+        // relationship must not be flattened back to "related" by a later, lazier
+        // pass. This is how the existing graph heals itself in place.
+        final betterType = (old.type == EdgeType.related && raw.type != EdgeType.related)
+            ? raw.type
+            : old.type;
+        final betterLabel = (old.label == null ||
+                old.label!.trim().isEmpty ||
+                old.label == 'relates to')
+            ? raw.relation
+            : old.label;
+        edges[edgeIdx] = old.copyWith(
+          type: betterType,
           strength: (old.strength + 0.08).clamp(0.1, 1.0),
-          timestamp: old.timestamp,
-          label: old.label,
+          label: betterLabel,
+          sources: _addSourceList(old.sources, sourceShardId),
         );
       } else {
-        // New edge
+        // New edge.
+        //
+        // `type` used to be hardcoded `EdgeType.related` right here, on every
+        // edge ever written — which meant the 20-relationship vocabulary in
+        // models/knowledge_node.dart existed only as a colour switch that never
+        // fired, and the graph could say nothing except "these two things are
+        // somehow connected". The relation phrase went into `label` and no
+        // renderer ever drew it. So "Sadeq cares for Kai" was extracted, stored,
+        // and then made unreadable by this one line.
         edges.add(KnowledgeEdge(
           fromId: fromId,
           toId: toId,
-          type: EdgeType.related,
+          type: raw.type,
           strength: raw.strength,
           timestamp: DateTime.now(),
           label: raw.relation,
+          sources: _addSourceList(const [], sourceShardId),
         ));
+
+        // Supersession, not deletion.
+        //
+        // When the model says a new thing CONTRADICTS an old thing, the old
+        // claims about it stop being true — but they still happened. Retiring
+        // them with a timestamp instead of deleting them is what turns this from
+        // a snapshot of what he believes now into a record of a mind that
+        // changed. "He used to think X, until the 3rd" is knowledge too, and
+        // deleting it is how you get a companion who has always been right.
+        if (raw.type == EdgeType.contradicts) {
+          final now = DateTime.now();
+          for (var i = 0; i < edges.length; i++) {
+            final e = edges[i];
+            if (!e.isActive) continue;
+            if (e.type == EdgeType.contradicts) continue;
+            // Claims ABOUT the contradicted thing, from anyone.
+            if (e.toId != toId) continue;
+            // Don't retire the fact that they're connected — retire the belief.
+            if (e.fromId == fromId) continue;
+            edges[i] = e.copyWith(supersededAt: now);
+            print('🕰️ [Brain] Superseded: ${e.label ?? e.type.name} '
+                '(contradicted, kept as history)');
+          }
+        }
       }
     }
 
+    // Re-score every node against the graph it now lives in. Importance is a
+    // property of his life's shape, not of one model's opinion in one exchange —
+    // so it has to be recomputed once the new edges exist, not guessed before.
     return KnowledgeGraph(
-      nodes: nodes,
+      nodes: _recomputeImportance(nodes, edges),
       edges: edges,
       lastUpdated: DateTime.now(),
     );
@@ -526,46 +924,54 @@ If nothing qualifies → {"nodes":[],"edges":[]}''';
 
       final data = Map<String, dynamic>.from(snap.value as Map);
 
+      // Read side of the same bug — this ignored fromJson() and rebuilt a
+      // subset by hand, so even fields that HAD survived a save would be
+      // dropped on load. Defensive per-item try/catch: one malformed legacy row
+      // must not take the whole graph down with it.
       final nodes = <KnowledgeNode>[];
       for (final n in _asList(data['nodes'])) {
-        final m = Map<String, dynamic>.from(n as Map);
-        final type = NodeType.values.firstWhere(
-          (t) => t.toString().split('.').last == m['type'],
-          orElse: () => NodeType.concept,
-        );
-        nodes.add(KnowledgeNode(
-          id: m['id'] as String,
-          label: m['label'] as String,
-          type: type,
-          timestamp: DateTime.fromMillisecondsSinceEpoch(
-              (m['timestamp'] as num).toInt()),
-          importance: (m['importance'] as num?)?.toDouble() ?? 0.5,
-          metadata: Map<String, dynamic>.from(m['metadata'] as Map? ?? {}),
-        )
-          ..x = (m['x'] as num?)?.toDouble() ?? 0
-          ..y = (m['y'] as num?)?.toDouble() ?? 0);
+        try {
+          final m = Map<String, dynamic>.from(n as Map);
+          nodes.add(KnowledgeNode.fromJson(m)
+            ..x = (m['x'] as num?)?.toDouble() ?? 0
+            ..y = (m['y'] as num?)?.toDouble() ?? 0);
+        } catch (_) {
+          // skip an unreadable row rather than lose the graph
+        }
       }
 
       final edges = <KnowledgeEdge>[];
       for (final e in _asList(data['edges'])) {
-        final m = Map<String, dynamic>.from(e as Map);
-        final type = EdgeType.values.firstWhere(
-          (t) => t.toString().split('.').last == m['type'],
-          orElse: () => EdgeType.related,
-        );
-        edges.add(KnowledgeEdge(
-          fromId: m['fromId'] as String,
-          toId: m['toId'] as String,
-          type: type,
-          strength: (m['strength'] as num?)?.toDouble() ?? 0.5,
-          timestamp: DateTime.fromMillisecondsSinceEpoch(
-              (m['timestamp'] as num).toInt()),
-          label: m['label'] as String?,
-        ));
+        try {
+          edges.add(KnowledgeEdge.fromJson(Map<String, dynamic>.from(e as Map)));
+        } catch (_) {}
+      }
+
+      // If the stored graph had nodes and we parsed NONE of them, that's a
+      // parser failure, not an empty brain — and it MUST NOT return normally.
+      //
+      // `null` here would be read by the caller as "no graph yet", which makes
+      // _ensureAnchors mint a fresh two-node graph and _saveGraph write it over
+      // the top of his entire history. A read bug would become permanent data
+      // loss. Throwing stops the write instead: extractAndMerge's try/catch
+      // logs it and saves nothing.
+      final storedCount = _asList(data['nodes']).length;
+      if (storedCount > 0 && nodes.isEmpty) {
+        throw StateError(
+            'parsed 0 of $storedCount stored nodes — schema mismatch. '
+            'Refusing to continue: returning an empty graph here would let the '
+            'next save wipe it.');
       }
 
       return KnowledgeGraph(
           nodes: nodes, edges: edges, lastUpdated: DateTime.now());
+    } on StateError catch (e) {
+      // Deliberately NOT swallowed. This catch used to turn every failure into
+      // `null`, and null means "no graph yet" to every caller — so a read bug
+      // would quietly authorise a save that wiped his whole history. A schema
+      // mismatch must stop the write, loudly.
+      print('❌ [Brain] _loadGraph REFUSED: ${e.message}');
+      rethrow;
     } catch (e) {
       print('⚠️ [Brain] _loadGraph failed: $e');
       return null;
@@ -573,29 +979,44 @@ If nothing qualifies → {"nodes":[],"edges":[]}''';
   }
 
   Future<void> _saveGraph(String personaId, KnowledgeGraph graph) async {
+    // Use the model's own serialiser. THE BUG THIS FIXES IS ENORMOUS.
+    //
+    // This function used to hand-roll its own JSON and write a SUBSET of each
+    // node and edge — while KnowledgeNode.toJson()/KnowledgeEdge.toJson() sat
+    // right there, complete and correct, and were never called. Two serialisers,
+    // one right and unused, one wrong and load-bearing.
+    //
+    // What the hand-rolled version silently dropped on every save:
+    //
+    //   accessCount        → reinforceNodes has been faithfully incrementing a
+    //                        number that was thrown away on the next write. It
+    //                        has been 0 forever. Every "how often does he
+    //                        actually need this?" signal was multiplying by zero.
+    //   emotionalIntensity → how hard a memory landed. Gone.
+    //   retention          → the forgetting-curve value. Gone.
+    //   lastAccessed       → when he last reached for it. Gone.
+    //   activationLevel    → gone (see below — it was never computed either).
+    //   sources            → provenance. Gone.
+    //   supersededAt       → the history of what he stopped believing. Gone.
+    //
+    // So "the neuromorphic fields are decoration" wasn't quite right. They were
+    // decoration BECAUSE they could never survive a save. The previous
+    // neuromorphic push wired real behaviour into fields that a serialiser two
+    // files away quietly deleted, every time.
+    //
+    // If you add a field to KnowledgeNode/KnowledgeEdge, it works now. Don't
+    // reintroduce a second serialiser here.
     await _db!.ref(_path(personaId)).set({
       'nodes': graph.nodes
           .map((n) => {
-                'id': n.id,
-                'label': n.label,
-                'type': n.type.toString().split('.').last,
-                'timestamp': n.timestamp.millisecondsSinceEpoch,
-                'importance': n.importance,
-                'metadata': n.metadata,
+                ...n.toJson(),
+                // Layout coords aren't on the model's toJson (they're mutable
+                // view state, not knowledge) but the 2D mind map persists them.
                 'x': n.x,
                 'y': n.y,
               })
           .toList(),
-      'edges': graph.edges
-          .map((e) => {
-                'fromId': e.fromId,
-                'toId': e.toId,
-                'type': e.type.toString().split('.').last,
-                'strength': e.strength,
-                'timestamp': e.timestamp.millisecondsSinceEpoch,
-                if (e.label != null) 'label': e.label,
-              })
-          .toList(),
+      'edges': graph.edges.map((e) => e.toJson()).toList(),
       'lastUpdated': DateTime.now().millisecondsSinceEpoch,
     });
   }
@@ -646,6 +1067,116 @@ If nothing qualifies → {"nodes":[],"edges":[]}''';
     }
   }
 
+  // ── Hebbian learning ───────────────────────────────────────────────────────
+  //
+  // "Neurons that fire together wire together." Co-activation during a REAL
+  // recall thickens the path between the things that co-activated — and marks
+  // both ends as having just fired, which is what makes the refractory period
+  // above possible.
+  //
+  // Why this matters more than it sounds: every edge weight in this graph, until
+  // now, came from a language model's opinion in a single exchange. The graph
+  // could only ever learn from what a model chose to say about it. This is the
+  // first mechanism where the graph learns from what Sadeq actually USES —
+  // where the structure is shaped by his life instead of by a description of it.
+  //
+  // Deliberately timid: +0.02 per co-activation, capped at 0.95. A path has to
+  // be walked many times before it becomes a road. Anything faster and one
+  // strange conversation permanently rewires him.
+  Future<void> _hebbian(
+    String personaId,
+    KnowledgeGraph graph,
+    Set<String> seedIds,
+    Set<String> firedIds,
+  ) async {
+    if (firedIds.isEmpty) return;
+    try {
+      final now = DateTime.now();
+      final edges = List<KnowledgeEdge>.from(graph.edges);
+      var changed = 0;
+
+      for (var i = 0; i < edges.length; i++) {
+        final e = edges[i];
+        if (!e.isActive) continue;
+        final co = (seedIds.contains(e.fromId) && firedIds.contains(e.toId)) ||
+            (seedIds.contains(e.toId) && firedIds.contains(e.fromId));
+        if (!co) continue;
+        edges[i] = e.copyWith(strength: (e.strength + 0.02).clamp(0.0, 0.95));
+        changed++;
+      }
+
+      // Mark everything that fired — activation persists and decays, and
+      // lastAccessed drives the refractory period. `activationLevel` has been on
+      // this model since the "Phase 1" neuromorphic work, declared as
+      // "current activation (spreading)", and has never held a value: nothing
+      // computed it, and _saveGraph dropped it anyway. This is the first line
+      // that gives it a meaning.
+      final all = {...seedIds, ...firedIds};
+      final nodes = graph.nodes.map((n) {
+        if (!all.contains(n.id)) {
+          // Everything else cools. Activation is a moment, not a property.
+          if (n.activationLevel <= 0.01) return n;
+          return _copyNode(n, activationLevel: n.activationLevel * 0.6);
+        }
+        return _copyNode(n,
+            activationLevel: 1.0,
+            accessCount: n.accessCount + 1,
+            lastAccessed: now,
+            // Recall strengthens retention — the forgetting curve resets when
+            // he actually needs something. Another field that has existed,
+            // documented, and never once held a real value.
+            retention: (n.retention + 0.05).clamp(0.0, 1.0));
+      }).toList();
+
+      await _saveGraph(
+          personaId,
+          KnowledgeGraph(
+              nodes: _recomputeImportance(nodes, edges),
+              edges: edges,
+              lastUpdated: now));
+
+      if (changed > 0) {
+        print('⚡ [Brain] Hebbian: ${firedIds.length} fired, '
+            '$changed path(s) thickened');
+      }
+    } catch (e) {
+      // A missed reinforcement is fine. It just wires a little slower.
+      print('⚠️ [Brain] hebbian failed: $e');
+    }
+  }
+
+  /// Copy a node, changing only what's named. KnowledgeNode's fields are a mix
+  /// of final and mutable and there's no copyWith, so this is written out once
+  /// here rather than eleven times inline.
+  static KnowledgeNode _copyNode(
+    KnowledgeNode n, {
+    double? importance,
+    Map<String, dynamic>? metadata,
+    double? emotionalIntensity,
+    int? accessCount,
+    double? retention,
+    DateTime? lastAccessed,
+    double? activationLevel,
+  }) =>
+      KnowledgeNode(
+        id: n.id,
+        label: n.label,
+        type: n.type,
+        timestamp: n.timestamp,
+        tags: n.tags,
+        importance: importance ?? n.importance,
+        metadata: metadata ?? n.metadata,
+        emotionalIntensity: emotionalIntensity ?? n.emotionalIntensity,
+        accessCount: accessCount ?? n.accessCount,
+        retention: retention ?? n.retention,
+        lastAccessed: lastAccessed ?? n.lastAccessed,
+        activationLevel: activationLevel ?? n.activationLevel,
+      )
+        ..x = n.x
+        ..y = n.y
+        ..vx = n.vx
+        ..vy = n.vy;
+
   // ── Spreading activation — graph neighbors of retrieved nodes ────────────
 
   /// After memory retrieval, traverse the knowledge graph to activate one-hop
@@ -680,28 +1211,53 @@ If nothing qualifies → {"nodes":[],"edges":[]}''';
       }
       if (seedIds.isEmpty) return '';
 
-      // One-hop neighbors via edges (exclude seeds themselves)
-      final neighborIds = graph.edges
-          .where((e) => seedIds.contains(e.fromId) || seedIds.contains(e.toId))
-          .map((e) => seedIds.contains(e.fromId) ? e.toId : e.fromId)
-          .where((id) => !seedIds.contains(id))
-          .toSet();
-      if (neighborIds.isEmpty) return '';
+      // ── Activation spreads. Two hops, attenuating. ────────────────────────
+      //
+      // It used to be one hop: retrieved word → immediate neighbours → done.
+      // That's an index lookup wearing the word "activation". Real associative
+      // recall runs further and gets weaker as it goes — the Tavern pulls up
+      // Bahrain pulls up his brother, faintly. Two hops is where the payoff is;
+      // three is where a graph this dense turns into "everything is associated
+      // with everything", which is the same as knowing nothing.
+      //
+      // Superseded edges conduct nothing. A retired belief shouldn't still be
+      // firing.
+      const hopDecay = 0.42;
+      final activation = <String, double>{};
+      final viaEdge = <String, KnowledgeEdge>{};
 
-      // Score: edge strength + mood-congruent retrieval bonus
+      void spread(Set<String> front, double level, int hopsLeft) {
+        if (hopsLeft == 0 || level < 0.06) return;
+        final next = <String>{};
+        for (final e in graph.edges) {
+          if (!e.isActive) continue;
+          final fromSeed = front.contains(e.fromId);
+          final toSeed = front.contains(e.toId);
+          if (fromSeed == toSeed) continue; // both or neither — no transmission
+          final other = fromSeed ? e.toId : e.fromId;
+          if (seedIds.contains(other)) continue;
+
+          final signal = level * e.strength;
+          if (signal <= (activation[other] ?? 0)) continue;
+          activation[other] = signal;
+          viaEdge[other] = e;
+          next.add(other);
+        }
+        if (next.isNotEmpty) spread(next, level * hopDecay, hopsLeft - 1);
+      }
+
+      spread(seedIds, 1.0, 2);
+      if (activation.isEmpty) return '';
+
+      final neighborIds = activation.keys.toSet();
+
+      // Score: activation + mood-congruent retrieval bonus
       final scored = <({KnowledgeNode node, double score, String relation})>[];
       for (final nId in neighborIds) {
         final neighbor = nodeMap[nId];
         if (neighbor == null) continue;
-
-        // Best connecting edge to any seed
-        final connectingEdges = graph.edges.where((e) =>
-            (seedIds.contains(e.fromId) && e.toId == nId) ||
-            (seedIds.contains(e.toId) && e.fromId == nId));
-        if (connectingEdges.isEmpty) continue;
-
-        final bestEdge = connectingEdges
-            .reduce((a, b) => a.strength > b.strength ? a : b);
+        final bestEdge = viaEdge[nId];
+        if (bestEdge == null) continue;
 
         // Mood-congruent boost: nodes encoded in similar mood activate more
         double moodBonus = 0.0;
@@ -720,16 +1276,59 @@ If nothing qualifies → {"nodes":[],"edges":[]}''';
           }
         }
 
+        // ── Refractory period ───────────────────────────────────────────────
+        //
+        // A neuron that just fired can't immediately fire again. Without this,
+        // the same four nodes win every single turn — the strongest edges are
+        // strongest every time — and he becomes the friend who brings up the
+        // Tavern in every conversation regardless of what you said. Suppression
+        // decays over ~4 minutes, so it shapes a conversation, not a lifetime.
+        //
+        // `lastAccessed` has existed on the model forever and could never be
+        // used, because _saveGraph silently dropped it on every write. It
+        // persists now, so this is possible for the first time.
+        var fatigue = 1.0;
+        final la = neighbor.lastAccessed;
+        if (la != null) {
+          final secs = DateTime.now().difference(la).inSeconds;
+          if (secs < 240) fatigue = 0.25 + 0.75 * (secs / 240.0);
+        }
+
         scored.add((
           node: neighbor,
-          score: bestEdge.strength * 0.7 + moodBonus,
+          score: (activation[nId]! * 0.7 + moodBonus) * fatigue,
           relation: bestEdge.label ?? 'relates to',
         ));
       }
 
       if (scored.isEmpty) return '';
       scored.sort((a, b) => b.score.compareTo(a.score));
-      final top = scored.take(4).toList();
+
+      // ── Lateral inhibition ──────────────────────────────────────────────
+      //
+      // The winner suppresses its neighbours. This used to be a blind take(4):
+      // four results whether or not the 4th meant anything, so a weak
+      // association got the same billing as a strong one and diluted it.
+      //
+      // Real recall is sharp. If one thing dominates, he should surface THAT —
+      // not it plus three also-rans. Only what clears 45% of the winner gets
+      // through, max 4. Some turns that's one line. That's correct.
+      final peak = scored.first.score;
+      final top = scored
+          .where((s) => s.score >= peak * 0.45)
+          .take(4)
+          .toList();
+
+      // ── Hebbian: what fires together, wires together ─────────────────────
+      //
+      // The one genuinely NEW knowledge in here. Until now an edge could only
+      // strengthen when the extractor happened to re-emit it — so the graph
+      // only learned from what a model chose to say, never from what he
+      // actually used. Now: when a seed and a neighbour co-activate during real
+      // recall, the path between them thickens. Use builds the connection.
+      //
+      // Fire-and-forget: this is on the reply path and must never delay him.
+      unawaited(_hebbian(personaId, graph, seedIds, top.map((t) => t.node.id).toSet()));
 
       final buf = StringBuffer('🕸️ ASSOCIATED CONTEXT (spreading activation):\n');
       for (final item in top) {
@@ -826,10 +1425,18 @@ If nothing qualifies → {"nodes":[],"edges":[]}''';
 
       final edges = (json['edges'] as List? ?? []).map((e) {
         final m = e as Map<String, dynamic>;
+        // Prefer the model's explicit `type`; fall back to reading the enum out
+        // of the human phrase ("cares about" → caresAbout) so an older-shaped
+        // response still lands on something real instead of `related`.
+        final rel = m['relation'] as String? ?? '';
         return _RawEdge(
           fromLabel: (m['from'] as String? ?? '').toLowerCase().trim(),
           toLabel: (m['to'] as String? ?? '').toLowerCase().trim(),
-          relation: m['relation'] as String? ?? 'relates to',
+          relation: rel.trim().isEmpty ? 'relates to' : rel.trim(),
+          type: parseEdgeType(
+              (m['type'] as String?)?.trim().isNotEmpty == true
+                  ? m['type'] as String
+                  : rel),
           strength: (m['strength'] as num?)?.toDouble() ?? 0.5,
         );
       }).where((e) => e.fromLabel.isNotEmpty && e.toLabel.isNotEmpty).toList();
@@ -867,6 +1474,10 @@ If nothing qualifies → {"nodes":[],"edges":[]}''';
 
       for (int i = 0; i < nodes.length; i++) {
         final node = nodes[i];
+        // Anchors don't fade. Sadeq and Kai are the centre the rest of the graph
+        // hangs off; if they decay, every claim attached to them loses its
+        // subject and we're back to nominalised horoscope nodes.
+        if (node.metadata['anchor'] == true) continue;
         final lastSeenMs = node.metadata['lastSeen'] as int?;
         final lastSeen = lastSeenMs != null
             ? DateTime.fromMillisecondsSinceEpoch(lastSeenMs)
@@ -905,20 +1516,203 @@ If nothing qualifies → {"nodes":[],"edges":[]}''';
 
   // ── Pruning — remove weak noise nodes ─────────────────────────────────────
 
+  /// Snapshot the whole graph before anything destructive touches it.
+  ///
+  /// There is no undo on RTDB. Pruning is the one operation here that can
+  /// destroy something irreplaceable — a memory can be re-formed from a
+  /// conversation, but a pruned node whose conversation has already decayed is
+  /// gone for good. Archive first, always. Storage is free; his history isn't.
+  Future<String?> archiveGraph(String personaId) async {
+    if (_db == null) return null;
+    try {
+      final graph = await _loadGraph(personaId);
+      if (graph == null || graph.nodes.isEmpty) return null;
+      final stamp = DateTime.now().toIso8601String().replaceAll(RegExp(r'[:.]'), '-');
+      await _db!.ref('knowledge_graph_archive/$personaId/$stamp').set({
+        'nodes': graph.nodes.map((n) => n.toJson()).toList(),
+        'edges': graph.edges.map((e) => e.toJson()).toList(),
+        'archivedAt': DateTime.now().millisecondsSinceEpoch,
+        'nodeCount': graph.nodes.length,
+        'edgeCount': graph.edges.length,
+      });
+      print('🗄️ [Brain] Archived ${graph.nodes.length} nodes → '
+          'knowledge_graph_archive/$personaId/$stamp');
+      return stamp;
+    } catch (e) {
+      print('⚠️ [Brain] archiveGraph failed: $e');
+      return null;
+    }
+  }
+
+  /// Judge a batch of labels on the ONE question that matters.
+  ///
+  /// Importance cannot answer it. "importance of clarity" was emitted by the
+  /// deep prompt, which is told to prioritise values and beliefs — so the model
+  /// scores its own abstractions HIGH. The old pruner kept anything ≥0.35, which
+  /// means it kept every piece of horoscope in the graph and swept the specific
+  /// one-off facts instead. It was filtering on exactly the wrong axis:
+  /// specificity and importance are orthogonal, and only one was measured.
+  ///
+  /// Returns the labels that FAIL the stranger test (i.e. should be pruned).
+  /// On any failure returns an empty set — a broken judge must delete nothing.
+  Future<Set<String>> _judgeGeneric(List<String> labels) async {
+    if (labels.isEmpty) return {};
+    try {
+      final key = await AIConfig.getOpenAIKey();
+      if (key.isEmpty) return {};
+      final numbered = labels.asMap().entries
+          .map((e) => '${e.key}. ${e.value}')
+          .join('\n');
+
+      final response = await _dio.post(
+        'https://api.openai.com/v1/chat/completions',
+        options: Options(headers: {
+          'Authorization': 'Bearer $key',
+          'Content-Type': 'application/json',
+        }),
+        data: {
+          'model': 'gpt-4o',
+          'max_tokens': 900,
+          'temperature': 0.0, // a judge should not be creative
+          'response_format': {'type': 'json_object'},
+          'messages': [
+            {
+              'role': 'system',
+              'content': '''You are auditing an AI companion's knowledge graph about ONE specific person.
+
+For each label, answer ONE question:
+
+  Would this be FALSE for a random other person?
+
+If it is true of people in general, it is NOT knowledge about this person — it is
+a horoscope. Those are the ones to cut. They crowd out the things that actually
+distinguish him, and they make the companion sound like everyone's assistant
+instead of his.
+
+  GENERIC (cut):   "importance of clarity" · "embracing uncertainty"
+                   "fear of failure" · "desire for progress" · "value of connection"
+                   "goal of being useful" · "frustration with complexity"
+  SPECIFIC (keep): "Mikey" · "the Tavern" · "Bahrain" · "Walker Scobell"
+                   "Flutter" · "sounding like every other AI assistant"
+                   "shipping before it's ready"
+
+Anything naming a real person, place, project, product or work is SPECIFIC —
+keep it, even if it looks unimportant. A stranger does not know his son's name.
+
+When genuinely unsure, keep it. Deleting a real memory is far worse than keeping
+a vague one: the vague one costs a row, the real one cannot be recovered.
+
+Return ONLY JSON: {"generic":[<indices of the GENERIC ones>]}''',
+            },
+            {'role': 'user', 'content': numbered},
+          ],
+        },
+      );
+
+      final content =
+          (response.data['choices'] as List)[0]['message']['content'] as String?;
+      if (content == null) return {};
+      final parsed = jsonDecode(content);
+      final idxs = (parsed is Map ? parsed['generic'] : null);
+      if (idxs is! List) return {};
+
+      final out = <String>{};
+      for (final i in idxs) {
+        final n = (i is num) ? i.toInt() : int.tryParse('$i');
+        if (n != null && n >= 0 && n < labels.length) out.add(labels[n]);
+      }
+      final _u = response.data['usage'];
+      if (_u != null) {
+        UsageTrackingService.trackOpenAI(
+          model: 'gpt-4o',
+          inputTokens: _u['prompt_tokens'] as int? ?? 0,
+          outputTokens: _u['completion_tokens'] as int? ?? 0,
+          operation: 'graph_prune_judge',
+        ).catchError((_) {});
+      }
+      return out;
+    } catch (e) {
+      // A judge that can't judge must not get a vote. Empty set → prune nothing.
+      print('⚠️ [Brain] _judgeGeneric failed (pruning nothing): $e');
+      return {};
+    }
+  }
+
   /// Call occasionally (e.g. from a settings screen) to clean up the graph.
-  /// Removes nodes that are: low importance, rarely mentioned, and old.
-  Future<int> pruneGraph(String personaId) async {
+  ///
+  /// Two passes now:
+  ///   1. the old rule — genuinely weak, unmentioned, old noise
+  ///   2. the stranger test — generic abstractions, however "important"
+  ///
+  /// Archives the graph first. Never judges entities (person/topic): a named
+  /// person or place is specific by definition and must never be at the mercy
+  /// of a model's opinion.
+  Future<int> pruneGraph(String personaId, {bool judgeGeneric = true}) async {
     if (_db == null) return 0;
 
     final graph = await _loadGraph(personaId);
     if (graph == null || graph.nodes.isEmpty) return 0;
 
+    // Nothing destructive happens before this line succeeds — and "succeeds"
+    // has to mean checked, not attempted.
+    //
+    // This originally ignored the return value, which made the archive a
+    // gesture: if the write were denied (it would have been — there was no
+    // `knowledge_graph_archive` rule, and root is `.write: false`), the failure
+    // was swallowed by archiveGraph's catch and the prune deleted anyway. The
+    // safety net was drawn on, not attached.
+    final stamp = await archiveGraph(personaId);
+    if (stamp == null) {
+      print('🛑 [Brain] Prune ABORTED — could not archive first. Nothing was '
+          'deleted. Check the knowledge_graph_archive rule is deployed.');
+      return 0;
+    }
+
     final now = DateTime.now();
     final keepIds = <String>{};
+
+    // ── Pass 2 input: which labels are even eligible for the judge ───────────
+    // Entities are exempt. So is anything recent — a new node hasn't had a
+    // chance to prove itself yet, and judging it now is judging a first
+    // impression.
+    Set<String> generic = {};
+    if (judgeGeneric) {
+      final candidates = graph.nodes
+          .where((n) =>
+              n.metadata['anchor'] != true && // never judge the centre
+              n.type != NodeType.you &&
+              n.type != NodeType.person &&
+              n.type != NodeType.topic &&
+              now.difference(n.timestamp).inDays >= 3)
+          .map((n) => n.label)
+          .toSet()
+          .toList();
+      // Batched — one call per 60 labels, not one per node.
+      for (var i = 0; i < candidates.length; i += 60) {
+        final batch = candidates.sublist(i, min(i + 60, candidates.length));
+        generic.addAll(await _judgeGeneric(batch));
+      }
+      if (generic.isNotEmpty) {
+        print('🧹 [Brain] Stranger test flagged ${generic.length} generic '
+            'label(s): ${generic.take(8).join(' · ')}'
+            '${generic.length > 8 ? ' …' : ''}');
+      }
+    }
 
     final pruned = graph.nodes.where((node) {
       final ageDays = now.difference(node.timestamp).inDays;
       final mentions = (node.metadata['mentions'] as int?) ?? 1;
+
+      // Anchors are never pruned, under any rule, ever.
+      if (node.metadata['anchor'] == true) {
+        keepIds.add(node.id);
+        return true;
+      }
+
+      // The horoscope cut. Deliberately ahead of the importance rule below,
+      // because these nodes are exactly the ones with HIGH importance — that's
+      // why they survived every prune until now.
+      if (generic.contains(node.label)) return false;
 
       // Keep if: high importance OR mentioned more than once OR recent (< 3 days)
       final keep = node.importance >= 0.35
@@ -1011,11 +1805,48 @@ class _RawEdge {
   final String fromLabel;
   final String toLabel;
   final String relation;
+
+  /// The real relationship, off the EdgeType vocabulary. Used to be absent
+  /// entirely — every edge was stamped `EdgeType.related` on the way in, which
+  /// is why 20 typed relationships and their colours never once fired.
+  final EdgeType type;
   final double strength;
   _RawEdge({
     required this.fromLabel,
     required this.toLabel,
     required this.relation,
     required this.strength,
+    this.type = EdgeType.related,
   });
+}
+
+/// Model's edge-type name → the enum. Tolerant of case and spacing
+/// ("caresAbout", "cares_about", "cares about" all land on caresAbout) because
+/// the alternative is silently dropping a good relationship over a space.
+EdgeType parseEdgeType(String raw) {
+  final k = raw.toLowerCase().replaceAll(RegExp(r'[^a-z]'), '');
+  if (k.isEmpty) return EdgeType.related;
+  for (final t in EdgeType.values) {
+    if (t.name.toLowerCase() == k) return t;
+  }
+  // A few things the model reaches for that aren't enum names.
+  const aliases = <String, EdgeType>{
+    'cares': EdgeType.caresAbout, 'caresfor': EdgeType.caresAbout,
+    'loves': EdgeType.caresAbout, 'values': EdgeType.holdsValue,
+    'value': EdgeType.holdsValue, 'wantsto': EdgeType.wants,
+    'workingon': EdgeType.pursues, 'isbuilding': EdgeType.pursues,
+    'building': EdgeType.pursues, 'pursuing': EdgeType.pursues,
+    'goal': EdgeType.pursues, 'believesin': EdgeType.believes,
+    'fears': EdgeType.dislikes, 'avoids': EdgeType.dislikes,
+    'hates': EdgeType.dislikes, 'likes': EdgeType.prefers,
+    'enjoys': EdgeType.prefers, 'knowsabout': EdgeType.knows,
+    'partof': EdgeType.contains, 'isa': EdgeType.categorized,
+    'kindof': EdgeType.categorized, 'shapes': EdgeType.influences,
+    'affects': EdgeType.influences, 'conflictswith': EdgeType.contradicts,
+    'exampleof': EdgeType.exemplifies, 'strengthens': EdgeType.reinforces,
+    'learnt': EdgeType.learned, 'realised': EdgeType.learned,
+    'realized': EdgeType.learned, 'happenedbefore': EdgeType.temporal,
+    'happenedafter': EdgeType.temporal,
+  };
+  return aliases[k] ?? EdgeType.related;
 }

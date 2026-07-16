@@ -58,9 +58,15 @@ class ConversationStoreService {
   }) async {
     final ts = DateTime.now().millisecondsSinceEpoch;
 
+    // Kai's own machinery must never be remembered as something SADEQ said.
+    // "(proactive)" turns are Kai reaching out unprompted — the seed is an
+    // instruction to himself, so we store a neutral marker instead. Otherwise he
+    // reads his own nudge back later and thinks Sadeq wrote it.
+    final storedUser = _sanitiseUser(userMessage);
+
     // Append to session buffer immediately (no await)
     final buffer = _sessionBuffer.putIfAbsent(personaId, () => []);
-    buffer.add('[$ts] User: $userMessage');
+    buffer.add('[$ts] User: $storedUser');
     buffer.add('[$ts] Kai: $aiReply');
 
     // Keep buffer from growing unbounded (cap at 60 messages = 30 turns)
@@ -69,11 +75,19 @@ class ConversationStoreService {
     // Write to Firebase (fire-and-forget)
     _writeToFirebase(
       personaId: personaId,
-      userMessage: userMessage,
+      userMessage: storedUser,
       aiReply: aiReply,
       personalityDeltas: personalityDeltas,
       timestamp: ts,
     ).catchError((e) => print('⚠️ [ConvStore] Firebase write failed: $e'));
+  }
+
+  /// Replaces Kai's internal seeds with a neutral, truthful marker so history
+  /// never attributes his own instructions to Sadeq.
+  static String _sanitiseUser(String userMessage) {
+    final t = userMessage.trimLeft();
+    if (t.startsWith('(proactive)')) return '(Kai spoke first, unprompted)';
+    return userMessage;
   }
 
   /// Clears the session buffer for a persona (e.g. on persona switch).

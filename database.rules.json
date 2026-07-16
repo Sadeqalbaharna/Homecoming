@@ -31,6 +31,9 @@
     "knowledge_graphs": {
       "$personaId": { ".read": "auth != null", ".write": "auth != null" }
     },
+    "knowledge_graph_archive": {
+      "$personaId": { ".read": "auth != null", ".write": "auth != null" }
+    },
     "personalities": {
       "$personaId": { ".read": "auth != null", ".write": "auth != null" }
     },

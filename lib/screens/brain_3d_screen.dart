@@ -6,9 +6,11 @@
 // Graph data is loaded from Firebase and injected into the HTML at render time.
 
 import 'dart:convert';
+import 'dart:io' show Platform;
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
-import 'package:firebase_database/firebase_database.dart';
 import '../services/core/kai_db.dart';
 import '../services/core/firebase_service.dart';
 import '../services/core/brain_extraction_service.dart';
@@ -31,8 +33,12 @@ class Brain3DScreen extends StatefulWidget {
 
 class _Brain3DScreenState extends State<Brain3DScreen> {
   WebViewController? _controller;
+  Map<String, dynamic>? _graphData;
   bool _loading = true;
   String? _error;
+
+  bool get _useNativeInspector =>
+      Platform.isWindows || Platform.isLinux || Platform.isMacOS;
 
   // Backfill state
   bool _backfilling = false;
@@ -40,6 +46,9 @@ class _Brain3DScreenState extends State<Brain3DScreen> {
 
   // Label overlay toggle
   bool _showLabels = false;
+
+  // Desktop native mind-map selection.
+  String? _selectedNativeNodeId;
 
   @override
   void initState() {
@@ -50,6 +59,18 @@ class _Brain3DScreenState extends State<Brain3DScreen> {
   Future<void> _initGraph() async {
     try {
       final graphData = await _loadGraphData();
+
+      if (_useNativeInspector) {
+        if (mounted) {
+          setState(() {
+            _graphData = graphData;
+            _controller = null;
+            _loading = false;
+          });
+        }
+        return;
+      }
+
       final html = _buildHtml(graphData);
 
       final controller = WebViewController()
@@ -59,6 +80,7 @@ class _Brain3DScreenState extends State<Brain3DScreen> {
 
       if (mounted) {
         setState(() {
+          _graphData = graphData;
           _controller = controller;
           _loading = false;
         });
@@ -465,6 +487,126 @@ window.toggleLabels = function() {
 </html>''';
   }
 
+  Widget _buildNativeInspector() {
+    final map = _NativeMindMapData.fromGraph(_graphData);
+
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Container(
+          decoration: BoxDecoration(
+            color: const Color(0xFF050511).withOpacity(0.72),
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: const Color(0x334CEBFF)),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0x334CEBFF).withOpacity(0.18),
+                blurRadius: 24,
+                spreadRadius: -8,
+              ),
+            ],
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(22),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'INTERACTIVE RTDB MIND MAP',
+                              style: TextStyle(
+                                color: const Color(0xFFFFE7B0).withOpacity(0.82),
+                                fontSize: 12,
+                                letterSpacing: 1.6,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            const SizedBox(height: 9),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                _statChip('source', 'RTDB'),
+                                _statChip('nodes', map.nodes.length.toString()),
+                                _statChip('links', map.links.length.toString()),
+                                _statChip('gesture', 'pan / zoom / tap'),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      TextButton.icon(
+                        onPressed: map.nodes.isEmpty
+                            ? null
+                            : () => setState(() => _selectedNativeNodeId = null),
+                        icon: const Icon(Icons.center_focus_strong_rounded, size: 16),
+                        label: const Text('RESET'),
+                        style: TextButton.styleFrom(
+                          foregroundColor: const Color(0xFF4CEBFF),
+                          disabledForegroundColor: const Color(0x334CEBFF),
+                          textStyle: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 1.0,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: map.nodes.isEmpty
+                      ? Center(
+                          child: Text(
+                            'No knowledge graph nodes found for ${widget.personaId}.',
+                            style: const TextStyle(
+                              color: Color(0x88FFE7B0),
+                              fontSize: 13,
+                            ),
+                          ),
+                        )
+                      : _NativeMindMapView(
+                          data: map,
+                          showLabels: _showLabels,
+                          selectedNodeId: _selectedNativeNodeId,
+                          onNodeSelected: (id) =>
+                              setState(() => _selectedNativeNodeId = id),
+                        ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+  Widget _statChip(String label, String value) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+      decoration: BoxDecoration(
+        color: const Color(0x14FFE7B0),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: const Color(0x22FFE7B0)),
+      ),
+      child: Text(
+        '$label: $value',
+        style: const TextStyle(
+          color: Color(0xAAFFE7B0),
+          fontSize: 11,
+          letterSpacing: 0.2,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -571,6 +713,8 @@ window.toggleLabels = function() {
             Center(
               child: Text(_error!,
                   style: const TextStyle(color: Colors.redAccent)))
+          else if (_useNativeInspector)
+            _buildNativeInspector()
           else
             WebViewWidget(controller: _controller!),
 
@@ -625,4 +769,581 @@ window.toggleLabels = function() {
       ),
     );
   }
+}
+
+class _NativeMindMapNode {
+  final String id;
+  final String label;
+  final String type;
+  final double importance;
+  final Offset position;
+
+  const _NativeMindMapNode({
+    required this.id,
+    required this.label,
+    required this.type,
+    required this.importance,
+    required this.position,
+  });
+}
+
+class _NativeMindMapLink {
+  final String source;
+  final String target;
+  final String relation;
+  final double strength;
+
+  const _NativeMindMapLink({
+    required this.source,
+    required this.target,
+    required this.relation,
+    required this.strength,
+  });
+}
+
+class _NativeMindMapData {
+  final List<_NativeMindMapNode> nodes;
+  final List<_NativeMindMapLink> links;
+  final Rect bounds;
+
+  const _NativeMindMapData({
+    required this.nodes,
+    required this.links,
+    required this.bounds,
+  });
+
+  factory _NativeMindMapData.fromGraph(Map<String, dynamic>? graph) {
+    final rawNodes = (graph?['nodes'] as List?)
+            ?.whereType<Map>()
+            .map((n) => Map<String, dynamic>.from(n))
+            .toList() ??
+        <Map<String, dynamic>>[];
+    final rawLinks = (graph?['links'] as List?)
+            ?.whereType<Map>()
+            .map((l) => Map<String, dynamic>.from(l))
+            .toList() ??
+        <Map<String, dynamic>>[];
+
+    rawNodes.sort((a, b) {
+      final ai = (a['importance'] as num?)?.toDouble() ?? 0;
+      final bi = (b['importance'] as num?)?.toDouble() ?? 0;
+      return bi.compareTo(ai);
+    });
+
+    if (rawNodes.isEmpty) {
+      return const _NativeMindMapData(
+        nodes: <_NativeMindMapNode>[],
+        links: <_NativeMindMapLink>[],
+        bounds: Rect.fromLTWH(-450, -320, 900, 640),
+      );
+    }
+
+    final byType = <String, List<Map<String, dynamic>>>{};
+    for (final node in rawNodes.take(180)) {
+      final type = '${node['type'] ?? 'concept'}'.trim().isEmpty
+          ? 'concept'
+          : '${node['type'] ?? 'concept'}'.trim();
+      byType.putIfAbsent(type, () => <Map<String, dynamic>>[]).add(node);
+    }
+
+    final typeKeys = byType.keys.toList()
+      ..sort((a, b) => byType[b]!.length.compareTo(byType[a]!.length));
+
+    final nodes = <_NativeMindMapNode>[];
+    final links = <_NativeMindMapLink>[];
+    final seenLinks = <String>{};
+
+    const rootId = '__kai_memory_root__';
+    nodes.add(const _NativeMindMapNode(
+      id: rootId,
+      label: 'Kai memory',
+      type: 'root',
+      importance: 1.0,
+      position: Offset.zero,
+    ));
+
+    final branchCount = math.max(1, typeKeys.length);
+    final branchRadius = 260.0 + math.min(180.0, rawNodes.length * 2.2);
+    final idSet = <String>{rootId};
+    final hubByType = <String, String>{};
+
+    for (var ti = 0; ti < typeKeys.length; ti++) {
+      final type = typeKeys[ti];
+      final bucket = byType[type]!;
+      final angle = -math.pi / 2 + (math.pi * 2 * ti / branchCount);
+      final hubId = '__type_hub_$type';
+      final hubPos = Offset(math.cos(angle) * branchRadius, math.sin(angle) * branchRadius);
+      hubByType[type] = hubId;
+      idSet.add(hubId);
+
+      nodes.add(_NativeMindMapNode(
+        id: hubId,
+        label: type.toUpperCase(),
+        type: 'hub:$type',
+        importance: 0.86,
+        position: hubPos,
+      ));
+      links.add(const _NativeMindMapLink(
+        source: rootId,
+        target: '',
+        relation: 'branch',
+        strength: 0.9,
+      ).copyWith(target: hubId));
+
+      final spread = math.min(math.pi * 0.78, math.pi * 0.20 + bucket.length * 0.035);
+      final rows = math.max(1, (bucket.length / 10).ceil());
+      for (var i = 0; i < bucket.length; i++) {
+        final raw = bucket[i];
+        final id = '${raw['id'] ?? raw['key'] ?? raw['label'] ?? 'node_${nodes.length}'}';
+        if (!idSet.add(id)) continue;
+        final label = '${raw['label'] ?? id}';
+        final importance = ((raw['importance'] as num?)?.toDouble() ?? 0.5).clamp(0.0, 1.0);
+        final lane = i % 10;
+        final row = i ~/ 10;
+        final t = bucket.length == 1 ? 0.5 : lane / math.max(1, math.min(9, bucket.length - 1));
+        final leafAngle = angle - spread / 2 + spread * t;
+        final distance = 130.0 + row * 92.0 + importance * 42.0;
+        final sideJitter = (((id.hashCode & 0xFFFF) / 0xFFFF) - 0.5) * 26.0;
+        final tangent = Offset(-math.sin(angle), math.cos(angle));
+        final pos = hubPos +
+            Offset(math.cos(leafAngle), math.sin(leafAngle)) * distance +
+            tangent * sideJitter;
+
+        nodes.add(_NativeMindMapNode(
+          id: id,
+          label: label,
+          type: type,
+          importance: importance,
+          position: pos,
+        ));
+        links.add(_NativeMindMapLink(
+          source: hubId,
+          target: id,
+          relation: 'contains',
+          strength: math.max(0.35, importance),
+        ));
+      }
+    }
+
+    final realNodeIds = nodes
+        .where((n) => !n.id.startsWith('__'))
+        .map((n) => n.id)
+        .toSet();
+
+    for (final raw in rawLinks) {
+      final source = '${raw['source'] ?? raw['fromId'] ?? raw['from'] ?? ''}';
+      final target = '${raw['target'] ?? raw['toId'] ?? raw['to'] ?? ''}';
+      if (!realNodeIds.contains(source) || !realNodeIds.contains(target) || source == target) continue;
+      final key = source.compareTo(target) <= 0 ? '$source->$target' : '$target->$source';
+      if (!seenLinks.add(key)) continue;
+      links.add(_NativeMindMapLink(
+        source: source,
+        target: target,
+        relation: '${raw['relation'] ?? raw['label'] ?? ''}',
+        strength: ((raw['strength'] as num?)?.toDouble() ?? 0.5).clamp(0.05, 1.0),
+      ));
+    }
+
+    var left = nodes.first.position.dx;
+    var right = left;
+    var top = nodes.first.position.dy;
+    var bottom = top;
+    for (final node in nodes) {
+      left = math.min(left, node.position.dx);
+      right = math.max(right, node.position.dx);
+      top = math.min(top, node.position.dy);
+      bottom = math.max(bottom, node.position.dy);
+    }
+
+    return _NativeMindMapData(
+      nodes: nodes,
+      links: links,
+      bounds: Rect.fromLTRB(left - 260, top - 220, right + 260, bottom + 220),
+    );
+  }
+}
+
+extension _NativeMindMapLinkCopy on _NativeMindMapLink {
+  _NativeMindMapLink copyWith({
+    String? source,
+    String? target,
+    String? relation,
+    double? strength,
+  }) =>
+      _NativeMindMapLink(
+        source: source ?? this.source,
+        target: target ?? this.target,
+        relation: relation ?? this.relation,
+        strength: strength ?? this.strength,
+      );
+}
+
+class _NativeMindMapView extends StatefulWidget {
+  final _NativeMindMapData data;
+  final bool showLabels;
+  final String? selectedNodeId;
+  final ValueChanged<String?> onNodeSelected;
+
+  const _NativeMindMapView({
+    required this.data,
+    required this.showLabels,
+    required this.selectedNodeId,
+    required this.onNodeSelected,
+  });
+
+  @override
+  State<_NativeMindMapView> createState() => _NativeMindMapViewState();
+}
+
+class _NativeMindMapViewState extends State<_NativeMindMapView> {
+  late final TransformationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TransformationController();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final size = Size(
+      math.max(900, widget.data.bounds.width),
+      math.max(650, widget.data.bounds.height),
+    );
+    final origin = Offset(size.width / 2, size.height / 2);
+
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: InteractiveViewer(
+            transformationController: _controller,
+            minScale: 0.18,
+            maxScale: 3.8,
+            boundaryMargin: const EdgeInsets.all(900),
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTapUp: (details) {
+                final local = details.localPosition - origin;
+                final hit = _hitNode(local);
+                widget.onNodeSelected(hit?.id);
+              },
+              child: CustomPaint(
+                size: size,
+                painter: _MindMapPainter(
+                  data: widget.data,
+                  origin: origin,
+                  showLabels: widget.showLabels,
+                  selectedNodeId: widget.selectedNodeId,
+                ),
+              ),
+            ),
+          ),
+        ),
+        if (widget.selectedNodeId != null && widget.data.nodes.isNotEmpty)
+          Positioned(
+            left: 14,
+            right: 14,
+            bottom: 14,
+            child: _NodeDetailCard(
+              node: widget.data.nodes.firstWhere(
+                (n) => n.id == widget.selectedNodeId,
+                orElse: () => widget.data.nodes.first,
+              ),
+              links: widget.data.links
+                  .where((l) => l.source == widget.selectedNodeId || l.target == widget.selectedNodeId)
+                  .toList(),
+              onClose: () => widget.onNodeSelected(null),
+            ),
+          ),
+      ],
+    );
+  }
+
+  _NativeMindMapNode? _hitNode(Offset local) {
+    _NativeMindMapNode? best;
+    var bestDistance = double.infinity;
+    for (final node in widget.data.nodes) {
+      final radius = 8 + node.importance * 17;
+      final distance = (node.position - local).distance;
+      if (distance <= radius + 12 && distance < bestDistance) {
+        best = node;
+        bestDistance = distance;
+      }
+    }
+    return best;
+  }
+}
+
+class _NodeDetailCard extends StatelessWidget {
+  final _NativeMindMapNode node;
+  final List<_NativeMindMapLink> links;
+  final VoidCallback onClose;
+
+  const _NodeDetailCard({
+    required this.node,
+    required this.links,
+    required this.onClose,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xEE050511),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0x55FFE7B0)),
+        boxShadow: const [
+          BoxShadow(color: Color(0x66000000), blurRadius: 24, offset: Offset(0, 8)),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  node.label,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFFFFE7B0),
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              IconButton(
+                onPressed: onClose,
+                icon: const Icon(Icons.close, color: Color(0x88FFE7B0), size: 18),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _miniChip(node.type),
+              _miniChip('importance ${(node.importance * 100).round()}%'),
+              _miniChip('${links.length} links'),
+            ],
+          ),
+          if (links.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Text(
+              links.take(5).map((l) {
+                final other = l.source == node.id ? l.target : l.source;
+                return '${l.relation.isEmpty ? 'linked to' : l.relation} $other';
+              }).join('  •  '),
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Color(0x99FFE7B0), fontSize: 12, height: 1.35),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  static Widget _miniChip(String text) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: const Color(0x14FFE7B0),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: const Color(0x22FFE7B0)),
+        ),
+        child: Text(
+          text,
+          style: const TextStyle(color: Color(0xAAFFE7B0), fontSize: 11),
+        ),
+      );
+}
+
+class _MindMapPainter extends CustomPainter {
+  final _NativeMindMapData data;
+  final Offset origin;
+  final bool showLabels;
+  final String? selectedNodeId;
+
+  const _MindMapPainter({
+    required this.data,
+    required this.origin,
+    required this.showLabels,
+    required this.selectedNodeId,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.drawRect(Offset.zero & size, Paint()..color = const Color(0xFF000011));
+    _paintGrid(canvas, size);
+
+    final byId = {for (final node in data.nodes) node.id: node};
+
+    for (final link in data.links) {
+      final a = byId[link.source];
+      final b = byId[link.target];
+      if (a == null || b == null) continue;
+      final selected = selectedNodeId == a.id || selectedNodeId == b.id;
+      final pa = origin + a.position;
+      final pb = origin + b.position;
+      final mid = Offset.lerp(pa, pb, 0.5)!;
+      final normal = Offset(-(pb.dy - pa.dy), pb.dx - pa.dx);
+      final len = normal.distance == 0 ? 1.0 : normal.distance;
+      final control = mid + normal / len * 24;
+      final path = Path()
+        ..moveTo(pa.dx, pa.dy)
+        ..quadraticBezierTo(control.dx, control.dy, pb.dx, pb.dy);
+
+      final scaffold = a.id.startsWith('__') || b.id.startsWith('__');
+      final alpha = selected
+          ? 0.78
+          : scaffold
+              ? 0.50
+              : (0.055 + link.strength * 0.16);
+      final linkColor = scaffold
+          ? Color.lerp(_colorForType(a.type), _colorForType(b.type), 0.55)!
+          : const Color(0xFFFFC76A);
+      canvas.drawPath(
+        path,
+        Paint()
+          ..color = linkColor.withOpacity(alpha)
+          ..strokeWidth = selected
+              ? 2.8
+              : scaffold
+                  ? 1.6 + link.strength * 1.3
+                  : 0.45 + link.strength * 1.0
+          ..style = PaintingStyle.stroke
+          ..maskFilter = scaffold || selected
+              ? const MaskFilter.blur(BlurStyle.normal, 2.2)
+              : null,
+      );
+    }
+
+    for (final node in data.nodes) {
+      _paintNode(canvas, origin + node.position, node);
+    }
+  }
+
+  void _paintGrid(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = const Color(0x114CEBFF)
+      ..strokeWidth = 0.6;
+    const step = 72.0;
+    for (var x = 0.0; x < size.width; x += step) {
+      canvas.drawLine(Offset(x, 0), Offset(x, size.height), paint);
+    }
+    for (var y = 0.0; y < size.height; y += step) {
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
+    }
+  }
+
+  void _paintNode(Canvas canvas, Offset center, _NativeMindMapNode node) {
+    final selected = selectedNodeId == node.id;
+    final synthetic = node.id.startsWith('__');
+    final root = node.type == 'root';
+    final hub = node.type.startsWith('hub:');
+    final color = _colorForType(node.type);
+    final radius = root
+        ? 32.0
+        : hub
+            ? 18.0
+            : 7 + node.importance * 15;
+
+    canvas.drawCircle(
+      center,
+      radius * (selected ? 2.2 : 1.8),
+      Paint()
+        ..color = color.withOpacity(selected ? 0.28 : 0.12)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 16),
+    );
+    canvas.drawCircle(center, radius, Paint()..color = color.withOpacity(synthetic ? 0.78 : 0.90));
+    canvas.drawCircle(
+      center,
+      radius,
+      Paint()
+        ..color = const Color(0xEE000011)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = selected ? 2.4 : 1.0,
+    );
+
+    if (root || hub || showLabels || selected || node.importance > 0.72) {
+      final painter = TextPainter(
+        text: TextSpan(
+          text: node.label,
+          style: TextStyle(
+            color: selected ? const Color(0xFFFFE7B0) : const Color(0xCCFFE7B0),
+            fontSize: root
+                ? 15
+                : hub
+                    ? 12
+                    : selected
+                        ? 13
+                        : 10.5,
+            fontWeight: (selected || synthetic) ? FontWeight.w800 : FontWeight.w600,
+          ),
+        ),
+        maxLines: 2,
+        ellipsis: '…',
+        textDirection: TextDirection.ltr,
+      )..layout(maxWidth: selected ? 210 : 145);
+      final rect = Rect.fromLTWH(
+        center.dx + radius + 8,
+        center.dy - painter.height / 2,
+        painter.width + 10,
+        painter.height + 6,
+      );
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(rect, const Radius.circular(8)),
+        Paint()..color = const Color(0xAA050511),
+      );
+      painter.paint(canvas, rect.topLeft + const Offset(5, 3));
+    }
+  }
+
+  Color _colorForType(String type) {
+    switch (type.toLowerCase()) {
+      case 'root':
+        return const Color(0xFFFFE7B0);
+      case 'hub:emotion':
+      case 'hub:value':
+      case 'emotion':
+      case 'value':
+        return const Color(0xFFFF9D2F);
+      case 'hub:person':
+      case 'person':
+        return const Color(0xFFFFE7B0);
+      case 'hub:goal':
+      case 'hub:preference':
+      case 'goal':
+      case 'preference':
+        return const Color(0xFFFF5FD2);
+      case 'hub:memory':
+      case 'hub:event':
+      case 'memory':
+      case 'event':
+        return const Color(0xFF57FF9A);
+      case 'hub:belief':
+      case 'hub:pattern':
+      case 'belief':
+      case 'pattern':
+        return const Color(0xFFB084FF);
+      default:
+        return const Color(0xFF4CEBFF);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _MindMapPainter oldDelegate) =>
+      oldDelegate.data != data ||
+      oldDelegate.showLabels != showLabels ||
+      oldDelegate.selectedNodeId != selectedNodeId;
 }

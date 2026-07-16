@@ -90,8 +90,55 @@ class AIConfig {
   }
 
   // ElevenLabs voice settings
+  static const _ttsEnabledKey = 'tts_enabled';
+
+  /// Whether chat replies should be synthesized with ElevenLabs.
+  ///
+  /// Default is OFF on purpose: desktop text chat should not burn ElevenLabs
+  /// characters/audio bandwidth unless Sadeq explicitly asks to hear me.
+  static Future<bool> getTtsEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_ttsEnabledKey) ?? false;
+  }
+
+  static Future<void> setTtsEnabled(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_ttsEnabledKey, enabled);
+  }
+
+  static const _ttsResetKey = 'tts_default_off_migration_v1';
+
+  /// One-time reset of a polluted preference.
+  ///
+  /// `getTtsEnabled()` defaults to false — but a default only protects a FRESH
+  /// install. An older build had already written `tts_enabled: true` into
+  /// SharedPreferences on this machine, so Kai kept speaking every reply (and
+  /// burning ElevenLabs characters) even after the gate landed and the default
+  /// flipped. The gate was right; the stored value was stale.
+  ///
+  /// So: force it off exactly once, then never touch it again — after this the
+  /// toggle is the only thing that can turn his voice on, which is what was
+  /// asked for.
+  static Future<void> ensureTtsDefaultOff() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool(_ttsResetKey) == true) return; // already migrated
+    await prefs.setBool(_ttsEnabledKey, false);
+    await prefs.setBool(_ttsResetKey, true);
+  }
+
   static const String elevenlabsVoiceId = kElevenLabsVoiceId;
-  static const String elevenlabsModelId = 'eleven_monolingual_v1';
+  // Kai's voice died here, not at the voice id.
+  //
+  // 'eleven_monolingual_v1' was DEPRECATED and removed by ElevenLabs. Every
+  // request 400'd with `unsupported_model` — but the error body was never
+  // logged, so for a long time it looked like Sadeq's custom voice was broken.
+  // It never was. The clone is fine; the engine underneath it was switched off.
+  //
+  // 'eleven_multilingual_v2' is the established, high-quality successor and the
+  // right choice for a cloned voice. ElevenLabs also offered, per the 400:
+  //   eleven_v3          — newest / most expressive
+  //   eleven_flash_v2_5  — fastest + cheapest, lower fidelity
+  static const String elevenlabsModelId = 'eleven_multilingual_v2';
 
   static const Map<String, Map<String, String>> availableVoices = {
     'kai_default': {

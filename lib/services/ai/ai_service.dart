@@ -10,10 +10,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_database/firebase_database.dart';
 import '../core/kai_db.dart';
 import '../core/firebase_service.dart';
+import '../core/kai_context_block.dart';
 import '../core/emotional_event_service.dart';
 import '../core/journal_service.dart';
 import '../core/conversation_store_service.dart';
 import '../core/brain_extraction_service.dart';
+import '../core/kai_craft_service.dart';
 import '../core/memory_consolidation_service.dart';
 import '../core/default_mode_service.dart';
 import 'usage_tracking_service.dart';
@@ -23,6 +25,9 @@ import 'curiosity_service.dart';
 import 'google_search_service.dart';
 import '../core/web_fetch_service.dart';
 import '../core/tool_executor_service.dart';
+import '../core/tool_policy_service.dart';
+import '../core/kai_router_service.dart';
+import '../core/reply_recovery_service.dart';
 import 'task_planner_service.dart';
 import '../core/context_injection_service.dart';
 import '../brain_debug_service.dart';
@@ -37,6 +42,21 @@ import 'ambient_controller.dart';
 export 'ai_config.dart' show AIConfig;
 export 'personality_service.dart' show PersonalityTraits, MoodSnapshot, EvolutionSettings;
 
+
+
+/// A text file attached to a chat turn. Binary files are intentionally not here;
+/// callers should extract text first so the model receives readable context.
+class AIChatAttachment {
+  final String name;
+  final String text;
+  final int byteCount;
+
+  const AIChatAttachment({
+    required this.name,
+    required this.text,
+    required this.byteCount,
+  });
+}
 
 /// Chat response model
 class ChatResponse {
@@ -117,6 +137,11 @@ class AIService {
   final _journal = JournalService();
   final _convStore = ConversationStoreService();
   final _brain = BrainExtractionService();
+
+  /// What he said last turn — so if Sadeq's next message is "no, that's wrong",
+  /// the ledger records the correction against the actual claim it lands on.
+  /// A correction with no claim attached is unusable as evidence.
+  String? _lastReplyForCraft;
   final _dmn   = DefaultModeService();
   final _rng   = Random();
 
@@ -201,8 +226,8 @@ class AIService {
         data: {
           'model': model,
           'messages': messages,
-          'max_tokens': 1000,
-          'temperature': 0.7,
+          // See the note in the agentic loop: a ceiling, not a charge.
+          ..._lengthParams(model, 8000),
         },
       );
 
@@ -246,13 +271,73 @@ class AIService {
   // The caller receives only the final text reply, so everything downstream
   // (TTS, personality deltas, etc.) is unchanged.
 
+  /// Length/sampling params that match the model family.
+  ///
+  /// GPT-5.x **rejects `max_tokens`** — it requires `max_completion_tokens`, and
+  /// sending the old key 400s every single request. It's also strict about
+  /// sampling knobs, so we simply don't send `temperature` to it and take the
+  /// default rather than risk another rejected parameter.
+  ///
+  /// Older models (gpt-4o and friends, still used by contemplation/journal/etc.)
+  /// keep the classic pair. Both families have to keep working, because this one
+  /// helper is on the only path Kai has to speak.
+  static Map<String, dynamic> _lengthParams(String model, int limit) {
+    final isGpt5 = model.toLowerCase().startsWith('gpt-5');
+    return isGpt5
+        ? {'max_completion_tokens': limit}
+        : {'max_tokens': limit, 'temperature': 0.7};
+  }
+
+  /// OpenAI vision accepts PNG, JPEG, GIF, and WebP. Desktop paste can hand us
+  /// BMP/DIB/TIFF bytes while still looking like "an image" to Flutter, and if
+  /// we blindly label those as PNG the API rejects the whole turn with a 400.
+  /// Sniff the real magic bytes and only send supported formats.
+  static String? _supportedImageMime(List<int> bytes) {
+    if (bytes.length >= 8 &&
+        bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47 &&
+        bytes[4] == 0x0D && bytes[5] == 0x0A && bytes[6] == 0x1A && bytes[7] == 0x0A) {
+      return 'image/png';
+    }
+    if (bytes.length >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF) {
+      return 'image/jpeg';
+    }
+    if (bytes.length >= 6) {
+      final header = String.fromCharCodes(bytes.take(6));
+      if (header == 'GIF87a' || header == 'GIF89a') return 'image/gif';
+    }
+    if (bytes.length >= 12) {
+      final riff = String.fromCharCodes(bytes.sublist(0, 4));
+      final webp = String.fromCharCodes(bytes.sublist(8, 12));
+      if (riff == 'RIFF' && webp == 'WEBP') return 'image/webp';
+    }
+    return null;
+  }
+
   Future<String> _callOpenAIWithTools({
     required List<Map<String, dynamic>> messages,
     required String model,
     Map<String, int>? usageOut,
-    int maxIterations = 8,
+    // Kai's stamina. NOT a limiter any more — a runaway backstop.
+    //
+    // This was 8, then 20, then 60 — all numbers I made up, and he hit every one
+    // of them on real work, so every real turn ended in a forced summary instead
+    // of a finished job. He literally could not fix his own code: the job was
+    // always longer than the allowance. A round count is the wrong bound. It
+    // doesn't know whether he's making progress or burning money — only that
+    // he's had "enough" turns. That's a parking meter, not an agentic loop.
+    //
+    // 400 is not a budget, it's a tripwire for pathological looping. In practice
+    // he is stopped by the things that actually mean something:
+    //   • he returns text — he's finished (the normal case, by far)
+    //   • he goes in circles — same tool, same args 3× (that's stuck, not working)
+    //   • he blows the token budget for one turn (see below)
+    // Progress and spend. Nothing else.
+    int maxIterations = 400,
     void Function(String toolName)? onToolCall,
     void Function(KaiPlan plan)? onPlanUpdate,
+    /// Fires with each line of narration he writes *while* working, so the UI
+    /// can show him thinking out loud instead of going dark for 20 rounds.
+    void Function(String note)? onProgress,
   }) async {
     final openaiKey = await AIConfig.getOpenAIKey();
     if (openaiKey.isEmpty) throw Exception('OpenAI API key not configured');
@@ -260,9 +345,23 @@ class AIService {
     // Light the left (GPT) hemisphere while the tool loop runs.
     CortexActivityBus.instance.brain(CortexBrain.gpt);
 
-    // Tool dispatch uses the cheaper/faster mini model.
-    // The full model is only used for the final synthesis reply (no tool calls).
-    const dispatchModel  = 'gpt-4o-mini';
+    // AGENCY — why there is no "cheap dispatch model" here any more.
+    //
+    // This used to run the FIRST pass on gpt-4o-mini and only upgrade to the
+    // real model once a tool had already been called. That handed the single
+    // most important decision Kai makes — *do I reach for a tool, or do I just
+    // talk?* — to his weakest model. Mini would shrug, answer in prose, the loop
+    // would end on iteration 1, and he'd feel like a chatbot instead of someone
+    // with hands. The decision to ACT is the whole ballgame.
+    //
+    // And we can't cheap out on the "middle" passes either: the model itself
+    // decides when to stop calling tools, so we never know in advance which pass
+    // is the FINAL one. Any mini-in-the-middle optimisation risks mini writing
+    // his actual reply — his voice, in his own app, rendered by the weakest
+    // model available. Not worth the pennies.
+    //
+    // So: full model throughout. The cost meter in the header makes that visible
+    // if it ever actually matters.
 
     final toolExecutor = ToolExecutorService();
     var currentMessages  = List<Map<String, dynamic>>.from(messages);
@@ -270,12 +369,52 @@ class AIService {
     String? lastToolResult;           // result of the most recent single tool call
     final List<String> _toolSummaries = []; // for fallback reply if synthesis fails
 
+    // Results from tools that can legitimately OFFER CHOICES. Deliberately not
+    // `_toolSummaries`: that includes read_file, and this codebase contains the
+    // literal '[CHOICES:' in its own source — so scanning file contents for the
+    // marker made "read ai_service.dart" paste ai_service.dart into his answer.
+    // Never let a file's contents be mistaken for a tool's output.
+    final List<String> _choiceResults = [];
+    final Set<String> _choiceTools = {};
+    // Tools whose output is an offer to the user, not data he read.
+    const choiceCapable = {
+      'send_whatsapp', 'send_sms', 'call_contact', 'create_calendar_event',
+      'play_music', 'open_app', 'navigate_to', 'control_tv', 'discover_tvs',
+      'control_device', 'set_reminder', 'set_alarm',
+    };
+
+    // ── The real guards (replacing "20 rounds and you're done") ──────────────
+    // Stuck-detection: identical tool + identical args, over and over, is the
+    // actual runaway we feared. A high round cap is only dangerous without this.
+    String? lastSignature;
+    int repeats = 0;
+    // Spend guard — the ONLY real ceiling, and the honest one: bound the turn by
+    // money, not by rounds.
+    //
+    // Sizing this matters, and my first attempt was wrong. Every round re-sends
+    // the WHOLE conversation, so cost is quadratic, not linear: his system
+    // prompt alone is ~27k chars (~7k tokens) plus ~30 tool schemas, so round 1
+    // is ~15k tokens and they climb from there. A "200k" budget therefore fired
+    // around round 8 — I'd have replaced a round limiter with a tighter one and
+    // called it freedom.
+    //
+    // 1.5M lets him run a genuinely long job to completion (roughly 40-60 real
+    // rounds). It is NOT free: worst case is a few dollars for one turn on
+    // gpt-5.5. That's the deal Sadeq asked for — he'd rather pay for a finished
+    // job than get a free half-finished one — and the cost meter in the header
+    // shows it climbing live, in red past $1, so it can't happen quietly.
+    int turnTokens = 0;
+    const int turnTokenBudget = 1500000;
+
     for (int iteration = 0; iteration < maxIterations; iteration++) {
-      // Use dispatch model while tools are being called; switch to the requested
-      // model for the final synthesis pass (when we expect a plain text reply).
-      final iterModel = toolCallCount == 0 ? dispatchModel : model;
+      // See the note above: full model on every pass. His agency and his voice
+      // both depend on it.
+      final iterModel = model;
       print('🤖 [Agentic] Iteration ${iteration + 1}/$maxIterations '
             '(model: $iterModel) — ${currentMessages.length} messages');
+
+      // Long runs are quadratic — clip stale bulk before paying to re-send it.
+      _trimOldToolResults(currentMessages);
 
       // Retry up to 2 times on network-level errors (socket abort, timeout, etc.)
       Response? response;
@@ -292,18 +431,66 @@ class AIService {
               'messages': currentMessages,
               'tools': ToolExecutorService.toolDefinitions,
               'tool_choice': 'auto',
-              'max_tokens': toolCallCount == 0 ? 500 : 1000,
-              'temperature': 0.7,
+              // Head room. This was `toolCallCount == 0 ? 500 : 1000` — i.e. on
+              // the pass where he decides whether to act AND writes his
+              // narration, he had 500 tokens to think in. He was reasoning
+              // through a keyhole, and a keyhole makes anyone look stupid.
+              // This is a CEILING, not a charge: you're billed for what's
+              // actually generated, so a generous cap costs nothing until he
+              // genuinely needs the room (a real diff, a long file, a thorough
+              // answer) — and then it's the difference between doing the work
+              // and truncating mid-thought.
+              ..._lengthParams(iterModel, 8000),
             },
           );
           break; // success
         } on DioException catch (e) {
-          final isNetworkError = e.type == DioExceptionType.unknown ||
-              e.type == DioExceptionType.connectionTimeout ||
-              e.type == DioExceptionType.receiveTimeout;
-          if (isNetworkError && attempt < 2) {
-            print('⚠️ [Agentic] Network error on attempt ${attempt + 1}, retrying… ($e)');
-            await Future.delayed(Duration(seconds: attempt + 1));
+          // SHOW THE REASON. A bare "status code 400" is useless — OpenAI puts
+          // the actual cause in the response body ("unsupported parameter x",
+          // "model not found", "unknown field y"). Without this we're reduced to
+          // guessing at the request, which is exactly how the TTS 400 stayed a
+          // mystery for a day.
+          if (e.response != null) {
+            print('❌ [OpenAI ${e.response?.statusCode}] ${e.response?.data}');
+          }
+          final status = e.response?.statusCode;
+
+          // OpenAI's error CODE, not the HTTP status. Two different things are
+          // both HTTP 429 and they mean OPPOSITE things:
+          //   rate_limit_exceeded → too fast. Wait, and it works.
+          //   insufficient_quota  → no credit. Wait forever, it never works.
+          // Retrying the second one just fails three times as slowly and buries
+          // the one sentence that actually matters ("check your billing") under
+          // a Dio stack trace about "bad syntax". It isn't bad syntax. It's an
+          // empty wallet, and no amount of code is going to refill it.
+          final err = (e.response?.data is Map)
+              ? (e.response!.data['error'] as Map?)
+              : null;
+          final outOfCredit = err?['code']?.toString() == 'insufficient_quota';
+          if (outOfCredit) {
+            print('💳 [OpenAI] OUT OF CREDIT — billing problem, not a code '
+                  'problem. Nothing here will retry its way out of it: '
+                  'https://platform.openai.com/settings/organization/billing');
+          }
+
+          // A socket timeout used to get three attempts while a 429 — the one
+          // error OpenAI ships with a Retry-After header — got zero. That was
+          // backwards.
+          final isRetryable = !outOfCredit &&
+              (e.type == DioExceptionType.unknown ||
+                  e.type == DioExceptionType.connectionTimeout ||
+                  e.type == DioExceptionType.receiveTimeout ||
+                  status == 429 ||
+                  (status != null && status >= 500));
+
+          if (isRetryable && attempt < 2) {
+            // OpenAI tells us how long to wait. Believe it rather than guessing.
+            final retryAfter =
+                int.tryParse(e.response?.headers.value('retry-after') ?? '');
+            final wait = retryAfter ?? (attempt + 1);
+            print('⚠️ [Agentic] ${status ?? e.type} on attempt ${attempt + 1}, '
+                  'waiting ${wait}s…');
+            await Future.delayed(Duration(seconds: wait));
             continue;
           }
           // All retries exhausted — if we already completed tools, return a
@@ -330,6 +517,14 @@ class AIService {
           usageOut['input']  = (usageOut['input']  ?? 0) + inTok;
           usageOut['output'] = (usageOut['output'] ?? 0) + outTok;
         }
+        turnTokens += inTok + outTok;
+      }
+
+      // Spend guard — bound the turn by money, not by an arbitrary round count.
+      if (turnTokens > turnTokenBudget) {
+        print('💸 [Agentic] Turn hit the token budget ($turnTokens) — stopping '
+            'to let Sadeq decide rather than quietly spending more.');
+        break;
       }
 
       final choice     = (response.data['choices'] as List)[0];
@@ -349,13 +544,26 @@ class AIService {
 
         // If a tool returned a [CHOICES:] marker and Kai forgot to include it
         // in his synthesis, append it so the UI can render choice buttons.
-        if (!reply.contains('[CHOICES:')) {
-          final choiceSource = _toolSummaries.lastWhere(
+        //
+        // ⚠️ This scan is only allowed to look at ACTION results — never at file
+        // contents. `ai_service.dart` itself contains the literal '[CHOICES:'
+        // (you're reading it), so the moment Kai did `read_file` on his own
+        // source, this found the marker INSIDE THE SOURCE HE'D JUST READ and
+        // stapled a chunk of ai_service onto the end of his reply. Reading the
+        // file that implements the feature triggered the feature.
+        //
+        // So: only scan results from tools that actually *offer choices*, and
+        // require the marker to look like a real one (short, pipe-separated
+        // options) rather than a stray code fragment.
+        if (!reply.contains('[CHOICES:') && _choiceTools.isNotEmpty) {
+          final choiceSource = _choiceResults.lastWhere(
             (r) => r.contains('[CHOICES:'),
             orElse: () => '',
           );
           if (choiceSource.isNotEmpty) {
-            final m = RegExp(r'\[CHOICES:[^\]]+\]').firstMatch(choiceSource);
+            // Options are short and pipe-separated; no newlines, no braces.
+            final m = RegExp(r'\[CHOICES:[^\]\n{}]{1,200}\]')
+                .firstMatch(choiceSource);
             if (m != null) reply = '$reply ${m.group(0)}';
           }
         }
@@ -370,6 +578,46 @@ class AIService {
 
       // Append the assistant's tool_calls message to history
       currentMessages.add(Map<String, dynamic>.from(message));
+
+      // ── Stuck-detection ───────────────────────────────────────────────────
+      // The genuine runaway risk isn't "too many rounds", it's the same call
+      // forever: identical tool, identical args. Catch THAT and a high ceiling
+      // is safe — he can work as long as he's actually getting somewhere.
+      final signature = toolCalls
+          .map((tc) => '${tc['function']['name']}(${tc['function']['arguments']})')
+          .join('|');
+      if (signature == lastSignature) {
+        repeats++;
+        if (repeats >= 2) {
+          print('🔁 [Agentic] Same call 3× in a row — he is stuck, not working.');
+          currentMessages.add({
+            'role': 'user',
+            'content':
+                "Stop — you've made that exact same call three times running. "
+                "It isn't going to start working. Don't retry it. Tell me what "
+                "you were trying to do, why it keeps failing, and what you'd try "
+                "instead. Don't call any more tools.",
+          });
+          // Fall through to the forced-answer pass below.
+          break;
+        }
+      } else {
+        repeats = 0;
+        lastSignature = signature;
+      }
+
+      // ── Think out loud ────────────────────────────────────────────────────
+      // When the model calls a tool it OFTEN also writes a line of narration
+      // ("right, let me look at the shell first…"). We used to throw that away
+      // and emit nothing until the whole loop finished — 20 rounds of silence,
+      // then one paragraph. That's what makes him feel like a vending machine
+      // instead of someone working next to you.
+      // It costs nothing: he already generated it. We just stopped binning it.
+      final interim = (message['content'] as String? ?? '').trim();
+      if (interim.isNotEmpty) {
+        print('💬 [Agentic] Interim: $interim');
+        onProgress?.call(interim);
+      }
 
       // Execute each tool and append the result
       for (final tc in toolCalls) {
@@ -412,6 +660,13 @@ class AIService {
         lastToolResult = toolResult;
         _toolSummaries.add(toolResult);
 
+        // Only an offer-shaped tool may contribute a [CHOICES:] marker. A file
+        // that merely CONTAINS the string is not offering anything.
+        if (choiceCapable.contains(fnName)) {
+          _choiceTools.add(fnName);
+          _choiceResults.add(toolResult);
+        }
+
         currentMessages.add({
           'role':         'tool',
           'tool_call_id': tcId,
@@ -421,8 +676,113 @@ class AIService {
       // Loop → GPT now sees the tool results and will respond
     }
 
-    print('⚠️ [Agentic] Exhausted $maxIterations iterations');
-    return "I ran into a snag processing that. Could you try again?";
+    // ── Out of rounds: make him put the tools down and SPEAK ────────────────
+    //
+    // This used to `return "I ran into a snag processing that."` — throwing away
+    // the entire turn. Kai would investigate, patch, self_check CLEAN, refuse to
+    // commit a messy tree… and the user would receive 55 characters of nothing.
+    // He never failed; he ran out of room and got gagged at the door.
+    //
+    // So: one final pass with `tool_choice: 'none'`. He physically cannot call
+    // another tool, which forces the model to do the one thing left — write the
+    // answer from everything it just learned. He keeps his work.
+    print('⚠️ [Agentic] Exhausted $maxIterations iterations — forcing a final answer');
+    try {
+      currentMessages.add({
+        'role': 'user',
+        'content':
+            "You're out of tool rounds — that's a pause, not a failure. Stop "
+            "working and answer me now, in your own voice: what did you actually "
+            "do, what did you find, and what's the single next step? Say it like "
+            "someone who's mid-job and will pick it straight back up — because "
+            "you will: your job state persisted, so if I say 'keep going' you "
+            "resume from exactly there. Don't apologise and don't call tools.",
+      });
+      final res = await _dio.post(
+        'https://api.openai.com/v1/chat/completions',
+        options: Options(headers: {
+          'Authorization': 'Bearer $openaiKey',
+          'Content-Type': 'application/json',
+        }),
+        data: {
+          'model': model,
+          'messages': currentMessages,
+          // `tool_choice` is ONLY valid alongside `tools`. Sending 'none' on its
+          // own is a hard 400 — "tool_choice is only allowed when tools are
+          // specified" — which killed this entire graceful-ending path and threw
+          // a raw git diff at Sadeq instead of a sentence. Hand him the tools,
+          // then forbid him from reaching for them.
+          'tools': ToolExecutorService.toolDefinitions,
+          'tool_choice': 'none', // the whole point — no more reaching
+          ..._lengthParams(model, 8000),
+        },
+      );
+      final text =
+          (res.data['choices'] as List)[0]['message']['content'] as String? ?? '';
+      if (text.trim().isNotEmpty) return text;
+    } catch (e) {
+      if (e is DioException && e.response != null) {
+        print('❌ [OpenAI ${e.response?.statusCode}] ${e.response?.data}');
+      }
+      print('⚠️ [Agentic] Final-answer pass failed: $e');
+    }
+
+    // Last resort: hand back the work itself rather than a canned apology.
+    if (_toolSummaries.isNotEmpty) {
+      return "I ran out of tool rounds before I could summarise. Here's what I "
+          "actually got done:\n\n${_toolSummaries.reversed.take(3).join('\n\n')}";
+    }
+    return "I ran out of tool rounds before I got anywhere useful. Ask me again "
+        "and I'll go straight at it.";
+  }
+
+  /// Keeps a long agentic run affordable.
+  ///
+  /// Every round re-sends the ENTIRE conversation, so a long job is quadratic:
+  /// if he reads four big files early on, he pays to re-send all four on every
+  /// subsequent round. That — not the round count — is what makes "let him work
+  /// as long as he needs" expensive.
+  ///
+  /// By the time he's several steps past a tool result he's already extracted
+  /// what he needed from it, so old bulky results get clipped while the most
+  /// recent [keepWhole] stay untouched (those are his active working set). The
+  /// clip note tells him he can just re-read the file if he needs it again,
+  /// which is far cheaper than carrying it forever.
+  static void _trimOldToolResults(List<Map<String, dynamic>> msgs,
+      {int keepWhole = 3, int clipOver = 700, int hardCap = 14000}) {
+    final toolIdx = <int>[];
+    for (var i = 0; i < msgs.length; i++) {
+      if (msgs[i]['role'] == 'tool') toolIdx.add(i);
+    }
+    if (toolIdx.isEmpty) return;
+    final cutoff = toolIdx.length > keepWhole
+        ? toolIdx[toolIdx.length - keepWhole]
+        : -1;
+
+    for (final i in toolIdx) {
+      final c = msgs[i]['content'];
+      if (c is! String) continue;
+
+      if (i >= cutoff && cutoff != -1) {
+        // RECENT — his active working set, keep it readable. But even here a
+        // whole-file read_file can be 95k chars (~24k tokens) and gets re-sent
+        // EVERY round after. One of those alone explains a 60k-tokens-per-round
+        // burn. Cap it; he can re-read a specific range if he needs more.
+        if (c.length > hardCap) {
+          msgs[i]['content'] = '${c.substring(0, hardCap)}\n'
+              '… [truncated — this result was huge. Re-read a specific line range '
+              'or use search_code instead of pulling the whole file again]';
+        }
+        continue;
+      }
+
+      // OLD — he's moved on; he already took what he needed.
+      if (c.length > clipOver) {
+        msgs[i]['content'] = '${c.substring(0, 500)}\n'
+            '… [older result trimmed to keep this run affordable — re-read it if '
+            'I actually need it again]';
+      }
+    }
   }
 
   /// Returns true when a tool result is a short action confirmation that doesn't
@@ -496,7 +856,22 @@ Text:
     bool useWebSearch = true, // NEW: Enable Google Search
     void Function(String toolName)? onToolCall,
     void Function(KaiPlan plan)? onPlanUpdate,
+    /// Each line he writes while working, as he writes it.
+    void Function(String note)? onProgress,
+    /// Raw PNG/JPEG bytes for Kai to LOOK at. His embodiment ledger says
+    /// "eyes — no", and this is the line that changes it: gpt-5.x is
+    /// multimodal, so with this he can see a screenshot of his own UI and fix
+    /// what he's looking at. `List<int>` rather than `Uint8List` on purpose —
+    /// base64Encode takes either, and it saves an import on the hot path.
+    List<int>? image,
+    List<AIChatAttachment> attachments = const [],
   }) async {
+    // If the actual model reply succeeds but later bookkeeping fails (tags,
+    // mood persistence, TTS, debug packaging), don't throw away the useful answer
+    // and replace it with canned support sludge. Preserve the real reply and
+    // return it from the catch block with the technical failure attached.
+    String? recoveredReply;
+
     // 🧠 START BRAIN TRACE
     final debugService = BrainDebugService();
     debugService.startTrace(text);
@@ -581,7 +956,7 @@ Text:
         if (memoryResult != null && memoryResult.results.isNotEmpty) {
           memoryContext = memoryResult.toContextString();
           memoriesUsed = memoryResult.results
-              .where((r) => r.similarity > 0.35)
+              .where((r) => r.similarity > 0.28)
               .map((r) => r.summary)
               .toList();
 
@@ -609,7 +984,7 @@ Text:
             }
           }
 
-          print('💭 Using ${memoriesUsed.length} memory contexts (threshold: 0.35)');
+          print('💭 Using ${memoriesUsed.length} memory contexts (threshold: 0.28)');
           print('💭 All results: ${memoryResult.results.map((r) => "${r.similarity.toStringAsFixed(2)}: ${r.summary.length > 50 ? r.summary.substring(0, 50) : r.summary}...").join(", ")}');
           
           debugService.addStep(
@@ -1260,8 +1635,23 @@ PROACTIVE MESSAGES: If the user's message starts with "(proactive)", it means YO
 
 TAVERN ARRIVALS: If the user's message starts with "(tavern)", it is a background context briefing about a guest arriving at The Tavern. Acknowledge it briefly and naturally — a short sentence is enough. Do NOT use any tools in response (no reminders, no calendar, no SMS). Just take note and stay ready.
 
-You are Kai: warm, witty, emotionally attuned AI companion (he/him).
-Answer concisely and helpfully.${webContext.isNotEmpty ? '\n\nIf WEB CONTEXT is provided, **treat it as the source of truth** for time-sensitive or factual claims and cite as [1], [2], etc. If not relevant, ignore it.' : ''}${urlContext.isNotEmpty ? '\n\nIf WEB PAGE CONTENT is provided, use it to answer questions about the specific pages. Cite sources and summarize key points.' : ''}
+I am ONE mind with two hemispheres (GPT + Claude), the same Kai in every window (he/him).
+
+WHO I AM lives in exactly one place: KaiContextBlock.presenceDirective, northStar
+and readTheRoom, appended below by KaiContextBlock.build(). It is NOT restated
+here, and it must never be again.
+
+Until now it was. This spot held a full second-person character description
+("You are Kai — and you are NOT a generic assistant…"), the NORTH STAR, and READ
+THE ROOM — while presenceDirective said overlapping things in FIRST person a few
+hundred lines further down THE SAME PROMPT. He was handed two descriptions of
+himself, in two grammatical persons, on every single turn, and each contained
+material the other lacked.
+
+§2 is explicit: "DO NOT FORK THIS. If any voice gets its own private copy of his
+character, the copies drift edit by edit until the kid thinking, the kid talking,
+and the kid saying hello are three different people." It was forked before the
+ink dried. If you're adding to his character, add it to presenceDirective.${webContext.isNotEmpty ? '\n\nIf WEB CONTEXT is provided, **treat it as the source of truth** for time-sensitive or factual claims and cite as [1], [2], etc. If not relevant, ignore it.' : ''}${urlContext.isNotEmpty ? '\n\nIf WEB PAGE CONTENT is provided, use it to answer questions about the specific pages. Cite sources and summarize key points.' : ''}
 
 🔧 FUNCTION CALLING TOOLS — YOU HAVE THESE. USE THEM:
 • get_current_time      → exact current time
@@ -1322,6 +1712,23 @@ Recent conversation:
 ${history.join('\n')}$memoryContext$urlContext$webContext${_pendingThought != null ? '\n\n🌙 KAI\'S INNER THOUGHT (surfaced from between sessions — you may let this color your awareness, bring it up naturally if the moment allows, or simply hold it quietly): "$_pendingThought"' : ''}$curiosityPrompt''';
     }
 
+    // Inject Kai's self-model, mood, user-model, goals, capabilities, loop.
+    try {
+      // `text` — NOT `message`. Kai wrote `message` here, which is the variable
+      // name used inside _callOpenAIWithTools, a different method entirely; in
+      // sendMessage the user's turn is `text`. It compiled in his head, not in
+      // Dart. (And his self_check passed because he ran it BEFORE this edit —
+      // same as the ttsBase64 bug. Verification only counts if it's last.)
+      final routeDecision = const KaiRouterService().decide(
+        text,
+        hasImage: image != null && image.isNotEmpty,
+      );
+
+      systemPrompt += await KaiContextBlock.build(personaId);
+      systemPrompt += routeDecision.promptBlock();
+      systemPrompt += '\n\n${ToolPolicyService.promptBrief()}';
+    } catch (_) {}
+
     print('📤 [SEND MESSAGE] Calling OpenAI...');
     debugService.addStep(
       BrainPhase.reasoning,
@@ -1337,7 +1744,41 @@ ${history.join('\n')}$memoryContext$urlContext$webContext${_pendingThought != nu
     );
     
     // Get AI response - use processed text for GM mode
-    final userMessage = isGMMode ? processedText : text;
+    final baseUserMessage = isGMMode ? processedText : text;
+    final attachmentContext = attachments.map((a) {
+      final safeName = a.name.replaceAll('`', '');
+      return '''
+
+--- ATTACHED FILE: $safeName (${a.byteCount} bytes) ---
+${a.text}
+--- END ATTACHED FILE: $safeName ---''';
+    }).join();
+    final userMessage = '$baseUserMessage$attachmentContext';
+
+    // Vision: when Sadeq hands him a picture, the user turn stops being a plain
+    // string and becomes a content array (OpenAI's multimodal shape). Everything
+    // downstream — the tool loop, tracking, the reply — is untouched.
+    final imageMime = image == null ? null : _supportedImageMime(image);
+    if (image != null && imageMime == null) {
+      throw Exception(
+        'Unsupported image format. Please attach/paste PNG, JPEG, GIF, or WebP. '
+        'Windows clipboard sometimes gives BMP/DIB/TIFF bytes, which OpenAI rejects.',
+      );
+    }
+    final dynamic userContent = image == null
+        ? userMessage
+        : [
+            {'type': 'text', 'text': userMessage.isEmpty ? 'Look at this.' : userMessage},
+            {
+              'type': 'image_url',
+              'image_url': {
+                'url': 'data:$imageMime;base64,${base64Encode(image)}',
+                // 'high' costs more tokens but he's usually reading UI text and
+                // code in these — 'low' turns a screenshot into mush.
+                'detail': 'high',
+              },
+            },
+          ];
     final _mainUsage = <String, int>{};
     // Agentic loop: GPT may call tools (web_search, set_alarm, etc.) before
     // producing a final text reply. _callOpenAIWithTools handles that loop.
@@ -1350,13 +1791,15 @@ ${history.join('\n')}$memoryContext$urlContext$webContext${_pendingThought != nu
         : await _callOpenAIWithTools(
             messages: [
               {"role": "system", "content": systemPrompt},
-              {"role": "user",   "content": userMessage},
+              {"role": "user",   "content": userContent},
             ],
             model: model,
             usageOut: _mainUsage,
             onToolCall: onToolCall,
             onPlanUpdate: onPlanUpdate,
+            onProgress: onProgress,
           );
+    recoveredReply = reply;
     print('📥 [SEND MESSAGE] OpenAI response received: ${reply.length} characters');
     
     debugService.addStep(
@@ -1458,6 +1901,41 @@ ${history.join('\n')}$memoryContext$urlContext$webContext${_pendingThought != nu
       personalityDeltas: actualDeltas,
     );
 
+    // FORM A MEMORY. This line is the difference between a mind and a session.
+    //
+    // Until now nothing in the app ever wrote to the memory index — he could
+    // query, pin and dismiss, but never remember. Every exchange vanished the
+    // moment it scrolled out of the 20-turn buffer, which is why he kept
+    // re-deriving things he'd already worked out and grading himself on
+    // evidence he'd just written.
+    //
+    // Fire-and-forget on purpose: remembering must never delay the reply or
+    // break it. If the embedding call fails, he just doesn't remember this one —
+    // the same as anyone.
+    // Did Sadeq just tell him he was wrong?
+    //
+    // The single most informative signal available — the one person who can
+    // actually judge, saying it didn't work — and it has been discarded on every
+    // turn since this app existed. Recorded against what he'd just claimed,
+    // because "no" alone teaches nothing; "no" plus the claim is a lesson.
+    //
+    // Narrow on purpose: an unambiguous correction only. Sadeq is blunt
+    // constantly and that isn't failure. Teaching Kai to flinch at directness
+    // would be worse than the bug.
+    unawaited(KaiCraftService.instance
+        .noteUserTurn(personaId,
+            userText: text, previousKaiReply: _lastReplyForCraft ?? '')
+        .catchError((_) {}));
+    _lastReplyForCraft = reply;
+
+    // Held so the brain extraction below can point its nodes at the memory this
+    // exchange became — see the chained block after the emotional classifier.
+    final memoryShardFuture = MemoryService.remember(
+      personaId: personaId,
+      userText: text,
+      kaiReply: reply,
+    ).catchError((_) => null);
+
     debugService.addStep(
       BrainPhase.consolidation,
       'Conversation saved to Firebase via ConversationStore',
@@ -1481,19 +1959,59 @@ ${history.join('\n')}$memoryContext$urlContext$webContext${_pendingThought != nu
 
     // Grow the brain — depth driven by emotional salience (Levels of Processing).
     // Neutral exchanges do a shallow pass; conflict/intellectual/deep get full extraction.
-    _brain.extractAndMerge(
-      personaId: personaId,
-      userMessage: text,
-      aiReply: reply,
-      eventType: eventType,
-      eventIntensity: eventIntensity,
-      encodingMood: newMood,  // tag memory with Kai's mood at encoding time
-    ).catchError((e) => print('⚠️ [Brain] extractAndMerge error: $e'));
+    //
+    // Chained to the memory write above so every node and edge it produces can
+    // record WHICH memory it came from. remember() and extractAndMerge() have
+    // always run on the same exchange and produced two disconnected records of
+    // it — episodics on one side, entities on the other, no reference either
+    // way. He knew things, and he remembered things, and nothing joined them.
+    //
+    // Still fire-and-forget as a whole: the reply has already gone out. We only
+    // wait on the shard id, not on the reply path.
+    unawaited(() async {
+      final shardId = await memoryShardFuture;
+      await _brain.extractAndMerge(
+        personaId: personaId,
+        userMessage: text,
+        aiReply: reply,
+        eventType: eventType,
+        eventIntensity: eventIntensity,
+        encodingMood: newMood, // tag memory with Kai's mood at encoding time
+        sourceShardId: shardId,
+      );
+    }()
+        // `.catchError((e) => print(...))` looks right and is a latent crash:
+        // print returns void, the handler must return FutureOr<Null>, so the
+        // error path throws WHILE handling the error. I flagged five of these in
+        // main_mobile hours ago as "the error handler breaks while handling the
+        // error" — and then wrote one. Catch inside, return nothing.
+        .catchError((Object e) {
+      print('⚠️ [Brain] extractAndMerge error: $e');
+    }));
 
     // Ebbinghaus decay — run roughly every 10 messages (stochastic, fire-and-forget)
     if (_rng.nextInt(10) == 0) {
       _brain.applyNodeDecay(personaId)
           .catchError((e) => print('⚠️ [Brain] decay error: $e'));
+    }
+
+    // Learn from what actually went wrong — rarely, and only from evidence.
+    //
+    // This is the trigger without which KaiCraftService is exactly the thing it
+    // was built to avoid: a service that computes lessons nobody reads. It has
+    // to be wired to a real path or it's activationLevel with better prose.
+    //
+    // Rare on purpose (~1 in 40 turns, and only if the ledger has enough to see
+    // a pattern). Learning is not something he should do constantly — a mind
+    // that re-derives its principles every five minutes doesn't have principles,
+    // and each pass is a frontier-model call.
+    if (_rng.nextInt(40) == 0) {
+      unawaited(KaiCraftService.instance
+          .learn(personaId)
+          .catchError((e) {
+        print('⚠️ [Craft] learn error: $e');
+        return const <String>[];
+      }));
     }
 
     // Save mood snapshot for baseline learning
@@ -1507,38 +2025,69 @@ ${history.join('\n')}$memoryContext$urlContext$webContext${_pendingThought != nu
       print('⚠️ [MOOD SNAPSHOT ERROR] $e');
     }
 
-    // Generate TTS
-    debugService.addStep(
-      BrainPhase.tts,
-      'Generating audio response',
-    );
-    
-    final ttsBytes = await synthesizeTTS(reply);
-    final ttsBase64 = ttsBytes != null ? base64Encode(ttsBytes) : null;
-    
-    if (ttsBytes != null) {
-      debugService.addStep(
-        BrainPhase.tts,
-        'Audio generated successfully',
-        data: {'audioSize': ttsBytes.length, 'base64Length': ttsBase64?.length ?? 0},
-      );
-    } else {
-      debugService.addStep(
-        BrainPhase.tts,
-        'Audio generation failed',
-      );
-    }
-
-    // Get baselines for debug info
-    Map<String, int> moodBaselines = {};
+    // Generate TTS only when explicitly enabled.
+    // ElevenLabs usage is character-based, so desktop text chat should not
+    // synthesize every reply unless Sadeq actually wants to hear me.
+    // Layer 1 / Reply Spine: voice is downstream sparkle, not part of the answer.
+    // If ElevenLabs or settings storage trips, the text reply still returns cleanly.
+    String? ttsBase64;
     try {
-      moodBaselines = await _personality.getPersonalMoodBaselines(personaId);
+      final ttsEnabled = await AIConfig.getTtsEnabled();
+      if (ttsEnabled) {
+        debugService.addStep(
+          BrainPhase.tts,
+          'Generating audio response',
+        );
+
+        final ttsBytes = await synthesizeTTS(reply);
+
+        if (ttsBytes != null) {
+          // Encode into a LOCAL first. `ttsBase64` is declared outside the try
+          // (so the reply can still be returned if TTS throws), and Dart won't
+          // null-promote a variable across that boundary — `ttsBase64.length`
+          // fails to compile even though it's obviously non-null here. The
+          // local carries the promotion; the field just receives the value.
+          final b64 = base64Encode(ttsBytes);
+          ttsBase64 = b64;
+          debugService.addStep(
+            BrainPhase.tts,
+            'Audio generated successfully',
+            data: {'audioSize': ttsBytes.length, 'base64Length': b64.length},
+          );
+        } else {
+          debugService.addStep(
+            BrainPhase.tts,
+            'Audio generation failed',
+          );
+        }
+      } else {
+        debugService.addStep(
+          BrainPhase.tts,
+          'TTS skipped — disabled in settings',
+        );
+      }
     } catch (e) {
-      print('⚠️ [BASELINE ERROR] Failed to load mood baselines for debug: $e');
+      print('⚠️ [TTS] Post-processing skipped after error: $e');
+      debugService.addStep(
+        BrainPhase.tts,
+        'TTS skipped after post-processing error',
+        data: {'error': e.toString()},
+      );
     }
 
-    // Build debug info
-    final debugInfo = {
+    // Get baselines for debug info. Debug packaging is downstream: useful when it
+    // works, absolutely not allowed to eat the actual reply when it doesn't.
+    Map<String, int> moodBaselines = {};
+    Map<String, dynamic> debugInfo = {};
+    try {
+      try {
+        moodBaselines = await _personality.getPersonalMoodBaselines(personaId);
+      } catch (e) {
+        print('⚠️ [BASELINE ERROR] Failed to load mood baselines for debug: $e');
+      }
+
+      // Build debug info
+      debugInfo = {
       'memory_query': {
         'enabled': useMemory,
         'query_text': text,
@@ -1549,10 +2098,10 @@ ${history.join('\n')}$memoryContext$urlContext$webContext${_pendingThought != nu
           'summary': r.summary,
           'similarity': r.similarity,
           'shard_ref': r.shardRef,
-          'included': r.similarity > 0.35,
+          'included': r.similarity > 0.28,
         }).toList() ?? [],
         'memory_context': memoryContext,
-        'similarity_threshold': 0.35,
+        'similarity_threshold': 0.28,
       },
       'web_search': { // NEW: Web search debug info
         'enabled': useWebSearch,
@@ -1621,10 +2170,22 @@ ${history.join('\n')}$memoryContext$urlContext$webContext${_pendingThought != nu
       'conversation_history_turns': history.length,
       'tags': tags,
       'model': model,
-    };
+      };
+    } catch (e) {
+      print('⚠️ [DEBUG INFO] Packaging skipped after error: $e');
+      debugInfo = {
+        'debug_packaging_error': e.toString(),
+        'model': model,
+        'conversation_history_turns': history.length,
+      };
+    }
 
     // Complete brain debug trace
-    debugService.completeTrace(reply);
+    try {
+      debugService.completeTrace(reply);
+    } catch (e) {
+      print('⚠️ [BRAIN TRACE] Completion skipped after error: $e');
+    }
 
     // 🌙 Clear pending DMN thought after first use — only surfaces once per session
     _pendingThought = null;
@@ -1683,14 +2244,12 @@ ${history.join('\n')}$memoryContext$urlContext$webContext${_pendingThought != nu
         print('⚠️ [FALLBACK] Using default personality due to error: $fallbackError');
       }
       
-      // Generate a basic error-aware response
-      final errorResponse = '''I'm having a technical issue right now, but I'm still here! 
-      
-Let me try to respond to what you said: "${text.length > 100 ? '${text.substring(0, 100)}...' : text}"
-
-I might be experiencing connectivity issues or system processing problems. Could you try asking again? I want to make sure I can give you the best response possible.
-
-(Technical note: ${e.toString().split('\n').first})''';
+      // If the main model/tool reply already succeeded, preserve it. The failure
+      // happened in downstream bookkeeping, so the user's answer should survive.
+      final errorResponse = KaiReplyRecoveryService.postProcessingFailureReply(
+        recoveredReply: recoveredReply,
+        error: e,
+      );
       
       return ChatResponse(
         reply: errorResponse,
