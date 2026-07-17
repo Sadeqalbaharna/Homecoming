@@ -235,7 +235,25 @@ class KaiFace extends StatelessWidget {
 // ── One line of the conversation ─────────────────────────────────────────────
 
 class P5MessageRow extends StatelessWidget {
-  final String text;
+  /// The contents. A [Text] for a plain message — or anything, because the real
+  /// chat puts a Column of image + attachments + markdown in here.
+  ///
+  /// ── Why this is a slot and not a String ──────────────────────────────────
+  ///
+  /// It WAS a String, and that would have been a lie the moment this touched the
+  /// real shell. `_bubble` in kai_desktop_shell renders `m.image` (pasted PNGs),
+  /// `m.attachments`, and `KaiRichText` — because "he writes markdown like
+  /// everyone does. Rendering it as plain text showed literal ** and ### and
+  /// made a careful answer look broken."
+  ///
+  /// So the bubble is a SHAPE, and the shape does not care. Porting the chat
+  /// then costs nothing that already worked, and the P5 look is not paid for by
+  /// losing the ability to show him a screenshot.
+  ///
+  /// It does mean a code block can technically be rendered in here, and it will
+  /// look absurd. Good. That absurdity is information — it's `replyCeiling`'s
+  /// argument, made in pixels, every time he forgets.
+  final Widget child;
 
   /// Kai on the left with a face; Sadeq on the right, bare — same as the source
   /// material, and it's the right call: you don't need a portrait to know who
@@ -245,17 +263,59 @@ class P5MessageRow extends StatelessWidget {
 
   /// Deterministic per-message tilt. NOT Random(): a bubble that jitters every
   /// rebuild is a bubble that jitters when you scroll. Seed it off the content
-  /// and it's stable forever, which is also why this file imports dart:math for
-  /// exactly one line of trigonometry and no dice.
+  /// and it's stable forever — see the note at the import, which is why there's
+  /// no dart:math in this file at all.
   final int seed;
 
   const P5MessageRow({
     super.key,
-    required this.text,
+    required this.child,
     required this.fromKai,
     this.portrait,
     this.seed = 0,
   });
+
+  /// The common case: a message that is just words.
+  ///
+  /// [dim] is for a line he wrote mid-work — quieter, never hidden. 0.62, not
+  /// the desktop's `white38`, and the difference is the argument: the desktop
+  /// greys those out under the comment "his real answer lands full", which has
+  /// it backwards. The interims are the only place he reliably sounds like
+  /// himself; the "real answer" is where he turns into a bulleted report. They
+  /// were also the one thing never persisted anywhere until tonight.
+  factory P5MessageRow.text(
+    String text, {
+    Key? key,
+    required bool fromKai,
+    Widget? portrait,
+    int seed = 0,
+    bool dim = false,
+  }) {
+    final ink = fromKai ? P5Palette.paper : P5Palette.ink;
+    return P5MessageRow(
+      key: key,
+      fromKai: fromKai,
+      portrait: portrait,
+      seed: seed,
+      child: Text(
+        text,
+        textAlign: fromKai ? TextAlign.left : TextAlign.right,
+        style: TextStyle(
+          color: dim ? ink.withOpacity(0.62) : ink,
+          fontSize: 15,
+          height: 1.25,
+          fontWeight: dim ? FontWeight.w600 : FontWeight.w800,
+          letterSpacing: 0.2,
+          fontStyle: dim ? FontStyle.italic : FontStyle.normal,
+        ),
+      ),
+    );
+  }
+
+  /// Ink for this speaker's bubble. The shell needs it to colour KaiRichText,
+  /// which takes its palette as arguments rather than reading a theme.
+  static Color inkFor(bool fromKai) =>
+      fromKai ? P5Palette.paper : P5Palette.ink;
 
   double get _tilt {
     // -0.018..0.018 rad — under a degree and a half. Enough to feel hand-placed,
@@ -267,7 +327,6 @@ class P5MessageRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final fill = fromKai ? P5Palette.ink : P5Palette.paper;
-    final ink = fromKai ? P5Palette.paper : P5Palette.ink;
 
     final bubble = Transform.rotate(
       angle: _tilt,
@@ -290,17 +349,7 @@ class P5MessageRow extends StatelessWidget {
               fromKai ? 16 : 26,
               13,
             ),
-            child: Text(
-              text,
-              textAlign: fromKai ? TextAlign.left : TextAlign.right,
-              style: TextStyle(
-                color: ink,
-                fontSize: 15,
-                height: 1.25,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 0.2,
-              ),
-            ),
+            child: child,
           ),
         ),
       ),
@@ -514,8 +563,8 @@ class _P5ChatDemoState extends State<P5ChatDemo> {
                 child: ListView.builder(
                   padding: const EdgeInsets.only(top: 12),
                   itemCount: _msgs.length,
-                  itemBuilder: (_, i) => P5MessageRow(
-                    text: _msgs[i].$1,
+                  itemBuilder: (_, i) => P5MessageRow.text(
+                    _msgs[i].$1,
                     fromKai: _msgs[i].$2,
                     seed: i + 1,
                   ),

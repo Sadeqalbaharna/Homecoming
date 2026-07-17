@@ -25,6 +25,21 @@ analyzer:
     # go_router), so it can only ever produce noise.
     - ARCHIVED_REDUNDANT/**
 
+    # A VENDORED dependency, and its example app is not our code.
+    #
+    # packages/flutter_overlay_window/example/ is the plugin author's demo. It
+    # imports `package:flutter_overlay_window_example/...`, which is a package
+    # that exists only inside their example's own pubspec — so from this root it
+    # can never resolve, and it produced all 8 errors that turned CI red on
+    # 2026-07-18. Zero of them were in lib/.
+    #
+    # This is the exact thing the header above warns about — noise that isn't
+    # ours, drowning the check that is. And it is NOT "silencing a real problem":
+    # nothing here imports the example, Dart never compiles it, and it cannot
+    # break the build. It's someone else's demo folder that came along for the
+    # ride.
+    - packages/**
+
     # Dead files: referenced by zero other files, so Dart never compiles them and
     # they cannot break the build — but they DO drown the analyzer in errors.
     # They're on the cleanup list; excluded until then so the check stays honest.

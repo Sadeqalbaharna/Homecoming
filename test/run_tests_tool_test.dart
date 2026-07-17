@@ -251,5 +251,32 @@ void main() {
         ToolOutcome.passed,
       );
     });
+
+    test('"I cannot read my own analyzer" is not a pass', () {
+      // The separator `flutter analyze` prints depends on the Flutter version:
+      //
+      //   local (C:\code\flutter):  warning - This 'onError' handler...
+      //   CI    (channel: stable):  warning • The value of the field '_prefs'...
+      //
+      // _selfCheck matched `error -` only. On this machine that works. One
+      // `flutter upgrade` and it matches nothing, finds zero errors, and returns
+      // CLEAN forever — while being the thing markVerified() hangs on. §4.6 —
+      // "self_check comes back CLEAN, he makes one more edit, the build breaks"
+      // — would have stopped being a bug he has and become one he IS.
+      //
+      // It now reads both separators AND checks the exit code, and when the
+      // parse finds nothing while the analyzer exited non-zero it says so. This
+      // pins the direction where being wrong is unsafe: that admission must
+      // never classify as a pass.
+      expect(
+        ToolExecutorService.classifyToolOutcome(
+          'self_check',
+          'I CANNOT READ MY OWN ANALYZER. It exited non-zero — so it found '
+              'something — and I could not parse a single line of it. This is '
+              'NOT clean and it is NOT a verdict: I have learned nothing.',
+        ),
+        isNot(ToolOutcome.passed),
+      );
+    });
   });
 }

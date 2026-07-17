@@ -32,6 +32,7 @@ import 'screens/brain_3d_screen.dart';
 import 'screens/activity_feed_screen.dart';
 import 'screens/worlds_screen.dart';
 import 'screens/kai_desktop_shell.dart';
+import 'screens/kai_p5_chat_screen.dart';
 import 'services/core/activity_card_service.dart';
 import 'firebase_options.dart';
 import 'widgets/debug_button.dart';
@@ -1883,6 +1884,33 @@ class _MobileKaiState extends State<_MobileKai>
         elevation: 0,
         centerTitle: false,
         actions: [
+          // ── The messenger ───────────────────────────────────────────────────
+          //
+          // This app has never had a conversation in it. It holds ONE `_reply`
+          // and one `_showBubble` — an avatar that says a thing, then forgets it
+          // was ever said. Everything Kai has ever texted from here has been a
+          // single line with no before and no after.
+          //
+          // KaiP5ChatScreen is the whole thread: real history, his face, and a
+          // hard token ceiling so what lands is a text rather than a report.
+          //
+          // Deliberately a door and not a rewrite. The avatar, the flame
+          // overlay, the wake word and hold-to-speak all still work exactly as
+          // they did — this is one button next to them, and if it's wrong it
+          // costs nothing to take out.
+          IconButton(
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => KaiP5ChatScreen(
+                  personaId: _personaId,
+                  model: _modelId,
+                ),
+              ),
+            ),
+            icon: const Icon(Icons.chat_bubble, color: Color(0xFFD41F26)),
+            tooltip: 'Messages',
+          ),
           // Background mode — blue flame icon
           IconButton(
             onPressed: _enterBackground,

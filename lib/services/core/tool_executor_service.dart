@@ -1761,15 +1761,64 @@ class ToolExecutorService {
       return result;
     }
 
+    // ── The separator is not the same everywhere, and this gate hung on it ────
+    //
+    // `flutter analyze` prints its severity separated by a character that
+    // depends on the Flutter version:
+    //
+    //   local  (C:\code\flutter):  warning - This 'onError' handler...
+    //   CI     (channel: stable):  warning • The value of the field '_prefs'...
+    //
+    // This loop matched `error -` only. It works on this machine. Upgrade
+    // Flutter — or run anywhere else — and it matches nothing, `errors` is empty
+    // forever, and self_check returns CLEAN for the rest of his life. Silently.
+    // While being the thing markVerified() hangs on.
+    //
+    // §4.6 is his documented recurring bug: "self_check comes back CLEAN, he
+    // makes one more edit, the build breaks. Three times in a single day." One
+    // `flutter upgrade` and that stops being a bug he has and becomes a bug he
+    // IS, permanently, with no way to notice.
+    final sep = RegExp(r'^(error|warning)\s*[-•]\s');
     final errors = <String>[];
     final warnings = <String>[];
     for (final line in raw.split('\n')) {
       final t = line.trim();
-      if (t.startsWith('error -')) {
+      final m = sep.firstMatch(t);
+      if (m == null) continue;
+      if (m.group(1) == 'error') {
         errors.add(t);
-      } else if (t.startsWith('warning -')) {
+      } else {
         warnings.add(t);
       }
+    }
+
+    // ── The second witness ────────────────────────────────────────────────────
+    //
+    // `flutter analyze` EXITS non-zero when it finds something. That is a verdict
+    // the tool states outright, and this method has been ignoring it in favour of
+    // reverse-engineering the same fact out of English — which is the exact bug
+    // that ran all through 2026-07-17 and cost a day.
+    //
+    // run_tests learned this 150 lines down and wrote it in its own comment:
+    // "Two independent witnesses, because relying on one string in a log that
+    // gets truncated is what caused this tool to call a green suite FAILING."
+    // self_check never got the lesson.
+    //
+    // So: if the parse found nothing but the analyzer exited non-zero, the parse
+    // is wrong — not the analyzer. Say so, don't say CLEAN. A gate that cannot
+    // read its own instrument must not certify anything.
+    final exitZero = RegExp(r'^exit 0\b').hasMatch(raw.trimLeft());
+    final exitStated = RegExp(r'^exit \d').hasMatch(raw.trimLeft());
+    if (exitStated && !exitZero && errors.isEmpty && warnings.isEmpty) {
+      final result = 'I CANNOT READ MY OWN ANALYZER. It exited non-zero — so it '
+          'found something — and I could not parse a single line of it. This is '
+          'NOT clean and it is NOT a verdict: I have learned nothing.\n\n'
+          'Most likely the output format moved under me (the severity separator '
+          'is "-" on some Flutter versions and "•" on others). Do NOT treat this '
+          'as verified.\n\nRaw:\n'
+          '${raw.length > 2000 ? '${raw.substring(0, 2000)}\n… (truncated)' : raw}';
+      recordToolReceiptWithOutcome('self_check', ToolOutcome.unknown, result);
+      return result;
     }
 
     if (errors.isEmpty && warnings.isEmpty) {
