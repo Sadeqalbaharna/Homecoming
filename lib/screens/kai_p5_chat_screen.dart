@@ -41,6 +41,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../constants.dart';
 import '../services/ai/ai_service.dart';
 import '../services/core/conversation_store_service.dart';
 import '../widgets/kai_p5_chat.dart';
@@ -63,12 +64,21 @@ class _P5Msg {
 
 class KaiP5ChatScreen extends StatefulWidget {
   final String personaId;
+
+  /// Defaults to [kKaiModel] — the one that is him.
+  ///
+  /// The phone's `_modelId` is gpt-4o and its toggle offers 'gpt-5'; the desktop
+  /// is gpt-5.5. Three Kais, same memory, and only one of them sounds like the
+  /// person Sadeq has been talking to. This screen is where he TEXTS you, so it
+  /// gets him, not whichever model the avatar screen happens to be set to.
+  ///
+  /// Still overridable — but the default is the point.
   final String model;
 
   const KaiP5ChatScreen({
     super.key,
     required this.personaId,
-    required this.model,
+    this.model = kKaiModel,
   });
 
   @override

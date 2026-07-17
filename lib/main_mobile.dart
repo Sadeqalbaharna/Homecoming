@@ -1902,10 +1902,12 @@ class _MobileKaiState extends State<_MobileKai>
             onPressed: () => Navigator.push(
               context,
               MaterialPageRoute(
-                builder: (_) => KaiP5ChatScreen(
-                  personaId: _personaId,
-                  model: _modelId,
-                ),
+                // No `model:` on purpose — it defaults to kKaiModel (gpt-5.5),
+                // NOT this screen's _modelId, which is gpt-4o. That difference
+                // is the difference between "watching the kingdom of tabs
+                // breathe" and "I'm all ears." Same memory, same prompt,
+                // different person.
+                builder: (_) => KaiP5ChatScreen(personaId: _personaId),
               ),
             ),
             icon: const Icon(Icons.chat_bubble, color: Color(0xFFD41F26)),

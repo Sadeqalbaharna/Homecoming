@@ -53,7 +53,8 @@
         ".write": "auth != null",
         "journal":          { ".indexOn": ["timestamp"] },
         "emotional_events": { ".indexOn": ["timestamp"] },
-        "proactive_queue":  { ".indexOn": ["delivered"] }
+        "proactive_queue":  { ".indexOn": ["delivered"] },
+        "activity_cards":   { ".indexOn": ["timestamp"] }
       }
     },
     "home_automation": {
