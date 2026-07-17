@@ -35,7 +35,10 @@
 // eats days.
 library;
 
-import 'dart:math' as math;
+// No dart:math, and that's load-bearing. Every angle in this file is a constant
+// or derived from the message itself — see P5MessageRow.seed. A Random() near a
+// thing you look at is a thing that jitters when you scroll, and this codebase
+// has a standing rule about dice near anything that speaks or renders.
 import 'package:flutter/material.dart';
 
 // ── Palette ──────────────────────────────────────────────────────────────────
