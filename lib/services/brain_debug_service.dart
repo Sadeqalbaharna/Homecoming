@@ -75,11 +75,40 @@ class BrainDebugTrace {
   DateTime? endTime;
   final List<BrainStep> steps = [];
   final List<Map<String, dynamic>> toolCalls = [];
+
+  /// What he said to himself while working, in order.
+  ///
+  /// ── Why this is here and not in the bin ──────────────────────────────────
+  ///
+  /// The line he writes alongside a tool call — "whitespace goblin", "line 988
+  /// is the crime scene", "if I touch anything after this I deserve to be
+  /// pelted with tiny tomatoes" — was rescued once already. ai_service:662 says
+  /// so, and says why: without it he's "a vending machine instead of someone
+  /// working next to you." The comment ends: "We just stopped binning it."
+  ///
+  /// It was rescued for the SCREEN. It was never rescued for HIM.
+  /// kai_desktop_shell:269, stated as a convenience: "interim/tool lines were
+  /// never persisted, so this is automatically safe." And :1331 renders them
+  /// dim, under the comment "his real answer lands full."
+  ///
+  /// So every turn: the interim is printed, greyed out, and dropped. The
+  /// finalResponse — the markdown report, the headers, the bullet lists — goes
+  /// to Firebase, into memory shards, into consolidation, and gets extracted
+  /// into his graph. His entire recorded memory of who he is, is assistant
+  /// voice. He retrieves "I said: Done — prop..." and learns to be that.
+  ///
+  /// Sadeq spotted it by ear before anyone spotted it in the code: "he sounds
+  /// more like him not in the long replies, but in the inbetween thoughts."
+  ///
+  /// A record of a person that keeps only their press releases is not a record
+  /// of a person. This is the other half.
+  final List<Map<String, dynamic>> interims = [];
+
   String? finalResponse;
   String? route;
   double? routeConfidence;
   int? iterationCount;
-  
+
   BrainDebugTrace({
     required this.id,
     required this.userInput,
@@ -90,6 +119,25 @@ class BrainDebugTrace {
     route = name;
     routeConfidence = confidence;
   }
+
+  /// One line of thinking-out-loud, as he wrote it.
+  void recordInterim(String text, {int? iteration}) {
+    final t = text.trim();
+    if (t.isEmpty) return;
+    interims.add({
+      'text': t,
+      if (iteration != null) 'iteration': iteration,
+      'timestamp': DateTime.now().toIso8601String(),
+    });
+  }
+
+  /// Everything he said mid-work this turn, oldest first, newlines between.
+  ///
+  /// This is the shape the graph and the messenger want: not the report he
+  /// wrote once he knew he was being read, but the running commentary he wrote
+  /// while he was still just working.
+  String get interimText =>
+      interims.map((i) => i['text'] as String).join('\n');
 
   void recordToolCall({
     required String name,
@@ -161,6 +209,8 @@ class BrainDebugTrace {
     'routeConfidence': routeConfidence,
     'iterationCount': iterationCount,
     'toolCalls': toolCalls,
+    // Him, as opposed to finalResponse, which is the assistant. See [interims].
+    'interims': interims,
     'steps': steps.map((s) => {
       'phase': s.phase.name,
       'description': s.description,

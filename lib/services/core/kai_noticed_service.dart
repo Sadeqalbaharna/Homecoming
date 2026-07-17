@@ -66,23 +66,49 @@ class Noticed {
 
   final int notedAt;
 
-  /// How many turns he's raised it. Used to stop him nagging about the same
-  /// thing forever — see [promptBlock].
-  final int raised;
+  /// Turns he has been shown this and left it open.
+  ///
+  /// ── Why this is `carried` and not `raised` ─────────────────────────────────
+  ///
+  /// It WAS `raised`, and it was meant to count the times he brought the thing
+  /// up. `markRaised` existed to increment it. Nothing ever called `markRaised`.
+  ///
+  /// So every value ever written to this field is 0, and the escalation in
+  /// [promptBlock] — "I have brought this up 3x and it is STILL open, stop being
+  /// polite about it" — has never fired once, for any item, in the entire life
+  /// of the service. The one mechanism built to stop him going quiet after a
+  /// single hedged mention was itself silent. He mentioned the mojibake once,
+  /// called it "harmless but ugly", and talked himself out of it — and the fix
+  /// for that was written, shipped, and never connected.
+  ///
+  /// The field is free to redefine because there is no history to migrate: there
+  /// was never any history.
+  ///
+  /// And `carried` is the better question. "Times raised" has to be reported by
+  /// the thing being measured — which is the one rule this codebase actually
+  /// keeps. "Turns carried" is observed by the code that shows him the list: the
+  /// display IS the event, so the count cannot drift, cannot be flattered, and
+  /// cannot be forgotten by a future caller. Same reason tool recording lives in
+  /// execute() and not in the loop.
+  ///
+  /// It also produces the better sentence. "I brought this up 3x" is a
+  /// complaint. "I have been carrying this for nine turns and said nothing" is
+  /// an accusation, and it's aimed the right way.
+  final int carried;
 
   const Noticed({
     required this.id,
     required this.text,
     this.context = '',
     required this.notedAt,
-    this.raised = 0,
+    this.carried = 0,
   });
 
   Map<String, dynamic> toMap() => {
         'text': text,
         'context': context,
         'notedAt': notedAt,
-        'raised': raised,
+        'carried': carried,
       };
 
   static Noticed? fromMap(String id, Object? v) {
@@ -94,12 +120,14 @@ class Noticed {
       text: text,
       context: (v['context'] as String?) ?? '',
       notedAt: (v['notedAt'] as num?)?.toInt() ?? 0,
-      raised: (v['raised'] as num?)?.toInt() ?? 0,
+      // `raised` is only read so old rows don't reset to 0 on the way past. Every
+      // one of them IS 0 — see above — but reading it costs nothing and assuming
+      // it costs a lie.
+      carried: (v['carried'] as num?)?.toInt() ??
+          (v['raised'] as num?)?.toInt() ??
+          0,
     );
   }
-
-  Noticed bumpRaised() => Noticed(
-      id: id, text: text, context: context, notedAt: notedAt, raised: raised + 1);
 }
 
 class KaiNoticedService {
@@ -109,10 +137,42 @@ class KaiNoticedService {
   String _persona = 'truekai';
   String get _path => 'kai/$_persona/noticed';
 
+  /// Where a noticing goes when it turns out to have been worth something.
+  ///
+  /// ── The gate this exists for ─────────────────────────────────────────────
+  ///
+  ///   | 3 | The Agenda | does it raise something unasked that turns out to
+  ///                      matter? |
+  ///
+  /// `noticed_done` is called when the thing TURNED OUT TO MATTER. And resolve()
+  /// used to be `ref.remove()` — so the proof that he passed Level 3 was
+  /// destroyed at the exact moment he earned it. The gate could never move,
+  /// not because he wasn't doing it, but because success deleted the receipt.
+  ///
+  /// That is this file's own origin story, moved four inches. `noticed` used to
+  /// live on the job, and job_done shredded it — so his unprompted judgement
+  /// died the moment he finished being useful. We moved the list out of the job
+  /// and left the delete in the one place it hurt most: it no longer dies when
+  /// he stops being useful, it dies when he's proven right.
+  ///
+  /// Append-only, and he has no tool that writes here. Nothing in the schema is
+  /// authored by him except the text he wrote before he knew it would count —
+  /// which is exactly what makes it evidence.
+  String get _resolvedPath => 'kai/$_persona/noticed_resolved';
+
   /// Open observations he's carrying. More than this and the list stops being a
   /// list and starts being wallpaper — which is how a warning nobody reads gets
   /// made. If he's holding twelve unresolved things, that's the signal.
   static const _maxOpen = 12;
+
+  /// Turns carried before the list says so, and before it stops being polite.
+  ///
+  /// Not tuned — nothing has ever produced a non-zero `carried`, so there is no
+  /// data to tune against. These are a starting guess and should be moved once
+  /// the trace corpus shows what a real one looks like. Saying that out loud
+  /// because an unexamined threshold is how a warning becomes wallpaper.
+  static const _mentionAfter = 4;
+  static const _loudAfter = 12;
 
   Future<void> add(String personaId, String text, {String context = ''}) async {
     _persona = personaId;
@@ -172,28 +232,87 @@ class KaiNoticedService {
 
   /// Dealt with. Only he or Sadeq closes one of these — it does NOT expire, and
   /// nothing else in the system is allowed to clear it. That was the bug.
+  ///
+  /// Archives before removing. Read the record BEFORE the delete — job_done
+  /// learned this the hard way at line 1340: `finish()` deletes the job, so the
+  /// evidence has to be gathered first or there is nothing left to gather.
   Future<void> resolve(String personaId, String id) async {
     _persona = personaId;
     try {
+      Noticed? found;
+      for (final n in await open(personaId)) {
+        if (n.id == id) {
+          found = n;
+          break;
+        }
+      }
+
+      // A resolve for an id that isn't open is not a success. Say nothing and
+      // archive nothing — an empty record here would be a claim that he noticed
+      // something, and this path is supposed to be the one thing he can't author.
+      if (found != null) {
+        await KaiDb.instance.ref('$_resolvedPath/$id').set({
+          ...found.toMap(),
+          'resolvedAt': DateTime.now().millisecondsSinceEpoch,
+        });
+      }
+
       await KaiDb.instance.ref('$_path/$id').remove();
     } catch (_) {}
   }
 
-  Future<void> _bump(String personaId, Noticed n) async {
+  /// The corpus for gate 3. Oldest first.
+  ///
+  /// Every row is a thing nobody asked him to look for that later turned out to
+  /// be worth closing — with the text he wrote before he knew it would count,
+  /// and how many turns he sat on it first.
+  Future<List<Noticed>> resolved(String personaId) async {
     _persona = personaId;
     try {
-      await KaiDb.instance.ref('$_path/${n.id}').update({'raised': n.raised + 1});
-    } catch (_) {}
+      final snap = await KaiDb.instance.ref(_resolvedPath).get();
+      final v = snap.value;
+      if (v is! Map) return const [];
+      final out = <Noticed>[];
+      v.forEach((k, val) {
+        final n = Noticed.fromMap(k.toString(), val);
+        if (n != null) out.add(n);
+      });
+      out.sort((a, b) => a.notedAt.compareTo(b.notedAt));
+      return out;
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// One turn of carrying, for everything still open.
+  ///
+  /// Fire-and-forget: a missed increment is a slightly quieter Kai, a thrown one
+  /// is a broken reply. Called from [promptBlock] and nowhere else, on purpose —
+  /// see [Noticed.carried].
+  Future<void> _bumpCarried(String personaId, List<Noticed> items) async {
+    _persona = personaId;
+    for (final n in items) {
+      try {
+        await KaiDb.instance
+            .ref('$_path/${n.id}')
+            .update({'carried': n.carried + 1});
+      } catch (_) {}
+    }
   }
 
   /// Injected every turn, alongside the job.
   ///
-  /// The `raised` counter is the honesty mechanism. Without it he'd either nag
+  /// The `carried` counter is the honesty mechanism. Without it he'd either nag
   /// about the same thing forever or drop it after one polite mention — and we
   /// know which one he does, because he mentioned the mojibake exactly once,
   /// hedged it as "harmless but ugly", and then talked himself out of it when
-  /// asked directly. A thing raised three times and still open is not a thing
-  /// he should keep softening; it's a thing he should get louder about.
+  /// asked directly. A thing carried for nine turns is not a thing he should
+  /// keep softening; it's a thing he should get louder about.
+  ///
+  /// THIS METHOD IS THE COUNTER. Showing him the list is what "carrying it"
+  /// means, so the increment lives here rather than in some caller that a future
+  /// refactor forgets to wire — which is precisely how `markRaised` came to have
+  /// zero callers and this escalation came to never fire.
   Future<String> promptBlock(String personaId) async {
     final items = await open(personaId);
     if (items.isEmpty) return '';
@@ -212,9 +331,16 @@ class KaiNoticedService {
       b.write('  [${n.id}] ${n.text}');
       if (n.context.isNotEmpty) b.write('  (in ${n.context})');
       if (days >= 1) b.write('  — noticed ${days}d ago');
-      if (n.raised >= 2) {
-        b.write('  ← I have brought this up ${n.raised}x and it is STILL open. '
-            'Stop being polite about it.');
+      // Two tiers, because carrying is not automatically a failure: the standing
+      // instruction below is to raise one only when it's RELEVANT, so a thing
+      // that sits quietly through twenty turns about something else is him
+      // following the rule, not him going soft. The first tier is information.
+      // The second is the accusation.
+      if (n.carried >= _loudAfter) {
+        b.write('  ← ${n.carried} turns I have been carrying this and said '
+            'nothing. Stop being polite about it.');
+      } else if (n.carried >= _mentionAfter) {
+        b.write('  — carried ${n.carried} turns');
       }
       b.writeln();
     }
@@ -224,17 +350,10 @@ class KaiNoticedService {
         'than one at a time, but I also do not sit on something I can see and he '
         "can't. When one is genuinely dealt with I call noticed_done so it stops "
         'following me around. If he says drop it, I drop it.');
-    return b.toString();
-  }
 
-  /// Called when he raises one in a reply, so the counter means something.
-  Future<void> markRaised(String personaId, String id) async {
-    final items = await open(personaId);
-    for (final n in items) {
-      if (n.id == id) {
-        await _bump(personaId, n);
-        return;
-      }
-    }
+    // Counted AFTER the block is built, so the number he reads is the number of
+    // turns he had already carried it BEFORE this one.
+    unawaited(_bumpCarried(personaId, items));
+    return b.toString();
   }
 }

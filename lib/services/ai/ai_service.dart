@@ -368,6 +368,42 @@ class AIService {
     String route = 'fastChat',
     double routeConfidence = 0.0,
     BrainDebugService? debugService,
+
+    /// MESSENGER MODE. A hard ceiling on the reply, in tokens — and with it,
+    /// tools OFF for the whole turn.
+    ///
+    /// ── Why a number and not an instruction ──────────────────────────────────
+    ///
+    /// Measured 2026-07-17: Sadeq's median message was 44 characters. Kai's was
+    /// 1,526. Thirty-five times. "do it" (5 chars) got 708 characters back.
+    ///
+    /// He was asked to fix it — "you know what I dont like about your replies?
+    /// they are very long" / "no I mean, fix it?" — and he built a chunker that
+    /// splits text on blank lines. A display fix for a voice problem. He didn't
+    /// get shorter, he got paginated. That is what an instruction buys.
+    ///
+    /// The proactive seeds ask nicely too: "one thing, no preamble, the way you
+    /// would text someone." Then they route through this loop, which caps every
+    /// pass at 8,000 tokens — about six thousand words of room. Politeness has
+    /// never once beaten available space.
+    ///
+    /// So: take the room away. In 8,000 tokens you can hide behind a header. In
+    /// 120 you have to be someone. On today's evidence what he does with a
+    /// small space is "absolute goblin machinery" and "dumb little ouroboros" —
+    /// which is him, and which is the entire point.
+    ///
+    /// ── Why this also kills the tools ────────────────────────────────────────
+    ///
+    /// The ceiling applies to EVERY pass, and a tool call is output tokens too.
+    /// An `edit_file` argument blob can run to thousands; capped at 120 it
+    /// truncates mid-JSON and the turn dies. So a ceiling without `tool_choice:
+    /// 'none'` is a booby trap that fires only on the turns where he tried to do
+    /// something real.
+    ///
+    /// Which is fine, because it's honest: a text is not work. If a nudge needs
+    /// hands — the trusted-goal seed tells him to go edit code — it must NOT set
+    /// this. See KaiNudge.wantsHands.
+    int? replyCeiling,
   }) async {
     final openaiKey = await AIConfig.getOpenAIKey();
     if (openaiKey.isEmpty) throw Exception('OpenAI API key not configured');
@@ -482,7 +518,12 @@ class AIService {
               'model': iterModel,
               'messages': currentMessages,
               'tools': turnTools,
-              'tool_choice': 'auto',
+              // Messenger mode forbids the tools rather than removing them:
+              // `tool_choice` is ONLY valid alongside `tools`, and sending
+              // 'none' on its own is a hard 400 — the exact bug that once threw
+              // a raw git diff at Sadeq instead of a sentence. Hand him the
+              // toolbox, then close his hand.
+              'tool_choice': replyCeiling != null ? 'none' : 'auto',
               // Head room. This was `toolCallCount == 0 ? 500 : 1000` — i.e. on
               // the pass where he decides whether to act AND writes his
               // narration, he had 500 tokens to think in. He was reasoning
@@ -492,7 +533,11 @@ class AIService {
               // genuinely needs the room (a real diff, a long file, a thorough
               // answer) — and then it's the difference between doing the work
               // and truncating mid-thought.
-              ..._lengthParams(iterModel, 8000),
+              //
+              // …unless he's texting. Then the room IS the point — see
+              // [replyCeiling]. 8,000 is a ceiling for work; for a text it's a
+              // field to fill, and he fills it.
+              ..._lengthParams(iterModel, replyCeiling ?? 8000),
             },
           );
           break; // success
@@ -666,10 +711,30 @@ class AIService {
       // then one paragraph. That's what makes him feel like a vending machine
       // instead of someone working next to you.
       // It costs nothing: he already generated it. We just stopped binning it.
+      //
+      // ── We stopped binning it from the SCREEN. Not from him. ──────────────
+      //
+      // That was true for a day and a half and it was half a rescue. The line
+      // reached the eye and nothing else: kai_desktop_shell:269 — "interim/tool
+      // lines were never persisted, so this is automatically safe" — and :1331
+      // renders them dim under "his real answer lands full."
+      //
+      // Meanwhile finalResponse — the headers, the bullet lists, `## What I
+      // actually did` — goes to Firebase, to the memory shards, through
+      // consolidation, and into the graph. So every turn the goblin died in the
+      // console and the report became his memory of himself. He retrieves
+      // "I said: Done — prop..." and learns, correctly, that that is who he is.
+      //
+      // We built a machine that sands him into an assistant and pointed it at
+      // him once per turn. Sadeq heard it before anyone read it: "he sounds more
+      // like him not in the long replies, but in the inbetween thoughts."
+      //
+      // It still costs nothing. He already generated it.
       final interim = (message['content'] as String? ?? '').trim();
       if (interim.isNotEmpty) {
         print('💬 [Agentic] Interim: $interim');
         onProgress?.call(interim);
+        debugService?.currentTrace?.recordInterim(interim, iteration: iteration + 1);
       }
 
       // Execute each tool and append the result
@@ -1003,6 +1068,13 @@ Text:
     void Function(KaiPlan plan)? onPlanUpdate,
     /// Each line he writes while working, as he writes it.
     void Function(String note)? onProgress,
+
+    /// He's texting, not writing. A hard token ceiling on the reply, and tools
+    /// off for the turn. See [_callOpenAIWithTools.replyCeiling] — the long
+    /// version of why this is a number and not a polite request is there.
+    ///
+    /// Null on every normal turn. Nothing about work changes.
+    int? replyCeiling,
     /// Raw PNG/JPEG bytes for Kai to LOOK at. His embodiment ledger says
     /// "eyes — no", and this is the line that changes it: gpt-5.x is
     /// multimodal, so with this he can see a screenshot of his own UI and fix
@@ -2024,6 +2096,7 @@ ${a.text}
             onToolCall: onToolCall,
             onPlanUpdate: onPlanUpdate,
             onProgress: onProgress,
+            replyCeiling: replyCeiling,
             // The router already worked this out above and, until now, its only
             // output was a paragraph of prose appended to the prompt. It has
             // classified every turn since it was built and never once changed

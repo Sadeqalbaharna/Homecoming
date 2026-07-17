@@ -123,12 +123,24 @@ class ProactiveService {
   }
 
   /// Mark a message as delivered so it never shows again.
+  ///
+  /// The `catch (_) {}` here used to be harmless — a failed write meant one
+  /// message showed twice. It is now load-bearing: proactiveKai will not send
+  /// another message while one sits unread, so a silent failure here makes Kai
+  /// go quiet and gives nobody a reason why. That is the exact shape of every
+  /// bug in this codebase — a real event, swallowed, rendered as nothing.
+  ///
+  /// Still swallowed, because a broken write must never break an app resume.
+  /// But it says so now.
   Future<void> markDelivered(String personaId, String messageId) async {
     if (_db == null) return;
     try {
       await _db!
           .ref('kai/$personaId/proactive_queue/$messageId/delivered')
           .set(true);
-    } catch (_) {}
+    } catch (e) {
+      print('📲 [Proactive] markDelivered FAILED for $messageId: $e — he will '
+          'not reach out again until this clears or ages out.');
+    }
   }
 }

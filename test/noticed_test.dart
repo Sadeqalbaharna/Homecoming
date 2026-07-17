@@ -44,7 +44,7 @@ Noticed make({
   String text = 'read_file lies about indentation in the gutter',
   String context = '',
   int ageDays = 0,
-  int raised = 0,
+  int carried = 0,
 }) =>
     Noticed(
       id: id,
@@ -53,7 +53,7 @@ Noticed make({
       notedAt: DateTime.now()
           .subtract(Duration(days: ageDays))
           .millisecondsSinceEpoch,
-      raised: raised,
+      carried: carried,
     );
 
 void main() {
@@ -78,15 +78,46 @@ void main() {
       // new hat.
       final n = Noticed.fromMap('x', {'text': 'something real'});
       expect(n, isNotNull);
-      expect(n!.raised, 0);
+      expect(n!.carried, 0);
       expect(n.context, '');
     });
 
-    test('raising bumps the counter and keeps everything else', () {
-      final n = make(raised: 1).bumpRaised();
-      expect(n.raised, 2);
-      expect(n.id, 'n1');
+    test('the carried count survives the round trip', () {
+      // This is the assertion that would have caught the original bug, and it is
+      // worth being precise about WHY it wouldn't have.
+      //
+      // The old field was `raised`, incremented by `markRaised`, which had ZERO
+      // callers — so every value ever stored was 0 and the escalation in
+      // promptBlock ("I have brought this up 3x, stop being polite about it")
+      // never fired once, for any item, ever. The mechanism built to stop him
+      // going quiet after one hedged mention was itself permanently silent.
+      //
+      // And the old test here passed the whole time. It called bumpRaised()
+      // directly and asserted the arithmetic. The arithmetic was never wrong.
+      // Nothing called it. A unit test on a method with no callers proves the
+      // method works and hides that it never runs — which is the same shape as
+      // toJson() with no caller, and classifyToolOutcome tested only on strings
+      // typed by hand.
+      //
+      // So the fix is not a better test of the counter. It's that the counter
+      // now lives inside promptBlock — showing him the list IS carrying it —
+      // and there is no separate call site left to forget.
+      final n = Noticed.fromMap('x', make(carried: 7).toMap());
+      expect(n!.carried, 7);
+      expect(n.id, 'x');
       expect(n.notedAt, isNot(0));
+    });
+
+    test('an old row written as `raised` still reads, and reads as 0', () {
+      // Every `raised` in Firebase right now is 0 — see above. Reading the old
+      // key costs nothing; assuming its value costs a lie.
+      final n = Noticed.fromMap('x', {'text': 'real', 'raised': 0});
+      expect(n!.carried, 0);
+    });
+
+    test('carried wins over raised when both exist', () {
+      final n = Noticed.fromMap('x', {'text': 'real', 'raised': 2, 'carried': 9});
+      expect(n!.carried, 9);
     });
   });
 

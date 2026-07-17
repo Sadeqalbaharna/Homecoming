@@ -60,6 +60,8 @@ flutter:
   assets:
     - assets/brain/kai_cortex.html
     - assets/avatar/images/mage.png
+    # His face. Referenced once, from KaiFace in widgets/kai_p5_chat.dart.
+    - assets/avatar/kai_face.png
     - assets/audio/record_start.wav
     - assets/audio/record_stop.wav
     # Frame-based animations (PNG sequences)

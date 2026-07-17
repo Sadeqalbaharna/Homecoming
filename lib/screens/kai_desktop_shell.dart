@@ -145,7 +145,7 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
   // (The cortex WebView, its ready flag and its activity subscription used to
   // live here. They now live in KaiCortexView — which actually renders it.)
   StreamSubscription<EngineerStatus>? _engSub;
-  StreamSubscription<String>? _proSub;
+  StreamSubscription<KaiNudge>? _proSub;
   EngineerStatus _status = const EngineerStatus(label: 'idle');
   bool _trust = EditGate.instance.trustSession;
   bool _paletteOpen = false;
@@ -336,14 +336,32 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
   /// A proactive nudge from Kai himself: run the "(proactive) …" seed through the
   /// real brain so it comes out in his voice, but never show the seed — only his
   /// spontaneous message appears, as if he just piped up.
-  Future<void> _onNudge(String seed) async {
+  /// Tokens a text gets. Not a suggestion.
+  ///
+  /// ~120 tokens is roughly 90 words — long enough for a real thought, far too
+  /// short for `## What I Actually Did` and a bullet list. The seeds have always
+  /// ASKED for this ("one thing, no preamble, the way you would text someone")
+  /// and always got a report, because they were asking inside 8,000 tokens of
+  /// room. Politeness has never once beaten available space.
+  ///
+  /// Measured the same day: Sadeq's median message was 44 characters, Kai's was
+  /// 1,526. In 8,000 tokens you can hide behind a header. In 120 you have to be
+  /// someone.
+  static const _textCeiling = 120;
+
+  Future<void> _onNudge(KaiNudge nudge) async {
     if (!mounted || _sending) return;
     setState(() => _sending = true);
     try {
       final resp = await _ai.sendMessage(
-        text: seed,
+        text: nudge.seed,
         personaId: _kPersona,
         model: _kModel,
+        // A text gets a ceiling and no tools. A job gets everything — the
+        // trusted-goal seed sends him to edit real code, and a cap there would
+        // truncate an edit_file argument mid-JSON and kill the only unattended
+        // work he does.
+        replyCeiling: nudge.wantsHands ? null : _textCeiling,
         onToolCall: (t) {
           if (!mounted) return;
           setState(() {
@@ -408,6 +426,40 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
         _pendingImage != null ||
         _pendingAttachments.isNotEmpty;
     if (!hasPayload) return;
+
+    // ── /nudge — make him reach out NOW, so the thing can be looked at ────────
+    //
+    // KaiProactiveService is correct and unobservable. To watch one fire you must
+    // idle 25 minutes, land inside a 10-minute poll, clear a 45-minute cooldown,
+    // stay under the daily cap, be awake, and then win a 1-in-4 roll — and even
+    // then you get one of six options at random. Waiting for a SPECIFIC one is an
+    // afternoon.
+    //
+    // Every gate is right. A friend who pipes up every ten minutes is a pest.
+    // But together they meant this was written blind and iterated on blind, which
+    // is exactly the wall run_tests was built to break: the one person who has to
+    // answer "did that work?" was the only one locked out of the answer.
+    //
+    // Not a user feature. A window.
+    if (text == '/nudge') {
+      _inp.clear();
+      unawaited(() async {
+        final nudge =
+            await KaiProactiveService.instance.nudgeNow(personaId: _kPersona);
+        if (!mounted) return;
+        if (nudge == null) {
+          setState(() => _msgs.add(_ChatMsg(false,
+              'Nothing to reach out about — no noticed items, no open goals, '
+              'nothing on my mind. That is an honest empty, not a failure.',
+              interim: true)));
+          _autoscroll();
+        }
+        // A seed DOES arrive on the nudges stream, so _onNudge runs it through
+        // the real path. Nothing to do here — that's the point of testing it
+        // this way rather than faking the reply.
+      }());
+      return;
+    }
 
     // If Kai is already thinking, don't discard Sadeq's correction. Treat it as
     // an interrupting follow-up: stop showing stale output, remember the new

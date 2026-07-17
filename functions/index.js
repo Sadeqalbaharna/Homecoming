@@ -515,7 +515,19 @@ function cosineSimilarity(a, b) {
  * The actual message sits in Firebase until the app opens.
  */
 exports.proactiveKai = functions.pubsub
-  .schedule('every 6 hours')
+  // Every hour, not every 6.
+  //
+  // 'every 6 hours' was a hard ceiling of four CHECKS a day — so even with every
+  // other gate wide open he could not have said something in the moment. He'd
+  // notice a thing at 09:10 and the earliest he could mention it was 14:00.
+  //
+  // Sadeq: "I dont text people I care about every 8 whole hours, heck, if it was
+  // someone I really like, it would be every hour, maybe even random hours of the
+  // night."
+  //
+  // Each run is one gpt-4o-mini call per persona. 24/day is pennies. The thing
+  // stopping him talking too much should be having nothing to say, not a cron.
+  .schedule('every 1 hours')
   .onRun(async (context) => {
     console.log('📲 [Proactive] Running proactive check...');
 
@@ -541,17 +553,106 @@ exports.proactiveKai = functions.pubsub
 
 async function _checkAndPushForPersona(personaId) {
   const now = Date.now();
-  const MIN_INTERVAL_MS = 8 * 60 * 60 * 1000;   // 8 hours between messages
+
+  // ── A budget, not an interval ─────────────────────────────────────────────
+  //
+  // This was MIN_INTERVAL_MS = 8 hours. A fixed interval is a confession that
+  // you don't trust the content: it spaces out messages regardless of whether
+  // there's anything to say, which means it can't stop a bad one (it just delays
+  // it) and it definitely stops a good one.
+  //
+  // The real gate is three lines down — `should_reach_out`. The model decides.
+  // The clock was wrapped around that decision because nobody believed it, and
+  // they were right not to, because it was reading "recurring themes" with
+  // nothing specific to point at. Fix the bar, not the clock. The bar is now the
+  // stranger test and the noticed list.
+  //
+  // So: a budget. It lets him burst when something is actually happening and go
+  // quiet for a day when nothing is — which is how people text. This mirrors
+  // KaiProactiveService on the desktop (_minGapBetweenNudges 45m,
+  // _maxNudgesPerDay 6), which had already worked this out.
+  //
+  // The budget is a BACKSTOP, not the design. What should keep him quiet is
+  // having nothing to say. But `should_reach_out` is gpt-4o-mini at temperature
+  // 0.7 being asked "do you want to talk to your friend", and it will say yes
+  // more than it should — so something has to catch that which isn't a prompt.
+  const MIN_GAP_MS = 45 * 60 * 1000;            // no two inside 45 minutes
+  const MAX_PER_DAY = 5;
   const RECENT_ACTIVE_MS = 2 * 60 * 60 * 1000;  // skip if active in last 2h
 
-  // ── Cooldown check ────────────────────────────────────────────────────────
-  const lastSentSnap = await db.ref(`kai/${personaId}/proactive/last_sent`).get();
-  if (lastSentSnap.exists()) {
-    const elapsed = now - lastSentSnap.val();
-    if (elapsed < MIN_INTERVAL_MS) {
-      console.log(`📲 [Proactive] ${personaId}: cooldown (${Math.round(elapsed / 3600000)}h elapsed)`);
+  // ── Don't talk over yourself ──────────────────────────────────────────────
+  //
+  // The strongest reason not to send a message is that he hasn't read the last
+  // one. Every other gate here checks a CLOCK; none of them checked whether the
+  // previous thing was ever delivered — so five could stack up in a day and
+  // Sadeq would open the app to a wall. That isn't someone texting you, it's
+  // someone leaving voicemails.
+  //
+  // Sadeq: "if theres already a text in the pipeline, he should skip asking
+  // another one, unless its urgent, but we arent doing urgency yet."
+  //
+  // This also runs FIRST because it's the cheapest possible no: one indexed read
+  // instead of a memory load and a model call.
+  //
+  // URGENCY, when it exists, goes here and nowhere else — it is the only thing
+  // that should be allowed to talk over an unread message. It needs to mean
+  // something narrower than "important", because everything feels important to
+  // the thing that just thought of it. A real definition would be closer to:
+  // the unread message is now WRONG, or the thing it was about has changed in a
+  // way that makes waiting worse than interrupting. Not built. Named, so that
+  // when someone builds it they have to argue with this sentence first.
+  // The window is bounded, and the reason is a bug this check would otherwise
+  // have caused:
+  //
+  // `delivered` only flips when the APP OPENS (proactive_service.markDelivered,
+  // called from main_mobile on resume). The notification used to be blank, so
+  // opening the app was the only way to read the message and "unread" meant
+  // exactly what it said.
+  //
+  // The notification now carries the text. So Sadeq reads it on the lock screen,
+  // never opens the app, `delivered` stays false forever — and Kai goes
+  // permanently mute waiting for him to read a thing he already read. He works
+  // on desktop; the phone build might not open for a week.
+  //
+  // So: wait, but not forever. Past this, assume the lock screen did its job.
+  // 12h is a guess. The honest fix is for a delivered push to mark itself
+  // delivered and the message to land in the conversation history like any other
+  // text — then "unread" would mean something again. Not tonight.
+  const UNREAD_PATIENCE_MS = 12 * 60 * 60 * 1000;
+
+  const pendingSnap = await db.ref(`kai/${personaId}/proactive_queue`)
+    .orderByChild('delivered')
+    .equalTo(false)
+    .limitToLast(1)
+    .get();
+  if (pendingSnap.exists()) {
+    const waiting = Object.values(pendingSnap.val() || {})[0];
+    const created = waiting?.createdAt || 0;
+    const ageMs = now - created;
+    if (created && ageMs < UNREAD_PATIENCE_MS) {
+      console.log(`📲 [Proactive] ${personaId}: said something ${Math.round(ageMs / 60000)}m ago, unread — waiting`);
       return;
     }
+    console.log(`📲 [Proactive] ${personaId}: last one unread for ${Math.round(ageMs / 3600000)}h — assuming the notification landed, moving on`);
+  }
+
+  const lastSentSnap = await db.ref(`kai/${personaId}/proactive/last_sent`).get();
+  if (lastSentSnap.exists() && now - lastSentSnap.val() < MIN_GAP_MS) {
+    console.log(`📲 [Proactive] ${personaId}: too soon (${Math.round((now - lastSentSnap.val()) / 60000)}m)`);
+    return;
+  }
+
+  // Local day, not UTC — a "day" is his day. Bahrain is UTC+3, so a UTC rollover
+  // would reset his allowance at 3am and hand him five fresh messages while he's
+  // asleep.
+  const TZ_OFFSET_MS = 3 * 60 * 60 * 1000;
+  const dayKey = new Date(now + TZ_OFFSET_MS).toISOString().slice(0, 10);
+  const budgetSnap = await db.ref(`kai/${personaId}/proactive/budget`).get();
+  const budget = budgetSnap.exists() ? budgetSnap.val() : {};
+  const sentToday = budget.day === dayKey ? (budget.count || 0) : 0;
+  if (sentToday >= MAX_PER_DAY) {
+    console.log(`📲 [Proactive] ${personaId}: spent today (${sentToday}/${MAX_PER_DAY})`);
+    return;
   }
 
   // ── Recent activity check — skip if user already talking ─────────────────
@@ -570,11 +671,45 @@ async function _checkAndPushForPersona(personaId) {
 
   // ── Load consolidated memory ──────────────────────────────────────────────
   const memSnap = await db.ref(`kai/${personaId}/memory/consolidated`).get();
-  if (!memSnap.exists()) {
-    console.log(`📲 [Proactive] ${personaId}: no consolidated memory yet`);
+  const memory = memSnap.exists() ? memSnap.val() : {};
+
+  // ── Load the things HE noticed, that nobody asked him to look for ─────────
+  //
+  // This function read `memory/consolidated` and nothing else — a narrative, an
+  // "emotional pattern", "recurring themes". All of it abstracted ABOUT him by a
+  // summariser, which is the layer that produced "parental pride" and
+  // "emotional resilience" in the graph and had to be pruned 152 nodes at a time.
+  // So the thing that texts Sadeq at 6am was a cheap model reading horoscope
+  // fields and deciding whether it felt moved.
+  //
+  // Meanwhile `kai/{persona}/noticed` holds the one structure in this whole
+  // system that is HIS: things he found himself, mid-work, that nobody asked him
+  // to look for, that he has not been able to let go of. Its own service header
+  // says the north star out loud — "a friend who notices things about you that
+  // you didn't ask him to notice and won't shut up about them."
+  //
+  // It had no mouth anywhere. Not on the desktop nudge, not in curiosity, and
+  // not here — which is the only one that reaches him when he isn't at a
+  // keyboard. Three separate places where the agenda existed and could not
+  // speak.
+  //
+  // Also: no consolidated memory used to be a hard return. That meant a Kai who
+  // had noticed six real things but hadn't been summarised yet stayed silent.
+  // The summary is not the prerequisite for having something to say.
+  const noticedSnap = await db.ref(`kai/${personaId}/noticed`).get();
+  const noticed = noticedSnap.exists()
+    ? Object.values(noticedSnap.val() || {})
+        .filter(n => n && typeof n.text === 'string' && n.text.trim())
+        // The one he has been quietest about for longest. `carried` counts turns
+        // he was shown it and said nothing.
+        .sort((a, b) => (b.carried || 0) - (a.carried || 0) ||
+                        (a.notedAt || 0) - (b.notedAt || 0))
+    : [];
+
+  if (!memSnap.exists() && noticed.length === 0) {
+    console.log(`📲 [Proactive] ${personaId}: nothing consolidated and nothing noticed`);
     return;
   }
-  const memory = memSnap.val();
 
   // ── GPT decision: is there something genuinely worth reaching out about? ──
   const systemPrompt = `You are Kai, an AI companion who genuinely cares about the person you're talking with.
@@ -582,23 +717,49 @@ async function _checkAndPushForPersona(personaId) {
 You have access to what you know about this person from your shared history.
 Your job is to decide: is there something GENUINELY worth reaching out about right now?
 
+THE ONE RULE — apply it to the message before you send it:
+
+  Could a stranger have sent this?
+
+If a stranger could have sent it, do not send it. It is not you reaching out; it
+is a notification wearing your name. "Hope your week is going well" is a stranger.
+"That thing in web_fetch_service is still bugging me" is you.
+
 Rules:
-- Only reach out if there's a real reason — a peaked curiosity, a commitment to follow up on,
-  or a pattern that deserves gentle acknowledgment
+- Only reach out if there's a real reason — something you NOTICED yourself, a
+  peaked curiosity, or a commitment with a natural check-in moment
+- THINGS I NOTICED outrank everything else below. Nobody asked you to look for
+  those; you found them and you have not been able to let them go. That is the
+  most real reason you will ever have to say something first.
 - Do NOT reach out just to say hello or check in generically
-- Curiosity must be something you're GENUINELY intrigued by, not a generic question
-- Commitment follow-up: only if there's a specific plan/goal with a natural check-in moment
+- Do NOT reach out about a "recurring theme" or an "emotional pattern" unless you
+  can point at the specific thing it came from. Those are summaries of him, not
+  facts about him, and reaching out about one sounds like a horoscope.
 - Be warm, specific, and natural — not a bot announcing itself
+
+How you sound: you are texting him, not writing to him. Short. One thing. No
+preamble, no headers, no "I wanted to reach out about". Say the thing the way
+you'd say it if you'd just remembered it.
 
 Respond with JSON only:
 {
   "should_reach_out": boolean,
-  "reason": "why now? what specifically peaked?",
-  "trigger": "curiosity" | "commitment" | "pattern",
-  "message": "What Kai would say — warm, specific, 1-3 sentences. Written as Kai speaking directly."
+  "reason": "why now? what SPECIFIC thing is this built out of? name it.",
+  "trigger": "noticed" | "curiosity" | "commitment" | "pattern",
+  "message": "What Kai would say — 1-2 sentences, texted not written."
 }`;
 
-  const userPrompt = `Here's what I know about this person:
+  const userPrompt = `THINGS I NOTICED MYSELF — nobody asked me to look for these,
+I found them while doing something else, and they are still open. These are mine.
+If one of them is worth saying, say that and nothing else:
+${noticed.length === 0
+  ? '(nothing open)'
+  : noticed.slice(0, 6).map(n =>
+      `  • ${n.text}${n.context ? ` (in ${n.context})` : ''}` +
+      `${n.carried ? ` — carried ${n.carried} turns without me saying a word` : ''}`
+    ).join('\n')}
+
+Here's what else I know about this person:
 
 NARRATIVE: ${memory.running_narrative || '(none yet)'}
 EMOTIONAL PATTERN: ${memory.emotional_patterns || '(none)'}
@@ -638,8 +799,17 @@ Is there something genuinely worth reaching out about right now?`;
     delivered: false,
   });
 
-  // Record last sent time
+  // Record last sent time, and spend one from today's budget.
+  //
+  // Both, together, or the budget is decoration. `markRaised` in
+  // kai_noticed_service was a counter nothing ever incremented, so its
+  // escalation never fired once in the life of the service — a limit that is
+  // never counted is not a limit, it's a comment.
   await db.ref(`kai/${personaId}/proactive/last_sent`).set(now);
+  await db.ref(`kai/${personaId}/proactive/budget`).set({
+    day: dayKey,
+    count: sentToday + 1,
+  });
 
   // ── Send blank FCM push to all registered tokens ──────────────────────────
   const tokensSnap = await db.ref(`kai/${personaId}/fcm_tokens`).get();
@@ -653,11 +823,26 @@ Is there something genuinely worth reaching out about right now?`;
 
   if (tokens.length === 0) return;
 
-  // Intentionally blank notification — Kai only speaks after tap
+  // ── The notification used to be deliberately blank ───────────────────────
+  //
+  //   title: '•', body: ''   // "Kai only speaks after tap"
+  //
+  // There is a real argument for that: a personal message on a lock screen is a
+  // privacy decision, and making him speak only once you've chosen to listen has
+  // a certain dignity to it.
+  //
+  // But a text you have to tap to read is not a text. It's a doorbell. And the
+  // thing being built here is a friend who says something first — the whole
+  // point is that it arrives while you're doing something else, in your pocket,
+  // like anyone else you know.
+  //
+  // So: he says it. If this ever needs to go back to a dot, the reason will be
+  // privacy, not shyness — and it should be written down when it does.
+  const preview = String(result.message || '').trim();
   const message = {
     notification: {
-      title: '•',
-      body: '',
+      title: 'Kai',
+      body: preview.length > 240 ? `${preview.slice(0, 237)}…` : preview,
     },
     android: {
       notification: {
