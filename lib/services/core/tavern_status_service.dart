@@ -12,6 +12,8 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_database/firebase_database.dart';
 
+import 'kai_db.dart' show kaiDbUsesRest;
+
 class TavernStatusService {
   static final TavernStatusService _i = TavernStatusService._();
   factory TavernStatusService() => _i;
@@ -28,6 +30,18 @@ class TavernStatusService {
   /// Returns a live tavern status block ready to inject into Kai's system prompt.
   /// Covers: who is currently at each table, VIPs, visit counts, usual orders.
   Future<String> getStatusBlock() async {
+    // The tavern lives on a SECOND Firebase app (kingdom-ac44f), reached
+    // through the firebase_database plugin — which has no Windows
+    // implementation (HANDOVER §4.5). On desktop this threw
+    // MissingPluginException twice on boot and twice on every single message:
+    // four guaranteed exceptions per turn for a service that cannot possibly
+    // succeed here.
+    //
+    // KaiDb is not the escape hatch it is everywhere else — it only speaks to
+    // the default app, and the tavern isn't on it. So the fix is simply to
+    // stop asking. There is no tavern on your laptop.
+    if (kaiDbUsesRest) return '';
+
     if (_cached != null && _cachedAt != null &&
         DateTime.now().difference(_cachedAt!) < _ttl) {
       return _cached!;

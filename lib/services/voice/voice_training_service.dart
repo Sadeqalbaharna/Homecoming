@@ -20,9 +20,6 @@ class VoiceTrainingService {
   // User's adaptive confidence threshold
   double _userConfidenceThreshold = 0.4; // Start more permissive to fix gibberish issue
   
-  // Environmental noise patterns
-  Map<String, int> _noisePatterns = {};
-  
   // Wake word variations learned from user
   List<String> _customWakeWords = [];
   

@@ -3,7 +3,6 @@
 library;
 
 import 'dart:async';
-import 'package:firebase_database/firebase_database.dart';
 import '../core/kai_db.dart';
 import '../core/firebase_service.dart';
 

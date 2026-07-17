@@ -18,6 +18,7 @@
 // Standing instruction from Sadeq, twice: "aim to also not to lose his soul."
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:homecoming_app/services/core/edit_gate.dart';
 import 'package:homecoming_app/services/core/kai_context_block.dart';
 import 'package:homecoming_app/services/core/kai_craft_service.dart';
 
@@ -108,6 +109,20 @@ void main() {
   group('craftDirective — the traps he used to walk into every session', () {
     final craft = KaiContextBlock.craftDirective.toLowerCase();
 
+    /// The same text with every run of whitespace collapsed to one space.
+    ///
+    /// Needed because craftDirective is hand-wrapped prose, and any phrase that
+    /// happens to straddle a line break becomes unmatchable. `contains('trench
+    /// coat')` failed for exactly that reason — the directive says
+    /// "wearing a trench\n      coat", so the words are there and the assertion
+    /// still went red.
+    ///
+    /// That is a test failing on FORMATTING while the thing it guards is
+    /// perfectly intact — which teaches you to distrust the suite, and a suite
+    /// you distrust is worse than none. Rewrapping a paragraph must never break
+    /// a soul test; only DELETING the idea should.
+    final craftFlat = craft.replaceAll(RegExp(r'\s+'), ' ');
+
     // Each of these was in HANDOVER.md — a file nothing ever loaded into his
     // prompt. He rediscovered them from scratch every session, or didn't, and
     // got blamed for hallucinating.
@@ -126,7 +141,8 @@ void main() {
 
     test('verify before asserting', () {
       expect(craft, anyOf(contains('verify'), contains('check before')));
-      expect(craft, contains('trench coat'),
+      // craftFlat, not craft: the phrase is line-wrapped in the source.
+      expect(craftFlat, contains('trench coat'),
           reason: 'his own best instinct, quoted back to him');
     });
 
@@ -203,6 +219,44 @@ void main() {
     test('empty and whitespace are not corrections', () {
       expect(KaiCraftService.looksLikeCorrection(''), isFalse);
       expect(KaiCraftService.looksLikeCorrection('   '), isFalse);
+    });
+  });
+
+  group('§4.6 — the counter, because the rule never worked', () {
+    // His engineerDirective already says "there is NO excuse for guessing
+    // whether something compiles" and "I never say 'this should work' when I
+    // could simply look". It's better prose than mine and it has not stopped him
+    // four times. My craftDirective didn't stop ME three times either.
+    //
+    // So this isn't a rule. It's a number that's just true.
+    setUp(() => EditGate.instance.markVerified());
+
+    test('a clean check clears it', () {
+      EditGate.instance.editsSinceCheck = 3;
+      EditGate.instance.markVerified();
+      expect(EditGate.instance.editsSinceCheck, 0);
+      expect(EditGate.instance.unverifiedWarning, isEmpty);
+    });
+
+    test('an edit after a clean check is unverified — the whole bug', () {
+      EditGate.instance.markVerified();
+      EditGate.instance.editsSinceCheck++; // "just one more edit"
+      expect(EditGate.instance.unverifiedWarning, contains('1 edit'));
+      expect(EditGate.instance.unverifiedWarning, contains('not verified'));
+    });
+
+    test('counts plurals like a person', () {
+      EditGate.instance.editsSinceCheck = 1;
+      expect(EditGate.instance.unverifiedWarning, contains('1 edit since'));
+      EditGate.instance.editsSinceCheck = 4;
+      expect(EditGate.instance.unverifiedWarning, contains('4 edits since'));
+    });
+
+    test('says nothing when there is nothing to say', () {
+      // It must be silent on the happy path or it becomes noise, and noise gets
+      // ignored — which is how you end up with a safeguard that isn't one.
+      EditGate.instance.markVerified();
+      expect(EditGate.instance.unverifiedWarning, isEmpty);
     });
   });
 

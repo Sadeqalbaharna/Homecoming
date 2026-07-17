@@ -73,6 +73,24 @@ class MemoryService {
     MemoryQuerySideEffects sideEffects = MemoryQuerySideEffects.enabled,
   }) async {
     try {
+      // ── Don't search for nothing ────────────────────────────────────────
+      //
+      // Measured on a real turn: "okay that worked" cost 6,795ms of memory
+      // retrieval — 27% of the entire 25-second reply — and returned, among
+      // other things, "I dont think that worked" (the exact opposite) and a
+      // pasted PowerShell prompt.
+      //
+      // An acknowledgement doesn't refer to anything in long-term memory. It
+      // refers to the message immediately before it, which is already in the
+      // history buffer. Embedding it and cosine-scoring it against every shard
+      // he owns buys nothing and costs seven seconds of him standing there.
+      //
+      // The cheapest query is the one that never runs.
+      if (!_worthSearching(query)) {
+        print('🧠 [MemoryService] Not worth searching: "$query"');
+        return MemoryQueryResult(results: const [], query: query);
+      }
+
       // Tests can inject deterministic embeddings so recall quality is verified
       // offline, without OpenAI or secure-storage plugins.
       final queryEmbedding = await (embeddingProvider ?? _getEmbedding)(query);
@@ -91,7 +109,39 @@ class MemoryService {
         if (rawVector is! List) continue;
 
         final vec = rawVector.map((v) => (v as num).toDouble()).toList();
-        final sim = _cosineSimilarity(queryEmbedding, vec);
+        var sim = _cosineSimilarity(queryEmbedding, vec);
+
+        // ── The legacy recaps are still beating real memories ────────────────
+        //
+        // §7.1 diagnosed this and assumed it would resolve itself: "the old ones
+        // will simply lose — they can't beat a memory that contains the actual
+        // words." Measured, live, on a real turn:
+        //
+        //   0.35  "In the conversation, the user initiates a friendly…"
+        //   0.35  "In the conversation, the user initiates interactio…"
+        //   0.35  "In the conversation, the user engages in casual gr…"
+        //   0.34  "Sadeq said: so what happens to chat history when I…"  ← real
+        //
+        // Sadeq asked about chat history. The memory containing those exact
+        // words came FOURTH, behind three generic recaps.
+        //
+        // They don't lose because they're not competing on meaning. Every one
+        // was written by a Cloud Function from the same boilerplate ("In the
+        // conversation, the user…"), so the template dominates the vector and
+        // they sit at a flat ~0.35 against literally any query. They're not
+        // similar to the question — they're equidistant from everything, and
+        // that's enough to outrank a real memory on a near-miss.
+        //
+        // Non-destructive: halve them so they fall under the 0.28 threshold and
+        // stop crowding the results. The rows stay — they're history we didn't
+        // author, and forgetWeak already refuses to touch shards with no clock.
+        // If a legacy recap ever genuinely is the best match, it can still win
+        // from 0.70+.
+        final isLegacyRecap = (shard['source']?.toString() ?? '') != 'live' &&
+            (shard['summary']?.toString() ?? '')
+                .startsWith('In the conversation');
+        if (isLegacyRecap) sim *= 0.5;
+
         scored.add(MemoryResult(
           id: shard['id']?.toString() ?? '',
           summary: shard['summary']?.toString() ?? '',
@@ -359,9 +409,70 @@ class MemoryService {
   /// nothing. A memory system that forgets too eagerly is worse than one that
   /// keeps a bit of junk — we can prune junk later, but we can't recover a
   /// thought he threw away. When in doubt, remember.
+  /// Is this turn worth a 7-second search of everything he knows?
+  ///
+  /// Different question from _worthRemembering. That one asks "did anything get
+  /// SAID here". This asks "does this point at something OUTSIDE the last few
+  /// turns" — because that's the only thing long-term memory can answer.
+  ///
+  /// "okay that worked" refers to the message directly above it. That message is
+  /// already in the history buffer. Searching the archive for it cost 6.8
+  /// seconds and returned the opposite sentiment plus a PowerShell prompt.
+  static bool _worthSearching(String query) {
+    final t = query.trim();
+    if (t.length < 15) return false; // "ok", "nice", "do it", "go on", "yes"
+
+    // Acknowledgement-shaped: opens with an ack and adds almost nothing. The
+    // referent is the previous turn, never the archive.
+    if (RegExp(
+      r'^(ok(ay)?|yep|yeah|yes|nice|cool|great|perfect|done|thanks?|lol|haha)\b.{0,20}$',
+      caseSensitive: false,
+    ).hasMatch(t)) {
+      return false;
+    }
+    return true;
+  }
+
+  /// Terminal output, stack traces, log dumps. Sadeq pastes these constantly —
+  /// they're how he SHOWS Kai something.
+  ///
+  /// Storing one as "Sadeq said: PS C:\code\homecoming_app> Get-Process…" is
+  /// wrong twice over: he didn't say it, and it poisons recall forever. Two of
+  /// the five memories returned for "okay that worked" were pasted logs.
+  ///
+  /// A paste is not a sentence. It's evidence — it belongs in the turn, and it
+  /// does belong in the reply he gives, but it is not a thing to remember him
+  /// having told you.
+  static final _pastedOutput = <RegExp>[
+    RegExp(r'^\s*PS [A-Z]:\\'), // PowerShell prompt
+    RegExp(r'\bTraceback \(most recent call last\)'),
+    RegExp(r'^\s*at [A-Za-z_$.<>]+\(', multiLine: true), // stack frames
+    RegExp(r'\b\d+ issues? found\b'), // flutter analyze
+    RegExp(r'^\s*(warning|info|error) - .+ - (lib|test)[\\/]', multiLine: true),
+    RegExp(r'\[Agentic\]|\[MemoryService\]|\[Brain\]|BRAIN TRACE'), // his own logs
+    RegExp(r'^\s*(Exception|Error|Failed assertion):', multiLine: true),
+  ];
+
+  static bool _looksPasted(String t) {
+    if (_pastedOutput.any((r) => r.hasMatch(t))) return true;
+    // A wall of lines that mostly aren't sentences.
+    final lines = t.split('\n');
+    if (lines.length >= 8) {
+      final proseish = lines.where((l) {
+        final s = l.trim();
+        return s.length > 15 && !s.contains(RegExp(r'^[\s\W]|\.dart:\d|=>|\{|\}'));
+      }).length;
+      if (proseish / lines.length < 0.4) return true;
+    }
+    return false;
+  }
+
   static bool _worthRemembering(String userText) {
     final t = userText.trim().toLowerCase();
     if (t.length < 12) return false; // "ok", "do it", "yes", "go on"
+
+    // He pasted a log, he didn't say a thing. See _looksPasted.
+    if (_looksPasted(userText)) return false;
 
     // Pure acknowledgement, nothing else in it.
     const filler = {

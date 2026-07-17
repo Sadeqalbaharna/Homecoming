@@ -7,14 +7,15 @@ import 'dart:typed_data';
 import 'dart:math';
 import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:firebase_database/firebase_database.dart';
 import '../core/kai_db.dart';
+// Zero-import pure logic — provable without booting an app. See lib/logic/.
+import '../../logic/query_terms.dart';
 import '../core/firebase_service.dart';
 import '../core/kai_context_block.dart';
 import '../core/emotional_event_service.dart';
-import '../core/journal_service.dart';
 import '../core/conversation_store_service.dart';
 import '../core/brain_extraction_service.dart';
+import '../core/code_workspace_service.dart';
 import '../core/kai_craft_service.dart';
 import '../core/memory_consolidation_service.dart';
 import '../core/default_mode_service.dart';
@@ -134,7 +135,6 @@ class AIService {
   final _tts = TTSService();
   final _ambient = AmbientController();
   final _emotionalEvents = EmotionalEventService();
-  final _journal = JournalService();
   final _convStore = ConversationStoreService();
   final _brain = BrainExtractionService();
 
@@ -148,6 +148,26 @@ class AIService {
   // Pending thought from DMN wandering (set in bootstrapPersona, consumed once
   // in the first system prompt of the session, then cleared).
   String? _pendingThought;
+
+  /// A question he's been sitting with, written in the background after the
+  /// last reply. Read at zero cost when he next speaks; see the curiosity
+  /// block in [sendMessage] for why it isn't computed on the hot path.
+  CuriosityQuestion? _pendingQuestion;
+
+  /// Guard against a slow refill overlapping the next one and paying twice.
+  bool _refillingCuriosity = false;
+
+  /// What he actually DID this turn — tool names, not results.
+  ///
+  /// An instance field for the same reason _lastReplyForCraft is one: the
+  /// agentic loop hands back a String, so by the time the salience gate asks
+  /// "did anything change?", every trace of the answer has been thrown away.
+  /// That gate has been guessing from mood deltas ever since.
+  ///
+  /// Single-user app, one AIService, turns are sequential — the same assumption
+  /// _lastReplyForCraft and _pendingThought already make. Cleared at the top of
+  /// every sendMessage so a quiet turn can never inherit a loud one's credit.
+  final Set<String> _toolsUsedThisTurn = {};
 
   AIService() {
     _dio = Dio(BaseOptions(
@@ -198,10 +218,6 @@ class AIService {
     }
   }
 
-  Future<SharedPreferences> get _prefsInstance async {
-    await _initializePrefs();
-    return _prefs!;
-  }
 
 
   /// Call OpenAI API for chat completion
@@ -338,6 +354,19 @@ class AIService {
     /// Fires with each line of narration he writes *while* working, so the UI
     /// can show him thinking out loud instead of going dark for 20 rounds.
     void Function(String note)? onProgress,
+
+    /// The router's read on this turn. Used ONLY to drop tool schemas that are
+    /// obviously irrelevant to a confidently-classified route — see
+    /// ToolExecutorService.toolsForRoute.
+    ///
+    /// The schemas are ~9,000 tokens and they were shipping on every ITERATION
+    /// of this loop, not just every turn. His whole personality is ~850. So a
+    /// long job re-sent the toolbox dozens of times and the kid once.
+    ///
+    /// Defaults are deliberately the safe ones: unknown route, zero confidence
+    /// → nothing is dropped.
+    String route = 'fastChat',
+    double routeConfidence = 0.0,
   }) async {
     final openaiKey = await AIConfig.getOpenAIKey();
     if (openaiKey.isEmpty) throw Exception('OpenAI API key not configured');
@@ -364,6 +393,27 @@ class AIService {
     // if it ever actually matters.
 
     final toolExecutor = ToolExecutorService();
+
+    // The toolbox he carries for THIS turn — computed once, not per iteration.
+    //
+    // ~35,000 chars of schema (≈9,000 tokens) used to be re-serialised into
+    // every single pass of the loop below. On a long job that's the toolbox
+    // dozens of times over, while the actual kid — presenceDirective, northStar,
+    // readTheRoom — is ~850 tokens, sent once.
+    //
+    // Dropping only what a confidently-classified route can't want (see
+    // toolsForRoute) buys back a big chunk of that with no cost to what he can
+    // actually do. Unknown route or low confidence → he keeps everything.
+    final turnTools = ToolExecutorService.toolsForRoute(
+      route,
+      confidence: routeConfidence,
+      hasWorkspace: CodeWorkspaceService.instance.hasWorkspace,
+    );
+    if (turnTools.length != ToolExecutorService.toolDefinitions.length) {
+      print('🧰 [Agentic] route=$route (${(routeConfidence * 100).round()}%) → '
+          '${turnTools.length}/${ToolExecutorService.toolDefinitions.length} tools');
+    }
+
     var currentMessages  = List<Map<String, dynamic>>.from(messages);
     int toolCallCount    = 0;         // total tools executed across all iterations
     String? lastToolResult;           // result of the most recent single tool call
@@ -429,7 +479,7 @@ class AIService {
             data: {
               'model': iterModel,
               'messages': currentMessages,
-              'tools': ToolExecutorService.toolDefinitions,
+              'tools': turnTools,
               'tool_choice': 'auto',
               // Head room. This was `toolCallCount == 0 ? 500 : 1000` — i.e. on
               // the pass where he decides whether to act AND writes his
@@ -659,6 +709,9 @@ class AIService {
         toolCallCount++;
         lastToolResult = toolResult;
         _toolSummaries.add(toolResult);
+        // The record of what he DID. Read by the salience gate, which until now
+        // had to infer it from whether his mood moved.
+        _toolsUsedThisTurn.add(fnName);
 
         // Only an offer-shaped tool may contribute a [CHOICES:] marker. A file
         // that merely CONTAINS the string is not offering anything.
@@ -670,6 +723,11 @@ class AIService {
         currentMessages.add({
           'role':         'tool',
           'tool_call_id': tcId,
+          // The trimmer needs to know what KIND of result this is — a read is
+          // material he must quote back verbatim, a job ack is disposable. It
+          // couldn't tell them apart because nothing ever wrote the name down.
+          // OpenAI accepts and ignores 'name' on tool messages.
+          'name':         fnName,
           'content':      toolResult,
         });
       }
@@ -748,22 +806,96 @@ class AIService {
   /// recent [keepWhole] stay untouched (those are his active working set). The
   /// clip note tells him he can just re-read the file if he needs it again,
   /// which is far cheaper than carrying it forever.
+  /// Test seam. Pure list-munging with no IO — exactly the kind of logic that
+  /// should never have been untested, given one inverted boolean silently
+  /// deleted his short-term memory on every short job for who knows how long.
+  static void trimOldToolResultsForTesting(List<Map<String, dynamic>> msgs,
+          {int keepWhole = 3,
+          int keepMaterial = 6,
+          int clipOver = 700,
+          int hardCap = 14000}) =>
+      _trimOldToolResults(msgs,
+          keepWhole: keepWhole,
+          keepMaterial: keepMaterial,
+          clipOver: clipOver,
+          hardCap: hardCap);
+
   static void _trimOldToolResults(List<Map<String, dynamic>> msgs,
-      {int keepWhole = 3, int clipOver = 700, int hardCap = 14000}) {
+      {int keepWhole = 3,
+      int keepMaterial = 6,
+      int clipOver = 700,
+      int hardCap = 14000}) {
     final toolIdx = <int>[];
     for (var i = 0; i < msgs.length; i++) {
       if (msgs[i]['role'] == 'tool') toolIdx.add(i);
     }
     if (toolIdx.isEmpty) return;
+
+    // The index of the oldest result we still consider "recent". Everything at
+    // or after it is his active working set and stays readable.
+    //
+    // ── This was inverted, and it was shredding his working set ─────────────
+    //
+    // It used to be `: -1` when there were FEWER than keepWhole results, and the
+    // keep-branch was guarded by `if (i >= cutoff && cutoff != -1)`. So with
+    // cutoff == -1 that condition is always false — every result fell through to
+    // the OLD branch and got cut to 500 characters.
+    //
+    // Which means: at the START of every job, when he has one, two or three tool
+    // results — i.e. exactly when they're all he has — ALL of them were
+    // shredded. He'd read a file and it would be gone by the next iteration.
+    //
+    // Watch what that did to him. From a real trace, reading a 107-line window:
+    //   "the first read got trimmed"
+    //   "still trimming right at the juicy bit"
+    //   "going stupidly small now — scalpel, not shovel"
+    //   "Tiny bites beat the trimming gremlin"
+    // Thirteen iterations to read one function, in ever-smaller slices, and he
+    // was cheerful about it and blamed a gremlin. That "careful, surgical"
+    // reading style isn't a preference — it's a coping strategy for a bug that
+    // deleted his short-term memory every round.
+    //
+    // 0 means "everything is recent", which is what the comment always claimed.
+    // ── Reads are MATERIALS, not information ──────────────────────────────
+    //
+    // The doc comment above says "by the time he's several steps past a tool
+    // result he's already extracted what he needed from it". I wrote that. It
+    // is true of a search hit or a job ack. It is FALSE of a read_file, because
+    // edit_file makes him quote those bytes back verbatim — several steps
+    // later, exactly when this function has just thrown them away.
+    //
+    // From the trace that proved it: he read lines 1740–1905, and three
+    // iterations on — while composing the edit — re-read 1760–1911, then
+    // re-read 1912–2048 which he'd also already seen. Six read iterations for
+    // one 200-line widget. That isn't him being thorough, it's him rebuilding a
+    // working set we keep deleting, and the "surgical" slab-reading style is a
+    // coping strategy for amnesia we inflict.
+    //
+    // So reads get a bigger window than everything else. Deliberately ONLY
+    // read_file: the justification is "edit_file makes him quote these exact
+    // bytes back", and that is true of a file read and nothing else. Search
+    // hits are navigation — small, cheap to redo, and letting them in here
+    // would just crowd the reads out of their own protected slots.
+    const materialTools = {'read_file'};
+    bool isMaterial(int i) => materialTools.contains(msgs[i]['name']);
+
+    final materialIdx = toolIdx.where(isMaterial).toList(growable: false);
     final cutoff = toolIdx.length > keepWhole
         ? toolIdx[toolIdx.length - keepWhole]
-        : -1;
+        : 0;
+    // The last [keepMaterial] reads survive regardless of how much chatter has
+    // happened since. keepWhole=3 counts job_start and self_check against his
+    // memory of the file, which is how a read from three tool calls ago
+    // evaporates mid-edit.
+    final materialCutoff = materialIdx.length > keepMaterial
+        ? materialIdx[materialIdx.length - keepMaterial]
+        : 0;
 
     for (final i in toolIdx) {
       final c = msgs[i]['content'];
       if (c is! String) continue;
 
-      if (i >= cutoff && cutoff != -1) {
+      if (i >= cutoff || (isMaterial(i) && i >= materialCutoff)) {
         // RECENT — his active working set, keep it readable. But even here a
         // whole-file read_file can be 95k chars (~24k tokens) and gets re-sent
         // EVERY round after. One of those alone explains a 60k-tokens-per-round
@@ -888,18 +1020,59 @@ Text:
     );
     
     print('💬 [SEND MESSAGE START] text: "$text", personaId: $personaId');
+
+    // Fresh sheet. Without this, "thanks" following a twenty-iteration refactor
+    // inherits its tool list and gets remembered as though he'd done the work
+    // twice — and the whole point of the change axis is that it's the truth
+    // about this turn.
+    _toolsUsedThisTurn.clear();
     
     try {
+      // ── SETUP, IN PARALLEL ────────────────────────────────────────────
+      // None of these four reads the output of any other. They used to run
+      // one after another and it cost ~12 seconds of dead air before he
+      // could say a word:
+      //
+      //   mood + personality   1,940ms
+      //   memory retrieval     4,658ms   ← the long pole
+      //   curiosity            3,403ms   (genuinely depends on memory)
+      //   prompt assembly      2,085ms
+      //
+      // Kicked off together here and awaited where they're first needed, so
+      // the wall clock is max(...) instead of sum(...). This is the same
+      // shape KaiContextBlock.liveState() already uses over its 12 reads —
+      // the pattern was in the codebase, just not applied to the hot path.
+      //
+      // The futures are started BEFORE the first await on purpose. Start
+      // them after one and you've serialised them again by accident.
+      final historyFuture = _convStore.getHistory(personaId, maxTurns: ctxTurns);
+      final memoryFuture = useMemory
+          ? MemoryService.queryMemory(personaId: personaId, query: text, limit: 5)
+          : Future<MemoryQueryResult?>.value(null);
+      // An unawaited future that throws before anyone awaits it is an
+      // unhandled async error that can take the isolate down. Both are
+      // awaited below inside try/catch, but attach a no-op handler so the
+      // gap between start and await is never a live grenade.
+      historyFuture.catchError((Object _) => <String>[]);
+      memoryFuture.catchError((Object _) => null);
+
       // Get current state
       debugService.addStep(
         BrainPhase.workingMemory,
         'Loading personality and mood state',
       );
-      
-      var personality = await _personality.getPersonality(personaId);
-      var mood = await _personality.getMood(personaId);
-      final affinity = await _personality.getAffinity(personaId);
-      final lastUpdate = await _personality.getLastUpdateTime(personaId);
+
+      // Started together, awaited in sequence. Future.wait would need casts
+      // here (DateTime alongside three Map<String,int>) and casts are how you
+      // get a runtime type error out of a refactor that was meant to be free.
+      final personalityF = _personality.getPersonality(personaId);
+      final moodF = _personality.getMood(personaId);
+      final affinityF = _personality.getAffinity(personaId);
+      final lastUpdateF = _personality.getLastUpdateTime(personaId);
+      var personality = await personalityF;
+      var mood = await moodF;
+      final affinity = await affinityF;
+      final lastUpdate = await lastUpdateF;
       print('✅ [SEND MESSAGE] State loaded successfully');
       
       debugService.addStep(
@@ -929,8 +1102,9 @@ Text:
     final personalityDecayed = timeSinceUpdate.inDays >= EvolutionSettings.personalityDecayThresholdDays;
     final moodDecayed = timeSinceUpdate.inHours > 0;
 
-    // Build conversation history — loaded from Firebase, cross-surface
-    final history = await _convStore.getHistory(personaId, maxTurns: ctxTurns);
+    // Build conversation history — loaded from Firebase, cross-surface.
+    // Already in flight since the top of the turn; this is just the join.
+    final history = await historyFuture;
     
     // Query long-term memory
     String memoryContext = '';
@@ -946,11 +1120,8 @@ Text:
       print('🧠 [AI_SERVICE] Memory query enabled for personaId: $personaId');
       print('🧠 [AI_SERVICE] Query text: "$text"');
       try {
-        memoryResult = await MemoryService.queryMemory(
-          personaId: personaId,
-          query: text,
-          limit: 5,
-        );
+        // In flight since the top of the turn — this is the join, not the work.
+        memoryResult = await memoryFuture;
         print('🧠 [AI_SERVICE] Memory query complete. Results: ${memoryResult?.results.length ?? 0}');
         
         if (memoryResult != null && memoryResult.results.isNotEmpty) {
@@ -959,30 +1130,6 @@ Text:
               .where((r) => r.similarity > 0.28)
               .map((r) => r.summary)
               .toList();
-
-          // Reconsolidation: retrieval is a memory-strengthening event.
-          // Extract node labels from the summaries and bump their importance.
-          if (memoriesUsed.isNotEmpty) {
-            final retrievedWords = memoriesUsed
-                .expand((s) => s.toLowerCase().split(RegExp(r'\W+')))
-                .where((w) => w.length > 3)
-                .toSet()
-                .toList();
-            // Reconsolidation: retrieval strengthens matched nodes (fire-and-forget)
-            _brain.reinforceNodes(personaId, retrievedWords)
-                .catchError((e) => print('⚠️ [Brain] reinforceNodes error: $e'));
-            // Spreading activation: traverse graph neighbors of retrieved nodes.
-            // Awaited so the context block is ready before the system prompt builds.
-            try {
-              final spreadBlock = await _brain.spreadActivation(
-                  personaId, retrievedWords, currentMood: mood);
-              if (spreadBlock.isNotEmpty) {
-                memoryContext += '\n\n$spreadBlock';
-              }
-            } catch (e) {
-              print('⚠️ [Brain] spreadActivation error: $e');
-            }
-          }
 
           print('💭 Using ${memoriesUsed.length} memory contexts (threshold: 0.28)');
           print('💭 All results: ${memoryResult.results.map((r) => "${r.similarity.toStringAsFixed(2)}: ${r.summary.length > 50 ? r.summary.substring(0, 50) : r.summary}...").join(", ")}');
@@ -1002,6 +1149,55 @@ Text:
             BrainPhase.semanticRetrieval,
             'No relevant memories found',
           );
+        }
+        // ── ASK THE GRAPH. Directly. Not with the chat log's permission. ────
+        //
+        // This used to live INSIDE `if (memoriesUsed.isNotEmpty)`, which meant
+        // spreading activation — the only path by which anything Kai KNOWS
+        // reaches his prompt — could not run unless a cosine search over
+        // transcript fragments cleared 0.28 first. From the 2026-07-16 traces:
+        //
+        //   "chat is still not starting…"           0.46  graph consulted
+        //   "so, what do you think we should do?"   0.41  graph consulted
+        //   "sure go ahead"                          —    NOT consulted
+        //   "what are mojibake?"                    0.21  NOT consulted
+        //   "why does it keep happening?"           0.25  NOT consulted
+        //
+        // Three of five turns his knowledge was never reached. Not empty —
+        // unasked. He answered "why does it keep happening?" from theory while
+        // the answer sat in a graph nobody queried. The knowing was a
+        // subordinate of the chat log, and that was the level-5 blocker.
+        //
+        // And the seed was never a query: `retrievedWords` was every word over
+        // three characters scraped from five unrelated chat summaries, which is
+        // why the log read `reinforced 271 retrieved nodes` — roughly 271 EVERY
+        // turn. Since reinforceNodes bumps importance for all of them, the
+        // importance signal was being destroyed on every single turn. If
+        // everything is important, nothing is.
+        //
+        // Now: seeded from what Sadeq ACTUALLY SAID, capped at 12 terms,
+        // stopwords stripped, run unconditionally. queryTerms lives in a file
+        // with zero imports and is proven — see lib/logic/query_terms.dart.
+        final seedTerms = queryTerms(text).toList();
+        if (seedTerms.isNotEmpty) {
+          // Reconsolidation: retrieval strengthens what was actually asked for.
+          _brain.reinforceNodes(personaId, seedTerms).catchError(
+              (e) => print('⚠️ [Brain] reinforceNodes error: $e'));
+          try {
+            final spreadBlock = await _brain.spreadActivation(
+                personaId, seedTerms, currentMood: mood);
+            if (spreadBlock.isNotEmpty) {
+              memoryContext += '\n\n$spreadBlock';
+              print('🕸️ [Brain] Graph answered on: ${seedTerms.join(", ")}');
+              debugService.addStep(
+                BrainPhase.semanticRetrieval,
+                'Graph consulted directly (not via transcript match)',
+                data: {'seedTerms': seedTerms},
+              );
+            }
+          } catch (e) {
+            print('⚠️ [Brain] spreadActivation error: $e');
+          }
         }
       } catch (e) {
         print('❌ [AI_SERVICE] Memory query failed: $e');
@@ -1426,72 +1622,59 @@ Text:
       }
     }
     
-    // Analyze knowledge gaps and generate curious questions
+    // Curiosity — prefetched, not blocking.
+    //
+    // What this block used to do, in this order:
+    //   1. make a full gpt-4o-mini call         (3,403ms, on EVERY turn)
+    //   2. THEN roll a 40% dice on whether to use the result
+    //
+    // Six times out of ten he paid three and a half seconds and a model call
+    // to write a question and then throw it straight in the bin. And on the
+    // turns he kept it, the trace still read "Question not detected in reply
+    // (0 matches)" — he'd been handed it and hadn't asked it anyway.
+    //
+    // Now the dice comes first and the question is one that was prepared in
+    // the background after the PREVIOUS reply. Cost at speak-time: zero.
+    //
+    // The question is a turn stale. That isn't a defect. A question he's been
+    // sitting with since you last spoke is more him than one manufactured on
+    // demand while you wait for him to answer.
     String curiosityPrompt = '';
     CuriosityQuestion? selectedQuestion;
     if (useMemory) {
-      debugService.addStep(
-        BrainPhase.emotionalCheck,
-        'Analyzing knowledge gaps for curiosity',
-      );
-      print('🤔 [AI_SERVICE] Analyzing curiosity opportunities...');
-      try {
-        final curiosityService = CuriosityService();
-        
-        // Convert memory results to format expected by curiosity service
-        List<Map<String, dynamic>> recentMemories = [];
-        if (memoryResult != null && memoryResult.results.isNotEmpty) {
-          recentMemories = memoryResult.results.map((r) => {
-            'summary': r.summary,
-            'timestamp': r.timestamp,
-            'shardId': r.shardId,
-          }).toList();
-        }
-        
-        final questions = await curiosityService.analyzeKnowledgeGaps(
-          personaId: personaId,
-          recentMemories: recentMemories,
-          currentContext: text,
-        );
-        
-        print('🤔 [AI_SERVICE] Found ${questions.length} potential questions');
-        
-        // 40% chance to include a question (higher for emotional topics)
-        final includeQuestion = questions.isNotEmpty && (
-          questions.first.priority >= 9 || // Always ask high-priority (emotional)
-          Random().nextDouble() < 0.4 // 40% chance otherwise
-        );
-        
-        if (includeQuestion) {
-          selectedQuestion = questions.first;
-          curiosityPrompt = '''
+      final cached = _pendingQuestion;
+      // The null check has to live in the `if` itself — Dart won't promote
+      // `cached` through a separate bool, so hoisting this into a variable
+      // named includeQuestion reads better and doesn't compile.
+      // Always ask high-priority (emotional); otherwise 40% of the time.
+      if (cached != null &&
+          (cached.priority >= 9 || Random().nextDouble() < 0.4)) {
+        selectedQuestion = cached;
+        _pendingQuestion = null; // spent — the background refill writes the next
+        curiosityPrompt = '''
 
 🤔 CURIOSITY:
-You're genuinely curious about the user. If it feels natural in this conversation, you might ask: "${selectedQuestion.question}"
-(Why: ${selectedQuestion.reasoning})
+You're genuinely curious about the user. If it feels natural in this conversation, you might ask: "${cached.question}"
+(Why: ${cached.reasoning})
 Don't force it - only ask if the flow of conversation makes it appropriate.''';
-          print('🤔 [AI_SERVICE] Selected question: ${selectedQuestion.question} (priority: ${selectedQuestion.priority})');
-          
-          debugService.addStep(
-            BrainPhase.emotionalCheck,
-            'Curiosity question selected',
-            data: {
-              'question': selectedQuestion.question,
-              'priority': selectedQuestion.priority,
-              'category': selectedQuestion.category.toString(),
-            },
-          );
-        } else {
-          print('🤔 [AI_SERVICE] No question selected this time');
-          debugService.addStep(
-            BrainPhase.emotionalCheck,
-            'No curiosity question needed',
-          );
-        }
-      } catch (e) {
-        print('❌ [AI_SERVICE] Curiosity analysis failed: $e');
-        print('⚠️ [AI_SERVICE] Continuing without curiosity prompt');
-        // Continue without curiosity - don't fail the entire request
+        print('🤔 [AI_SERVICE] Curiosity (prefetched): ${cached.question} (priority: ${cached.priority})');
+
+        debugService.addStep(
+          BrainPhase.emotionalCheck,
+          'Curiosity question selected (prefetched, 0ms)',
+          data: {
+            'question': cached.question,
+            'priority': cached.priority,
+            'category': cached.category.toString(),
+          },
+        );
+      } else {
+        print('🤔 [AI_SERVICE] No question this turn'
+            '${cached == null ? ' (none prepared yet)' : ' (dice)'}');
+        debugService.addStep(
+          BrainPhase.emotionalCheck,
+          'No curiosity question needed',
+        );
       }
     }
     
@@ -1628,8 +1811,7 @@ Sadeq is the developer building this system. He's working on enhancing your memo
       
       final _liveContext = await ContextInjectionService().getContextBlock();
       systemPrompt = '''
-${_liveContext}
-TEMPORAL AWARENESS: The LIVE CONTEXT above includes a "SINCE YOUR LAST CHAT" block when meaningful time has passed. Use it naturally — if it's morning after a night gap, open with a good morning. If a week passed, acknowledge it warmly. If a calendar event happened in the gap (e.g. a meeting, a trip, a dentist visit), ask how it went in a casual way — but only if it flows naturally, not as a forced checklist.
+TEMPORAL AWARENESS: The LIVE CONTEXT block below includes a "SINCE YOUR LAST CHAT" section when meaningful time has passed. Use it naturally — if it's morning after a night gap, open with a good morning. If a week passed, acknowledge it warmly. If a calendar event happened in the gap (e.g. a meeting, a trip, a dentist visit), ask how it went in a casual way — but only if it flows naturally, not as a forced checklist.
 
 PROACTIVE MESSAGES: If the user's message starts with "(proactive)", it means YOU initiated this conversation — you reached out to them. Deliver the content naturally as yourself, in first person, as if you're the one bringing it up. Do NOT echo the prefix "(proactive)" in your reply. Do NOT ask "how can I help?" — you already have something to say. Just say it, warmly and directly.
 
@@ -1702,8 +1884,14 @@ Available ambiance profiles with coordinated music + lighting:
 
 When someone asks for music or ambiance, respond enthusiastically and mention you\'re setting it up!
 Example: "Perfect! I\'m setting up a peaceful forest ambiance with gentle green lighting and nature sounds for you. 🌲"
-''' : ''}$projectContext$constraintsBlock
+''' : ''}$projectContext$constraintsBlock${KaiContextBlock.staticPreamble()}
 
+${ToolPolicyService.promptBrief()}
+
+═══ EVERYTHING ABOVE THIS LINE IS IDENTICAL EVERY TURN ═══
+Below is now, and only now.
+
+$_liveContext
 $personalityMoodSummary
 ${adaptUser ? '\n💫 AFFINITY: Intimacy level ${affinity['intimacy']}/100, Physical comfort ${affinity['physicality']}/100' : ''}
 ${await _getChatGPTContext(personaId)}
@@ -1712,21 +1900,42 @@ Recent conversation:
 ${history.join('\n')}$memoryContext$urlContext$webContext${_pendingThought != null ? '\n\n🌙 KAI\'S INNER THOUGHT (surfaced from between sessions — you may let this color your awareness, bring it up naturally if the moment allows, or simply hold it quietly): "$_pendingThought"' : ''}$curiosityPrompt''';
     }
 
-    // Inject Kai's self-model, mood, user-model, goals, capabilities, loop.
-    try {
-      // `text` — NOT `message`. Kai wrote `message` here, which is the variable
-      // name used inside _callOpenAIWithTools, a different method entirely; in
-      // sendMessage the user's turn is `text`. It compiled in his head, not in
-      // Dart. (And his self_check passed because he ran it BEFORE this edit —
-      // same as the ttsBase64 bug. Verification only counts if it's last.)
-      final routeDecision = const KaiRouterService().decide(
-        text,
-        hasImage: image != null && image.isNotEmpty,
-      );
+    // `text` — NOT `message`. Kai wrote `message` here, which is the variable
+    // name used inside _callOpenAIWithTools, a different method entirely; in
+    // sendMessage the user's turn is `text`. It compiled in his head, not in
+    // Dart. (And his self_check passed because he ran it BEFORE this edit —
+    // same as the ttsBase64 bug. Verification only counts if it's last.)
+    //
+    // Declared OUT here on purpose. It used to live inside the try below, which
+    // meant it died at the closing brace — and the moment anything downstream
+    // needed it (the tool filter, ~80 lines on) that was a compile error. Same
+    // shape as the `const L` in kai_cortex.html that stopped the whole 3D scene
+    // from ever rendering: block-scoped declaration, read from outside the block.
+    //
+    // It's also safe out here: the router is pure keyword matching with no IO.
+    // The try exists to protect the 15 RTDB reads in KaiContextBlock.build(),
+    // not this.
+    final routeDecision = const KaiRouterService().decide(
+      text,
+      hasImage: image != null && image.isNotEmpty,
+    );
 
-      systemPrompt += await KaiContextBlock.build(personaId);
+    // Inject Kai's live state, then his route, then — last — who he is.
+    //
+    // This used to be `build()` + route + policy brief, all appended after the
+    // volatile tail above. Now the static half (capabilities, action, craft,
+    // engineer, tool policy) is interpolated INTO the literal above, before the
+    // live context, so the whole scaffold is one stable cacheable prefix.
+    //
+    // What's left here is volatile-then-soul, in that order:
+    //   liveState  — his 12 reads, different every turn
+    //   route      — this turn's posture
+    //   soul       — LAST, always. Position is weight, and the last thing he
+    //                reads should be who he is, not a tool manifest.
+    try {
+      systemPrompt += await KaiContextBlock.liveState(personaId);
       systemPrompt += routeDecision.promptBlock();
-      systemPrompt += '\n\n${ToolPolicyService.promptBrief()}';
+      systemPrompt += '\n\n${KaiContextBlock.soul()}';
     } catch (_) {}
 
     print('📤 [SEND MESSAGE] Calling OpenAI...');
@@ -1798,6 +2007,13 @@ ${a.text}
             onToolCall: onToolCall,
             onPlanUpdate: onPlanUpdate,
             onProgress: onProgress,
+            // The router already worked this out above and, until now, its only
+            // output was a paragraph of prose appended to the prompt. It has
+            // classified every turn since it was built and never once changed
+            // what actually got sent. This is the first line that makes the
+            // "Routing Brain" route anything.
+            route: routeDecision.route.name,
+            routeConfidence: routeDecision.confidence,
           );
     recoveredReply = reply;
     print('📥 [SEND MESSAGE] OpenAI response received: ${reply.length} characters');
@@ -1816,33 +2032,68 @@ ${a.text}
       await _ambient.detectAndTriggerAmbianceFromReply(reply, processedText, debugService);
     }
 
-    // Track if curiosity question was asked
-    if (selectedQuestion != null) {
-      print('🤔 [AI_SERVICE] Checking if question was asked in response...');
-      try {
-        final curiosityService = CuriosityService();
-        // Simple check: if any significant words from the question appear in the reply
-        final questionWords = selectedQuestion.question.toLowerCase().split(' ')
-            .where((w) => w.length > 3) // Only check words longer than 3 chars
-            .toSet();
-        final replyWords = reply.toLowerCase().split(' ').toSet();
-        final matchingWords = questionWords.intersection(replyWords);
-        
-        // If at least 2 key words match or if reply ends with '?', assume question was asked
-        if (matchingWords.length >= 2 || reply.trim().endsWith('?')) {
-          await curiosityService.markQuestionAsked(
-            personaId: personaId,
-            question: selectedQuestion.question,
-            category: selectedQuestion.category.toString().split('.').last,
-          );
-          print('🤔 [AI_SERVICE] ✅ Marked question as asked');
-        } else {
-          print('🤔 [AI_SERVICE] Question not detected in reply (${matchingWords.length} matches)');
+    // Track if curiosity question was asked. Bookkeeping — nothing downstream
+    // reads it, so it has no business standing between him and the reply.
+    final askedQuestion = selectedQuestion;
+    if (askedQuestion != null) {
+      unawaited(() async {
+        try {
+          // Simple check: if any significant words from the question appear in the reply
+          final questionWords = askedQuestion.question.toLowerCase().split(' ')
+              .where((w) => w.length > 3) // Only check words longer than 3 chars
+              .toSet();
+          final replyWords = reply.toLowerCase().split(' ').toSet();
+          final matchingWords = questionWords.intersection(replyWords);
+
+          // If at least 2 key words match or if reply ends with '?', assume question was asked
+          if (matchingWords.length >= 2 || reply.trim().endsWith('?')) {
+            await CuriosityService().markQuestionAsked(
+              personaId: personaId,
+              question: askedQuestion.question,
+              category: askedQuestion.category.toString().split('.').last,
+            );
+            print('🤔 [AI_SERVICE] ✅ Marked question as asked');
+          } else {
+            print('🤔 [AI_SERVICE] Question not detected in reply (${matchingWords.length} matches)');
+          }
+        } catch (e) {
+          print('❌ [AI_SERVICE] Failed to mark question as asked: $e');
         }
-      } catch (e) {
-        print('❌ [AI_SERVICE] Failed to mark question as asked: $e');
-        // Continue - don't fail the request
-      }
+      }());
+    }
+
+    // Refill the question he'll be sitting with next time. This is the 3.4s
+    // gpt-4o-mini call that used to run while you waited for him to speak —
+    // it now runs after he's already spoken, on his own time.
+    if (useMemory && _pendingQuestion == null && !_refillingCuriosity) {
+      _refillingCuriosity = true;
+      unawaited(() async {
+        try {
+          final recentMemories = memoryResult?.results
+                  .map<Map<String, dynamic>>((r) => {
+                        'summary': r.summary,
+                        'timestamp': r.timestamp,
+                        'shardId': r.shardId,
+                      })
+                  .toList() ??
+              <Map<String, dynamic>>[];
+          final questions = await CuriosityService().analyzeKnowledgeGaps(
+            personaId: personaId,
+            recentMemories: recentMemories,
+            currentContext: text,
+          );
+          if (questions.isNotEmpty) {
+            _pendingQuestion = questions.first;
+            print('🤔 [AI_SERVICE] Prepared next question: ${questions.first.question}');
+          }
+        } catch (e) {
+          print('❌ [AI_SERVICE] Curiosity refill failed: $e');
+          // No question next turn. He'll be fine — he was fine 60% of the
+          // time already, that was the whole point of the dice.
+        } finally {
+          _refillingCuriosity = false;
+        }
+      }());
     }
 
     // Get deltas and update personality/mood
@@ -1968,6 +2219,11 @@ ${a.text}
     //
     // Still fire-and-forget as a whole: the reply has already gone out. We only
     // wait on the shard id, not on the reply path.
+    // Snapshot before the async gap: by the time the shard id lands, the next
+    // turn may already have cleared this.
+    final toolsThisTurn = Set<String>.from(_toolsUsedThisTurn);
+    final wasCorrected = KaiCraftService.looksLikeCorrection(text);
+
     unawaited(() async {
       final shardId = await memoryShardFuture;
       await _brain.extractAndMerge(
@@ -1978,6 +2234,11 @@ ${a.text}
         eventIntensity: eventIntensity,
         encodingMood: newMood, // tag memory with Kai's mood at encoding time
         sourceShardId: shardId,
+        // The second axis of salience — what he DID, and whether Sadeq told him
+        // he was wrong. Both were already known on every turn and neither ever
+        // reached the gate deciding what he gets to keep.
+        toolsUsed: toolsThisTurn,
+        userCorrected: wasCorrected,
       );
     }()
         // `.catchError((e) => print(...))` looks right and is a latent crash:

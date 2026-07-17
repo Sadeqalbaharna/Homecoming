@@ -20,6 +20,7 @@ library;
 
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../screens/usage_stats_screen.dart';
 import '../services/ai/usage_tracking_service.dart';
 
 const _gpt = Color(0xFFFF9D2F);
@@ -99,11 +100,29 @@ class _KaiCostMeterState extends State<KaiCostMeter> {
       return Semantics(
         label: semantic,
         container: true,
+        button: true,
         child: Tooltip(
           message: 'Session: $cost · $toks tokens · $_sessionCalls calls\n'
               'All time: ${UsageTrackingService.formatCost(_totalCost)} · '
-              '${UsageTrackingService.formatTokens(_totalTokens)} tokens',
-          child: Container(
+              '${UsageTrackingService.formatTokens(_totalTokens)} tokens\n'
+              '\nClick for the full breakdown — what he spends it ON.',
+          // THE DOOR.
+          //
+          // UsageStatsScreen is 787 lines and had ZERO importers. The instrument
+          // that answers "how expensive is he, and why" has been recording all
+          // night into a screen nobody could open — the fourth doorless room in
+          // this codebase, after settings_screen, kai_cortex_screen and
+          // _smartProjectCard.
+          //
+          // This meter was already in the header, already reading the same
+          // numbers, already the thing your eye lands on when you wonder about
+          // cost. It was one gesture away from being the door the whole time.
+          child: InkWell(
+            borderRadius: BorderRadius.circular(20),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const UsageStatsScreen()),
+            ),
+            child: Container(
             padding: const EdgeInsets.fromLTRB(9, 4, 9, 4),
             decoration: BoxDecoration(
               color: const Color(0xFF0D1826),
@@ -143,8 +162,14 @@ class _KaiCostMeterState extends State<KaiCostMeter> {
                         color: Color(0xFF5B7183),
                         fontSize: 9,
                         fontFamily: 'monospace')),
+                const SizedBox(width: 5),
+                // Affordance. Without it nobody discovers the door exists —
+                // which is how a 787-line screen goes unopened for months.
+                Icon(Icons.unfold_more,
+                    size: 11, color: Colors.white.withOpacity(0.22)),
               ],
             ),
+          ),
           ),
         ),
       );

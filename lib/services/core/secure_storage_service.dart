@@ -11,7 +11,6 @@ import '../../secrets.dart';
 // CI generates secrets.dart from GitHub secrets before building.
 const _kBuiltInOpenAI     = kOpenAIKey;
 const _kBuiltInElevenLabs = kElevenLabsKey;
-const _kBuiltInPicovoice  = kPicovoiceKey;
 
 /// Secure storage for API keys using device encryption
 /// Keys are encrypted using Android Keystore (hardware-backed when available)

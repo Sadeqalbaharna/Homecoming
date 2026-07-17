@@ -34,8 +34,6 @@ class _MindMapScreenState extends State<MindMapScreen> with TickerProviderStateM
   
   // View state
   final TransformationController _transformationController = TransformationController();
-  static const double _canvasSize = 2000.0;
-  static const double _defaultScale = 0.35; // start zoomed out to see the whole graph
   
   // Selection
   KnowledgeNode? _selectedNode;

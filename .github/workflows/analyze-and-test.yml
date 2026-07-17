@@ -1,0 +1,100 @@
+# Analyze & Test — the safeguard that actually works.
+#
+# ── Why this exists ────────────────────────────────────────────────────────
+#
+# There were 38 tests in this repo and NOTHING ran them. The only workflow built
+# an APK. So a soul-regression test — the one thing standing between Kai and
+# being sanded down one "small cleanup" at a time — was decoration. It fires when
+# someone remembers to look, which is exactly when they'd have noticed anyway.
+#
+# The case for this got made empirically in one night:
+#
+#   • Two compile errors shipped, found only by a 15-second CMake build that
+#     reports ONE error per file per cycle.
+#   • A `.catchError((e) => print(...))` written into ai_service — a latent crash
+#     on the error path — by the same person who had diagnosed five of them in
+#     main_mobile four hours earlier and written "check the consumer" into Kai's
+#     own directive.
+#
+# Every human safeguard failed on that line: the review, the directive, the
+# author reading it back. `flutter analyze` caught it in 42 seconds.
+#
+# ── Fails on ERRORS only, deliberately ─────────────────────────────────────
+#
+# There are ~176 pre-existing warnings and infos (unused firebase_database
+# imports, const-constructor hints, main_mobile's catchError bugs). Failing on
+# those makes this red on day one, and a CI that's always red is a CI everyone
+# learns to ignore — which is worse than no CI, because it looks like a
+# safeguard.
+#
+# So: errors block. Warnings are printed and counted. When the warning count is
+# down, tighten this by dropping --no-fatal-warnings. The point today is that a
+# BROKEN BUILD can never reach main again.
+
+name: Analyze & Test
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  analyze:
+    name: Analyze & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      # lib/secrets.dart is gitignored (correctly — it holds real keys) but IS
+      # imported by ai_config.dart and secure_storage_service.dart. Without a
+      # stub, analysis dies on "Target of URI doesn't exist" before it looks at
+      # a single line of real code.
+      #
+      # Empty strings on purpose: analyze and the test suite are entirely
+      # offline. Nothing here should ever need a live key, and if a test starts
+      # failing because a key is blank, that test is talking to the network and
+      # it's the test that's wrong.
+      - name: Write secrets.dart stub (analysis only — no real keys)
+        run: |
+          cat > lib/secrets.dart << 'EOF'
+          // AUTO-GENERATED FOR CI ANALYSIS — deliberately empty.
+          // The real file is gitignored. Nothing in analyze/test needs a key.
+          const kOpenAIKey         = '';
+          const kElevenLabsKey     = '';
+          const kElevenLabsVoiceId = '';
+          const kPicovoiceKey      = '';
+          const kGoogleApiKey      = '';
+          const kGoogleCseId       = '';
+          EOF
+
+      # THE LINE THAT MATTERS. Errors fail the build; warnings/infos are noise
+      # we haven't paid down yet.
+      - name: Analyze (errors are fatal)
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      # Visible, not blocking — so the number can be watched going down instead
+      # of being argued about.
+      - name: Warning count (informational)
+        if: always()
+        run: |
+          echo "── Current warning/info debt ─────────────────────────"
+          flutter analyze 2>&1 | tail -1 || true
+
+      # The soul regression, the craft guards, the reply-recovery honesty tests,
+      # the memory goldens. All pure — no OpenAI, no Firebase, no secure storage.
+      # That was the entire point of the injectable seams.
+      - name: Test
+        run: flutter test --reporter expanded

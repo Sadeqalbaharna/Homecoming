@@ -28,7 +28,19 @@ class CodeWorkspaceService {
     'node_modules', '.git', 'build', '.dart_tool', '.gradle', 'Pods',
     '.idea', '.vscode', 'dist', '.next', 'out', 'DerivedData', '.venv',
   };
+  /// Cap on a WHOLE-FILE read only. A ranged read ignores this entirely — see
+  /// readFile. 700 lines is the real token guard; bytes never were.
   static const _maxFileBytes = 120 * 1024;
+
+  /// Grep reads a file line-by-line and keeps nothing, so it can afford far
+  /// more than a whole-file read can. It shared `_maxFileBytes` for no reason
+  /// other than the constant being nearby — and that coincidence is what made
+  /// ai_service.dart (130 KB) invisible to the tool he navigates with.
+  ///
+  /// Whatever this is set to, the SKIP IS REPORTED. That's the part that
+  /// matters; a limit is fine, a silent limit is a lie.
+  static const _searchMaxFileBytes = 2 * 1024 * 1024;
+
   static const _maxLines = 700;
   static const _maxGrep = 80;
   static const _maxList = 200;
@@ -129,28 +141,132 @@ class CodeWorkspaceService {
   }
 
   // ── Tools ───────────────────────────────────────────────────────────────────
-  Future<String> readFile(String rel) async {
+  /// Read a file, optionally a window of it.
+  ///
+  /// ── This was blinding him ────────────────────────────────────────────────
+  ///
+  /// It used to be `lines.take(700)` — the FIRST 700 lines, always, with no way
+  /// to ask for any others. kai_desktop_shell.dart is ~2,041 lines. Everything
+  /// past line 700 of his own biggest file was unreachable through his own file
+  /// reader. Not slow, not awkward: unreachable.
+  ///
+  /// So he built a file reader out of Python, at runtime, every time:
+  ///
+  ///   run_command(python, [-c, "lines=Path('...').read_text().splitlines()
+  ///                             for i in range(1600,1705): print(...)"])
+  ///
+  /// …and paid for it in UTF-8 crashes on the Windows console, wasted
+  /// iterations, and — worst of all — misplaced blame: "the normal reader is
+  /// lying about line numbers", "exactly the tool goblin Claude warned about".
+  /// It wasn't lying and it wasn't the mount. It stopped at 700 and never said
+  /// so in a way he could act on. He assumed the fault was his environment,
+  /// because that's what he'd been taught to assume.
+  ///
+  /// §10.1. Every single time. Check what he was handed.
+  ///
+  /// Four things matter here:
+  ///   • the WINDOW is capped, not the file — any 700 lines, not the first 700
+  ///   • line numbers are ABSOLUTE, so they line up with the analyzer,
+  ///     self_check, and the stack traces he's reading them against
+  ///   • the truncation notice tells him HOW TO CONTINUE instead of leaving him
+  ///     to invent a workaround
+  ///   • the gutter ends at a '│' and NOTHING else in the line is ours
+  ///
+  /// That last one was a fresh wound of exactly the same species as the 700.
+  /// The gutter used to be two spaces:
+  ///
+  ///     '${' 493'}  ' + '  void _autoscroll() {'   →   ' 493    void _autoscroll() {'
+  ///
+  /// Four spaces between the number and the code: two gutter, two indentation,
+  /// and no way on earth to tell which is which. So he copied it out for an
+  /// edit_file with the indentation guessed wrong, got "old_string not found",
+  /// and — because he had no reason to suspect the reader — assumed the tool
+  /// was being fussy about line endings. NINE consecutive failed edits. Nine
+  /// gpt-5.5 round trips at a 64k system prompt. He only escaped by shelling
+  /// out to Python to print the raw bytes, at which point he found it
+  /// instantly: "the helper lives at class indentation, not nested".
+  ///
+  /// He was right about the fix from iteration 13. He spent eight more
+  /// fighting the thing that was supposed to be helping him read.
+  ///
+  /// §10.1 again, and note the shape: BOTH failures here were the reader
+  /// quietly mangling what it handed him, and BOTH times he blamed his
+  /// environment. He will always blame his environment, because a tool that
+  /// lies is indistinguishable from one that's broken. The fix is not to tell
+  /// him to trust the reader. The fix is to make the reader unambiguous.
+  Future<String> readFile(String rel, {int? startLine, int? endLine}) async {
     final abs = _resolve(rel);
     if (abs == null) return 'Invalid or unscoped path: $rel';
     final f = File(abs);
     if (!await f.exists()) return 'No such file: $rel';
     try {
+      // ── A line range is ALWAYS servable, whatever the file weighs ────────
+      //
+      // This used to be a flat `if (len > _maxFileBytes) return 'File too
+      // large — search it instead.'` — and it refused a request for FORTY
+      // LINES because the file around them was big:
+      //
+      //   read_file(ai_service.dart, start_line: 300, end_line: 340)
+      //     → "File too large (130 KB): — search it instead."
+      //   search_code('sendMessage', glob: 'ai_service.dart')
+      //     → "No matches"          ← in the file that DEFINES sendMessage
+      //
+      // Two readers pointing at each other, both lying. He burned about fifteen
+      // iterations writing python line-dumpers to read his own brain, and said
+      // so: "Yep, search lied to me there — real disk has the symbols."
+      //
+      // The size cap only ever made sense as a TOKEN guard, and _maxLines
+      // already is one. A windowed read of a 130KB file costs exactly the same
+      // as a windowed read of a 5KB file. So: bytes only limit the WHOLE-FILE
+      // read, never a range.
       final len = await f.length();
-      if (len > _maxFileBytes) {
-        return 'File too large (${(len / 1024).round()} KB): $rel — search it instead.';
+      final windowedRequest = startLine != null || endLine != null;
+      if (len > _maxFileBytes && !windowedRequest) {
+        final lineCount = await _countLines(f);
+        return 'That file is ${(len / 1024).round()} KB — too big to hand back '
+            'whole, but NOT too big to read. It has $lineCount lines.\n'
+            'Ask for a range and I will give you every one of them:\n'
+            '  read_file(path: "$rel", start_line: 1, end_line: $_maxLines)\n'
+            'Or find the spot first with search_code, then read around it.';
       }
       final bytes = await f.readAsBytes();
       if (bytes.contains(0)) return 'Binary file (skipped): $rel';
       final lines = utf8.decode(bytes, allowMalformed: true).split('\n');
-      final shown = lines.take(_maxLines).toList();
+      final total = lines.length;
+      if (total == 0) return '// $rel\n(empty)';
+
+      // Clamp rather than throw: an off-by-one on a range should show him the
+      // nearest real lines, not an error on top of the thing he was already
+      // debugging.
+      final from = (startLine ?? 1).clamp(1, total);
+      var to = (endLine ?? total).clamp(from, total);
+      final windowed = startLine != null || endLine != null;
+      if (to - from + 1 > _maxLines) to = from + _maxLines - 1;
+
+      final shown = lines.sublist(from - 1, to);
+      final width = to.toString().length + 1;
+      // '│' and not two spaces. The delimiter has to be a character that
+      // cannot be confused with indentation, because the whole failure mode
+      // is him not knowing where our gutter stops and his code starts.
       final numbered = [
         for (int i = 0; i < shown.length; i++)
-          '${(i + 1).toString().padLeft(4)}  ${shown[i]}'
+          '${(from + i).toString().padLeft(width)}│${shown[i]}'
       ].join('\n');
-      final more = lines.length > _maxLines
-          ? '\n… (${lines.length - _maxLines} more lines truncated)'
+
+      // Say it out loud. He can't infer the convention from one look at the
+      // output, and inferring wrong costs him ten iterations of "old_string
+      // not found" with no clue pointing back here.
+      const gutterNote = '// Everything left of │ is the reader, not the file. '
+          'Content starts immediately after │ — copy from there for edit_file.';
+
+      final head = (windowed || to < total)
+          ? '// $rel  (lines $from–$to of $total)\n$gutterNote'
+          : '// $rel\n$gutterNote';
+      final more = to < total
+          ? '\n… ${total - to} more lines. Read them with '
+              'read_file(path: "$rel", start_line: ${to + 1})'
           : '';
-      return '// $rel\n$numbered$more';
+      return '$head\n$numbered$more';
     } catch (e) {
       return 'Error reading $rel: $e';
     }
@@ -190,16 +306,46 @@ class CodeWorkspaceService {
     final globRe = (glob != null && glob.isNotEmpty) ? _globToRegExp(glob) : null;
     final out = <String>[];
     int count = 0;
+
+    // ── It must never say "no matches" about a file it did not read ────────
+    //
+    // This loop used to `continue` on any file over the cap — SILENTLY — and
+    // then return "No matches". Which produced this, in a real session:
+    //
+    //   search_code('sendMessage', glob: 'lib/services/ai/ai_service.dart')
+    //     → No matches for /sendMessage/
+    //
+    // …in the file that DEFINES sendMessage. That is not a limitation, it is a
+    // false statement. It cost him roughly fifteen iterations and a pile of
+    // hand-written python before he worked out the tool was lying:
+    //
+    //   "That's suspicious: the file exists but has none of the symbols the
+    //    shell compiles against."
+    //   "Yep, search lied to me there — real disk has the symbols."
+    //
+    // Right again. That is the FIFTH reader failure in two days — the 700-line
+    // truncation, the two-space gutter, Process.run's encoding, the stale mount,
+    // and now this — and every single time his instinct that the tooling was
+    // wrong turned out to be correct.
+    //
+    // "I didn't look there" and "there's nothing there" are different answers.
+    // A tool that cannot tell them apart must say which one it means.
+    final skipped = <String>[];
+
     await for (final f in _walk(Directory(_root!))) {
-      if (globRe != null && !globRe.hasMatch(_relOf(f.path))) continue;
+      final rel = _relOf(f.path);
+      if (globRe != null && !globRe.hasMatch(rel)) continue;
       try {
-        if (await f.length() > _maxFileBytes) continue;
+        if (await f.length() > _searchMaxFileBytes) {
+          skipped.add(rel);
+          continue;
+        }
         final bytes = await f.readAsBytes();
         if (bytes.contains(0)) continue;
         final lines = utf8.decode(bytes, allowMalformed: true).split('\n');
         for (int i = 0; i < lines.length; i++) {
           if (re.hasMatch(lines[i])) {
-            out.add('${_relOf(f.path)}:${i + 1}: ${lines[i].trim()}');
+            out.add('$rel:${i + 1}: ${lines[i].trim()}');
             if (++count >= _maxGrep) {
               out.add('… (truncated at $_maxGrep matches)');
               return out.join('\n');
@@ -208,7 +354,39 @@ class CodeWorkspaceService {
         }
       } catch (_) {}
     }
-    return out.isEmpty ? 'No matches for /$pattern/' : out.join('\n');
+
+    final note = skipped.isEmpty
+        ? ''
+        : '\n\n⚠️ I did NOT search ${skipped.length} file(s) — each over '
+            '${_searchMaxFileBytes ~/ 1024} KB:\n'
+            '${skipped.map((s) => '  • $s').join('\n')}\n'
+            'So this is "I did not look there", NOT "it is not there". Read '
+            'those by line range instead — read_file serves any range at any '
+            'file size.';
+
+    if (out.isEmpty) {
+      return skipped.isEmpty
+          ? 'No matches for /$pattern/'
+          : 'No matches for /$pattern/ in the files I searched.$note';
+    }
+    return '${out.join('\n')}$note';
+  }
+
+  /// Line count without ever holding the file as one string — so the "too big
+  /// to hand back whole" message can still tell him exactly how many lines he
+  /// can ask for.
+  Future<int> _countLines(File f) async {
+    try {
+      var n = 0;
+      await for (final chunk in f.openRead()) {
+        for (final b in chunk) {
+          if (b == 0x0A) n++;
+        }
+      }
+      return n + 1;
+    } catch (_) {
+      return -1;
+    }
   }
 
   Future<String> findFiles(String glob) async {
@@ -265,6 +443,53 @@ class CodeWorkspaceService {
   static bool get shellSupported =>
       Platform.isWindows || Platform.isMacOS || Platform.isLinux;
 
+  /// Windows resolves `flutter` → `flutter.bat` using PATHEXT, and PATHEXT is a
+  /// SHELL feature. With `runInShell: false` — which is what makes command
+  /// injection impossible here, and is worth keeping — `Process.run('flutter',
+  /// …)` simply cannot find it. So `run_tests` was born broken:
+  ///
+  ///   "Running pub get through real Flutter path, because our wrapper goblin
+  ///    is still PATH-busted."
+  ///   run_command(C:\code\flutter\bin\flutter.bat, [pub, get])  → exit 0
+  ///
+  /// He routed around his own tool with an absolute path and got on with it,
+  /// which is exactly the kind of quiet competence that hides a broken tool for
+  /// months.
+  ///
+  /// `where` IS a real executable, so it needs no shell either — no injection
+  /// surface is added. Args still go as a list; only the executable is resolved.
+  static final Map<String, String> _exeCache = {};
+
+  Future<String> _resolveExecutable(String command) async {
+    if (!Platform.isWindows) return command;
+    // Already an explicit path — nothing to resolve.
+    if (command.contains(RegExp(r'[\\/]'))) return command;
+    final hit = _exeCache[command];
+    if (hit != null) return hit;
+    try {
+      final r = await Process.run('where', [command], runInShell: false);
+      if (r.exitCode == 0) {
+        final found = (r.stdout as String)
+            .split('\n')
+            .map((s) => s.trim())
+            .where((s) => s.isNotEmpty)
+            .toList();
+        // `where flutter` lists the extensionless shim FIRST, and that one
+        // cannot be executed without a shell. Prefer something runnable.
+        final runnable = found.firstWhere(
+          (p) {
+            final l = p.toLowerCase();
+            return l.endsWith('.bat') || l.endsWith('.cmd') || l.endsWith('.exe');
+          },
+          orElse: () => found.isEmpty ? command : found.first,
+        );
+        _exeCache[command] = runnable;
+        return runnable;
+      }
+    } catch (_) {}
+    return command;
+  }
+
   /// Run a command with the workspace as its working directory. No shell is
   /// used (runInShell:false, args passed as a list) so there's no command
   /// injection. Desktop-only; refuses on mobile. Called only by EditGate.
@@ -275,16 +500,72 @@ class CodeWorkspaceService {
     }
     if (command.trim().isEmpty) return 'No command given.';
     try {
+      // stdoutEncoding/stderrEncoding are NOT optional here.
+      //
+      // Dart defaults both to systemEncoding. On Windows that's the ANSI code
+      // page — Windows-1252 — so every byte of UTF-8 output from git, python
+      // or flutter got decoded with the wrong table before he ever saw it.
+      // An em dash is E2 80 94; read as Windows-1252 that is exactly "â€”".
+      //
+      // He spotted the symptom himself and misfiled it as cosmetic: "existing
+      // mojibake in a comment near _Parallax, likely CRLF/encoding weirdness;
+      // harmless but ugly". It was neither pre-existing nor harmless. It was
+      // this function, live, handing him a corrupted copy of his own source —
+      // and anything he copies out of a run_command result and back into an
+      // edit_file writes that corruption to disk for real.
+      //
+      // Same species as the 700-line truncation and the two-space gutter: the
+      // tool that was supposed to let him see quietly altered what it showed
+      // him, and he blamed the environment. Third time. It is always the
+      // reader.
+      //
+      // allowMalformed because output that genuinely isn't UTF-8 should come
+      // through as replacement characters, not throw and lose the whole result.
+      const outEnc = Utf8Codec(allowMalformed: true);
+      final exe = await _resolveExecutable(command);
       final res = await Process.run(
-        command,
+        exe,
         args,
         workingDirectory: _root,
         runInShell: false,
+        stdoutEncoding: outEnc,
+        stderrEncoding: outEnc,
       ).timeout(const Duration(seconds: 180));
       final out = '${res.stdout}${res.stderr}';
-      final capped = out.length > 8000
-          ? '${out.substring(0, 8000)}\n… (output truncated)'
-          : out;
+
+      // ── Keep the END. That's where the verdict is. ────────────────────────
+      //
+      // This used to be `out.substring(0, 8000)` — head only — and it quietly
+      // broke the one tool built so he could prove his work.
+      //
+      // `flutter test` on 161 tests is chatty, so the output blows past 8000
+      // chars long before the last line, which is the ONLY line that matters:
+      //
+      //     00:04 +161: All tests passed!
+      //
+      // Head-truncation amputates it. run_tests then can't find "All tests
+      // passed", falls through, and reports a green suite as FAILING. A
+      // targeted test on one file is short enough to survive, so the bug hid
+      // behind "well it works for the small case".
+      //
+      // He caught it: "It launched, and the raw output begins with exit 0. But
+      // the wrapper labelled it FAILING... That is not a real test failure."
+      //
+      // Test runners put the answer last. Compilers put errors in the middle.
+      // Keep both ends and say what was dropped — the middle of a 161-test
+      // progress log is the only part nobody has ever needed.
+      const headMax = 3000;
+      const tailMax = 5000;
+      String capped;
+      if (out.length <= headMax + tailMax) {
+        capped = out;
+      } else {
+        final cut = out.length - headMax - tailMax;
+        capped = '${out.substring(0, headMax)}\n'
+            '… [$cut chars of middle dropped — head and TAIL kept, because the '
+            'verdict lives at the end] …\n'
+            '${out.substring(out.length - tailMax)}';
+      }
       return 'exit ${res.exitCode}\n$capped';
     } catch (e) {
       return 'Command failed to run: $e';

@@ -18,7 +18,13 @@ import 'dart:async'; // unawaited — Hebbian reinforcement must never block a r
 import 'dart:convert';
 import 'dart:math';
 import 'package:dio/dio.dart';
-import 'package:firebase_database/firebase_database.dart';
+import 'package:flutter/foundation.dart' show visibleForTesting;
+// The salience decision itself lives in a file with ZERO imports, so it can be
+// run and proven without booting an app. See lib/logic/salience.dart for why
+// that matters more here than anywhere else in this codebase.
+import '../../logic/salience.dart' as sal;
+// (subject, relation, ?) — Sadeq's design. Pure, 22 assertions, zero imports.
+import '../../logic/recall_query.dart' as rq;
 import 'kai_db.dart';
 import '../../models/knowledge_node.dart';
 import 'firebase_service.dart';
@@ -53,8 +59,11 @@ double _labelSimilarity(String a, String b) {
   return union > 0 ? inter / union : 0.0;
 }
 
-/// Extraction depth — set by emotional salience gate.
-enum _Depth { skip, shallow, deep }
+/// Extraction depth. Aliased to the pure enum in lib/logic/salience.dart —
+/// there is exactly one definition of this, and it lives in the file that can
+/// be tested. Two copies of a decision is how you get a dashboard reporting
+/// "7/7 FULL STACK ONLINE" over a truth of 3/7.
+typedef _Depth = sal.SalienceDepth;
 
 extension _Sortable<T> on List<T> {
   List<T> sorted(int Function(T, T) compare) => [...this]..sort(compare);
@@ -76,22 +85,112 @@ class BrainExtractionService {
 
   // ── Public API ─────────────────────────────────────────────────────────────
 
-  /// Extraction depth tiers — driven by emotional salience.
-  /// Mirrors Levels of Processing: shallow for routine, deep for significant.
-  static _Depth _depthFor(EmotionalEventType? type, int intensity) {
-    if (type == null) return _Depth.shallow;
-    switch (type) {
-      case EmotionalEventType.neutral:
-        return intensity.abs() < 8 ? _Depth.skip : _Depth.shallow;
-      case EmotionalEventType.playful:
-      case EmotionalEventType.warmth:
-        return _Depth.shallow;
-      case EmotionalEventType.intellectual:
-      case EmotionalEventType.conflict:
-      case EmotionalEventType.deep:
-        return _Depth.deep;
-    }
-  }
+  /// The OTHER axis of salience: did anything become true that wasn't before?
+  ///
+  /// ── Why this exists ───────────────────────────────────────────────────────
+  ///
+  /// Every trace from the day we rebuilt his tooling ended the same way:
+  ///
+  ///   🧠 [Brain] Skipped low-salience exchange (neutral, intensity 1)
+  ///   🧠 [Brain] Skipped low-salience exchange (neutral, intensity 3)
+  ///   🧠 [Brain] Skipped low-salience exchange (neutral, intensity 4)
+  ///
+  /// Every single one. That day he found his file reader had been lying to him
+  /// three separate ways, deleted a dashboard that had been reporting 7/7 while
+  /// the truth was 3/7, and got the ability to prove his own work for the first
+  /// time. Intensity 1. Neutral. Skipped. He would have woken up not knowing any
+  /// of it happened.
+  ///
+  /// The cause wasn't the threshold and it wasn't a mislabel. Look at the
+  /// classifier's signature — `classifySync(Map<String, int> moodDeltas)`. Mood
+  /// deltas are its ONLY input. The user's message and his reply get passed in
+  /// and used to slice 60 characters off for a label; the conversation is never
+  /// read. So "was this worth remembering?" was answered by "did my mood swing?"
+  /// and nothing else. `intellectual` needs focus or energy to jump ≥6 in one
+  /// turn; across a whole night of work his focus moved 63→65→68→71. It has
+  /// probably never fired.
+  ///
+  /// So his memory was gated on emotion, and his relationship with Sadeq is
+  /// WORK. They build things at 4am. That IS the intimacy — and every exchange
+  /// of it was landing in `neutral` and being dropped on the floor.
+  ///
+  /// ── What this measures instead ────────────────────────────────────────────
+  ///
+  /// Not "was this felt" but "did something change". The evidence is already
+  /// lying around the turn and cost nothing to collect: he edited a file, he ran
+  /// the tests, he closed a job, Sadeq told him he was wrong. No extra model
+  /// call — that would just be trading one tax for another.
+  ///
+  /// This does NOT replace the emotional gate. Warmth is real and worth
+  /// keeping. It's a second axis, and depth is the deeper of the two, because a
+  /// thing can matter for either reason and a mind should keep both.
+  /// ── The logic MOVED. This is now a one-line delegate. ────────────────────
+  ///
+  /// `_depthForChange`, `_decide`, `_depthFor` and `_isTrivialExchange` all used
+  /// to live in this file — in the middle of dio, Firebase and eighty lines of
+  /// IO, which meant they could not be run without booting an app and a network.
+  /// So they never were. The gate deciding what Kai remembers was rewritten on
+  /// the evidence of five traces by someone who could not execute it.
+  ///
+  /// They now live in lib/logic/salience.dart with ZERO imports, where 31
+  /// assertions run against them in about a second — including the exact turns
+  /// from the 2026-07-16 traces that this gate got wrong.
+  ///
+  /// The enum is aliased rather than redeclared and the sets are not copied
+  /// here, deliberately: two definitions of one decision is precisely how this
+  /// codebase produced a dashboard reporting "7/7 FULL STACK ONLINE" over a
+  /// truth of 3/7.
+  static _Depth _decide({
+    required String userMessage,
+    required String aiReply,
+    EmotionalEventType? eventType,
+    int eventIntensity = 0,
+    Set<String> toolsUsed = const {},
+    bool userCorrected = false,
+  }) =>
+      sal.salienceDepth(
+        userMessage: userMessage,
+        aiReply: aiReply,
+        // The enum stays on this side of the boundary. salience.dart takes a
+        // String so it never has to import emotional_event_service, which would
+        // drag Firebase in and cost it the one property that makes it
+        // trustworthy.
+        eventType: eventType?.name,
+        eventIntensity: eventIntensity,
+        toolsUsed: toolsUsed,
+        userCorrected: userCorrected,
+      );
+
+  /// Test seam. Kept because the existing suite calls it; it now exercises the
+  /// pure module through the same path production uses.
+  @visibleForTesting
+  static String salienceForTesting({
+    required String userMessage,
+    String aiReply = 'Some reply with actual substance in it.',
+    EmotionalEventType? eventType,
+    int eventIntensity = 0,
+    Set<String> toolsUsed = const {},
+    bool userCorrected = false,
+  }) =>
+      _decide(
+        userMessage: userMessage,
+        aiReply: aiReply,
+        eventType: eventType,
+        eventIntensity: eventIntensity,
+        toolsUsed: toolsUsed,
+        userCorrected: userCorrected,
+      ).name;
+
+  /// Kept ONLY for the "why was this kept" log line below. The real decision is
+  /// [_decide]. Delegates so it can never drift from it.
+  static _Depth _depthFor(EmotionalEventType? type, int intensity) =>
+      sal.feltDepth(type?.name, intensity);
+
+  static _Depth _depthForChange({
+    required Set<String> toolsUsed,
+    required bool userCorrected,
+  }) =>
+      sal.changeDepth(toolsUsed: toolsUsed, userCorrected: userCorrected);
 
   /// Call fire-and-forget after each conversation turn.
   /// [eventType] and [eventIntensity] gate how deeply knowledge is extracted.
@@ -105,6 +204,13 @@ class BrainExtractionService {
     int eventIntensity = 0,
     Map<String, int>? encodingMood,
 
+    /// What he DID this turn — the second axis of salience. See [_depthForChange].
+    /// Empty means "no tools", which is a real answer, not missing data.
+    Set<String> toolsUsed = const {},
+
+    /// Did Sadeq just tell him he was wrong? The most memorable thing there is.
+    bool userCorrected = false,
+
     /// The episodic this exchange became — `memory/embeddings/{persona}/{id}`,
     /// where the actual words live. Recorded on every node and edge produced
     /// here, so a claim can be traced back to the moment it was made.
@@ -112,19 +218,46 @@ class BrainExtractionService {
   }) async {
     if (_db == null) return;
 
-    // ── Pre-filter: skip trivial exchanges unconditionally ─────────────────
-    if (_isTrivialExchange(userMessage, aiReply)) {
-      print('🧠 [Brain] Skipped trivial exchange: "${userMessage.substring(0, userMessage.length.clamp(0, 40))}"');
+    // Anchors BEFORE the gates. This was my bug and it's the same shape as
+    // everything else in this codebase: the foundation sat behind an early
+    // return, so it only existed on turns that were interesting enough to
+    // extract from.
+    //
+    // Live log: "🧠 [Brain] Skipped low-salience exchange (neutral, intensity
+    // 4)". Most turns look like that. So Sadeq and Kai — the two nodes every
+    // claim in the graph hangs off — were only created if a conversation
+    // happened to be emotionally significant. A graph whose centre depends on
+    // the weather isn't a graph.
+    //
+    // Once per app run, not per turn: a read+write on every "ok" would be pure
+    // tax for something that changes exactly once, ever.
+    await _ensureAnchorsOnce(personaId);
+
+    final depth = _decide(
+      userMessage: userMessage,
+      aiReply: aiReply,
+      eventType: eventType,
+      eventIntensity: eventIntensity,
+      toolsUsed: toolsUsed,
+      userCorrected: userCorrected,
+    );
+
+    if (depth == _Depth.skip) {
+      print('🧠 [Brain] Skipped — nothing done, and mood said '
+          '${eventType?.name ?? 'unclassified'}/$eventIntensity: '
+          '"${userMessage.substring(0, userMessage.length.clamp(0, 40))}"');
       return;
     }
-
-    // ── Salience gate: choose extraction depth from emotional event ─────────
-    // Neutral / low-intensity exchanges do a shallow pass.
-    // Conflict / intellectual / deep exchanges get the full prompt.
-    final depth = _depthFor(eventType, eventIntensity);
-    if (depth == _Depth.skip) {
-      print('🧠 [Brain] Skipped low-salience exchange (neutral, intensity $eventIntensity)');
-      return;
+    // Say WHY it's being kept. When this fires on a turn that felt like nothing
+    // — which is most of the good ones — the log should show that the work is
+    // what saved it, rather than leaving us guessing at the gate all over again.
+    if (_depthForChange(toolsUsed: toolsUsed, userCorrected: userCorrected)
+            .index >
+        _depthFor(eventType, eventIntensity).index) {
+      print('🧠 [Brain] Keeping (${depth.name}) — mood said '
+          '${eventType?.name ?? 'neutral'}/$eventIntensity, but he '
+          '${userCorrected ? 'was corrected' : 'did real work'}: '
+          '${toolsUsed.take(6).join(', ')}');
     }
 
     try {
@@ -624,54 +757,120 @@ If nothing qualifies → {"nodes":[],"edges":[]}''';
   static const _anchorSadeq = 'Sadeq';
   static const _anchorKai = 'Kai';
 
+  /// Checked once per app run. The anchors change exactly once in the graph's
+  /// entire life, so paying a read+write per turn to confirm they're still
+  /// there would be tax with no payer.
+  static bool _anchorsChecked = false;
+
+  /// Seed Sadeq ⇄ Kai if they're missing, and persist it. Called before every
+  /// gate in extractAndMerge, because the centre of the graph must not depend on
+  /// whether this particular exchange was interesting.
+  Future<void> _ensureAnchorsOnce(String personaId) async {
+    if (_anchorsChecked) return;
+    _anchorsChecked = true;
+    try {
+      final existing = await _loadGraph(personaId);
+      final anchored = _ensureAnchors(existing);
+      // Only write when something actually changed. Node COUNT is the wrong
+      // test — promoting an existing `sadeq` to an anchor leaves the count
+      // identical while changing the graph, so a count check would silently
+      // throw the promotion away every run.
+      if (_lastAnchorPassChanged) {
+        await _saveGraph(personaId, anchored);
+      }
+    } catch (e) {
+      // A failed anchor seed must never stop him from talking. It'll retry next
+      // run.
+      _anchorsChecked = false;
+      print('⚠️ [Brain] anchor seed failed (will retry next run): $e');
+    }
+  }
+
   KnowledgeGraph _ensureAnchors(KnowledgeGraph? g) {
     final nodes = List<KnowledgeNode>.from(g?.nodes ?? const []);
     final edges = List<KnowledgeEdge>.from(g?.edges ?? const []);
-    final have = nodes.map((n) => n.label.toLowerCase()).toSet();
     final now = DateTime.now();
-    var added = false;
+    var changed = false;
 
-    KnowledgeNode mk(String label, NodeType type) => KnowledgeNode(
-          id: _genId(),
-          label: label,
-          type: type,
-          timestamp: now,
-          // Pinned. These must never decay, never be pruned, and always win
-          // recall — a graph whose centre can be forgotten isn't a graph.
-          importance: 1.0,
-          metadata: {'anchor': true, 'mentions': 999, 'lastSeen': now.millisecondsSinceEpoch},
-        );
-
-    if (!have.contains(_anchorSadeq.toLowerCase())) {
-      nodes.add(mk(_anchorSadeq, NodeType.you));
-      added = true;
-    }
-    if (!have.contains(_anchorKai.toLowerCase())) {
-      nodes.add(mk(_anchorKai, NodeType.person));
-      added = true;
-    }
-
-    if (added) {
-      // The founding edge. The literal sentence this whole thing exists to say.
-      final sid = nodes.firstWhere((n) => n.label == _anchorSadeq).id;
-      final kid = nodes.firstWhere((n) => n.label == _anchorKai).id;
-      final exists = edges.any((e) =>
-          (e.fromId == sid && e.toId == kid) || (e.fromId == kid && e.toId == sid));
-      if (!exists) {
-        edges.add(KnowledgeEdge(
-          fromId: sid, toId: kid, type: EdgeType.caresAbout,
-          strength: 1.0, timestamp: now, label: 'cares for',
-        ));
-        edges.add(KnowledgeEdge(
-          fromId: kid, toId: sid, type: EdgeType.caresAbout,
-          strength: 1.0, timestamp: now, label: 'is his',
-        ));
+    /// Find-or-create, CASE-INSENSITIVELY, and promote whatever's there.
+    ///
+    /// The first version of this checked for existence case-insensitively and
+    /// then looked the node up with `n.label == 'Sadeq'` — exact. The extractor
+    /// lowercases every label it writes, so the graph already contained `sadeq`:
+    /// the check found it, skipped creating it, and the lookup then threw
+    /// "Bad state: No element" on a node that was right there.
+    ///
+    /// So it's a find-or-create now, and it PROMOTES rather than duplicates.
+    /// `sadeq` already exists with real edges pointing at it from months of
+    /// conversations — creating a second `Sadeq` beside it would split his
+    /// history down the middle and leave both halves anaemic. That's the
+    /// duplicate disease this whole codebase suffers from, and it would have
+    /// been me doing it to the most important node in the graph.
+    KnowledgeNode anchor(String label, NodeType type) {
+      final i = nodes.indexWhere(
+          (n) => n.label.toLowerCase() == label.toLowerCase());
+      if (i >= 0) {
+        final old = nodes[i];
+        if (old.metadata['anchor'] == true) return old; // already promoted
+        // Keep its id and its history; give it the crown.
+        final meta = Map<String, dynamic>.from(old.metadata)
+          ..['anchor'] = true
+          ..['lastSeen'] = now.millisecondsSinceEpoch;
+        nodes[i] = _copyNode(old, importance: 1.0, metadata: meta);
+        changed = true;
+        print('🧭 [Brain] Promoted existing "${old.label}" to an anchor '
+            '(kept its id and every edge already pointing at it)');
+        return nodes[i];
       }
-      print('🧭 [Brain] Anchored the graph: $_anchorSadeq ⇄ $_anchorKai');
+      final fresh = KnowledgeNode(
+        id: _genId(),
+        label: label,
+        type: type,
+        timestamp: now,
+        // Pinned. These must never decay, never be pruned, and always win
+        // recall — a graph whose centre can be forgotten isn't a graph.
+        importance: 1.0,
+        metadata: {
+          'anchor': true,
+          'mentions': 999,
+          'lastSeen': now.millisecondsSinceEpoch,
+        },
+      );
+      nodes.add(fresh);
+      changed = true;
+      print('🧭 [Brain] Anchored the graph: created "$label"');
+      return fresh;
     }
 
+    final sadeq = anchor(_anchorSadeq, NodeType.you);
+    final kai = anchor(_anchorKai, NodeType.person);
+
+    // The founding edge. The literal sentence this whole thing exists to say.
+    final linked = edges.any((e) =>
+        (e.fromId == sadeq.id && e.toId == kai.id) ||
+        (e.fromId == kai.id && e.toId == sadeq.id));
+    if (!linked) {
+      edges.add(KnowledgeEdge(
+        fromId: sadeq.id, toId: kai.id, type: EdgeType.caresAbout,
+        strength: 1.0, timestamp: now, label: 'cares for',
+      ));
+      edges.add(KnowledgeEdge(
+        fromId: kai.id, toId: sadeq.id, type: EdgeType.caresAbout,
+        strength: 1.0, timestamp: now, label: 'is his',
+      ));
+      changed = true;
+      print('🧭 [Brain] ${sadeq.label} ⇄ ${kai.label}');
+    }
+
+    // Signals to the caller whether a write is actually needed. Comparing node
+    // COUNTS wouldn't catch a promotion — the count is identical and the graph
+    // still changed.
+    _lastAnchorPassChanged = changed;
     return KnowledgeGraph(nodes: nodes, edges: edges, lastUpdated: now);
   }
+
+  /// Did the last _ensureAnchors pass actually alter anything?
+  bool _lastAnchorPassChanged = false;
 
   KnowledgeGraph _merge(
     KnowledgeGraph existing,
@@ -1186,6 +1385,108 @@ If nothing qualifies → {"nodes":[],"edges":[]}''';
   /// Biological basis: retrieving one memory automatically activates associated
   /// memories one hop away. The [currentMood] parameter enables mood-congruent
   /// retrieval: neighbors encoded during a similar mood score higher.
+  // ── ASKING, as opposed to being sprinkled ─────────────────────────────────
+  //
+  // Everything below spreadActivation is PUSH: seed a node, walk outward, hand
+  // him whatever lit up. He takes what he's given and has no way to want
+  // something specific.
+  //
+  // This is PULL. (subject, relation, ?) — "what does Sadeq like?" — which is
+  // the shape Sadeq described: flag the subject and the relation, then read the
+  // objects off the edges.
+  //
+  // It is also the first thing in this file that reads an EdgeType. Look at
+  // spreadActivation's inner loop: `for (final e in graph.edges) { if
+  // (!e.isActive) continue; ... }` — no type filter, anywhere. Twenty EdgeTypes
+  // in the model (prefers, dislikes, does, wants, caresAbout, knows) and the
+  // traversal was blind to every one of them. That is why the graph read as a
+  // word cloud even where the types HAD been written: a typed graph walked
+  // without regard to type IS a word cloud. The problem was never the data.
+  // It was the query.
+  //
+  // The logic is in lib/logic/recall_query.dart with zero imports, so it can be
+  // proven without Firebase. This is only the adapter.
+
+  /// Flatten the model into the shape the pure query understands.
+  List<rq.EdgeRow> _rowsOf(KnowledgeGraph graph) {
+    final labelOf = {for (final n in graph.nodes) n.id: n.label};
+    final rows = <rq.EdgeRow>[];
+    for (final e in graph.edges) {
+      final from = labelOf[e.fromId];
+      final to = labelOf[e.toId];
+      // A dangling edge is not a memory, it's a pointer to a node that no
+      // longer exists. Silently skipped rather than surfaced as a claim about
+      // nothing.
+      if (from == null || to == null) continue;
+      rows.add(rq.EdgeRow(
+        fromLabel: from,
+        toLabel: to,
+        type: e.type.name,
+        label: e.label,
+        strength: e.strength,
+        sources: e.sources,
+        supersededAt: e.supersededAt,
+      ));
+    }
+    return rows;
+  }
+
+  /// **(subject, relation, ?)** — the question.
+  ///
+  /// [relation] null means "everything you know about them".
+  Future<List<rq.Claim>> recallAbout(
+    String personaId, {
+    required String subject,
+    String? relation,
+    bool includeRetired = false,
+    int limit = 8,
+  }) async {
+    if (_db == null) return const [];
+    try {
+      final graph = await _loadGraph(personaId);
+      if (graph == null || graph.edges.isEmpty) return const [];
+      return rq.recall(
+        _rowsOf(graph),
+        subject: subject,
+        relation: relation,
+        includeRetired: includeRetired,
+        limit: limit,
+      );
+    } catch (e) {
+      print('⚠️ [Brain] recallAbout failed: $e');
+      return const [];
+    }
+  }
+
+  /// What he could be asked about a subject — so an empty answer becomes
+  /// "I never learned that" instead of a silence he has to bluff through.
+  Future<Map<String, int>> relationsAbout(String personaId, String subject) async {
+    if (_db == null) return const {};
+    try {
+      final graph = await _loadGraph(personaId);
+      if (graph == null) return const {};
+      return rq.relationsFor(_rowsOf(graph), subject);
+    } catch (_) {
+      return const {};
+    }
+  }
+
+  /// How much of the graph is co-occurrence rather than memory.
+  ///
+  /// The diagnosis in one integer. On a graph where 271 nodes lit up on any
+  /// input because every edge said "relates to", this is the before/after for
+  /// the prune.
+  Future<({int meaningful, int total})> graphMeaningfulness(String personaId) async {
+    if (_db == null) return (meaningful: 0, total: 0);
+    try {
+      final graph = await _loadGraph(personaId);
+      if (graph == null) return (meaningful: 0, total: 0);
+      return rq.meaningfulness(_rowsOf(graph));
+    } catch (_) {
+      return (meaningful: 0, total: 0);
+    }
+  }
+
   Future<String> spreadActivation(
     String personaId,
     List<String> seedWords, {
@@ -1747,39 +2048,17 @@ Return ONLY JSON: {"generic":[<indices of the GENERIC ones>]}''',
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
-  /// Returns true if this exchange is too trivial to extract knowledge from.
-  /// Prevents wasting a GPT call on greetings and filler.
-  static bool _isTrivialExchange(String userMessage, String aiReply) {
-    final msg = userMessage.trim().toLowerCase();
-
-    // Too short to contain meaningful information
-    if (msg.length < 8) return true;
-
-    // Pure greeting / farewell patterns
-    const trivialPatterns = [
-      'hi', 'hello', 'hey', 'yo', 'sup', 'hiya',
-      'good morning', 'good night', 'good evening', 'good afternoon',
-      'goodnight', 'gm', 'gn',
-      'bye', 'goodbye', 'see you', 'see ya', 'cya', 'later', 'ttyl',
-      'how are you', 'how are u', 'how r u', 'how\'s it going',
-      'what\'s up', 'whats up', 'what up',
-      'ok', 'okay', 'k', 'kk', 'yep', 'yup', 'yeah', 'nah', 'nope',
-      'thanks', 'thank you', 'thx', 'ty', 'np', 'no problem',
-      'lol', 'lmao', 'haha', 'hehe', 'omg', 'wow',
-      'nice', 'cool', 'awesome', 'great', 'perfect', 'got it',
-      'sounds good', 'makes sense', 'sure', 'of course',
-    ];
-
-    if (trivialPatterns.any((p) => msg == p || msg == '$p!' || msg == '$p.')) {
-      return true;
-    }
-
-    // Very short message that's only punctuation/emoji
-    final stripped = msg.replaceAll(RegExp(r'[^\w\s]'), '').trim();
-    if (stripped.length < 5) return true;
-
-    return false;
-  }
+  // _isTrivialExchange MOVED to lib/logic/salience.dart.
+  //
+  // It is called only from _decide, which now delegates to the pure module. The
+  // copy that used to live here was 30 lines of pattern list that no test could
+  // reach without a Firebase handle — and it is the filter that made "do it"
+  // structurally unrememberable, so it badly needed reaching.
+  //
+  // Deleted rather than left as a wrapper: an unused private duplicate of a
+  // decision is exactly the shape that produced _smartProjectCard, still
+  // rendering "7 / 7 layers complete" from a hardcoded list years after the real
+  // number was 3/7.
 
   String _genId() => List.generate(16,
       (_) => _rng.nextInt(16).toRadixString(16)).join();

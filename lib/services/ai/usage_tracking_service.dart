@@ -8,6 +8,33 @@ import 'package:firebase_database/firebase_database.dart';
 import '../core/kai_db.dart';
 import '../core/firebase_service.dart';
 
+/// What one kind of thinking cost him.
+class OperationUsage {
+  final String operation;
+  final int calls;
+  final int tokens;
+  final int inputTokens;
+  final double cost;
+
+  const OperationUsage({
+    required this.operation,
+    required this.calls,
+    required this.tokens,
+    required this.inputTokens,
+    required this.cost,
+  });
+
+  /// Average tokens per call. The number that tells you whether an operation is
+  /// expensive because it happens a lot, or because each one is enormous — two
+  /// completely different problems with two completely different fixes.
+  int get avgTokens => calls == 0 ? 0 : (tokens / calls).round();
+
+  /// Share of tokens that were INPUT. High means he's carrying context, not
+  /// thinking — which is a prompt problem, not a model problem. His system
+  /// prompt is ~68,000 chars, so this is the number to watch.
+  double get inputRatio => tokens == 0 ? 0 : inputTokens / tokens;
+}
+
 class UsageTrackingService {
   // ── Key prefixes ──────────────────────────────────────────────────────────
   static const _pfx = 'usage_';
@@ -74,6 +101,9 @@ class UsageTrackingService {
     await _increment(prefs, '${_pfx}total_tokens', inputTokens + outputTokens);
     await _incrementDouble(prefs, '${_pfx}total_cost', totalCost);
 
+    // WHERE the money actually goes. See _trackOperation.
+    await _trackOperation(prefs, operation, inputTokens, outputTokens, totalCost);
+
     // Monthly accumulation → Firebase (cross-device)
     final monthKey = _currentMonthKey();
     unawaited(_fbIncrement(monthKey, 'cost',        totalCost));
@@ -124,6 +154,61 @@ class UsageTrackingService {
     await _increment(prefs, '${_pfxSession}anthropic_calls', 1);
     await _increment(prefs, '${_pfxSession}tokens', inputTokens + outputTokens);
     await _incrementDouble(prefs, '${_pfxSession}cost', totalCost);
+
+    await _trackOperation(prefs, operation, inputTokens, outputTokens, totalCost);
+  }
+
+  // ── Where the money actually goes ─────────────────────────────────────────
+  //
+  // `operation` has been a parameter on trackOpenAI and trackAnthropic since
+  // they were written. Every call site passes it faithfully — 'chat',
+  // 'brain_extraction', 'contemplate', 'code', 'consolidation', 'reflection',
+  // 'journal', 'craft_learn', 'second_opinion', 'graph_prune_judge' — and it was
+  // read into a local variable and then dropped on the floor. Every one of them.
+  //
+  // So the app could tell you what Kai cost, and never what he spent it ON.
+  // "Is he expensive?" was answerable. "Is his MEMORY expensive?" was not — and
+  // that's the only version of the question you can act on.
+  //
+  // Sadeq asked how much more efficient Kai has become tonight, and the honest
+  // answer was "I can't tell you, and neither can the app" — because this line
+  // didn't exist. That's not a philosophical limit, it's a missing write.
+  static const _pfxOp = 'usage_op_';
+
+  static Future<void> _trackOperation(SharedPreferences prefs, String operation,
+      int inputTokens, int outputTokens, double cost) async {
+    final op = operation.trim().isEmpty ? 'unknown' : operation.trim();
+    await _increment(prefs, '$_pfxOp${op}_calls', 1);
+    await _increment(prefs, '$_pfxOp${op}_tokens', inputTokens + outputTokens);
+    await _increment(prefs, '$_pfxOp${op}_input', inputTokens);
+    await _incrementDouble(prefs, '$_pfxOp${op}_cost', cost);
+    // Keep the roster so the readout can enumerate operations without guessing
+    // their names — new ones appear on their own the first time they fire.
+    final known = prefs.getStringList('${_pfxOp}names') ?? <String>[];
+    if (!known.contains(op)) {
+      await prefs.setStringList('${_pfxOp}names', [...known, op]);
+    }
+  }
+
+  /// Cost/tokens/calls per operation, biggest spender first.
+  ///
+  /// THE question this service exists to answer and couldn't: not "what does he
+  /// cost" but "what is he spending it on".
+  static Future<List<OperationUsage>> byOperation() async {
+    final prefs = await SharedPreferences.getInstance();
+    final names = prefs.getStringList('${_pfxOp}names') ?? const <String>[];
+    final out = <OperationUsage>[];
+    for (final op in names) {
+      out.add(OperationUsage(
+        operation: op,
+        calls: prefs.getInt('$_pfxOp${op}_calls') ?? 0,
+        tokens: prefs.getInt('$_pfxOp${op}_tokens') ?? 0,
+        inputTokens: prefs.getInt('$_pfxOp${op}_input') ?? 0,
+        cost: prefs.getDouble('$_pfxOp${op}_cost') ?? 0,
+      ));
+    }
+    out.sort((a, b) => b.cost.compareTo(a.cost));
+    return out;
   }
 
   // ── Monthly stats — Firebase (cross-device) ───────────────────────────────
@@ -272,7 +357,32 @@ class UsageTrackingService {
       'firebase_writes': prefs.getInt('${_pfx}firebase_writes') ?? 0,
       'total_tokens': prefs.getInt('${_pfx}total_tokens') ?? 0,
       'total_cost': prefs.getDouble('${_pfx}total_cost') ?? 0.0,
+      // The key UsageStatsScreen._buildOperationUsageCard has been reading since
+      // the day it was written, and which nothing has ever written. Its card is
+      // literally titled "Usage by Operation" and it has never once had data —
+      // it read `_usageData!['operations']`, got null, and would have thrown if
+      // anyone had been able to open the screen. Nobody could. Zero importers.
+      //
+      // So: the UI existed, the parameter existed on every tracking call, and
+      // the one line joining them didn't. This is that line.
+      'operations': _operationsMap(prefs),
     };
+  }
+
+  /// {operation: {count, tokens, input, cost}} — the shape the screen's existing
+  /// card already expects. Built from the same per-op keys as [byOperation].
+  static Map<String, dynamic> _operationsMap(SharedPreferences prefs) {
+    final names = prefs.getStringList('${_pfxOp}names') ?? const <String>[];
+    final out = <String, dynamic>{};
+    for (final op in names) {
+      out[op] = {
+        'count': prefs.getInt('$_pfxOp${op}_calls') ?? 0,
+        'tokens': prefs.getInt('$_pfxOp${op}_tokens') ?? 0,
+        'input': prefs.getInt('$_pfxOp${op}_input') ?? 0,
+        'cost': prefs.getDouble('$_pfxOp${op}_cost') ?? 0.0,
+      };
+    }
+    return out;
   }
 
   static Future<Map<String, dynamic>> getSessionStats() async {

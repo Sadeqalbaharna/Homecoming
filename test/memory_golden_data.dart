@@ -1,5 +1,17 @@
-// Golden Test Set for Memory System
-// Run this before and after any memory changes to prevent regressions
+// Golden Test DATA for the memory system — not a test file.
+//
+// Renamed from memory_golden_test.dart. That name matched `*_test.dart`, so
+// `flutter test` picked it up as a suite and choked: it has no main(). It's a
+// data set and two model classes, consumed by memory_golden_test_runner.dart
+// and memory_golden_runner_offline_test.dart.
+//
+// That single misnamed file is why `flutter test` couldn't be run across the
+// whole suite, which is part of why there was never CI, which is why 38 tests
+// existed and nothing executed them.
+//
+// Note `minSimilarity: 0.7` below. That's a real recorded expectation about how
+// text-embedding-3-small behaves on related text, and it should be the input to
+// any similarity threshold anyone picks — measured, not guessed.
 
 
 /// A single test case for memory recall quality

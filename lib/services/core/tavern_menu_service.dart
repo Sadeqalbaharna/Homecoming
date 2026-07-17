@@ -12,6 +12,8 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_database/firebase_database.dart';
 
+import 'kai_db.dart' show kaiDbUsesRest;
+
 class TavernMenuService {
   static final TavernMenuService _i = TavernMenuService._();
   factory TavernMenuService() => _i;
@@ -39,6 +41,12 @@ class TavernMenuService {
   /// Returns a formatted menu + allergen block ready to inject into Kai's
   /// system prompt. Cached for 30 min; falls back to last cache on error.
   Future<String> getMenuBlock() async {
+    // See TavernStatusService.getStatusBlock — the tavern is on a second
+    // Firebase app reached via the firebase_database plugin, which does not
+    // exist on Windows. This also spared a pointless Firebase.initializeApp
+    // for an app whose every call was going to throw. (§4.5)
+    if (kaiDbUsesRest) return '';
+
     if (_cached != null && _cachedAt != null &&
         DateTime.now().difference(_cachedAt!) < _ttl) {
       return _cached!;

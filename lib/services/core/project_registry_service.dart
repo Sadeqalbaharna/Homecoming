@@ -14,7 +14,6 @@
 // registry directly. Tighten to the god uid when a permanent login lands.
 library;
 
-import 'package:firebase_database/firebase_database.dart';
 import 'kai_db.dart';
 
 /// One project ("world") in Kai's registry.

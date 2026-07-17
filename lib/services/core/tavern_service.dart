@@ -12,7 +12,6 @@
 library;
 
 import 'dart:async';
-import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_database/firebase_database.dart';
@@ -298,7 +297,9 @@ Rules:
     if (guest.isNewGuest)            buf.writeln('(First-time guest)');
     if (guest.memoryFacts.isNotEmpty) {
       buf.writeln('What Kai remembers:');
-      for (final f in guest.memoryFacts) buf.writeln('  • $f');
+      for (final f in guest.memoryFacts) {
+        buf.writeln('  • $f');
+      }
     }
     return buf.toString().trim();
   }

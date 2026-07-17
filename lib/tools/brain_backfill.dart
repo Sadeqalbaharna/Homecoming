@@ -9,7 +9,6 @@
 
 library;
 
-import 'package:firebase_database/firebase_database.dart';
 import '../services/core/kai_db.dart';
 import '../services/core/brain_extraction_service.dart';
 import '../services/core/firebase_service.dart';
@@ -141,7 +140,7 @@ class BrainBackfill {
       if (clean.startsWith('User: ')) {
         pendingUser = clean.substring(6);
       } else if (clean.startsWith('Kai: ') && pendingUser != null) {
-        pairs.add((pendingUser!, clean.substring(5)));
+        pairs.add((pendingUser, clean.substring(5)));
         pendingUser = null;
       }
     }

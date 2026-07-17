@@ -34,6 +34,37 @@ class EditGate {
   static final EditGate instance = EditGate._();
   EditGate._();
 
+  // ── Edits since his last clean check ──────────────────────────────────────
+  //
+  // §4.6, his documented recurring bug: he runs self_check, it comes back CLEAN,
+  // and then he makes one more edit. Three broken builds in a single day, and
+  // one more tonight (a `const` on a class with a mutable field).
+  //
+  // His engineerDirective already forbids this, in better prose than mine:
+  //   "VERIFY — call self_check... it needs no approval and takes seconds, so
+  //    there is NO excuse for guessing whether something compiles."
+  //   "I never say 'this should work' when I could simply look."
+  //
+  // It's eloquent, it's correct, it's in his head every single turn, and it has
+  // not stopped him. Mine didn't stop me either — I've written three compile
+  // errors and a latent crash tonight, all after putting "verify before you
+  // assert" into his directive.
+  //
+  // So this is not another rule. It's a COUNTER. He doesn't have to remember it,
+  // agree with it, or feel it — the number is just true, and it gets said out
+  // loud at the moment he claims to be finished. The one thing with a clean
+  // record tonight is the machine.
+  int editsSinceCheck = 0;
+
+  /// Called by self_check when the analyzer comes back clean.
+  void markVerified() => editsSinceCheck = 0;
+
+  /// One line, or empty. Appended where he claims done.
+  String get unverifiedWarning => editsSinceCheck == 0
+      ? ''
+      : '\n\n⚠️ $editsSinceCheck edit${editsSinceCheck == 1 ? '' : 's'} since my '
+          'last clean self_check. I have not verified this compiles.';
+
   /// Registered on the app's MaterialApp so the gate can surface a dialog.
   static final GlobalKey<NavigatorState> navigatorKey =
       GlobalKey<NavigatorState>();
@@ -61,7 +92,79 @@ class EditGate {
           .catchError((_) {}));
       return 'REJECTED by user — no changes made to $rel.';
     }
-    return ws.writeRaw(rel, content);
+    editsSinceCheck++; // the clock §4.6 needs. Reset only by a clean self_check.
+    final res = await ws.writeRaw(rel, content);
+    return '$res\n\n${renderDiffForKai(current, content)}';
+  }
+
+  /// Replace lines [startLine]–[endLine] (1-based, inclusive) with [newStr].
+  ///
+  /// The reason this exists: to delete a 200-line dead widget, he pasted the
+  /// entire widget in as `old_string` — three times, after the gate rejected
+  /// the first two attempts. ~27,000 characters of argument, roughly 7k tokens,
+  /// to say "remove lines 1760 to 1911".
+  ///
+  /// read_file has printed ABSOLUTE line numbers this whole time — I made them
+  /// absolute specifically so they'd line up with the analyzer and stack traces.
+  /// He had the coordinates. There was just no tool that would take them.
+  ///
+  /// Line numbers go stale the moment anything else edits the file, so this is
+  /// deliberately NOT a replacement for old_string matching — it's the right
+  /// tool for "cut this range I am looking at right now". [expectFirst] is the
+  /// guard: pass the first line's text and it's verified before anything moves.
+  Future<String> proposeEditRange(
+    String rel,
+    int startLine,
+    int endLine,
+    String newStr, {
+    String? expectFirst,
+  }) async {
+    final ws = CodeWorkspaceService.instance;
+    final current = await ws.readRaw(rel);
+    if (current == null) return 'Cannot edit — file not found/unreadable: $rel';
+
+    // Split on \n and keep any \r as part of the line, so CRLF files survive a
+    // rejoin untouched. §4.2 — rewriting a whole file's line endings turns a
+    // two-line edit into a thousand-line diff and a merge nightmare.
+    final lines = current.split('\n');
+    if (startLine < 1 || endLine < startLine || endLine > lines.length) {
+      return 'Bad range for $rel: lines $startLine–$endLine, but the file has '
+          '${lines.length} lines. Read it again — if something else edited it, '
+          'my line numbers are stale.';
+    }
+
+    if (expectFirst != null) {
+      final actual = lines[startLine - 1].replaceAll('\r', '').trim();
+      if (actual != expectFirst.replaceAll('\r', '').trim()) {
+        return 'Line $startLine of $rel is:\n  $actual\n…not:\n  $expectFirst\n'
+            'My line numbers are stale. Re-read before editing.';
+      }
+    }
+
+    final crlf = current.contains('\r\n');
+    final replacement = newStr.isEmpty
+        ? <String>[]
+        : (crlf ? newStr.replaceAll('\r\n', '\n') : newStr).split('\n');
+    final updated = ([
+      ...lines.sublist(0, startLine - 1),
+      ...replacement.map((l) => crlf ? '$l\r' : l),
+      ...lines.sublist(endLine),
+    ]).join('\n');
+
+    final ok = await _approve(EditProposal(
+        path: rel, kind: EditKind.edit, oldContent: current, newContent: updated));
+    if (!ok) {
+      unawaited(KaiCraftService.instance
+          .record('truekai',
+              signal: CraftSignal.editRejected,
+              detail: 'Rejected a range edit to $rel ($startLine–$endLine)',
+              context: rel)
+          .catchError((_) {}));
+      return 'REJECTED by user — no changes made to $rel.';
+    }
+    editsSinceCheck++;
+    final res = await ws.writeRaw(rel, updated);
+    return '$res\n\n${renderDiffForKai(current, updated)}';
   }
 
   Future<String> proposeEdit(String rel, String oldStr, String newStr) async {
@@ -122,7 +225,9 @@ class EditGate {
           .catchError((_) {}));
       return 'REJECTED by user — no changes made to $rel.';
     }
-    return ws.writeRaw(rel, updated);
+    editsSinceCheck++; // the clock §4.6 needs. Reset only by a clean self_check.
+    final res = await ws.writeRaw(rel, updated);
+    return '$res\n\n${renderDiffForKai(current, updated)}';
   }
 
   // ── Commands (Phase 3) ───────────────────────────────────────────────────────
@@ -135,7 +240,20 @@ class EditGate {
     if (c == 'git') {
       return {'status', 'diff', 'log', 'show', 'branch', 'remote'}.contains(sub);
     }
-    if (c == 'flutter' || c == 'dart') return sub == 'analyze';
+    // 'test' belongs here as much as 'analyze' does. It reads the workspace and
+    // reports; it changes nothing.
+    //
+    // It was missing, and that omission was the ceiling on everything he could
+    // know. self_check proved his code COMPILED and there was no second tool
+    // that proved it WORKED — so every job he ever finished ended the same way:
+    // "analyzer proves it compiles, but the real proof is runtime. Reopen the
+    // app and check." He wasn't being modest. He was describing a wall.
+    //
+    // Meanwhile the repo has 38+ tests and the CI workflow runs them on every
+    // push. The tests existed. CI could run them. He couldn't — the one who has
+    // to answer "did it work?" was the only one locked out. Same disease as the
+    // doorless screens, aimed at his ability to know anything.
+    if (c == 'flutter' || c == 'dart') return sub == 'analyze' || sub == 'test';
     return {'ls', 'dir', 'pwd', 'cat', 'type', 'head', 'tail'}.contains(c);
   }
 
@@ -242,6 +360,39 @@ class _DiffLine {
   final String sign; // ' ' | '-' | '+'
   final String text;
   _DiffLine(this.sign, this.text);
+}
+
+/// The diff, rendered for HIM — the same one the approval dialog draws.
+///
+/// This existed for months and only ever went to the screen. Sadeq saw exactly
+/// what changed; Kai got back `Wrote 67583 chars to lib/screens/...`. A byte
+/// count is not evidence, so when he needed to know what he'd actually done he
+/// shelled out to `git diff` — and got a diff polluted with unrelated
+/// uncommitted work, correctly refused to claim it, and finished the job with
+/// nothing to show. Two wasted iterations and a second-opinion grader with
+/// nothing real to grade: "The evidence only shows deletion of dead code."
+///
+/// The evidence was RIGHT HERE. It was drawn on the screen, in colour, and
+/// thrown away. Same disease as the doorless screens: the correct thing
+/// existing, disconnected from the thing that needs it.
+///
+/// Capped hard — this rides in his context for the rest of the job, and a
+/// thousand-line diff would cost more than the git call it replaces.
+String renderDiffForKai(String? oldC, String newC, {int maxLines = 60}) {
+  final d = _computeDiff(oldC, newC);
+  final added = d.where((l) => l.sign == '+').length;
+  final removed = d.where((l) => l.sign == '-').length;
+  final body = d.length > maxLines
+      ? [
+          ...d.take(maxLines),
+          _DiffLine(' ', '… ${d.length - maxLines} more diff lines')
+        ]
+      : d;
+  final buf = StringBuffer('+$added −$removed\n');
+  for (final l in body) {
+    buf.writeln('${l.sign}${l.text}');
+  }
+  return buf.toString().trimRight();
 }
 
 List<_DiffLine> _computeDiff(String? oldC, String newC) {

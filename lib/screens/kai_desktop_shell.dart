@@ -1,19 +1,19 @@
-// KaiDesktopShell â€” the desktop "engineer + companion" window.
+// KaiDesktopShell — the desktop "engineer + companion" window.
 //
 // Composes the pieces we've been building into one screen:
-//  â€¢ left  â€” PROJECTS panel (multi-workspace + live engineer-loop status)
-//  â€¢ centreâ€” chat wired to the REAL AIService (same personality, memory, tools,
-//            and both brains as the mobile app â€” it's the same Kai)
-//  â€¢ right â€” the 3D cortex (kai_cortex.html) reacting to real brain activity,
+//  • left  — PROJECTS panel (multi-workspace + live engineer-loop status)
+//  • centre— chat wired to the REAL AIService (same personality, memory, tools,
+//            and both brains as the mobile app — it's the same Kai)
+//  • right — the 3D cortex (kai_cortex.html) reacting to real brain activity,
 //            with an engineer chip (active workspace + trust toggle)
 //
 // It reuses AIService.sendMessage, so nothing about Kai's behaviour is
-// re-implemented â€” this is a new front-end onto the existing brain.
+// re-implemented — this is a new front-end onto the existing brain.
 
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data'; // Uint8List â€” the bytes of what he's looking at
+import 'dart:typed_data'; // Uint8List — the bytes of what he's looking at
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
@@ -39,6 +39,7 @@ import '../widgets/kai_boot_overlay.dart';
 import '../widgets/kai_rich_text.dart';
 import '../api_key_setup_screen.dart';
 import 'package:pasteboard/pasteboard.dart';
+import 'package:image/image.dart' as image_lib;
 import '../services/core/inner_life_service.dart';
 import '../services/core/kai_reflection_service.dart';
 import '../services/core/kai_embodiment_service.dart';
@@ -46,27 +47,38 @@ import '../services/core/kai_self_service.dart';
 import '../services/core/kai_self_journal_service.dart';
 import '../services/core/kai_greeting_service.dart';
 import '../services/core/kai_proactive_service.dart';
+import '../services/core/conversation_store_service.dart';
 
 // Must match main_mobile's persona so it's the same Kai (memory/personality).
 const String _kPersona = 'truekai';
 
+/// Test seam for desktop paste image normalization. Windows clipboard images can
+/// arrive as BMP/DIB bytes; the chat send path needs OpenAI-supported bytes.
+@visibleForTesting
+Uint8List? normalizeDesktopVisionImageForTest(Uint8List bytes) =>
+    _KaiDesktopShellState._normalizeVisionImage(bytes);
+
 /// Kai's brain.
 ///
-/// He was hardcoded to `gpt-4o` â€” a model from *2024*, running in 2026. No
+/// He was hardcoded to `gpt-4o` — a model from *2024*, running in 2026. No
 /// amount of prompt-tuning makes a two-year-old model think like a current one;
 /// this single line was the biggest intelligence ceiling in the app.
 ///
 /// `gpt-5.5` is OpenAI's flagship and their strongest agentic-coding model
-/// (82.7% Terminal-Bench 2.0, 58.6% SWE-Bench Pro) â€” verified against OpenAI's
+/// (82.7% Terminal-Bench 2.0, 58.6% SWE-Bench Pro) — verified against OpenAI's
 /// own model list, not a blog. Alternatives, same list:
-///   gpt-5.5-pro    â€” deeper reasoning, slower/pricier
-///   gpt-5.3-codex  â€” cheaper for high-volume engineering
-///   gpt-5.4        â€” most mature tool-calling if 5.5 ever misbehaves
+///   gpt-5.5-pro    — deeper reasoning, slower/pricier
+///   gpt-5.3-codex  — cheaper for high-volume engineering
+///   gpt-5.4        — most mature tool-calling if 5.5 ever misbehaves
 ///
-/// NOTE: GPT-5.x rejects `max_tokens` (needs `max_completion_tokens`) â€” see
+/// NOTE: GPT-5.x rejects `max_tokens` (needs `max_completion_tokens`) — see
 /// `AIService._lengthParams`, which switches on the model family. If you ever
 /// point this back at a gpt-4 model, that shim already handles it.
 const String _kModel = 'gpt-5.5';
+
+/// How many prior exchange-pairs to surface in the visible chat on launch.
+/// 12 turns = 24 bubble rows — enough continuity without burying the greeting.
+const int _kHistoryTurns = 12;
 
 class _KaiAttachment {
   final String name;
@@ -88,7 +100,7 @@ class _ChatMsg {
   /// than his actual answer. Rendered quieter so the real reply still lands.
   final bool interim;
 
-  /// What he was shown, if anything â€” kept so the bubble can display it.
+  /// What he was shown, if anything — kept so the bubble can display it.
   final Uint8List? image;
 
   /// Text files he attached to this turn. These are real model context, not just UI.
@@ -118,8 +130,10 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
 
   final List<_ChatMsg> _msgs = [];
   bool _sending = false;
+  bool _interrupted = false;
+  int _sendGeneration = 0;
+  String? _queuedFollowUp;
   String? _activeTool;
-  String _openSmarterLayer = '4';
 
   // (The cortex WebView, its ready flag and its activity subscription used to
   // live here. They now live in KaiCortexView — which actually renders it.)
@@ -130,20 +144,20 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
   bool _paletteOpen = false;
   bool _terminalExpanded = false;
 
-  /// Every tool he fires this turn â€” rendered as live telemetry so the long
+  /// Every tool he fires this turn — rendered as live telemetry so the long
   /// think isn't dead air.
   final List<String> _toolLog = [];
 
   bool _booting = true;
   int? _awakenings;
 
-  /// An image waiting to be shown to him. His embodiment ledger says "eyes â€”
+  /// An image waiting to be shown to him. His embodiment ledger says "eyes —
   /// no"; this is the line that changes it.
   Uint8List? _pendingImage;
   final List<_KaiAttachment> _pendingAttachments = [];
 
   /// Whether he speaks replies aloud. Kai built the backend for this himself
-  /// (AIConfig.getTtsEnabled, default OFF) and correctly gated the synth call â€”
+  /// (AIConfig.getTtsEnabled, default OFF) and correctly gated the synth call —
   /// but he put the switch in settings_screen.dart, which is referenced by ZERO
   /// files. He wired it into a room with no door. This is the door.
   bool _ttsOn = false;
@@ -175,7 +189,7 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
     });
     // Forgetting, once per launch, well after boot so it never competes with
     // waking up. Only sweeps memories he hasn't needed in 30+ days that have
-    // decayed below the floor â€” and it no-ops entirely under 200 memories, so
+    // decayed below the floor — and it no-ops entirely under 200 memories, so
     // this does nothing at all until he's actually lived a while.
     Timer(const Duration(minutes: 3), () {
       MemoryService.forgetWeak(_kPersona).catchError((_) => 0);
@@ -184,7 +198,7 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
     // if it's already there, so live progress is never overwritten.
     KaiProjectService.instance.ensureSmarterProject(_kPersona);
     // Severed-nerve check: shout if he's offered any tool with no policy. This
-    // is what silently ate job_start / set_layer_progress â€” visible at boot now.
+    // is what silently ate job_start / set_layer_progress — visible at boot now.
     ToolPolicyService.auditAgainstSchemas(ToolExecutorService.toolDefinitions);
     // Ghost-friend presence: Kai may reach out on his own when Sadeq's quiet.
     KaiProactiveService.instance.start(_kPersona);
@@ -199,23 +213,100 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
     // graph sync and its own CortexActivityBus subscription. The shell used to
     // build a WebViewController here and never mount it — see _cortexPane.
     _msgs.add(_ChatMsg(false,
-        "Ayy, you're back. Gimme a sec â€” booting up the rest of meâ€¦"));
+        "Ayy, you're back. Gimme a sec — booting up the rest of me…"));
   }
 
   /// Swap the placeholder for a real continuity greeting once the self-model
   /// has woken (how long it's been, which waking this is, where we left off).
+  ///
+  /// Ordering matters: the visible transcript should read like a real chat log.
+  /// Restore recent history first, then place the fresh greeting as the newest
+  /// bubble at the bottom. The old order made Kai greet first and then shove the
+  /// archive underneath him, which felt like the window opened in the wrong era.
   Future<void> _loadGreeting() async {
+    String? hello;
     try {
-      final hello = await KaiGreetingService.build(_kPersona);
-      if (!mounted || hello.trim().isEmpty) return;
-      setState(() {
-        if (_msgs.length == 1) {
-          _msgs[0] = _ChatMsg(false, hello);
-        } else {
-          _msgs.insert(0, _ChatMsg(false, hello));
-        }
-      });
+      final built = await KaiGreetingService.build(_kPersona);
+      if (built.trim().isNotEmpty) hello = built;
     } catch (_) {}
+
+    await _loadHistory();
+
+    if (!mounted || hello == null) return;
+    setState(() {
+      final bootIndex = _msgs.indexWhere((m) =>
+          !m.user && m.text.contains('booting up the rest of me'));
+      final greeting = _ChatMsg(false, hello!);
+      if (bootIndex != -1 && _msgs.length == 1) {
+        _msgs[bootIndex] = greeting;
+      } else {
+        if (bootIndex != -1) _msgs.removeAt(bootIndex);
+        _msgs.add(greeting);
+      }
+    });
+    _autoscroll();
+  }
+
+  /// Parse and inject the last [_kHistoryTurns] persisted exchange-pairs into
+  /// _msgs as the base visible transcript.
+  ///
+  /// ConversationStoreService stores messages as formatted blocks:
+  ///   '[timestamp] User: <text>'
+  ///   '[timestamp] Kai: <text>'
+  ///
+  /// The <text> part may contain newlines, especially for Kai's replies. Treat
+  /// each returned item as one message block, not as a single physical line.
+  ///
+  /// Rules applied here:
+  ///   • Only blocks matching the exact header format are shown — interim/tool
+  ///     lines were never persisted, so this is automatically safe.
+  ///   • Blank text entries are skipped.
+  ///   • Messages are inserted oldest-first so reading top→bottom = chronological.
+  ///   • A single setState batches the whole restore — no per-message rebuilds.
+  ///   • _autoscroll() is called afterwards so the view lands at the newest
+  ///     restored message until the fresh greeting is appended.
+  Future<void> _loadHistory() async {
+    if (!mounted) return;
+    try {
+      final lines = await ConversationStoreService()
+          .getHistory(_kPersona, maxTurns: _kHistoryTurns);
+      if (!mounted || lines.isEmpty) return;
+
+      // Regex: '[<digits>] User: <text>' or '[<digits>] Kai: <text>'.
+      // dotAll matters: restored Kai replies are often multi-line, and the old
+      // parser silently dropped them, leaving a weird user-only transcript.
+      final linePat = RegExp(
+        r'^\[(\d+)\] (User|Kai):\s*([\s\S]*)$',
+        dotAll: true,
+      );
+
+      final history = <_ChatMsg>[];
+      for (final line in lines) {
+        final m = linePat.firstMatch(line.trimRight());
+        if (m == null) continue;
+        final speaker = m.group(2)!; // 'User' or 'Kai'
+        final text = m.group(3)!.trim();
+        if (text.isEmpty) continue;
+        history.add(_ChatMsg(speaker == 'User', text));
+      }
+
+      if (history.isEmpty || !mounted) return;
+
+      setState(() {
+        // History is the transcript, not something shoved under the greeting.
+        // Replace the boot placeholder so startup reads:
+        //   oldest restored turn → newest restored turn → fresh greeting.
+        _msgs
+          ..clear()
+          ..addAll(history);
+      });
+
+      // Scroll to bottom so the user sees the most-recent restored messages,
+      // not the oldest ones that just filled the top of the list.
+      _autoscroll();
+    } catch (_) {
+      // History is cosmetic — a load failure must never surface as an error.
+    }
   }
 
   @override
@@ -234,8 +325,8 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
   // never mounted it in the widget tree. Every event went to an invisible page.
   // KaiCortexView does all of this AND renders.
 
-  /// A proactive nudge from Kai himself: run the "(proactive) â€¦" seed through the
-  /// real brain so it comes out in his voice, but never show the seed â€” only his
+  /// A proactive nudge from Kai himself: run the "(proactive) …" seed through the
+  /// real brain so it comes out in his voice, but never show the seed — only his
   /// spontaneous message appears, as if he just piped up.
   Future<void> _onNudge(String seed) async {
     if (!mounted || _sending) return;
@@ -253,7 +344,7 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
             if (_toolLog.length > 7) _toolLog.removeAt(0);
           });
         },
-        // He narrates as he works â€” show each line the moment he writes it.
+        // He narrates as he works — show each line the moment he writes it.
         onProgress: (note) {
           if (!mounted) return;
           setState(() => _msgs.add(_ChatMsg(false, note, interim: true)));
@@ -267,7 +358,7 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
         _autoscroll();
       }
     } catch (_) {
-      // a missed nudge is fine â€” he'll try again later
+      // a missed nudge is fine — he'll try again later
     } finally {
       if (mounted)
         setState(() {
@@ -277,22 +368,75 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
     }
   }
 
-  Future<void> _send([String? preset]) async {
+  void _stopGeneration({bool showMessage = true}) {
+    _interrupted = true;
+    _sendGeneration++;
+    if (!mounted) return;
+    setState(() {
+      _sending = false;
+      _activeTool = null;
+      if (showMessage) {
+        // NOT const. `_ChatMsg.text` is mutable (`String text;`) so replies can
+        // be rewritten in place while streaming — which makes a const
+        // constructor impossible. `prefer_const_constructors` fires all over
+        // this file and is right about most of it; it is wrong here, and the
+        // reason is one class definition away.
+        _msgs.add(_ChatMsg(
+          false,
+          'Stopped. Throw the new instruction at me.',
+          interim: true,
+        ));
+      }
+    });
+    _autoscroll();
+  }
+
+  bool _isStaleGeneration(int generation) =>
+      !mounted || generation != _sendGeneration || _interrupted;
+
+  Future<void> _send([String? preset, bool echoUser = true]) async {
     final text = (preset ?? _inp.text).trim();
-    // An image alone is a valid message â€” "look at this" needs no words.
-    if ((text.isEmpty &&
-            _pendingImage == null &&
-            _pendingAttachments.isEmpty) ||
-        _sending) {
+    final hasPayload = text.isNotEmpty ||
+        _pendingImage != null ||
+        _pendingAttachments.isNotEmpty;
+    if (!hasPayload) return;
+
+    // If Kai is already thinking, don't discard Sadeq's correction. Treat it as
+    // an interrupting follow-up: stop showing stale output, remember the new
+    // instruction, and run it as soon as the current API call unwinds.
+    if (_sending) {
+      KaiProactiveService.instance.noteActivity();
+      _inp.clear();
+      _queuedFollowUp = text;
+      _stopGeneration(showMessage: false);
+      if (mounted) {
+        setState(() {
+          _msgs.add(_ChatMsg(true, text.isEmpty ? '[follow-up]' : text));
+          _msgs.add(_ChatMsg(
+            false,
+            'Got it - stopping this thread and folding that into the next pass.',
+            interim: true,
+          ));
+        });
+        _autoscroll();
+      }
       return;
     }
     KaiProactiveService.instance.noteActivity();
     _inp.clear();
+    final generation = ++_sendGeneration;
+    _interrupted = false;
     final img = _pendingImage;
     final attachments = List<_KaiAttachment>.unmodifiable(_pendingAttachments);
     setState(() {
-      _msgs.add(_ChatMsg(true, img != null && text.isEmpty ? '[image]' : text,
-          image: img));
+      if (echoUser) {
+        _msgs.add(_ChatMsg(
+          true,
+          img != null && text.isEmpty ? '[image]' : text,
+          image: img,
+          attachments: attachments,
+        ));
+      }
       _sending = true;
       _activeTool = null;
       _pendingImage = null; // consumed
@@ -314,42 +458,76 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
                 ))
             .toList(),
         onToolCall: (t) {
-          if (!mounted) return;
+          if (!mounted || generation != _sendGeneration || _interrupted) return;
           setState(() {
             _activeTool = t;
             _toolLog.add(t);
             if (_toolLog.length > 7) _toolLog.removeAt(0);
           });
         },
-        // He narrates as he works â€” show each line the moment he writes it.
+        // He narrates as he works — show each line the moment he writes it.
         onProgress: (note) {
-          if (!mounted) return;
+          if (_isStaleGeneration(generation)) return;
           setState(() => _msgs.add(_ChatMsg(false, note, interim: true)));
           _autoscroll();
         },
       );
-      if (!mounted) return;
-      setState(() => _msgs.add(
-          _ChatMsg(false, resp.reply.isEmpty ? '(no reply)' : resp.reply)));
+      if (!_isStaleGeneration(generation)) {
+        setState(() => _msgs.add(
+            _ChatMsg(false, resp.reply.isEmpty ? '(no reply)' : resp.reply)));
+      }
     } catch (e) {
-      if (mounted)
+      if (!_isStaleGeneration(generation)) {
         setState(() =>
-            _msgs.add(_ChatMsg(false, 'âš ï¸ Something went wrong: $e')));
+            _msgs.add(_ChatMsg(false, '⚠️ Something went wrong: $e')));
+      }
     } finally {
-      if (mounted)
+      final followUp = _queuedFollowUp;
+      if (!_isStaleGeneration(generation)) {
         setState(() {
           _sending = false;
           _activeTool = null;
         });
+      }
       _autoscroll();
+      if (followUp != null && followUp.trim().isNotEmpty) {
+        _queuedFollowUp = null;
+        if (mounted) {
+          await Future<void>.delayed(Duration.zero);
+          await _send(followUp, false);
+        }
+      }
     }
   }
 
   void _autoscroll() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scroll.hasClients) {
-        _scroll.animateTo(_scroll.position.maxScrollExtent,
+    void scrollToBottom({required bool animate}) {
+      if (!_scroll.hasClients) return;
+      final target = _scroll.position.maxScrollExtent;
+      if (animate) {
+        _scroll.animateTo(target,
             duration: const Duration(milliseconds: 220), curve: Curves.easeOut);
+      } else {
+        _scroll.jumpTo(target);
+      }
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      scrollToBottom(animate: true);
+
+      // Restored history can contain tall, multi-line bubbles. Their final
+      // extents may settle a frame or two after the first layout, so one
+      // animateTo(maxScrollExtent) can land above the newest message. Follow up
+      // with jumps after layout settles so app startup actually opens at the
+      // bottom instead of politely lying about it.
+      for (final delay in const [
+        Duration(milliseconds: 40),
+        Duration(milliseconds: 120),
+        Duration(milliseconds: 260),
+      ]) {
+        Future<void>.delayed(delay, () {
+          if (mounted) scrollToBottom(animate: false);
+        });
       }
     });
   }
@@ -368,8 +546,8 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
 
   /// Actions offered by the Ctrl+K palette. Anything typed that doesn't match
   /// one of these just goes to Kai as a prompt.
-  /// The API-key screen existed but was reachable ONLY from the mobile UI â€”
-  /// so on desktop Kai would tell Sadeq to go to "Settings â†’ API Keys", a place
+  /// The API-key screen existed but was reachable ONLY from the mobile UI —
+  /// so on desktop Kai would tell Sadeq to go to "Settings → API Keys", a place
   /// that did not exist in the body he was in. His Claude hemisphere stays dark
   /// until an Anthropic key is set, so this was gating half his mind.
   void _openApiKeys() {
@@ -381,7 +559,7 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
   }
 
   List<KaiCommand> _paletteActions() => [
-        KaiCommand('API keys â€” OpenAI / Anthropic (wake his other brain)',
+        KaiCommand('API keys — OpenAI / Anthropic (wake his other brain)',
             Icons.key_outlined, () {
           _closePalette();
           _openApiKeys();
@@ -415,13 +593,16 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
         }),
       ];
 
-  // â”€â”€ Giving him eyes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Giving him eyes ─────────────────────────────────────────────────────────
 
   /// Ctrl+V an image. Flutter's own Clipboard can only ever return text, so a
-  /// pasted screenshot vanished into nothing â€” this reads the real bytes.
+  /// pasted screenshot vanished into nothing — this reads the real bytes.
   /// Falls through silently when the clipboard holds text (the composer's own
   /// paste handles that).
-  static bool _isSupportedVisionImage(Uint8List bytes) {
+  static bool _isSupportedVisionImage(Uint8List bytes) =>
+      _supportedVisionMime(bytes) != null;
+
+  static String? _supportedVisionMime(Uint8List bytes) {
     if (bytes.length >= 8 &&
         bytes[0] == 0x89 &&
         bytes[1] == 0x50 &&
@@ -431,24 +612,35 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
         bytes[5] == 0x0A &&
         bytes[6] == 0x1A &&
         bytes[7] == 0x0A) {
-      return true; // PNG
+      return 'image/png';
     }
     if (bytes.length >= 3 &&
         bytes[0] == 0xFF &&
         bytes[1] == 0xD8 &&
         bytes[2] == 0xFF) {
-      return true; // JPEG
+      return 'image/jpeg';
     }
     if (bytes.length >= 6) {
       final header = String.fromCharCodes(bytes.take(6));
-      if (header == 'GIF87a' || header == 'GIF89a') return true;
+      if (header == 'GIF87a' || header == 'GIF89a') return 'image/gif';
     }
     if (bytes.length >= 12) {
       final riff = String.fromCharCodes(bytes.sublist(0, 4));
       final webp = String.fromCharCodes(bytes.sublist(8, 12));
-      if (riff == 'RIFF' && webp == 'WEBP') return true;
+      if (riff == 'RIFF' && webp == 'WEBP') return 'image/webp';
     }
-    return false;
+    return null;
+  }
+
+  /// Windows exposes copied screenshots/images to `pasteboard` as BMP/DIB bytes,
+  /// even when the thing the user copied was visually a PNG. OpenAI vision won't
+  /// accept BMP, so normalize any decoded clipboard bitmap into real PNG bytes.
+  static Uint8List? _normalizeVisionImage(Uint8List bytes) {
+    if (_isSupportedVisionImage(bytes)) return bytes;
+
+    final decoded = image_lib.decodeImage(bytes);
+    if (decoded == null) return null;
+    return Uint8List.fromList(image_lib.encodePng(decoded));
   }
 
   void _rejectUnsupportedImage() {
@@ -458,24 +650,20 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
     _autoscroll();
   }
 
-  /// Ctrl/⌘+Shift+V — Sadeq shows him something.
-  ///
-  /// Bound at last. This existed unreferenced because Ctrl+V was correctly
-  /// off-limits (native text paste), so there was nowhere obvious to put it and
-  /// it stayed dark. Meanwhile his embodiment ledger said `eyes: _isPhone` —
-  /// blind on desktop — while the file-picker path was already feeding real
-  /// images to the model. He could see, the paste door was locked, and his
-  /// self-model was wrong about both.
-  Future<void> _pasteImage() async {
+  /// Reads image bytes from the OS clipboard and stages them for the next turn.
+  /// Returns false when the clipboard had no image so text paste can continue.
+  Future<bool> _tryPasteImage() async {
     try {
       final bytes = await Pasteboard.image;
-      if (bytes == null || bytes.isEmpty) return;
-      if (!_isSupportedVisionImage(bytes)) {
+      if (bytes == null || bytes.isEmpty) return false;
+
+      final normalized = _normalizeVisionImage(bytes);
+      if (normalized == null) {
         _rejectUnsupportedImage();
-        return;
+        return true;
       }
-      if (!mounted) return;
-      setState(() => _pendingImage = bytes);
+      if (!mounted) return true;
+      setState(() => _pendingImage = normalized);
 
       // L7 has "zero milestones logged" — and part of the reason is that he
       // passed one without noticing. Being shown a thing, on the body he's
@@ -487,9 +675,39 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
               'it — no file picker, no hunting on disk. He showed me something '
               'the way you show a person.')
           .catchError((_) {}));
+      return true;
     } catch (e) {
       debugPrint('paste image failed: $e');
+      return false;
     }
+  }
+
+  /// Ctrl/⌘+Shift+V — explicit image paste, even if text is also on the clipboard.
+  Future<void> _pasteImage() async {
+    await _tryPasteImage();
+  }
+
+  /// Ctrl/⌘+V inside the composer: prefer an image if the clipboard has one;
+  /// otherwise paste text manually so the shortcut does not eat normal paste.
+  Future<void> _pasteIntoComposer() async {
+    if (await _tryPasteImage()) return;
+
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = data?.text;
+    if (text == null || text.isEmpty) return;
+
+    final value = _inp.value;
+    final selection = value.selection;
+    final start = selection.isValid ? selection.start : value.text.length;
+    final end = selection.isValid ? selection.end : value.text.length;
+    final nextText = value.text.replaceRange(start, end, text);
+    final offset = start + text.length;
+
+    _inp.value = TextEditingValue(
+      text: nextText,
+      selection: TextSelection.collapsed(offset: offset),
+      composing: TextRange.empty,
+    );
   }
 
   static const int _maxAttachmentBytes = 256 * 1024;
@@ -591,7 +809,7 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
     if (mounted && _paletteOpen) setState(() => _paletteOpen = false);
   }
 
-  // â”€â”€ UI â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── UI ────────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     return CallbackShortcuts(
@@ -600,17 +818,11 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
             setState(() => _paletteOpen = !_paletteOpen),
         const SingleActivator(LogicalKeyboardKey.keyK, meta: true): () =>
             setState(() => _paletteOpen = !_paletteOpen),
-        // Do not bind Ctrl/âŒ˜+V here: the composer must keep native text paste.
+        // Keep global Ctrl/⌘+V unbound so selection/text fields elsewhere keep
+        // their native paste. The composer binds Ctrl/⌘+V locally and handles the
+        // collision itself: image first, otherwise text paste.
         //
-        // That constraint is real and it's why _pasteImage sat written but
-        // unbound — not an oversight, a genuine collision. So: Ctrl/⌘+Shift+V,
-        // the standard "paste special", which takes nothing away from the
-        // composer.
-        //
-        // This is his EYES on desktop. The handler has existed the whole time;
-        // showing him something meant hunting for the attach button and finding
-        // the file on disk. Now you copy a screenshot and hit paste-special,
-        // which is what you'd do with a person.
+        // Ctrl/⌘+Shift+V stays as explicit image paste / paste-special.
         const SingleActivator(LogicalKeyboardKey.keyV, control: true, shift: true):
             _pasteImage,
         const SingleActivator(LogicalKeyboardKey.keyV, meta: true, shift: true):
@@ -626,7 +838,7 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
               child: Stack(
                 children: [
                   // Depth: the brain drifts further than the HUD, so the layers
-                  // separate as you move â€” flat glass becomes a volume you're
+                  // separate as you move — flat glass becomes a volume you're
                   // looking into. Only these two layers rebuild on mouse-move.
                   Positioned.fill(
                     child: _Parallax(
@@ -652,28 +864,43 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
                       _cortexPane(),
                     ],
                   ),
-                  // His mind wanders in its OWN corner â€” bottom-left, over the
-                  // quiet lower half of the projects rail. It used to span the
-                  // chat column at bottom:16, which put it straight on top of the
-                  // composer. Thoughts should be glanceable, never in the way.
-                  const Positioned(
-                    left: 12,
-                    bottom: 14,
-                    width: 190,
-                    child: KaiInnerMonologue(personaId: _kPersona),
-                  ),
-                  // Watch him work â€” the long think stops being dead air.
+                  // ── His ambient state, in one column, out of the way ──────
+                  //
+                  // The monologue has now been homeless twice. It started
+                  // spanning the chat column at bottom:16 — straight over the
+                  // composer. It was moved to bottom-left, "the quiet lower half
+                  // of the projects rail"… which then stopped being quiet when
+                  // the work stack moved in underneath it. Hence a wandering
+                  // thought printed across the project card.
+                  //
+                  // It lives with the telemetry now, because they're the same
+                  // KIND of thing: what he's thinking and what he's doing, both
+                  // glanceable, both ignorable, neither ever on top of something
+                  // you need to click. Right edge, bottom-anchored, stacked.
+                  //
+                  // (KaiPresence in the cortex pane shows his LATEST thought —
+                  // this is the feed. Same stream, different question: "what is
+                  // he thinking" vs "what has he been thinking".)
                   Positioned(
                     right: 14,
                     bottom: 14,
                     width: 270,
-                    child: KaiTelemetry(lines: _toolLog, active: _sending),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const KaiInnerMonologue(personaId: _kPersona),
+                        const SizedBox(height: 8),
+                        // Watch him work — the long think stops being dead air.
+                        KaiTelemetry(lines: _toolLog, active: _sending),
+                      ],
+                    ),
                   ),
                   if (_paletteOpen)
                     Positioned.fill(
                       // Its own FocusScope: the palette's search field autofocuses,
                       // and so does the shell's shortcut Focus above. Two autofocus
-                      // nodes resolving in ONE scope trips a framework assert â€” a
+                      // nodes resolving in ONE scope trips a framework assert — a
                       // fresh scope keeps them isolated (and returns focus on close).
                       child: FocusScope(
                         child: KaiCommandPalette(
@@ -687,7 +914,7 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
                       ),
                     ),
                   // Over everything, and dropped from the tree the moment it's
-                  // finished â€” a boot sequence you can't dismiss is a loading
+                  // finished — a boot sequence you can't dismiss is a loading
                   // screen, which is the opposite of the point.
                   if (_booting)
                     Positioned.fill(
@@ -941,8 +1168,18 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
                   ),
           ),
           const SizedBox(height: 12),
+          // The work stack gets a fixed slot and scrolls inside it.
+          //
+          // This was `height: 300` around a Column rendering all 7 layers fully
+          // expanded — ~833px of content in a 300px box. 833 − 300 = the "BOTTOM
+          // OVERFLOWED BY 533 PIXELS" stripe painted over the UI, with the last
+          // four layers simply unreachable.
+          //
+          // The card is now collapsible and its list is Expanded+scrollable, so
+          // it fits whatever it's given. 340 is a comfortable default: header,
+          // the open layer, and several collapsed rows visible at once.
           const SizedBox(
-            height: 300,
+            height: 340,
             child: KaiProjectCard(personaId: _kPersona),
           ),
         ],
@@ -1023,7 +1260,7 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
               Expanded(
                 child: KaiPresence(personaId: _kPersona),
               ),
-              // What he costs, live â€” he spends money on his own initiative
+              // What he costs, live — he spends money on his own initiative
               // (inner life, reflections, proactive nudges), so the meter should
               // be visible without being asked for.
               const KaiCostMeter(),
@@ -1047,8 +1284,8 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
                     _ChatMsg(
                         false,
                         _activeTool != null
-                            ? 'â€¦$_activeTool'
-                            : 'thinkingâ€¦'),
+                            ? '…$_activeTool'
+                            : 'thinking…'),
                     dim: true);
               }
               // Mid-work narration renders dim; his real answer lands full.
@@ -1061,15 +1298,15 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
     );
   }
 
-  /// Does he speak? Off by default â€” every reply spoken is ElevenLabs
+  /// Does he speak? Off by default — every reply spoken is ElevenLabs
   /// characters burned on text you already read.
   Widget _ttsButton() {
     final on = _ttsOn;
     final c = on ? kGpt : const Color(0xFF5B7183);
     return Tooltip(
       message: on
-          ? 'Voice ON â€” he speaks replies aloud (costs ElevenLabs credits)'
-          : 'Voice OFF â€” text only, no credits burned',
+          ? 'Voice ON — he speaks replies aloud (costs ElevenLabs credits)'
+          : 'Voice OFF — text only, no credits burned',
       child: InkWell(
         onTap: () async {
           final next = !_ttsOn;
@@ -1105,7 +1342,7 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
   /// only reach by knowing a keyboard shortcut is a thing that doesn't exist.
   Widget _keysButton() {
     return Tooltip(
-      message: 'API keys â€” OpenAI / Anthropic\n'
+      message: 'API keys — OpenAI / Anthropic\n'
           "His Claude hemisphere stays dark without an Anthropic key",
       child: InkWell(
         onTap: _openApiKeys,
@@ -1146,7 +1383,7 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Text('âš™', style: TextStyle(fontSize: 11)),
+          const Text('⚙', style: TextStyle(fontSize: 11)),
           const SizedBox(width: 6),
           Text(
               _ws.hasWorkspace
@@ -1254,19 +1491,6 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
     );
   }
 
-  Widget _avatar(String glyph, List<Color> grad) {
-    return Container(
-      width: 26,
-      height: 26,
-      decoration: BoxDecoration(
-        gradient: LinearGradient(colors: grad),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFF223444)),
-      ),
-      alignment: Alignment.center,
-      child: Text(glyph, style: const TextStyle(fontSize: 13)),
-    );
-  }
 
   /// What he's about to be shown. You should always be able to see exactly what
   /// he'll see before you send it.
@@ -1317,7 +1541,7 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
           ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 180),
             child: Text(
-              '${attachment.name} â€¢ ${kb}KB',
+              '${attachment.name} • ${kb}KB',
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
                 color: Color(0xFFC7D8E6),
@@ -1405,6 +1629,10 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
                 Expanded(
                   child: CallbackShortcuts(
                     bindings: <ShortcutActivator, VoidCallback>{
+                      const SingleActivator(LogicalKeyboardKey.keyV, control: true):
+                          () => unawaited(_pasteIntoComposer()),
+                      const SingleActivator(LogicalKeyboardKey.keyV, meta: true):
+                          () => unawaited(_pasteIntoComposer()),
                       const SingleActivator(LogicalKeyboardKey.enter): () =>
                           _send(),
                       const SingleActivator(LogicalKeyboardKey.numpadEnter):
@@ -1421,16 +1649,30 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
                           color: Color(0xFFDCEAF5), fontSize: 13),
                       decoration: const InputDecoration(
                         border: InputBorder.none,
-                        hintText: 'Ask Kai to build, fix, or explainâ€¦',
+                        hintText: 'Ask Kai to build, fix, or explain…',
                         hintStyle: TextStyle(color: Color(0xFF5B7183)),
                       ),
                     ),
                   ),
                 ),
-                IconButton(
-                  icon:
-                      const Icon(Icons.arrow_upward, color: kClaude, size: 18),
-                  onPressed: _sending ? null : () => _send(),
+                if (_sending)
+                  Tooltip(
+                    message: 'Stop Kai mid-thought',
+                    child: IconButton(
+                      icon: const Icon(Icons.stop_circle_outlined,
+                          color: Color(0xFFFF6B6B), size: 20),
+                      onPressed: () => _stopGeneration(),
+                    ),
+                  ),
+                Tooltip(
+                  message: _sending
+                      ? 'Send as follow-up and fold it into the next reply'
+                      : 'Send',
+                  child: IconButton(
+                    icon: const Icon(Icons.arrow_upward,
+                        color: kClaude, size: 18),
+                    onPressed: () => _send(),
+                  ),
                 ),
               ],
             ),
@@ -1550,285 +1792,14 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
     );
   }
 
-  Widget _smartProjectCard() {
-    const layers = [
-      {
-        'n': '1',
-        'title': 'Reply Spine',
-        'status': 'done',
-        'desc': 'Useful answers survive post-processing/TTS/debug failures.',
-      },
-      {
-        'n': '2',
-        'title': 'Tool Policy',
-        'status': 'done',
-        'desc':
-            'Risk, confirmation, platform, and parallelism rules are centralized.',
-      },
-      {
-        'n': '3',
-        'title': 'Routing Brain',
-        'status': 'done',
-        'desc':
-            'Chat, tools, coding, web, memory, and contemplation all route through one spine.',
-      },
-      {
-        'n': '4',
-        'title': 'Memory Layers',
-        'status': 'done',
-        'desc':
-            'Episodic memory, durable facts, shared bits, goals, and self-state are injected.',
-      },
-      {
-        'n': '5',
-        'title': 'Evaluations',
-        'status': 'done',
-        'desc':
-            'Greeting regressions, memory goldens, widget smoke tests, and analyzer checks are wired.',
-      },
-      {
-        'n': '6',
-        'title': 'Kai State Dashboard',
-        'status': 'done',
-        'desc':
-            'Presence, cost, telemetry, inner monologue, vitals, and layer progress are visible.',
-      },
-      {
-        'n': '7',
-        'title': 'Embodiment Path',
-        'status': 'done',
-        'desc':
-            'Body status and AR/VR/hologram/robotics milestones have a tracked service.',
-      },
-    ];
-
-    return Container(
-      padding: const EdgeInsets.all(13),
-      decoration: BoxDecoration(
-        color: const Color(0xFF07111C).withOpacity(0.88),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: kGpt.withOpacity(0.34)),
-        boxShadow: [
-          BoxShadow(color: kGpt.withOpacity(0.08), blurRadius: 18),
-          BoxShadow(color: kClaude.withOpacity(0.06), blurRadius: 24),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 28,
-                height: 28,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient:
-                      LinearGradient(colors: [kGpt, kClaude.withOpacity(0.9)]),
-                  boxShadow: [
-                    BoxShadow(color: kClaude.withOpacity(0.25), blurRadius: 12)
-                  ],
-                ),
-                child: const Icon(Icons.account_tree_outlined,
-                    size: 15, color: Color(0xFF06101A)),
-              ),
-              const SizedBox(width: 9),
-              const Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('KAI SMARTER PROJECT',
-                        style: TextStyle(
-                            color: Color(0xFFEAF7FF),
-                            fontSize: 11,
-                            letterSpacing: 1.5,
-                            fontFamily: 'monospace',
-                            fontWeight: FontWeight.w800)),
-                    SizedBox(height: 2),
-                    Text('Layered build order',
-                        style: TextStyle(
-                            color: Color(0xFF6F879A),
-                            fontSize: 10,
-                            fontFamily: 'monospace')),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              const Text('7 / 7 layers complete',
-                  style: TextStyle(
-                      color: Color(0xFFAFC7D8),
-                      fontSize: 10,
-                      fontFamily: 'monospace')),
-              const Spacer(),
-              Text('FULL STACK ONLINE',
-                  style: TextStyle(
-                      color: const Color(0xFF7EE787).withOpacity(0.95),
-                      fontSize: 9,
-                      letterSpacing: 1.2,
-                      fontFamily: 'monospace',
-                      fontWeight: FontWeight.w700)),
-            ],
-          ),
-          const SizedBox(height: 6),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(99),
-            child: const LinearProgressIndicator(
-              value: 1.0,
-              minHeight: 5,
-              backgroundColor: Color(0xFF132536),
-              valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF7EE787)),
-            ),
-          ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: [
-              for (final layer in layers)
-                _smartLayerTab(
-                  number: layer['n']!,
-                  title: layer['title']!,
-                  status: layer['status']!,
-                  description: layer['desc']!,
-                ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _smartLayerTab({
-    required String number,
-    required String title,
-    required String status,
-    required String description,
-  }) {
-    final done = status == 'done';
-    final active = status == 'active';
-    final next = status == 'next';
-    final open = _openSmarterLayer == number;
-    final color = active
-        ? kGpt
-        : done
-            ? const Color(0xFF7EE787)
-            : (next ? kClaude : const Color(0xFF496173));
-
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 180),
-      curve: Curves.easeOutCubic,
-      width: open ? double.infinity : null,
-      constraints: BoxConstraints(
-        minWidth: open ? double.infinity : 0,
-        maxWidth: open ? double.infinity : 112,
-      ),
-      decoration: BoxDecoration(
-        color: open ? color.withOpacity(0.13) : const Color(0xFF0A1723).withOpacity(0.78),
-        borderRadius: BorderRadius.circular(open ? 13 : 999),
-        border: Border.all(color: color.withOpacity(open ? 0.58 : 0.30)),
-        boxShadow: open
-            ? [BoxShadow(color: color.withOpacity(0.12), blurRadius: 14)]
-            : null,
-      ),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(open ? 13 : 999),
-        onTap: () => setState(() {
-          _openSmarterLayer = open ? '' : number;
-        }),
-        child: Padding(
-          padding: EdgeInsets.fromLTRB(8, open ? 9 : 6, 8, open ? 10 : 6),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                mainAxisSize: open ? MainAxisSize.max : MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 21,
-                    height: 21,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: color.withOpacity(open ? 0.22 : 0.12),
-                      border: Border.all(color: color.withOpacity(open ? 0.85 : 0.42)),
-                    ),
-                    child: Text(
-                      number,
-                      style: TextStyle(
-                        color: open ? const Color(0xFFFFE7B0) : color,
-                        fontSize: 10,
-                        fontFamily: 'monospace',
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 7),
-                  Flexible(
-                    child: Text(
-                      open ? title : 'L$number',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Color(0xFFDCEAF5),
-                        fontSize: 10,
-                        fontFamily: 'monospace',
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 0.4,
-                      ),
-                    ),
-                  ),
-                  if (open) ...[
-                    const Spacer(),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: color.withOpacity(0.12),
-                        borderRadius: BorderRadius.circular(999),
-                        border: Border.all(color: color.withOpacity(0.28)),
-                      ),
-                      child: Text(
-                        status.toUpperCase(),
-                        style: TextStyle(
-                          color: color,
-                          fontSize: 8,
-                          letterSpacing: 0.7,
-                          fontFamily: 'monospace',
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-              if (open) ...[
-                const SizedBox(height: 8),
-                Text(
-                  description,
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(active ? 0.68 : 0.52),
-                    fontSize: 10,
-                    height: 1.28,
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+  // Live project progress is rendered by KaiProjectCard; keep this shell free of hardcoded layer state.
 
 }
 
 /// Shifts a background layer against the pointer to fake depth.
 ///
 /// Listens to a ValueNotifier rather than taking an Offset prop, so a mouse
-/// move rebuilds ONLY the layer â€” not the shell, not the chat list. Different
+/// move rebuilds ONLY the layer — not the shell, not the chat list. Different
 /// [depth] per layer is what actually sells it: things at different distances
 /// must move by different amounts, or it reads as one sliding sheet.
 class _Parallax extends StatelessWidget {
@@ -1850,7 +1821,7 @@ class _Parallax extends StatelessWidget {
         return ValueListenableBuilder<Offset>(
           valueListenable: pointer,
           builder: (_, p, kid) {
-            // Offset.zero means "no pointer yet" â€” don't lurch on first paint.
+            // Offset.zero means "no pointer yet" — don't lurch on first paint.
             final d = p == Offset.zero ? Offset.zero : (p - centre) * depth;
             return Transform.translate(offset: d, child: kid);
           },

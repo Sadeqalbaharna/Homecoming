@@ -45,7 +45,6 @@ library;
 import 'dart:convert';
 import 'package:dio/dio.dart';
 import '../ai/usage_tracking_service.dart';
-import 'package:firebase_database/firebase_database.dart';
 import 'kai_db.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'firebase_service.dart';

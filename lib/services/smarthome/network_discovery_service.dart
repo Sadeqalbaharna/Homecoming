@@ -11,7 +11,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
-import 'package:firebase_database/firebase_database.dart';
 import '../core/kai_db.dart';
 
 // ── Model ─────────────────────────────────────────────────────────────────────

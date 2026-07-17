@@ -25,7 +25,6 @@ library;
 import 'dart:convert';
 import 'package:dio/dio.dart';
 import '../ai/usage_tracking_service.dart';
-import 'package:firebase_database/firebase_database.dart';
 import 'kai_db.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'firebase_service.dart';
@@ -259,7 +258,7 @@ Preserve important existing memories. Return only the JSON.
     }
 
     try {
-      return Map<String, dynamic>.from(jsonDecode(raw ?? '{}'));
+      return Map<String, dynamic>.from(jsonDecode(raw));
     } catch (e) {
       print('🗜️ [Consolidation] JSON parse failed: $e');
       return null;

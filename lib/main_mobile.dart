@@ -131,7 +131,9 @@ Future<void> main() async {
     }
     // Pre-warm Tavern caches (non-blocking)
     TavernMenuService().prime().catchError((_) {});
-    TavernStatusService().getStatusBlock().catchError((_) {});
+    TavernStatusService().getStatusBlock().then<void>((_) {}).catchError((Object e) {
+      print('[TavernStatus] getStatusBlock prewarm failed: $e');
+    });
   } catch (e) {
     print('⚠️ Firebase initialization failed: $e');
     print('📱 App will continue with local storage only');
@@ -277,8 +279,6 @@ class _MobileKaiState extends State<_MobileKai>
   final Random _rng = Random();
 
   // avatar state machine
-  DateTime _lastInteraction = DateTime.now();
-  DateTime _attentionUntil = DateTime.fromMillisecondsSinceEpoch(0);
   // frame-based animation
   String _currentAnimation = 'idle';
   AnimationController? _frameAnimController;
@@ -380,7 +380,9 @@ class _MobileKaiState extends State<_MobileKai>
       _setStep('Loading avatar…');
       _precacheAnimation(kAvatarIdleFrameDir, kIdleFrameCount)
           .then((_) { if (mounted) _switchToAnimation('idle'); })
-          .catchError((e) => print('⚠️ [Init] Frame precache: $e'));
+          .catchError((Object e) {
+            print('⚠️ [Init] Frame precache: $e');
+          });
 
       // 1b — sign in anonymously so Firebase rules accept our reads/writes
       _setStep('Connecting…');
@@ -472,7 +474,6 @@ class _MobileKaiState extends State<_MobileKai>
   }
 
   void _markInteraction() {
-    _lastInteraction = DateTime.now();
     _resetIdleTimer();
   }
 
@@ -499,7 +500,6 @@ class _MobileKaiState extends State<_MobileKai>
   }
 
   void _pulseAttention() {
-    _attentionUntil = DateTime.now().add(kAttentionPulse);
     _switchToAnimation('attention');
     // Return to idle after pulse expires
     Future.delayed(kAttentionPulse, () {
@@ -678,11 +678,16 @@ class _MobileKaiState extends State<_MobileKai>
           print('⚠️ [HoldToSpeak-flame] No audio file — treating as tap → expand');
           _exitBackground();
         } else {
-          final fileSize = await File(path).length().catchError((_) => 0);
+          final fileSize = await File(path).length().catchError((Object e) {
+            print('⚠️ [HoldToSpeak-flame] file length failed: $e');
+            return 0;
+          });
           if (fileSize < 8000) {
             // Too short (~<0.7s) → quick tap, not a voice message → expand
             print('⚠️ [HoldToSpeak-flame] File too small ($fileSize B) → tap → expand');
-            await File(path).delete().catchError((_) {});
+            await File(path).delete().then<void>((_) {}).catchError((Object e) {
+              print('⚠️ [HoldToSpeak-flame] temp delete failed: $e');
+            });
             _exitBackground();
           } else {
             print('🎤 [HoldToSpeak-flame] Transcribing $path ($fileSize B)…');
@@ -982,10 +987,15 @@ class _MobileKaiState extends State<_MobileKai>
       return;
     }
 
-    final fileSize = await File(path).length().catchError((_) => 0);
+    final fileSize = await File(path).length().catchError((Object e) {
+      print('⚠️ [WakeWord] file length failed: $e');
+      return 0;
+    });
     if (fileSize < 4000) {
       // Too short — background noise, not a real command
-      await File(path).delete().catchError((_) {});
+      await File(path).delete().then<void>((_) {}).catchError((Object e) {
+        print('⚠️ [WakeWord] temp delete failed: $e');
+      });
       print('⚠️ [WakeWord] Recording too short ($fileSize B) — ignoring');
       _switchToAnimation('idle');
       VoiceActivationService().resume();
@@ -1462,11 +1472,6 @@ class _MobileKaiState extends State<_MobileKai>
         ),
       );
     }
-  }
-
-  Future<void> _playMusic() async {
-    // Show music selection dialog
-    _showMusicSelectionDialog();
   }
 
   void _showMusicSelectionDialog() {
@@ -2067,10 +2072,15 @@ class _MobileKaiState extends State<_MobileKai>
                         _switchToAnimation('idle');
                         return;
                       }
-                      final fileSize = await File(path).length().catchError((_) => 0);
+                      final fileSize = await File(path).length().catchError((Object e) {
+                        print('⚠️ [HoldToSpeak] file length failed: $e');
+                        return 0;
+                      });
                       if (fileSize < 8000) {
                         print('⚠️ [HoldToSpeak] Too short ($fileSize bytes) — ignoring');
-                        await File(path).delete().catchError((_) {});
+                        await File(path).delete().then<void>((_) {}).catchError((Object e) {
+                          print('⚠️ [HoldToSpeak] temp delete failed: $e');
+                        });
                         _switchToAnimation('idle');
                         return;
                       }
@@ -3276,34 +3286,6 @@ class _PersonaDialogState extends State<PersonaDialog> {
   }
 }
 
-/// Music Control Button Widget
-class _MusicControlButton extends StatelessWidget {
-  final IconData icon;
-  final String tooltip;
-  final VoidCallback onTap;
-
-  const _MusicControlButton({
-    required this.icon,
-    required this.tooltip,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(6),
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.1),
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: Icon(icon, color: Colors.white70, size: 18),
-      ),
-    );
-  }
-}
-
 // ── Drift portrait row ────────────────────────────────────────────────────────
 
 class _DriftRow extends StatelessWidget {
@@ -3413,7 +3395,9 @@ class _GmKaiSheet extends StatelessWidget {
       target: 'music',
       action: action,
       params: params ?? {},
-    ).catchError((e) => print('GM music $action error: $e'));
+    ).then<void>((_) {}).catchError((Object e) {
+      print('GM music $action error: $e');
+    });
   }
 
   @override

@@ -21,16 +21,27 @@ class _UsageStatsScreenState extends State<UsageStatsScreen> {
 
   Future<void> _loadUsageData() async {
     setState(() => _isLoading = true);
-    
+
     final usage = await UsageTrackingService.getUsageStats();
     final session = await UsageTrackingService.getSessionStats();
-    
+
     setState(() {
       _usageData = usage;
       _sessionData = session;
       _isLoading = false;
     });
   }
+
+  // (A second "Where it goes" card used to live here — mine. Deleted.
+  //
+  // _buildOperationUsageCard() below is titled "Usage by Operation", has always
+  // been wired into the ListView, and reads exactly the per-operation count /
+  // tokens / cost I was about to re-invent. It was never populated because the
+  // service didn't write the key — a wire, not a missing feature.
+  //
+  // I told Kai this morning: "before you build anything, search_code for it.
+  // it's already there." Then I didn't search, and built the duplicate anyway,
+  // three feet from the original. The disease doesn't care who you are.)
 
   Future<void> _resetStats() async {
     final confirmed = await showDialog<bool>(
@@ -138,14 +149,35 @@ class _UsageStatsScreenState extends State<UsageStatsScreen> {
   Widget _buildSessionCard() {
     if (_sessionData == null) return const SizedBox();
 
-    final tokens = _sessionData!['tokens'] as int;
-    final cost = _sessionData!['cost'] as double;
-    final apiCalls = _sessionData!['api_calls'] as int;
-    final ttsChars = _sessionData!['tts_characters'] as int;
-    final firebaseOps = _sessionData!['firebase_operations'] as int? ?? 0;
-    final functionCalls = _sessionData!['function_calls'] as int? ?? 0;
-    final searchQueries = _sessionData!['search_queries'] as int? ?? 0;
-    final startedAt = _sessionData!['started_at'] as String;
+    // ── Every read here is null-safe now, and the keys are the REAL ones ────
+    //
+    // This screen crashed the app the instant it got a door:
+    //   type 'Null' is not a subtype of type 'int' in type cast
+    //
+    // It was asking for 'api_calls', 'tts_characters', 'firebase_operations',
+    // 'search_queries' and 'started_at'. getSessionStats() returns
+    // 'openai_calls', 'elevenlabs_chars', 'firebase_reads'/'firebase_writes',
+    // 'google_searches' — and no start time at all.
+    //
+    // The screen and the service drifted apart at some point and NOTHING
+    // noticed, because the screen had zero importers. Dead code doesn't stay
+    // correct; it stays compile-clean, which is not the same thing and looks
+    // identical from the outside. It rotted quietly for months and the rot only
+    // became visible the moment someone could walk in.
+    //
+    // That's the real argument against doorless rooms: not that they're unused,
+    // but that they're unverified while looking finished.
+    int i(String k) => (_sessionData![k] as num?)?.toInt() ?? 0;
+    double d(String k) => (_sessionData![k] as num?)?.toDouble() ?? 0.0;
+
+    final tokens = i('tokens');
+    final cost = d('cost');
+    final apiCalls = i('openai_calls');
+    final ttsChars = i('elevenlabs_chars');
+    final firebaseOps = i('firebase_reads') + i('firebase_writes');
+    final functionCalls = i('function_calls');
+    final searchQueries = i('google_searches');
+    final startedAt = (_sessionData!['started_at'] as String?) ?? '';
 
     return Card(
       child: Padding(
@@ -192,8 +224,10 @@ class _UsageStatsScreenState extends State<UsageStatsScreen> {
   }
 
   Widget _buildTotalCostCard() {
-    final totalCost = _usageData!['total_cost'] as double;
-    final totalTokens = _usageData!['total_tokens'] as int;
+    // Null-safe: same reason as _buildSessionCard. A missing key must render a
+    // zero, not take the whole app down.
+    final totalCost = (_usageData!['total_cost'] as num?)?.toDouble() ?? 0.0;
+    final totalTokens = (_usageData!['total_tokens'] as num?)?.toInt() ?? 0;
 
     return Card(
       color: Colors.blue.shade50,
@@ -481,11 +515,14 @@ class _UsageStatsScreenState extends State<UsageStatsScreen> {
             const SizedBox(height: 16),
             ...models.entries.map((entry) {
               final modelName = entry.key;
-              final data = entry.value as Map<String, dynamic>;
-              final inputTokens = data['input_tokens'] as int;
-              final outputTokens = data['output_tokens'] as int;
-              final cost = data['total_cost'] as double;
-              final calls = data['call_count'] as int;
+              // Firebase hands back Map<Object?, Object?>, never
+              // Map<String, dynamic> — so the old cast was a second crash
+              // waiting behind the first.
+              final data = Map<String, dynamic>.from(entry.value as Map);
+              final inputTokens = (data['input_tokens'] as num?)?.toInt() ?? 0;
+              final outputTokens = (data['output_tokens'] as num?)?.toInt() ?? 0;
+              final cost = (data['total_cost'] as num?)?.toDouble() ?? 0.0;
+              final calls = (data['call_count'] as num?)?.toInt() ?? 0;
 
               return Padding(
                 padding: const EdgeInsets.only(bottom: 16),
@@ -531,7 +568,10 @@ class _UsageStatsScreenState extends State<UsageStatsScreen> {
   }
 
   Widget _buildOperationUsageCard() {
-    final operations = _usageData!['operations'] as Map<String, dynamic>;
+    // Null-safe: this key genuinely didn't exist until now, and a screen that
+    // can't open is a screen whose casts are never tested.
+    final operations =
+        Map<String, dynamic>.from(_usageData!['operations'] as Map? ?? const {});
 
     if (operations.isEmpty) {
       return const SizedBox();
@@ -556,10 +596,10 @@ class _UsageStatsScreenState extends State<UsageStatsScreen> {
             const SizedBox(height: 16),
             ...operations.entries.map((entry) {
               final opName = entry.key;
-              final data = entry.value as Map<String, dynamic>;
-              final count = data['count'] as int;
-              final tokens = data['tokens'] as int;
-              final cost = data['cost'] as double;
+              final data = Map<String, dynamic>.from(entry.value as Map);
+              final count = (data['count'] as num?)?.toInt() ?? 0;
+              final tokens = (data['tokens'] as num?)?.toInt() ?? 0;
+              final cost = (data['cost'] as num?)?.toDouble() ?? 0.0;
 
               final icon = _getOperationIcon(opName);
               final displayName = _getOperationDisplayName(opName);

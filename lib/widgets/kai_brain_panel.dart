@@ -526,23 +526,6 @@ class _KaiVitalsState extends State<KaiVitals> {
   Widget _wrap(List<Widget> children) =>
       Wrap(spacing: 6, runSpacing: 10, children: children);
 
-  Widget _section(String t, Color color) => Padding(
-        padding: const EdgeInsets.only(bottom: 10),
-        child: Row(
-          children: [
-            Text(t,
-                style: TextStyle(
-                    color: color,
-                    fontSize: 10,
-                    letterSpacing: 2.2,
-                    fontFamily: 'monospace',
-                    fontWeight: FontWeight.w700,
-                    shadows: [Shadow(color: color.withOpacity(0.7), blurRadius: 8)])),
-            const SizedBox(width: 8),
-            Expanded(child: Container(height: 1, color: color.withOpacity(0.28))),
-          ],
-        ),
-      );
 
   Widget _gauge(String label, double value, Color color) {
     return SizedBox(

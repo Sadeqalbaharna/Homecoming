@@ -891,7 +891,6 @@ class _NativeMindMapData {
       ).copyWith(target: hubId));
 
       final spread = math.min(math.pi * 0.78, math.pi * 0.20 + bucket.length * 0.035);
-      final rows = math.max(1, (bucket.length / 10).ceil());
       for (var i = 0; i < bucket.length; i++) {
         final raw = bucket[i];
         final id = '${raw['id'] ?? raw['key'] ?? raw['label'] ?? 'node_${nodes.length}'}';

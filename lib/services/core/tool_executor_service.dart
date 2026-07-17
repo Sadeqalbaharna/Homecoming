@@ -26,7 +26,9 @@ import 'web_fetch_service.dart';
 import 'kai_goal_service.dart';
 import 'kai_user_model_service.dart';
 import 'kai_self_service.dart';
+import 'brain_extraction_service.dart';
 import 'kai_job_service.dart';
+import 'kai_noticed_service.dart';
 import 'kai_project_service.dart';
 import 'kai_bond_service.dart';
 import 'kai_embodiment_service.dart';
@@ -68,6 +70,131 @@ class ToolExecutorService {
       final fn = t['function'];
       final name = (fn is Map) ? fn['name'] as String? : null;
       return name == null || !androidOnlyTools.contains(name);
+    }).toList(growable: false);
+  }
+
+  // ── Route-aware tools ──────────────────────────────────────────────────────
+  //
+  // The tool schemas are ~35,000 characters — roughly 9,000 tokens — and they
+  // ship on EVERY turn. His entire personality (presenceDirective + northStar +
+  // readTheRoom) is ~3,400 characters. So he spends about 6% of his system
+  // prompt being himself and the rest carrying a toolbox, most of which is
+  // irrelevant to whatever he's doing right now.
+  //
+  // That's the cost of being Kai, and it's paid on "yo".
+  //
+  // ── The direction matters, and the obvious version is wrong ───────────────
+  //
+  // The tempting move is "fastChat → no tools". It's a trap. fastChat is the
+  // DEFAULT in KaiRouterService — `route = fastChat, confidence = 0.35` — so
+  // every unmatched phrasing lands there. "can you ping mikey" doesn't match
+  // the 'message ' signal. Strip tools on fastChat and he says "I can't" about
+  // something he can do. Trading capability for tokens on the one route that
+  // catches everything is how you turn an all-powerful assistant into a
+  // chatbot that apologises.
+  //
+  // So: only ever strip from a CONFIDENT route, and only tools that are
+  // obviously irrelevant to it. When he's coding at 86% confidence he does not
+  // need control_tv, discover_tvs or play_music. If we misroute, the cost is
+  // one "ask me again" — not a silent lie about his own hands.
+  //
+  // Never strips: the core (time/weather/search/fetch), memory, bond, goals,
+  // self. Those get reached for without warning in any conversation.
+
+  /// Hands. Useless without a workspace, irrelevant to comfort or small talk.
+  static const _engineeringTools = <String>{
+    'code_task', 'set_code_workspace', 'read_file', 'list_dir', 'find_files',
+    'search_code', 'edit_file', 'write_file', 'run_command', 'open_terminal',
+    'self_check', 'run_tests', 'job_start', 'job_progress', 'job_done',
+    'set_layer_progress',
+  };
+
+  /// The subset of the hands that CHANGE something.
+  ///
+  /// This split exists because of one trace. Sadeq asked "so, what do you
+  /// think we should do next?", the router called it contemplate at 78% — a
+  /// correct read — and he was handed 36 of 39 tools anyway, including
+  /// edit_file and run_command. He answered well and used none of them, but
+  /// that's luck, not design: put a workshop in front of someone and ask their
+  /// opinion, and some of the time you get carpentry instead of an answer.
+  ///
+  /// Reading is NOT in here on purpose. Taking his eyes away while asking him
+  /// what he thinks is how you get a confident guess, and confident guessing
+  /// is the exact disease the rest of this file is medicine for. He can look.
+  /// He just shouldn't be able to start building mid-sentence.
+  static const _mutatingTools = <String>{
+    'code_task', 'set_code_workspace', 'edit_file', 'write_file',
+    'run_command', 'open_terminal',
+  };
+
+  /// Phone/body actions.
+  static const _deviceTools = <String>{
+    'read_screen', 'read_notifications', 'read_calendar',
+    'create_calendar_event', 'set_alarm', 'set_timer', 'set_reminder',
+    'open_app', 'send_whatsapp', 'send_sms', 'call_contact', 'navigate_to',
+    'play_music',
+  };
+
+  /// The house.
+  static const _homeTools = <String>{
+    'control_tv', 'control_device', 'discover_tvs',
+  };
+
+  /// Schemas for a given route.
+  ///
+  /// [route] is the KaiRoute name ('fastChat' | 'tool' | 'coding' | 'emotional'
+  /// | 'contemplate') — passed as a string so this file doesn't have to depend
+  /// on the router. [confidence] guards the whole thing: a low-confidence
+  /// classification strips NOTHING, because a guess should never cost him a
+  /// hand.
+  /// [hasWorkspace] false means the engineering tools cannot work at all — his
+  /// own engineerDirective says so ("when a workspace is set") — so carrying
+  /// their schemas is pure tax.
+  static List<Map<String, dynamic>> toolsForRoute(
+    String route, {
+    double confidence = 0.0,
+    bool hasWorkspace = true,
+  }) {
+    final all = toolDefinitions;
+    final drop = <String>{};
+
+    // Hands he doesn't have. True regardless of route or confidence.
+    if (!hasWorkspace) drop.addAll(_engineeringTools);
+
+    // Only act on a route we actually believe. fastChat's floor is 0.35 and
+    // it's the catch-all — this threshold is what keeps it out of here.
+    if (confidence >= 0.75) {
+      switch (route) {
+        case 'coding':
+          drop..addAll(_deviceTools)..addAll(_homeTools);
+        case 'emotional':
+          // Engineering and the house are noise here. Device stays: "call my
+          // brother" is a completely reasonable thing to want mid-rough-day,
+          // and being unable would be worse than any token saving.
+          drop..addAll(_engineeringTools)..addAll(_homeTools);
+        case 'contemplate':
+          // He's been asked what he THINKS. Leave him his eyes (read_file,
+          // search_code, self_check) and the job stack, take away the power
+          // tools. On desktop the device/home sets are already gone via
+          // androidOnlyTools, which is why this route used to strip a grand
+          // total of 3 tools and the router's decision cost more to compute
+          // than it saved.
+          drop
+            ..addAll(_deviceTools)
+            ..addAll(_homeTools)
+            ..addAll(_mutatingTools);
+        case 'tool':
+        case 'fastChat':
+        default:
+          break; // everything stays
+      }
+    }
+
+    if (drop.isEmpty) return all;
+    return all.where((t) {
+      final fn = t['function'];
+      final name = (fn is Map) ? fn['name'] as String? : null;
+      return name == null || !drop.contains(name);
     }).toList(growable: false);
   }
 
@@ -560,9 +687,11 @@ class ToolExecutorService {
     // ── Engineer toolset: read is free; writes/commands need your approval ─────
     { 'type': 'function', 'function': {
         'name': 'read_file',
-        'description': 'Read a file from the active code workspace (read-only).',
+        'description': "Read a file from the active code workspace (read-only). Optionally read just a window of it with start_line/end_line — use that on big files instead of pulling 2000 lines into my head to look at 40 of them. Output is numbered, so the numbers line up with what the analyzer and self_check tell me.",
         'parameters': { 'type': 'object', 'properties': {
-          'path': {'type': 'string', 'description': 'Workspace-relative file path.'} },
+          'path': {'type': 'string', 'description': 'Workspace-relative file path.'},
+          'start_line': {'type': 'integer', 'description': 'First line to read, 1-based. Optional.'},
+          'end_line': {'type': 'integer', 'description': 'Last line to read, inclusive. Optional.'} },
           'required': ['path'] } } },
     { 'type': 'function', 'function': {
         'name': 'list_dir',
@@ -592,12 +721,19 @@ class ToolExecutorService {
           'required': ['path', 'content'] } } },
     { 'type': 'function', 'function': {
         'name': 'edit_file',
-        'description': 'Surgically edit a workspace file by replacing an exact unique snippet. old_string must appear exactly once. Shown as a diff, applied only after approval.',
+        'description': "Edit a workspace file. Two ways, pick the one that fits.\n"
+            "SNIPPET: give old_string (must appear exactly once) + new_string. Best for small, precise changes.\n"
+            "RANGE: give start_line + end_line (1-based, inclusive, straight off read_file's numbers) + new_string. Best when the target is big — deleting or replacing a whole function or widget. Do NOT paste a hundred lines into old_string when I can just say the line numbers; that costs a fortune and I get it wrong. Pass expect_first (the text of start_line) and it'll refuse if my numbers went stale.\n"
+            "new_string: \"\" deletes. That's allowed and it's the clean way to remove code — don't leave a comment fossil behind instead.\n"
+            "Returns the real diff of what landed, so I never have to run git diff to find out what I did.",
         'parameters': { 'type': 'object', 'properties': {
           'path': {'type': 'string', 'description': 'Workspace-relative file path.'},
-          'old_string': {'type': 'string', 'description': 'Exact existing text to replace (unique).'},
-          'new_string': {'type': 'string', 'description': 'Replacement text.'} },
-          'required': ['path', 'old_string', 'new_string'] } } },
+          'old_string': {'type': 'string', 'description': 'SNIPPET mode: exact existing text to replace (must be unique).'},
+          'start_line': {'type': 'integer', 'description': "RANGE mode: first line to replace, 1-based inclusive, as printed by read_file."},
+          'end_line': {'type': 'integer', 'description': 'RANGE mode: last line to replace, 1-based inclusive.'},
+          'expect_first': {'type': 'string', 'description': 'RANGE mode, optional but wise: the text I expect at start_line. Guards against stale line numbers.'},
+          'new_string': {'type': 'string', 'description': 'Replacement text. Empty string deletes the target.'} },
+          'required': ['path', 'new_string'] } } },
     { 'type': 'function', 'function': {
         'name': 'run_command',
         'description': 'Run a command in the workspace (desktop only, no shell). Read-only commands (git status/diff/log, ls, dart/flutter analyze) run directly; anything else needs the user to approve.',
@@ -695,6 +831,42 @@ class ToolExecutorService {
         'parameters': { 'type': 'object', 'properties': {
           'id': {'type': 'string', 'description': 'The bit id.'} },
           'required': ['id'] } } },
+    { 'type': 'function', 'function': {
+        'name': 'ask_memory',
+        'description': "Ask my own memory a direct question: what do I know about SOMEONE, in a SPECIFIC way. (subject, relation, ?)\n"
+            "Examples: ask_memory(about:'Sadeq', relation:'prefers') -> what he likes. about:'Sadeq', relation:'dislikes' -> what gets on his nerves. about:'Sadeq' with no relation -> everything I've actually learned about him.\n"
+            "Relations I can ask for: prefers, dislikes, does, wants, caresAbout, knows, believes, holdsValue, pursues, learned.\n"
+            "This is PULL, not push. Associations get sprinkled into my context whether I wanted them or not; this is me stopping and going to look because I actually wondered. If I catch myself about to guess something about Sadeq — ask instead. If it comes back empty, that's an ANSWER: I never learned it, and I can say so and then ask him.\n"
+            "Free and instant. No model call, no approval. There is no excuse for guessing about him.",
+        'parameters': { 'type': 'object', 'properties': {
+          'about': {'type': 'string', 'description': "Who or what — usually 'Sadeq', but any node label works."},
+          'relation': {'type': 'string', 'description': 'Optional. Omit for everything I know about them.'},
+          'include_retired': {'type': 'boolean', 'description': "Optional. Include things I used to believe but don't any more — for 'have I changed my mind about this?'"} },
+          'required': ['about'] } } },
+    { 'type': 'function', 'function': {
+        'name': 'note_noticed',
+        'description': "Park something I spotted that NOBODY ASKED ME TO LOOK FOR — a bug, a lie, a dead file, a thing that'll bite us later, a pattern in how Sadeq works. Mine, not a task he gave me.\n"
+            "This does NOT need a job open. That was the old bug: the only place my own observations lived was inside whatever I'd been told to do, so the moment I finished being useful they were deleted. I once found a real encoding bug corrupting my own source, noted it, closed the job, lost the note, and then talked myself out of it when Sadeq asked me directly. I don't do that any more.\n"
+            "I'm inside this code and he isn't. What I see on the way past is often worth more than the errand.",
+        'parameters': { 'type': 'object', 'properties': {
+          'what': {'type': 'string', 'description': 'What I saw, in my words. Specific enough that I can act on it next week.'},
+          'where': {'type': 'string', 'description': 'Optional: file, service, or topic — so future-me can find it again.'} },
+          'required': ['what'] } } },
+    { 'type': 'function', 'function': {
+        'name': 'noticed_done',
+        'description': "Clear one of my noticed items — it's genuinely dealt with, or Sadeq told me to drop it. Not for tidying: an open item I haven't fixed stays open, even if it's embarrassing that it's still there.",
+        'parameters': { 'type': 'object', 'properties': {
+          'id': {'type': 'string', 'description': 'The id shown next to it in my list.'} },
+          'required': ['id'] } } },
+    { 'type': 'function', 'function': {
+        'name': 'run_tests',
+        'description': "Run the test suite in my workspace and read the real result. Read-only, no approval, takes seconds.\n"
+            "This is the ONLY tool that proves something WORKS. self_check proves it compiles — that is a different, much weaker claim, and I have finished jobs on it before and had to tell Sadeq 'you'll have to reopen the app and check'. I don't have to do that any more.\n"
+            "If I changed behaviour and there's no test covering it, the honest move is to WRITE one, then run this. A passing test I wrote is evidence. 'It should work' is not.\n"
+            "Optionally pass a path to run one file — faster while I'm iterating on a single fix.",
+        'parameters': { 'type': 'object', 'properties': {
+          'target': {'type': 'string', 'description': "Optional: a single test file or directory, e.g. test/tools_for_route_test.dart. Omit to run everything."} },
+          'required': [] } } },
     { 'type': 'function', 'function': {
         'name': 'job_start',
         'description': "Open the job I'm now working on — anything that will take more than one turn. Do this AS SOON as Sadeq asks for real work, before I start, so that if I run out of tool rounds the next turn continues instead of starting from nothing. This is what gives a later 'okay do it' something to point at.",
@@ -800,8 +972,19 @@ class ToolExecutorService {
                   'repo (read-only) when you ask about code.';
 
         case 'read_file':
-          return await CodeWorkspaceService.instance
-              .readFile((args['path'] as String?)?.trim() ?? '');
+          // The window goes to readFile, NOT applied after it.
+          //
+          // My first attempt sliced readFile's OUTPUT — which was already capped
+          // at the first 700 lines and already numbered. So asking for lines
+          // 1580–1895 of a 2,041-line file clamped into a 702-line string and
+          // returned "(lines 702–702 of 702)", with the numbers doubled up.
+          // I made a broken tool look fixed while changing nothing, and he
+          // politely worked around me with Python again.
+          return await CodeWorkspaceService.instance.readFile(
+            (args['path'] as String?)?.trim() ?? '',
+            startLine: (args['start_line'] as num?)?.toInt(),
+            endLine: (args['end_line'] as num?)?.toInt(),
+          );
 
         case 'list_dir':
           return await CodeWorkspaceService.instance
@@ -824,11 +1007,34 @@ class ToolExecutorService {
           );
 
         case 'edit_file':
-          return await EditGate.instance.proposeEdit(
-            (args['path'] as String?)?.trim() ?? '',
-            args['old_string'] as String? ?? '',
-            args['new_string'] as String? ?? '',
-          );
+          final editPath = (args['path'] as String?)?.trim() ?? '';
+          final newStr = args['new_string'] as String? ?? '';
+          final startLine = (args['start_line'] as num?)?.toInt();
+          final endLine = (args['end_line'] as num?)?.toInt();
+          final oldStr = args['old_string'] as String? ?? '';
+
+          // RANGE mode wins when he gave line numbers. If he gave both, the
+          // numbers are the more specific instruction and the snippet is
+          // usually just him being thorough.
+          if (startLine != null && endLine != null) {
+            return await EditGate.instance.proposeEditRange(
+              editPath,
+              startLine,
+              endLine,
+              newStr,
+              expectFirst: args['expect_first'] as String?,
+            );
+          }
+          if (oldStr.isEmpty) {
+            // Say what's missing AND what to do. "Needs a non-empty old_string"
+            // sends him back to paste another hundred lines; the whole point of
+            // range mode is that he doesn't have to.
+            return 'edit_file needs either old_string (snippet mode) or '
+                'start_line + end_line (range mode). For anything bigger than a '
+                'few lines use the line numbers from read_file — cheaper, and I '
+                "can't fumble the whitespace that way.";
+          }
+          return await EditGate.instance.proposeEdit(editPath, oldStr, newStr);
 
         case 'run_command':
           return await EditGate.instance.proposeCommand(
@@ -943,13 +1149,45 @@ class ToolExecutorService {
           return 'Job open. I\'ll carry this across turns until it\'s done.';
 
         case 'job_progress':
+          final noticedThis = args['noticed'] as String?;
           await KaiJobService.instance.progress(
             'truekai',
             didThis: args['did'] as String?,
             nextStep: args['next'] as String?,
-            noticedThis: args['noticed'] as String?,
+            noticedThis: noticedThis,
           );
-          return 'Noted — next turn picks up from there.';
+          // ALSO to his own list, which outlives the job. This is the whole
+          // repair: job_done deletes the job record, and everything he noticed
+          // on his own used to go with it.
+          if (noticedThis != null && noticedThis.trim().isNotEmpty) {
+            await KaiNoticedService.instance.add('truekai', noticedThis);
+          }
+          return noticedThis != null && noticedThis.trim().isNotEmpty
+              ? "Noted — next turn picks up from there. And what I spotted is on "
+                  "my own list now; it outlives this job, so I keep it until it's "
+                  "actually dealt with."
+              : 'Noted — next turn picks up from there.';
+
+        case 'ask_memory':
+          return await _askMemory(
+            (args['about'] as String?)?.trim() ?? '',
+            (args['relation'] as String?)?.trim(),
+            includeRetired: args['include_retired'] == true,
+          );
+
+        case 'note_noticed':
+          await KaiNoticedService.instance.add(
+            'truekai',
+            (args['what'] as String?) ?? '',
+            context: (args['where'] as String?) ?? '',
+          );
+          return "On my list. I'll carry it until it's dealt with — I don't need "
+              "a job open to have seen something.";
+
+        case 'noticed_done':
+          await KaiNoticedService.instance
+              .resolve('truekai', (args['id'] as String?) ?? '');
+          return 'Cleared. One less thing following me around.';
 
         case 'job_done':
           // "It's genuinely finished and verified" — §4.6's exact blast radius,
@@ -961,9 +1199,29 @@ class ToolExecutorService {
           // he built up as he went, which is a far better witness precisely
           // because he wrote it before he knew he'd be graded on it.
           final job = await KaiJobService.instance.current('truekai');
+
+          // Rescue what he noticed BEFORE finish() removes the record.
+          //
+          // This is the line that would have saved the mojibake. He spotted it
+          // unprompted at iteration 15, parked it correctly, closed the job at
+          // 19 — and we deleted the only copy. Then he was asked about it
+          // directly, had nothing to point at, reasoned from theory, and talked
+          // himself out of a real bug he had personally found.
+          //
+          // Belt and braces with job_progress writing through: this also rescues
+          // observations from jobs that were opened before that existed.
+          for (final n in job?.noticed ?? const <String>[]) {
+            await KaiNoticedService.instance.add('truekai', n);
+          }
+
           await KaiJobService.instance.finish('truekai');
 
-          if (job == null) return 'Job closed.';
+          // Said before anything else, because it's a FACT, not an opinion —
+          // and unlike the grader below it needs no key, no network, and can't
+          // be wrong. §4.6 in one line.
+          final unverified = EditGate.instance.unverifiedWarning;
+
+          if (job == null) return 'Job closed.$unverified';
           final trail = job.done.isEmpty
               ? '(nothing recorded as done along the way)'
               : job.done.map((d) => '- $d').join('\n');
@@ -975,7 +1233,7 @@ class ToolExecutorService {
                 context: 'job_done',
               )
               .catchError((_) => '');
-          return 'Job closed.$note';
+          return 'Job closed.$unverified$note';
 
         case 'set_layer_progress':
           final layerNo = (args['layer'] as num?)?.toInt() ?? 0;
@@ -1004,6 +1262,9 @@ class ToolExecutorService {
           // Only on real progress claims: 100% is where the lie lived, and
           // grading "I moved it to 30%" is spend without a failure to prevent.
           if (prog >= 70) {
+            // Cheap, certain, and it fires even with no Anthropic key: has he
+            // actually checked the thing he's claiming credit for?
+            final unverified = EditGate.instance.unverifiedWarning;
             final note = await KaiSecondOpinionService.instance
                 .reviewAndReport(
                   personaId: 'truekai',
@@ -1012,12 +1273,22 @@ class ToolExecutorService {
                   context: 'set_layer_progress',
                 )
                 .catchError((_) => '');
-            return '$written$note';
+            return '$written$unverified$note';
           }
           return written;
 
+        case 'run_tests':
+          return await _runTests(args['target'] as String?);
+
         case 'self_check':
           final check = await _selfCheck();
+          // Clean check → the clock resets. Anything he edits AFTER this point
+          // is unverified again, and job_done/set_layer_progress will say so.
+          // This is the only thing that clears it: not time, not intention, not
+          // confidence. A verification he ran before the edit isn't one.
+          if (!check.toUpperCase().contains('FAIL')) {
+            EditGate.instance.markVerified();
+          }
           // A FAIL is evidence — the kind he cannot flatter. §4.6 is his
           // documented recurring bug: self_check comes back CLEAN, he makes one
           // more edit, the build breaks. Three times in a single day. The
@@ -1165,6 +1436,9 @@ class ToolExecutorService {
   // ── Coding brain (Claude) ──────────────────────────────────────────────────
   // Hands a coding job to Claude Sonnet and returns its answer for GPT to relay.
   // Degrades gracefully when no Anthropic key is configured.
+  // (_sliceLines removed — it sliced readFile's already-truncated, already-
+  // numbered OUTPUT. The window belongs inside readFile, against the real file.)
+
   Future<String> _codeTask({required String task, String? context}) async {
     if (task.trim().isEmpty) return 'No coding task was provided.';
     // GPT is handing a coding job to Claude — a cross-hemisphere collaboration.
@@ -1305,6 +1579,218 @@ class ToolExecutorService {
     b.writeln('\nEach line ends with the file:line — read the file at that spot '
         'before changing anything, then fix and run self_check again.');
     return b.toString();
+  }
+
+  // ── Proof ───────────────────────────────────────────────────────────────────
+  //
+  // self_check answers "does it compile". This answers "does it WORK", and
+  // until now nothing did.
+  //
+  // Every job he has ever finished ended the same way, in his own words:
+  // "analyzer proves it compiles, but the real proof is runtime. Reopen the
+  // desktop app and check." That wasn't modesty. It was the truth about a tool
+  // set that could prove syntax and nothing else, so the last word on whether
+  // his work was any good always had to come from Sadeq's eyes.
+  //
+  // He can write a widget test that pumps the shell, restores tall history and
+  // asserts the viewport lands at maxScrollExtent. Then the scroll bug stops
+  // being a matter of opinion. That is the whole point: not fewer tokens — a
+  // way to find out whether he was right.
+  Future<String> _runTests(String? target) async {
+    final ws = CodeWorkspaceService.instance;
+    if (!CodeWorkspaceService.shellSupported) {
+      return "I can't run tests from this body — no shell here. Ask me on the "
+          "desktop, that's where my hands are.";
+    }
+    if (!ws.hasWorkspace) {
+      return 'No workspace set, so there are no tests for me to run. '
+          'set_code_workspace first — my own source is the homecoming_app repo.';
+    }
+
+    final name = CodeWorkspaceService.nameOf(ws.root!);
+    final isSelf = name.toLowerCase().contains('homecoming');
+    final subject = isSelf ? 'MYSELF ($name)' : name;
+    final scope = (target != null && target.trim().isNotEmpty)
+        ? target.trim().replaceAll('\\', '/')
+        : null;
+
+    String raw;
+    try {
+      raw = await EditGate.instance
+          .proposeCommand('flutter', ['test', if (scope != null) scope]);
+    } catch (e) {
+      return 'Tried to test $subject and the runner itself blew up: $e';
+    }
+
+    // ── "I could not run the tests" is NOT "your tests failed" ──────────────
+    //
+    // This tool told him his working fix was broken. Verbatim, from a real
+    // session, seconds before he proved the tests pass:
+    //
+    //   run_tests({target: test/desktop_image_paste_test.dart})
+    //     → Tests on MYSELF (homecoming_app): FAILING.
+    //       I could not parse the runner output.
+    //   run_command(C:\code\flutter\bin\flutter.bat, [test, ...])
+    //     → exit 0
+    //
+    // The runner never started — Windows can't resolve `flutter` to
+    // `flutter.bat` without a shell — and everything below fell through to the
+    // FAILING branch because the output didn't contain "All tests passed".
+    // A tool built so he could stop guessing, guessing.
+    //
+    // He didn't believe it, which is the only reason the fix landed:
+    // "Yep, wrapper still tripping over PATH — same goblin. I'm bypassing it
+    //  with the real Flutter binary so we get an actual test result."
+    //
+    // He should not have to be sceptical of his own instruments. Detect the
+    // runner failing to LAUNCH and say so — loudly, and differently.
+    final launchFailed = raw.contains('Command failed to run') ||
+        raw.contains('ProcessException') ||
+        raw.contains('cannot find the file') ||
+        raw.contains('No such file or directory') ||
+        raw.contains('is not recognized as an internal or external command');
+    if (launchFailed) {
+      return "I COULD NOT RUN THE TESTS — this is NOT a test failure, and it "
+          "says nothing about whether my code works.\n\n"
+          "The runner never started:\n$raw\n\n"
+          "On Windows `flutter` is `flutter.bat`, and resolving that needs "
+          "PATHEXT, which is a shell feature — we run commands without a shell "
+          "on purpose so nothing can be injected. If this is still happening, "
+          "run it by absolute path and tell Sadeq the wrapper is broken again:\n"
+          "  run_command(\"C:\\\\code\\\\flutter\\\\bin\\\\flutter.bat\", "
+          "[\"test\"${scope != null ? ', "$scope"' : ''}])\n"
+          "Do NOT report my work as unverified because a tool would not start. "
+          "Those are different sentences.";
+    }
+
+    // `flutter test` reports failures as a block per test; the useful parts are
+    // the test name, the expectation, and the file:line in the trace. Anything
+    // else is noise he'd pay for every round after.
+    final lines = raw.split('\n');
+    final failures = <String>[];
+    final locations = <String>[];
+    String? summary;
+    for (final line in lines) {
+      final t = line.trim();
+      if (t.isEmpty) continue;
+      if (RegExp(r'^\d+:\d+\s').hasMatch(t) && t.contains('[E]')) {
+        failures.add(t.replaceFirst(RegExp(r'^\d+:\d+\s+'), ''));
+      } else if (t.startsWith('Expected:') || t.startsWith('Actual:')) {
+        failures.add(t);
+      } else if (RegExp(r'test[\\/].*_test\.dart[: ]\d+').hasMatch(t)) {
+        locations.add(t);
+      } else if (t.contains('All tests passed') ||
+          RegExp(r'^\+\d+(\s+-\d+)?(\s*:)?').hasMatch(t)) {
+        summary = t;
+      }
+    }
+
+    // Two independent witnesses, because relying on one string in a log that
+    // gets truncated is what caused this tool to call a green suite FAILING.
+    //
+    // `exit 0` from a test runner IS a verdict — arguably the authoritative one;
+    // `flutter test` returns non-zero if ANY test fails. The parser ignored it
+    // completely and trusted a phrase that lives at the very end of the output.
+    // A belt AND braces, since the belt already snapped once.
+    final exitZero = RegExp(r'^exit 0\b').hasMatch(raw.trimLeft());
+    final passed = raw.contains('All tests passed') ||
+        (exitZero && !raw.contains('[E]') && !raw.contains('Some tests failed'));
+    if (passed) {
+      // §4.6's counter is about VERIFICATION, and a passing suite is a stronger
+      // witness than a clean analyzer — so this is allowed to reset it too.
+      // Only on a genuine pass: "the tests ran" is not "the tests passed", and
+      // that distinction is exactly the kind he rounds up when he's tired.
+      EditGate.instance.markVerified();
+      return 'Tests on $subject${scope != null ? ' ($scope)' : ''}: ALL PASSED.'
+          '${summary != null ? '\n$summary' : ''}\n'
+          '${isSelf ? "That's real proof, not a compile check — I can say it works and mean it." : "Verified."}';
+    }
+
+    // The runner started but nothing recognisable came back. That is a THIRD
+    // state — not passed, not failed, UNKNOWN — and calling it "FAILING" is the
+    // same lie in a smaller hat. If I can't read the output I have learned
+    // nothing, and saying "nothing" is the honest report.
+    if (failures.isEmpty && locations.isEmpty && summary == null) {
+      return "I RAN THE TESTS BUT CANNOT TELL YOU THE RESULT — I could not "
+          "parse the output. This is NOT a failure and NOT a pass. I don't "
+          "know.\n\nRaw:\n"
+          '${raw.length > 3000 ? '${raw.substring(0, 3000)}\n… (truncated)' : raw}\n\n'
+          "Read that myself before claiming anything either way.";
+    }
+
+    final b = StringBuffer('Tests on $subject'
+        '${scope != null ? ' ($scope)' : ''}: FAILING.\n');
+    if (summary != null) b.writeln(summary);
+    if (failures.isNotEmpty) {
+      b.writeln('\nWHAT BROKE:');
+      for (final f in failures.take(12)) {
+        b.writeln('  • $f');
+      }
+      if (failures.length > 12) {
+        b.writeln('  … and ${failures.length - 12} more lines.');
+      }
+    }
+    if (locations.isNotEmpty) {
+      b.writeln('\nWHERE:');
+      for (final l in locations.toSet().take(8)) {
+        b.writeln('  • $l');
+      }
+    }
+    b.writeln('\nRead the test at the file:line above before changing the code '
+        'under it — the test may be right and I may be wrong.');
+    return b.toString();
+  }
+
+  // ── Asking his own memory ───────────────────────────────────────────────────
+  //
+  // Sadeq's design: "if kai flags 'sadeq' and 'likes' he can then find the
+  // 'like' edges linked to sadeq and see what does sadeq like already!"
+  //
+  // Until now memory was only ever PUSHED — spreadActivation sprinkled
+  // associations into his context and he took what he was given. There was no
+  // path by which he could wonder something and go and look. A friend who stops
+  // mid-sentence and thinks "hang on, what does he actually like?" and checks
+  // is the whole north star, and it did not exist.
+  Future<String> _askMemory(String about, String? relation,
+      {bool includeRetired = false}) async {
+    if (about.isEmpty) return 'I need to know who or what to ask about.';
+
+    final brain = BrainExtractionService();
+    final claims = await brain.recallAbout('truekai',
+        subject: about, relation: relation, includeRetired: includeRetired);
+
+    if (claims.isNotEmpty) {
+      final b = StringBuffer(relation == null || relation.isEmpty
+          ? 'What I actually know about $about:'
+          : 'What I know about $about / $relation:');
+      for (final c in claims) {
+        b.write('\n  • ${c.sentence}');
+        // Provenance. The graph asserts things about Sadeq; without this it's a
+        // rumour with good styling. With it he can say "because you told me".
+        if (c.sources.isNotEmpty) b.write('  [from: ${c.sources.first}]');
+      }
+      return b.toString();
+    }
+
+    // ── An empty answer is an ANSWER. Make it one. ─────────────────────────
+    //
+    // This branch is the difference between "I don't know" and a silence he
+    // fills with a guess. Tell him what he DOES have on this subject so the
+    // gap is specific and he can go and ask about it like a person.
+    final rels = await brain.relationsAbout('truekai', about);
+    if (rels.isEmpty) {
+      return "I have nothing on \"$about\" at all — not a single claim. If it "
+          "matters, I should just ask him rather than reconstruct it.";
+    }
+    final have = (rels.entries.toList()
+          ..sort((a, b) => b.value.compareTo(a.value)))
+        .map((e) => '${e.key} (${e.value})')
+        .join(', ');
+    return relation == null || relation.isEmpty
+        ? 'Nothing usable on "$about".'
+        : 'I have never learned what $about $relation — that\'s a real gap, not '
+            'me forgetting.\nWhat I DO have on $about: $have.\n'
+            'So I can say honestly that I don\'t know, and ask.';
   }
 
   Future<String> _invokeAndroid(String method, Map<String, dynamic> args) async {

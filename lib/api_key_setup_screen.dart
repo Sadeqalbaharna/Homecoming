@@ -2,7 +2,6 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'services/core/secure_storage_service.dart';
 import 'services/ai/ai_config.dart';
@@ -19,7 +18,6 @@ class ApiKeySetupScreen extends StatefulWidget {
 
 class _ApiKeySetupScreenState extends State<ApiKeySetupScreen> {
   final _secureStorage = SecureStorageService();
-  final _rawStorage = const FlutterSecureStorage();
   final _openaiController = TextEditingController();
   final _elevenlabsController = TextEditingController();
   final _voiceIdController = TextEditingController();

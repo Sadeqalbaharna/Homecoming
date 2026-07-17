@@ -3,7 +3,7 @@
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:homecoming_app/services/ai/memory_service.dart';
-import 'memory_golden_test.dart';
+import 'memory_golden_data.dart';
 
 /// Run all golden tests and return results
 Future<List<MemoryTestResult>> runGoldenTests({

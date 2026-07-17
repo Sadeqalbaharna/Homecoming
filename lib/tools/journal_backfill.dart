@@ -5,7 +5,6 @@
 //
 // Usage: call JournalBackfill.run(personaId) from a debug screen or initState.
 
-import 'package:firebase_database/firebase_database.dart';
 import '../services/core/kai_db.dart';
 import '../services/core/journal_service.dart';
 import '../services/core/firebase_service.dart';
@@ -23,7 +22,7 @@ class JournalBackfill {
   }) async {
     if (!FirebaseService.isAvailable) {
       print('⚠️ [Backfill] Firebase not available');
-      return BackfillResult(processed: 0, written: 0, skipped: 0);
+      return const BackfillResult(processed: 0, written: 0, skipped: 0);
     }
 
     print('📓 [Backfill] Starting journal backfill for $personaId...');
@@ -36,7 +35,7 @@ class JournalBackfill {
 
     if (!snap.exists || snap.value == null) {
       print('📓 [Backfill] No conversations found at conversations/$personaId');
-      return BackfillResult(processed: 0, written: 0, skipped: 0);
+      return const BackfillResult(processed: 0, written: 0, skipped: 0);
     }
 
     final raw = Map<String, dynamic>.from(snap.value as Map);
@@ -112,7 +111,7 @@ class JournalBackfill {
             moodDeltas: c.personalityDeltas,
           );
           written++;
-          print('📓 [Backfill] ✅ Wrote entry ${written} / ${candidates.length - skipped}');
+          print('📓 [Backfill] ✅ Wrote entry $written / ${candidates.length - skipped}');
           // Small delay between batches to avoid hammering the API
           await Future.delayed(const Duration(milliseconds: 500));
         } catch (e) {

@@ -4,7 +4,6 @@ library;
 
 import 'dart:async';
 import 'dart:math';
-import 'package:firebase_database/firebase_database.dart';
 import 'core/kai_db.dart';
 import '../models/knowledge_node.dart';
 import 'core/firebase_service.dart';

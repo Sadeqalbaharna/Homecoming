@@ -35,6 +35,22 @@ class ToolPolicy {
   final ToolRisk risk;
   final Set<ToolCapability> capabilities;
   final Set<String> requiredArgs;
+
+  /// Args that must be PRESENT but are allowed to be an empty string.
+  ///
+  /// The distinction is not pedantic. For edit_file, `new_string: ""` is not a
+  /// malformed call — it is how you delete code. The validator's blanket
+  /// "empty string means missing" rule made deletion structurally impossible,
+  /// and it went unnoticed because nothing had asked him to delete anything.
+  ///
+  /// From the trace where it surfaced: he tried to cut a dead 200-line widget,
+  /// was told off for an empty new_string, tried whitespace, was told off
+  /// again — "It rejected whitespace too. Good, whatever" — and settled for
+  /// replacing the fossil with a comment. The comment now in that file exists
+  /// only because the tool wouldn't let him remove the thing cleanly. He did
+  /// the right work and the gate made him leave litter.
+  final Set<String> emptyOkArgs;
+
   final bool returnsData;
   final bool androidOnly;
   final bool needsUserApproval;
@@ -44,6 +60,7 @@ class ToolPolicy {
     required this.risk,
     required this.capabilities,
     this.requiredArgs = const {},
+    this.emptyOkArgs = const {},
     this.returnsData = false,
     this.androidOnly = false,
     this.needsUserApproval = false,
@@ -266,7 +283,18 @@ class ToolPolicyService {
       name: 'edit_file',
       risk: ToolRisk.destructive,
       capabilities: {ToolCapability.coding},
-      requiredArgs: {'path', 'old_string', 'new_string'},
+      // old_string is NOT required any more — edit_file has two modes now, and
+      // range mode (start_line/end_line) exists precisely so he doesn't have to
+      // paste the thing he's deleting. The executor enforces "one mode or the
+      // other" and can say something useful about which; this gate can only say
+      // "missing", which would send him straight back to pasting.
+      //
+      // Mirrors the schema's 'required' list. They must not drift: declaring an
+      // arg required here that the schema calls optional invents a rejection he
+      // has no way to predict.
+      requiredArgs: {'path', 'new_string'},
+      // new_string: "" is a deletion, not a mistake.
+      emptyOkArgs: {'new_string'},
       needsUserApproval: true,
     ),
     'run_command': ToolPolicy(
@@ -375,6 +403,75 @@ class ToolPolicyService {
       requiredArgs: {'id'},
       needsUserApproval: true,
     ),
+    // ── The work stack ───────────────────────────────────────────────────
+    // These four have been running with no policy since they were added, and
+    // saying so in a 4-line warning on every single boot. They're bookkeeping:
+    // they move a job marker around, they don't touch the world. Declaring
+    // them costs nothing and stops the warning being wallpaper — a startup
+    // nag that's always there is a nag nobody reads, including the one time
+    // it's about something that matters.
+    'job_start': ToolPolicy(
+      name: 'job_start',
+      risk: ToolRisk.safeAction,
+      capabilities: {ToolCapability.self},
+      requiredArgs: {'goal'},
+    ),
+    // requiredArgs MUST mirror the 'required' list in the tool schema
+    // (tool_executor_service.dart ~797-823). Declaring an arg required here
+    // that the schema says is optional invents a rejection GPT has no way to
+    // predict — it would burn an iteration being told off for a call the
+    // schema told it was legal. job_progress and job_done are 'required': [].
+    'job_progress': ToolPolicy(
+      name: 'job_progress',
+      risk: ToolRisk.safeAction,
+      capabilities: {ToolCapability.self},
+    ),
+    'job_done': ToolPolicy(
+      name: 'job_done',
+      risk: ToolRisk.safeAction,
+      capabilities: {ToolCapability.self},
+    ),
+    // Asking his own memory. Read-only, no approval, no model call — the same
+    // reasoning as self_check and run_tests: anything standing between him and
+    // finding out will get skipped exactly when it matters. He should be able
+    // to check a fact about Sadeq as cheaply as he can guess one.
+    'ask_memory': ToolPolicy(
+      name: 'ask_memory',
+      risk: ToolRisk.read,
+      capabilities: {ToolCapability.memory},
+      requiredArgs: {'about'},
+      returnsData: true,
+    ),
+    // His own noticing. Deliberately NOT scoped to coding: the best thing he
+    // ever notices might be about Sadeq, not about a file.
+    'note_noticed': ToolPolicy(
+      name: 'note_noticed',
+      risk: ToolRisk.safeAction,
+      capabilities: {ToolCapability.self},
+      requiredArgs: {'what'},
+    ),
+    'noticed_done': ToolPolicy(
+      name: 'noticed_done',
+      risk: ToolRisk.safeAction,
+      capabilities: {ToolCapability.self},
+      requiredArgs: {'id'},
+    ),
+    'set_layer_progress': ToolPolicy(
+      name: 'set_layer_progress',
+      risk: ToolRisk.safeAction,
+      capabilities: {ToolCapability.self},
+      requiredArgs: {'layer', 'progress', 'evidence'},
+    ),
+    // Proof. Read-only and no approval — the same reasoning as self_check, and
+    // for the same reason: anything that stands between him and finding out
+    // whether he was right will be skipped when he's tired, and being tired is
+    // exactly when he rounds up.
+    'run_tests': ToolPolicy(
+      name: 'run_tests',
+      risk: ToolRisk.read,
+      capabilities: {ToolCapability.self, ToolCapability.coding},
+      returnsData: true,
+    ),
     'self_check': ToolPolicy(
       name: 'self_check',
       risk: ToolRisk.read,
@@ -467,7 +564,15 @@ class ToolPolicyService {
     final missing = policy.requiredArgs.where((key) {
       final value = args[key];
       if (value == null) return true;
-      if (value is String && value.trim().isEmpty) return true;
+      // An empty string is usually a malformed call — but not always. For
+      // edit_file, new_string: "" IS the delete operation. Declared per-tool
+      // rather than special-cased here, so the next tool with a legitimately
+      // empty argument doesn't have to rediscover this the hard way.
+      if (value is String &&
+          value.trim().isEmpty &&
+          !policy.emptyOkArgs.contains(key)) {
+        return true;
+      }
       if (value is List && value.isEmpty) return true;
       return false;
     }).toList(growable: false);

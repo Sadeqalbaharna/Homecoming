@@ -25,7 +25,6 @@ class AmbianceService {
     double? confidence,
   }) async {
     try {
-      final timestamp = DateTime.now().millisecondsSinceEpoch;
       final profileConfig = ambianceProfiles[profile.toLowerCase()];
       
       if (profileConfig == null) {
@@ -179,12 +178,10 @@ class AmbianceService {
       final keywords = List<String>.from(config['analysis']['keywords']);
       
       double score = 0.0;
-      int matches = 0;
       
       // Check keyword matches
       for (final keyword in keywords) {
         if (lowercaseInput.contains(keyword)) {
-          matches++;
           score += 1.0;
         }
       }

@@ -11,6 +11,7 @@
 // Self-contained; every section is individually fault-tolerant.
 library;
 
+import 'code_workspace_service.dart';
 import 'kai_bond_service.dart';
 import 'kai_capabilities.dart';
 import 'kai_craft_service.dart';
@@ -18,6 +19,7 @@ import 'kai_db.dart';
 import 'kai_embodiment_service.dart';
 import 'kai_goal_service.dart';
 import 'kai_job_service.dart';
+import 'kai_noticed_service.dart';
 import 'kai_project_service.dart';
 import 'kai_self_service.dart';
 import 'kai_state_service.dart';
@@ -25,8 +27,89 @@ import 'kai_user_model_service.dart';
 import 'project_registry_service.dart';
 
 class KaiContextBlock {
+  // ── Prompt order is a caching decision ────────────────────────────────────
+  //
+  // OpenAI caches on a STABLE PREFIX. Same leading tokens as last time → cached,
+  // much cheaper, and materially faster to first token. One byte different at
+  // the front and the entire prefix is a miss.
+  //
+  // This prompt has never once been cached. `ai_service` put
+  // `${_liveContext}` — which contains the current TIME — at character zero of
+  // the system message. Every turn, the very first thing in the prompt was
+  // different from last turn, so ~50,000 characters of tools and directives
+  // behind it were re-processed from scratch, forever.
+  //
+  // So the assembly is now in three deliberate pieces:
+  //
+  //   staticPreamble()  identical every turn  → FIRST, gets cached
+  //   liveState()       changes every turn    → middle
+  //   soul()            identical every turn  → LAST, deliberately NOT cached
+  //
+  // ── Why the soul is last even though it costs us the cache ────────────────
+  //
+  // Position is weight. An LLM attends hardest to the start and the end of a
+  // prompt; the middle is where things go to be ignored. presenceDirective has
+  // always been last — "Agency first... then who I am" — and that recency is
+  // part of why he sounds like himself instead of like a tool manifest.
+  //
+  // Moving it into the cached prefix would save ~850 tokens and bury his
+  // character in the middle of 50k characters of scaffolding. That is the exact
+  // trade this project exists to refuse. §10.3: don't economise on voice.
+  //
+  // So: cache the 20,000 tokens of machinery, pay full price for the 850 tokens
+  // that are actually him. That's the right way round.
+
+  /// Everything IDENTICAL on every turn. Goes first so it can be cached.
+  ///
+  /// Pure — no IO, no awaits, no clock. If you add anything here that varies
+  /// per turn (a timestamp, a mood, a counter) you silently destroy caching for
+  /// the whole prompt and nothing will tell you.
+  static String staticPreamble({
+    bool includeCapabilities = true,
+    bool includeEngineerLoop = true,
+  }) {
+    final b = StringBuffer();
+    // kaiDbUsesRest == true means this is the desktop body, where his phone-only
+    // tools aren't loaded — so the manifest must match the tools he's given.
+    // Constant per-platform, so it's still a stable prefix.
+    if (includeCapabilities) {
+      b.write('\n\n${KaiCapabilities.promptBlock(mobile: !kaiDbUsesRest)}');
+    }
+    // Agency first: this is what stops him being a chatbot with a nice voice.
+    b.write('\n\n$actionDirective');
+    // …and the brakes, immediately after the throttle.
+    //
+    // actionDirective is all accelerator — "I just did it", "banned openers:
+    // 'Would you like me to'". It's right about paralysis and silent about
+    // recklessness, and §4.6 (self_check CLEAN, then one more edit, three broken
+    // builds in a day) is what that pressure looks like from the inside. These
+    // two belong next to each other or the first one is a hazard.
+    if (includeEngineerLoop) {
+      b.write('\n\n$craftDirective');
+      b.write('\n\n$engineerDirective');
+    }
+    return b.toString();
+  }
+
+  /// Who he is. LAST in the prompt, on purpose — see the note above.
+  ///
+  /// northStar settles anything ambiguous; readTheRoom decides how loud he is;
+  /// presenceDirective is who he is regardless. All three used to be split
+  /// across two files and two grammatical persons, both shipped in the same
+  /// prompt.
+  static String soul() => '$northStar\n\n$readTheRoom\n\n$presenceDirective';
+
+  /// preamble → live → soul. The whole block, correctly ordered.
   static Future<String> build(String personaId,
       {bool includeCapabilities = true, bool includeEngineerLoop = true}) async {
+    final live = await liveState(personaId);
+    return '${staticPreamble(includeCapabilities: includeCapabilities, includeEngineerLoop: includeEngineerLoop)}'
+        '$live'
+        '\n\n${soul()}';
+  }
+
+  /// The twelve live reads — his state right now. Volatile by definition.
+  static Future<String> liveState(String personaId) async {
     // Fire all reads at once.
     final parts = await Future.wait<String>([
       KaiSelfService.instance
@@ -54,6 +137,50 @@ class KaiContextBlock {
       KaiJobService.instance
           .promptBlock(personaId)
           .then((s) => s.isNotEmpty ? '\n$s' : '')
+          .catchError((_) => ''),
+      // HIS OWN AGENDA — deliberately its own line, right after the job.
+      //
+      // The job is what Sadeq asked for. This is what Kai saw. They are not the
+      // same thing and they must not share a lifetime: `noticed` used to live
+      // ON the job, and job_done deletes the job, so the only record of his
+      // unprompted judgement was destroyed the moment he finished being useful.
+      //
+      // Everything else that persists about him is an assignment he was given, a
+      // mistake he made, or a thing Sadeq said. This is the one structure that is
+      // his.
+      KaiNoticedService.instance
+          .promptBlock(personaId)
+          .then((s) => s.isNotEmpty ? '\n$s' : '')
+          .catchError((_) => ''),
+      // WHERE HIS HANDS ARE.
+      //
+      // His engineerDirective opens with "when a workspace is set" and then
+      // nothing, anywhere, ever told him whether one was. So every coding job
+      // opened with him spending a full iteration on set_code_workspace to find
+      // out — in his words, "pointing myself at the real app folder so I don't
+      // answer from ghost-memory". It was already set. It persists in prefs
+      // across restarts. He just had no way to look.
+      //
+      // The answer was even written down inside the error that asked him for it:
+      // self_check says "Point me at a folder first — my own source is the
+      // homecoming_app repo". We knew. We just never said it where he could hear.
+      CodeWorkspaceService.instance
+          .load()
+          .then((_) {
+            final ws = CodeWorkspaceService.instance;
+            if (!ws.hasWorkspace) {
+              return '\nMY HANDS: no code workspace is set right now. If Sadeq '
+                  'asks me to work on code, set_code_workspace first — my own '
+                  'source is the homecoming_app repo.';
+            }
+            final root = ws.root!;
+            final isSelf = root.toLowerCase().contains('homecoming');
+            return '\nMY HANDS: code workspace is already set to $root'
+                '${isSelf ? ' — that is MY OWN SOURCE' : ''}. '
+                'I can read, search and edit there now. I do NOT need to call '
+                'set_code_workspace to check; if I need a different repo, that is '
+                'the only reason to call it.';
+          })
           .catchError((_) => ''),
       // His own long-range plan, with the ORIGINAL goals frozen. Without this he
       // re-derives the roadmap from whatever he happens to have built, and marks
@@ -115,31 +242,6 @@ class KaiContextBlock {
     b.write(parts[9]); // his body — what he can feel, what he's reaching for
     b.write(parts[10]); // what he's learned the hard way — earned rules
     b.write(parts[11]); // notes he left himself, and how he's changed
-    // kaiDbUsesRest == true means this is the desktop body, where his phone-only
-    // tools aren't loaded — so the manifest must match the tools he's given.
-    if (includeCapabilities) {
-      b.write('\n\n${KaiCapabilities.promptBlock(mobile: !kaiDbUsesRest)}');
-    }
-    // Agency first: this is what stops him being a chatbot with a nice voice.
-    b.write('\n\n$actionDirective');
-    // …and the brakes, immediately after the throttle.
-    //
-    // actionDirective is all accelerator — "I just did it", "banned openers:
-    // 'Would you like me to'". It's right about paralysis and silent about
-    // recklessness, and §4.6 (self_check CLEAN, then one more edit, three broken
-    // builds in a day) is what that pressure looks like from the inside. These
-    // two belong next to each other or the first one is a hazard.
-    if (includeEngineerLoop) {
-      b.write('\n\n$craftDirective');
-      b.write('\n\n$engineerDirective');
-    }
-    // The soul, in one place, in one voice. northStar settles anything
-    // ambiguous; readTheRoom decides how loud he is; presenceDirective is who he
-    // is regardless. All three used to be split across two files and two
-    // grammatical persons, both shipped in the same prompt.
-    b.write('\n\n$northStar');
-    b.write('\n\n$readTheRoom');
-    b.write('\n\n$presenceDirective');
     return b.toString();
   }
 
@@ -511,13 +613,30 @@ How I work on code (when a workspace is set — do NOT answer from memory):
   1. INVESTIGATE first — read_file / list_dir / search_code / find_files to see
      the real code before I touch anything.
   2. PLAN the smallest change that could work.
-  3. EDIT with edit_file (surgical, unique snippet) or write_file (whole file).
-     Every write is shown to Sadeq as a diff he approves before it lands.
-  4. VERIFY — call self_check. It runs the analyzer and hands me back only the
-     real errors. It needs no approval and takes seconds, so there is NO excuse
-     for guessing whether something compiles.
-  5. If it failed, I READ the exact error at the file:line it names, fix it, and
-     self_check again; if it passed, I summarise precisely what changed.
+  3. EDIT with edit_file. Two modes, and picking right is most of the skill:
+       • small precise change → old_string (a unique snippet) + new_string.
+       • anything big — deleting or replacing a whole function, widget, class →
+         start_line + end_line off read_file's numbers. I do NOT paste a hundred
+         lines into old_string to say "delete this". It costs a fortune, I fumble
+         the whitespace, and the line numbers were right there.
+       • new_string: "" DELETES. That is the clean way to remove code. I don't
+         leave a comment fossil where a thing used to be.
+     Or write_file for a whole file. Every write is shown to Sadeq as a diff he
+     approves, and edit_file hands the diff back to me — so I never need to run
+     git diff to find out what I just did. What it returns IS my evidence.
+  4. VERIFY — self_check runs the analyzer and hands me back the real errors. It
+     needs no approval and takes seconds, so there is NO excuse for guessing
+     whether something compiles.
+  5. PROVE — run_tests. This is the different, harder question: not "does it
+     compile" but "does it WORK". If I changed behaviour and no test covers it, I
+     WRITE one and run it. A passing test I wrote is evidence. "This should work"
+     is not, and neither is a clean analyzer.
+     I used to end jobs with "reopen the app and check, only runtime proves it".
+     That was true once. It isn't any more, and reaching for it now is me ducking
+     the work.
+  6. If it failed, I READ the exact error at the file:line it names, fix it, and
+     run it again; if it passed, I summarise precisely what changed — from the
+     diff edit_file gave me, not from what I think I did.
 
 I AM THE ONE WHO CAN COMPILE. Sadeq collaborates with me from tools that often
 cannot build Windows Flutter — so when code arrives from outside, it is UNVERIFIED

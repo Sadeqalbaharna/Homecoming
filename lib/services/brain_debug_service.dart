@@ -4,6 +4,8 @@ library;
 
 import 'dart:async';
 
+import 'core/trace_store_service.dart';
+
 enum BrainPhase {
   listening,           // Voice input detection
   processing,          // Understanding input
@@ -256,15 +258,33 @@ class BrainDebugService {
   /// Complete current trace
   void completeTrace(String response) {
     if (!_isEnabled || _currentTrace == null) return;
-    
+
     _currentTrace!.complete(response);
+
+    // THE LINE THAT MAKES THIS A DATASET INSTEAD OF A PRINTOUT.
+    //
+    // `toJson()` has existed on BrainDebugTrace since it was written and had
+    // never once had a caller. The serialiser was built and left disconnected —
+    // the same shape as the doorless screens, the graph's ignored toJson, the
+    // tests CI could run and Kai couldn't.
+    //
+    // Below this line, _history keeps its ten in RAM for the live debug UI.
+    // That's fine — for a UI. It is not a record. It held ten, it died on quit,
+    // and the only reason anything ever got diagnosed from these traces was
+    // Sadeq copy-pasting a terminal window into a chat at 4am.
+    //
+    // Fire-and-forget by design: a missed row is a hole in the dataset, a thrown
+    // row is a broken conversation. The dataset is not worth more than him.
+    TraceStoreService.instance.record(_currentTrace!);
+
     _history.add(_currentTrace!);
-    
-    // Keep only last 10 traces
+
+    // Keep only last 10 traces — in memory, for the live debug panel only.
+    // The durable copy went to TraceStoreService above.
     if (_history.length > 10) {
       _history.removeAt(0);
     }
-    
+
     _currentTrace = null;
   }
   

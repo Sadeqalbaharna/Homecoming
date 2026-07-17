@@ -30,6 +30,8 @@ dependencies:
   # physically cannot read image bytes, which is why pasting a screenshot into
   # Kai silently did nothing. Small, and supports Windows/macOS/Linux/Android.
   pasteboard: ^0.2.0
+  # Re-encode Windows clipboard BMP/DIB screenshots into PNG for OpenAI vision.
+  image: ^4.3.0
   # Smart home — WebSocket TV control + SSDP discovery
   web_socket_channel: ^3.0.1
   # Firebase
