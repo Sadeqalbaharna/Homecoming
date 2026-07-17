@@ -22,9 +22,15 @@
 
 library;
 
+import 'dart:async'; // unawaited — the graph must never block consolidation
 import 'dart:convert';
 import 'package:dio/dio.dart';
 import '../ai/usage_tracking_service.dart';
+// The episode → graph wire. See _extractEpisodeIntoGraph: this is the one place
+// in the system that can see a whole scene, and it had never spoken to the one
+// place that stores what he knows.
+import 'brain_extraction_service.dart';
+import 'emotional_event_service.dart';
 import 'kai_db.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'firebase_service.dart';
@@ -122,6 +128,92 @@ class MemoryConsolidationService {
     });
 
     print('🗜️ [Consolidation] Done — ${(result['key_moments'] as List?)?.length ?? 0} key moments stored');
+
+    // ── THE EPISODE REACHES THE GRAPH ────────────────────────────────────────
+    //
+    // This is the wire that was missing, and it is the level-5 move.
+    //
+    // Extraction has always run PER TURN. But a turn is the wrong unit — most
+    // turns contain no memory at all, and it isn't a gate problem, it's a
+    // physics problem:
+    //
+    //   "not terribly, couldve been better, but eh"
+    //
+    // There is nothing in that sentence to extract. No prompt, no model, no
+    // threshold can find a memory in it, because there isn't one. But the
+    // MORNING it belongs to contains one: "Sadeq slept badly on the 17th and
+    // wanted to go gentle — no heroic productivity goblin nonsense."
+    //
+    // Memories don't live in turns. They live in scenes. Human consolidation is
+    // offline and episodic for exactly this reason — you don't remember a
+    // conversation one word at a time.
+    //
+    // And the episode boundary ALREADY EXISTED, right here, firing on its own
+    // every 20 turns, reading real history and producing `key_moments` — which
+    // then went into Firebase and stopped. The one thing in this system that
+    // could see a whole scene was not on speaking terms with the one thing that
+    // stores what he knows. The signature disease, one more time: the correct
+    // thing, disconnected.
+    //
+    // Fire-and-forget: consolidation must never be blocked by extraction, and
+    // extraction failing means one episode isn't in the graph — not that the
+    // consolidated memory is lost. It's already written above.
+    unawaited(_extractEpisodeIntoGraph(personaId, result));
+  }
+
+  /// Feed the consolidated EPISODE to the knowledge graph.
+  ///
+  /// The key moments are already the distilled version — GPT has read 20 turns
+  /// and said what mattered. Handing that to extraction is a completely
+  /// different question from handing it "eh":
+  ///
+  ///   per-turn:  "what entities are in this sentence?"     → nouns
+  ///   episodic:  "what became true across this scene?"     → claims
+  ///
+  /// [toolsUsed] is deliberately non-empty. This is not a chat turn — it is a
+  /// scene that GPT has already judged significant enough to keep. Passing
+  /// 'contemplate' marks it as real work on the change axis, so the salience
+  /// gate doesn't re-litigate a decision that has already been made by the
+  /// thing with more context than it.
+  Future<void> _extractEpisodeIntoGraph(
+    String personaId,
+    Map<String, dynamic> result,
+  ) async {
+    try {
+      final moments = (result['key_moments'] as List?) ?? const [];
+      if (moments.isEmpty) return;
+
+      // Each moment is its own claim, so they go in as one block rather than
+      // one call per moment — the relationships BETWEEN them are half the
+      // point, and extraction can only see those if it sees them together.
+      final episode = moments
+          .map((m) => m is Map ? (m['moment'] ?? m['text'] ?? m).toString() : m.toString())
+          .where((s) => s.trim().isNotEmpty)
+          .map((s) => '• $s')
+          .join('\n');
+      if (episode.trim().isEmpty) return;
+
+      final patterns = (result['emotional_patterns'] ?? '').toString().trim();
+
+      print('🧬 [Consolidation] Feeding the episode to the graph — '
+          '${moments.length} moments');
+
+      await BrainExtractionService().extractAndMerge(
+        personaId: personaId,
+        userMessage: 'What actually happened between us recently, distilled '
+            'from the last stretch of conversation:\n$episode'
+            '${patterns.isEmpty ? '' : '\n\nThe emotional shape of it: $patterns'}',
+        aiReply: 'This is a consolidated episode, not a single exchange. Extract '
+            'what became TRUE across it — claims about Sadeq, about me, about '
+            'what we are building and how we work together. Not the words that '
+            'were said.',
+        eventType: EmotionalEventType.deep,
+        eventIntensity: 40,
+        toolsUsed: const {'contemplate'},
+      );
+    } catch (e) {
+      print('⚠️ [Consolidation] Episode extraction failed: $e');
+    }
   }
 
   // ── GPT consolidation ──────────────────────────────────────────────────────

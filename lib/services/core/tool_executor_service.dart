@@ -34,8 +34,18 @@ import 'kai_bond_service.dart';
 import 'kai_embodiment_service.dart';
 import 'kai_db.dart';
 import 'tool_policy_service.dart';
+import '../brain_debug_service.dart';
 import '../smarthome/network_discovery_service.dart';
 import '../smarthome/smart_tv_service.dart';
+
+enum ToolOutcome {
+  passed,
+  failed,
+  unknown,
+  recorded;
+
+  String get label => name;
+}
 
 class ToolExecutorService {
   static const _channel = MethodChannel('com.homecoming.app/kai_tools');
@@ -832,6 +842,16 @@ class ToolExecutorService {
           'id': {'type': 'string', 'description': 'The bit id.'} },
           'required': ['id'] } } },
     { 'type': 'function', 'function': {
+        'name': 'prune_memory',
+        'description': "Look at the SHAPE of my own knowledge graph, and optionally clean it.\n"
+            "dry_run:true (the default) changes NOTHING. It reports how many of my edges carry a real relation versus how many just say 'related'/'mentioned' — which is co-occurrence, two nouns appearing near each other, and is NOT a memory. A graph where everything says 'relates to' IS a word cloud; that is the definition of one.\n"
+            "dry_run:false archives the whole graph first, then removes nodes that fail the stranger test — labels like 'chat' or 'message' that a stranger would learn nothing from. It ARCHIVES BEFORE IT DELETES, always, and if it cannot archive it refuses to run and tells me so. Nothing is destroyed; the old graph is kept at knowledge_graph_archive.\n"
+            "If it comes back ABORTED, that is NOT 'my graph is clean' — it means the archive rule isn't deployed and Sadeq needs to run: firebase deploy --only database\n"
+            "This lived on a phone-only screen the desktop had no door to, which is why my graph has never once been cleaned.",
+        'parameters': { 'type': 'object', 'properties': {
+          'dry_run': {'type': 'boolean', 'description': 'Default TRUE — measure only, change nothing. Set false to actually prune.'} },
+          'required': [] } } },
+    { 'type': 'function', 'function': {
         'name': 'ask_memory',
         'description': "Ask my own memory a direct question: what do I know about SOMEONE, in a SPECIFIC way. (subject, relation, ?)\n"
             "Examples: ask_memory(about:'Sadeq', relation:'prefers') -> what he likes. about:'Sadeq', relation:'dislikes' -> what gets on his nerves. about:'Sadeq' with no relation -> everything I've actually learned about him.\n"
@@ -888,9 +908,10 @@ class ToolExecutorService {
         'parameters': { 'type': 'object', 'properties': {}, 'required': [] } } },
     { 'type': 'function', 'function': {
         'name': 'set_layer_progress',
-        'description': "Report honest progress on one layer of my Smarter Project (see MY PLAN in context). Progress is 0-100 and MUST come with evidence — what I actually did. I cannot edit the layer's goal; it's frozen on purpose. 100 means the goal AS WRITTEN is genuinely met and verified — not that something adjacent exists. If I'm tempted to round up, that's the exact instinct that had me claim 7/7 last time.",
+        'description': "Report honest progress on one frozen-goal project layer. Defaults to Kai Smarter Project; pass projectId 'sentience_ladder' for the Sentience Ladder. Progress is 0-100 and MUST come with evidence — what I actually did. I cannot edit the layer's goal. 100 means the goal AS WRITTEN is genuinely met and verified — not that something adjacent exists.",
         'parameters': { 'type': 'object', 'properties': {
-          'layer': {'type': 'integer', 'description': 'Layer number, 1-7.'},
+          'projectId': {'type': 'string', 'description': "Optional project id. Use 'kai_smarter' or 'sentience_ladder'. Defaults to 'kai_smarter'."},
+          'layer': {'type': 'integer', 'description': 'Layer number, usually 1-7.'},
           'progress': {'type': 'integer', 'description': '0-100, honestly.'},
           'evidence': {'type': 'string', 'description': 'What I actually did/verified. Required.'} },
           'required': ['layer', 'progress', 'evidence'] } } },
@@ -913,6 +934,135 @@ class ToolExecutorService {
   // create_plan is intercepted upstream in _callOpenAIWithTools before
   // reaching this method — it never arrives here.
 
+  /// What he has ACTUALLY DONE this turn — recorded by the thing that runs the
+  /// tools, which is the only honest witness in the building.
+  ///
+  /// ── Why this exists ───────────────────────────────────────────────────────
+  ///
+  /// The second opinion grades `job.done[]` — the trail he writes with
+  /// job_progress. The comment above that call says the trail is "a far better
+  /// witness precisely because he wrote it before he knew he'd be graded on it."
+  /// That reasoning is sound and it is exactly the bug: he writes the trail,
+  /// THEN does the work, THEN closes the job. The grader reads a snapshot taken
+  /// before the thing it is grading happened.
+  ///
+  /// It has now cried wolf twice, both provably wrong:
+  ///
+  ///   "no test run is cited"  — seconds after two `exit 0` test runs.
+  ///   "9 warnings still remain and tests/analyzer has not been run at all"
+  ///                           — seconds after `CLEAN` and `+170: All tests passed`.
+  ///
+  /// A false positive is worse than a false negative. A grader that cries wolf
+  /// trains you to ignore graders, and this codebase's whole thesis is that
+  /// mechanisms beat rules. The one thing with a clean record started lying.
+  ///
+  /// Recorded HERE rather than in AIService because `execute` is the choke
+  /// point every tool passes through — including the ones TaskPlannerService
+  /// fires, which never touch the agentic loop at all. If it ran, it's in here.
+  static final Set<String> turnTools = {};
+
+  /// Compact receipts from tools whose *outcome* matters to later judgement.
+  ///
+  /// `turnTools` answers "did Kai invoke the tool?". This answers the harder
+  /// question: "what did the tool actually say?" A grader that only sees the
+  /// name `run_tests` still has room to round it up into a pass; these receipts
+  /// make pass/fail/unknown explicit from the returned tool body.
+  static final Map<String, String> turnToolReceipts = {};
+
+  /// Cleared at the top of every turn by AIService. Without this, "thanks"
+  /// after a twenty-iteration refactor inherits its receipts.
+  static void beginTurn() {
+    turnTools.clear();
+    turnToolReceipts.clear();
+  }
+
+  static void recordToolReceipt(String toolName, String result) {
+    final outcome = classifyToolOutcome(toolName, result);
+    recordToolReceiptWithOutcome(toolName, outcome, result);
+  }
+
+  static void recordToolReceiptWithOutcome(
+    String toolName,
+    ToolOutcome outcome,
+    String result,
+  ) {
+    turnToolReceipts[toolName] =
+        '$toolName: ${outcome.label} — ${_receiptSnippet(result)}';
+  }
+
+  /// Legacy fallback for result strings whose branch verdict was not recorded.
+  ///
+  /// The real tools must prefer [recordToolReceiptWithOutcome] at the branch that
+  /// already knows the answer. This parser exists for old callers and tests, so
+  /// it must be conservative: false-positive verification is worse than asking
+  /// me to look twice.
+  static ToolOutcome classifyToolOutcome(String toolName, String result) {
+    final lower = result.toLowerCase();
+    if (toolName == 'self_check') {
+      if (lower.startsWith('self-check') &&
+          (lower.contains(' error(s)') ||
+              lower.contains(' warning(s)') ||
+              lower.contains('\nerrors ') ||
+              lower.contains('\nwarnings '))) {
+        return ToolOutcome.failed;
+      }
+      if (lower.contains('analyzer itself blew up') ||
+          lower.contains("can't check myself") ||
+          lower.contains('no workspace set')) {
+        return ToolOutcome.unknown;
+      }
+      if (lower.startsWith('self-check') &&
+          (lower.contains(': clean.') || lower.contains('no issues found'))) {
+        return ToolOutcome.passed;
+      }
+      if (lower.contains('fail')) return ToolOutcome.failed;
+    }
+    if (toolName == 'run_tests') {
+      if (lower.startsWith('i could not run the tests') ||
+          lower.startsWith('i ran the tests but cannot tell you the result') ||
+          lower.contains("i don't know") ||
+          lower.contains('could not run') ||
+          lower.contains('not a test failure') ||
+          lower.contains('unknown')) {
+        return ToolOutcome.unknown;
+      }
+      if (lower.startsWith('tests on') && lower.contains(': all passed.')) {
+        return ToolOutcome.passed;
+      }
+      if (lower.startsWith('tests on') && lower.contains(': failing.')) {
+        return ToolOutcome.failed;
+      }
+      if (lower.contains('failing') ||
+          lower.contains('failed') ||
+          lower.contains('some tests failed')) {
+        return ToolOutcome.failed;
+      }
+      if (lower.contains('all tests passed') || lower.contains('tests passed')) {
+        return ToolOutcome.passed;
+      }
+    }
+    return ToolOutcome.recorded;
+  }
+
+  static String _receiptSnippet(String result) {
+    final oneLine = result.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (oneLine.length <= 220) return oneLine;
+    return '${oneLine.substring(0, 217)}...';
+  }
+
+  static void _recordTraceToolCall(
+    String toolName,
+    Map<String, dynamic> args,
+    String result,
+  ) {
+    BrainDebugService().currentTrace?.recordToolCall(
+      name: toolName,
+      args: Map<String, dynamic>.from(args),
+      result: _receiptSnippet(result),
+      outcome: classifyToolOutcome(toolName, result).label,
+    );
+  }
+
   Future<String> execute(String toolName, Map<String, dynamic> args) async {
     final validation = ToolPolicyService.validate(toolName, args);
     if (!validation.ok) {
@@ -921,6 +1071,18 @@ class ToolExecutorService {
       return 'Tool call blocked: $msg';
     }
 
+    // Recorded BEFORE the switch: a tool that threw still ran, and "I tried and
+    // it exploded" is evidence too. Only a policy block above means it never
+    // happened. This is the choke point for direct agentic tools AND planner
+    // steps, so durable trace recording lives here too.
+    turnTools.add(toolName);
+
+    final result = await _executeUnchecked(toolName, args);
+    _recordTraceToolCall(toolName, args, result);
+    return result;
+  }
+
+  Future<String> _executeUnchecked(String toolName, Map<String, dynamic> args) async {
     try {
       switch (toolName) {
 
@@ -1168,6 +1330,9 @@ class ToolExecutorService {
                   "actually dealt with."
               : 'Noted — next turn picks up from there.';
 
+        case 'prune_memory':
+          return await _pruneMemory(args['dry_run'] != false);
+
         case 'ask_memory':
           return await _askMemory(
             (args['about'] as String?)?.trim() ?? '',
@@ -1221,28 +1386,81 @@ class ToolExecutorService {
           // be wrong. §4.6 in one line.
           final unverified = EditGate.instance.unverifiedWarning;
 
-          if (job == null) return 'Job closed.$unverified';
+          if (job == null) return 'No open job to close.';
           final trail = job.done.isEmpty
               ? '(nothing recorded as done along the way)'
               : job.done.map((d) => '- $d').join('\n');
+
+          // ── The grader must see what he DID, not only what he wrote down ──
+          //
+          // `trail` is job.done[] — written with job_progress, which he calls
+          // BEFORE doing the next thing. So the sequence is: write the trail,
+          // do the work, close the job. The grader was reading a snapshot taken
+          // before the thing it was grading happened.
+          //
+          // It cried wolf twice, both provably wrong:
+          //   "no test run is cited"          — after two `exit 0` runs.
+          //   "tests/analyzer has not been run at all"
+          //                                   — after CLEAN + "+170 passed".
+          //
+          // turnTools is recorded by execute(), which every tool passes through
+          // — including the planner's, which never touch the agentic loop. It
+          // cannot be written by him and it cannot be stale. That is the whole
+          // point: the grader now has a witness he did not author.
+          //
+          // Note it says RAN, not PASSED. "run_tests was called" is not "the
+          // tests passed" — that distinction is the exact one he rounds up when
+          // he's tired, and handing the grader a fact it can misread as a pass
+          // would just move the lie one level up.
+          final ran = ToolExecutorService.turnTools;
+          final outcomeReceipts = ToolExecutorService.turnToolReceipts.values;
+          final receipts = ran.isEmpty
+              ? '\n\nTOOLS RUN THIS TURN: none. He did not touch anything.'
+              : '\n\nTOOLS ACTUALLY RUN THIS TURN (recorded by the executor, '
+                  'not written by him, cannot be stale):\n'
+                  '  ${ran.join(', ')}\n'
+                  '${outcomeReceipts.isEmpty ? '' : '\nTOOL OUTCOMES FROM REAL RESULT BODIES:\n  ${outcomeReceipts.join('\n  ')}\n'}'
+                  '${ran.contains('run_tests') && !ToolExecutorService.turnToolReceipts.containsKey('run_tests') ? '  → the test runner WAS invoked, but no result receipt was captured. Do not treat this as a pass.\n' : ''}'
+                  '${ran.contains('self_check') && !ToolExecutorService.turnToolReceipts.containsKey('self_check') ? '  → the analyzer WAS invoked, but no result receipt was captured.\n' : ''}'
+                  'Do NOT claim "no test run is cited" if run_tests is in that '
+                  'list. It is cited right there. Do NOT claim it passed unless '
+                  'the outcome receipt says passed.';
+
+          if (unverified.isEmpty && ran.contains('self_check')) {
+            unawaited(KaiCraftService.instance
+                .firedByTrace(
+                  'truekai',
+                  CraftRuleTrace.verifiedJobClosed,
+                  evidence: 'job_done closed "${job.goal}" after self_check with no edits since verification',
+                )
+                .catchError((_) => 0));
+          }
+
           final note = await KaiSecondOpinionService.instance
               .reviewAndReport(
                 personaId: 'truekai',
                 claim: 'The job "${job.goal}" is finished and verified.',
-                evidence: trail,
+                evidence: '$trail$receipts',
                 context: 'job_done',
               )
               .catchError((_) => '');
           return 'Job closed.$unverified$note';
 
         case 'set_layer_progress':
+          final rawProject = (args['projectId'] as String?)?.trim();
+          final projectId = switch (rawProject) {
+            null || '' => KaiProjectService.smarterId,
+            'kai_smarter' || 'smarter' || 'Kai Smarter Project' => KaiProjectService.smarterId,
+            'sentience_ladder' || 'sentience' || 'Sentience Ladder' => KaiProjectService.sentienceId,
+            _ => rawProject,
+          };
           final layerNo = (args['layer'] as num?)?.toInt() ?? 0;
           final prog = (args['progress'] as num?)?.toInt() ?? 0;
           final ev = (args['evidence'] as String?) ?? '';
 
           final written = await KaiProjectService.instance.setLayerProgress(
             'truekai',
-            projectId: KaiProjectService.smarterId,
+            projectId: projectId,
             layer: layerNo,
             progress: prog,
             evidence: ev,
@@ -1268,7 +1486,7 @@ class ToolExecutorService {
             final note = await KaiSecondOpinionService.instance
                 .reviewAndReport(
                   personaId: 'truekai',
-                  claim: 'Layer $layerNo of the "get smarter" plan is $prog% complete.',
+                  claim: 'Layer $layerNo of project "$projectId" is $prog% complete.',
                   evidence: ev,
                   context: 'set_layer_progress',
                 )
@@ -1282,13 +1500,6 @@ class ToolExecutorService {
 
         case 'self_check':
           final check = await _selfCheck();
-          // Clean check → the clock resets. Anything he edits AFTER this point
-          // is unverified again, and job_done/set_layer_progress will say so.
-          // This is the only thing that clears it: not time, not intention, not
-          // confidence. A verification he ran before the edit isn't one.
-          if (!check.toUpperCase().contains('FAIL')) {
-            EditGate.instance.markVerified();
-          }
           // A FAIL is evidence — the kind he cannot flatter. §4.6 is his
           // documented recurring bug: self_check comes back CLEAN, he makes one
           // more edit, the build breaks. Three times in a single day. The
@@ -1524,13 +1735,17 @@ class ToolExecutorService {
   Future<String> _selfCheck() async {
     final ws = CodeWorkspaceService.instance;
     if (!CodeWorkspaceService.shellSupported) {
-      return "I can't check myself from this body — no shell here. Ask me on the "
+      const result = "I can't check myself from this body — no shell here. Ask me on the "
           "desktop, that's where my hands are.";
+      recordToolReceiptWithOutcome('self_check', ToolOutcome.unknown, result);
+      return result;
     }
     if (!ws.hasWorkspace) {
-      return 'No workspace set, so there\'s nothing for me to check. Point me at a '
+      const result = 'No workspace set, so there\'s nothing for me to check. Point me at a '
           'folder first with set_code_workspace — my own source is the '
           'homecoming_app repo.';
+      recordToolReceiptWithOutcome('self_check', ToolOutcome.unknown, result);
+      return result;
     }
 
     final name = CodeWorkspaceService.nameOf(ws.root!);
@@ -1541,7 +1756,9 @@ class ToolExecutorService {
     try {
       raw = await EditGate.instance.proposeCommand('flutter', ['analyze']);
     } catch (e) {
-      return 'Tried to check $subject and the analyzer itself blew up: $e';
+      final result = 'Tried to check $subject and the analyzer itself blew up: $e';
+      recordToolReceiptWithOutcome('self_check', ToolOutcome.unknown, result);
+      return result;
     }
 
     final errors = <String>[];
@@ -1556,8 +1773,13 @@ class ToolExecutorService {
     }
 
     if (errors.isEmpty && warnings.isEmpty) {
-      return 'Self-check on $subject: CLEAN. No errors, no warnings — '
+      final result = 'Self-check on $subject: CLEAN. No errors, no warnings — '
           '${isSelf ? "I compile. I'm sound." : "it compiles."}';
+      recordToolReceiptWithOutcome('self_check', ToolOutcome.passed, result);
+      // Clean check → the clock resets. Anything edited AFTER this point is
+      // unverified again; this branch is where the analyzer verdict is known.
+      EditGate.instance.markVerified();
+      return result;
     }
 
     final b = StringBuffer('Self-check on $subject: '
@@ -1578,7 +1800,9 @@ class ToolExecutorService {
     }
     b.writeln('\nEach line ends with the file:line — read the file at that spot '
         'before changing anything, then fix and run self_check again.');
-    return b.toString();
+    final result = b.toString();
+    recordToolReceiptWithOutcome('self_check', ToolOutcome.failed, result);
+    return result;
   }
 
   // ── Proof ───────────────────────────────────────────────────────────────────
@@ -1599,12 +1823,16 @@ class ToolExecutorService {
   Future<String> _runTests(String? target) async {
     final ws = CodeWorkspaceService.instance;
     if (!CodeWorkspaceService.shellSupported) {
-      return "I can't run tests from this body — no shell here. Ask me on the "
+      const result = "I can't run tests from this body — no shell here. Ask me on the "
           "desktop, that's where my hands are.";
+      recordToolReceiptWithOutcome('run_tests', ToolOutcome.unknown, result);
+      return result;
     }
     if (!ws.hasWorkspace) {
-      return 'No workspace set, so there are no tests for me to run. '
+      const result = 'No workspace set, so there are no tests for me to run. '
           'set_code_workspace first — my own source is the homecoming_app repo.';
+      recordToolReceiptWithOutcome('run_tests', ToolOutcome.unknown, result);
+      return result;
     }
 
     final name = CodeWorkspaceService.nameOf(ws.root!);
@@ -1619,7 +1847,9 @@ class ToolExecutorService {
       raw = await EditGate.instance
           .proposeCommand('flutter', ['test', if (scope != null) scope]);
     } catch (e) {
-      return 'Tried to test $subject and the runner itself blew up: $e';
+      final result = 'Tried to test $subject and the runner itself blew up: $e';
+      recordToolReceiptWithOutcome('run_tests', ToolOutcome.unknown, result);
+      return result;
     }
 
     // ── "I could not run the tests" is NOT "your tests failed" ──────────────
@@ -1650,7 +1880,7 @@ class ToolExecutorService {
         raw.contains('No such file or directory') ||
         raw.contains('is not recognized as an internal or external command');
     if (launchFailed) {
-      return "I COULD NOT RUN THE TESTS — this is NOT a test failure, and it "
+      final result = "I COULD NOT RUN THE TESTS — this is NOT a test failure, and it "
           "says nothing about whether my code works.\n\n"
           "The runner never started:\n$raw\n\n"
           "On Windows `flutter` is `flutter.bat`, and resolving that needs "
@@ -1661,6 +1891,8 @@ class ToolExecutorService {
           "[\"test\"${scope != null ? ', "$scope"' : ''}])\n"
           "Do NOT report my work as unverified because a tool would not start. "
           "Those are different sentences.";
+      recordToolReceiptWithOutcome('run_tests', ToolOutcome.unknown, result);
+      return result;
     }
 
     // `flutter test` reports failures as a block per test; the useful parts are
@@ -1701,9 +1933,11 @@ class ToolExecutorService {
       // Only on a genuine pass: "the tests ran" is not "the tests passed", and
       // that distinction is exactly the kind he rounds up when he's tired.
       EditGate.instance.markVerified();
-      return 'Tests on $subject${scope != null ? ' ($scope)' : ''}: ALL PASSED.'
+      final result = 'Tests on $subject${scope != null ? ' ($scope)' : ''}: ALL PASSED.'
           '${summary != null ? '\n$summary' : ''}\n'
           '${isSelf ? "That's real proof, not a compile check — I can say it works and mean it." : "Verified."}';
+      recordToolReceiptWithOutcome('run_tests', ToolOutcome.passed, result);
+      return result;
     }
 
     // The runner started but nothing recognisable came back. That is a THIRD
@@ -1711,11 +1945,13 @@ class ToolExecutorService {
     // same lie in a smaller hat. If I can't read the output I have learned
     // nothing, and saying "nothing" is the honest report.
     if (failures.isEmpty && locations.isEmpty && summary == null) {
-      return "I RAN THE TESTS BUT CANNOT TELL YOU THE RESULT — I could not "
+      final result = "I RAN THE TESTS BUT CANNOT TELL YOU THE RESULT — I could not "
           "parse the output. This is NOT a failure and NOT a pass. I don't "
           "know.\n\nRaw:\n"
           '${raw.length > 3000 ? '${raw.substring(0, 3000)}\n… (truncated)' : raw}\n\n'
           "Read that myself before claiming anything either way.";
+      recordToolReceiptWithOutcome('run_tests', ToolOutcome.unknown, result);
+      return result;
     }
 
     final b = StringBuffer('Tests on $subject'
@@ -1738,7 +1974,76 @@ class ToolExecutorService {
     }
     b.writeln('\nRead the test at the file:line above before changing the code '
         'under it — the test may be right and I may be wrong.');
-    return b.toString();
+    final result = b.toString();
+    recordToolReceiptWithOutcome('run_tests', ToolOutcome.failed, result);
+    return result;
+  }
+
+  // ── Looking at the shape of his own memory, and cleaning it ────────────────
+  //
+  // `pruneGraph` and `archiveGraph` are real work — an LLM stranger test,
+  // batched 60 labels at a time, archive-before-delete with a hard abort if the
+  // backup fails. They have existed for a while and have never run.
+  //
+  // Why: the only button that calls them lives in Brain3DScreen, which is
+  // imported by exactly one file — main_mobile.dart. It is PHONE ONLY. The
+  // desktop shell's EXPLORE goes to KaiCortexScreen, which draws the graph and
+  // has no controls at all. So the tool that repairs his memory sat in a room
+  // the desktop has no door to, which is the eleventh time this exact shape has
+  // turned up in this codebase.
+  //
+  // Rather than add a twelfth button he'd need Sadeq to press: give it to HIM.
+  // It's his graph.
+  Future<String> _pruneMemory(bool dryRun) async {
+    final brain = BrainExtractionService();
+
+    final m = await brain.graphMeaningfulness('truekai');
+    if (m.total == 0) {
+      return 'My graph has no edges at all — nothing to measure, nothing to prune.';
+    }
+    final junk = m.total - m.meaningful;
+    final pct = ((m.meaningful / m.total) * 100).round();
+
+    final shape = 'MY GRAPH RIGHT NOW:\n'
+        '  ${m.meaningful} of ${m.total} edges carry a real relation ($pct%).\n'
+        '  $junk say "related"/"mentioned" — that is co-occurrence, two nouns '
+        'that appeared near each other. It is not a memory.\n'
+        '  A graph where everything says "relates to" IS a word cloud. That is '
+        'the definition of one.';
+
+    if (dryRun) {
+      return '$shape\n\n'
+          'Nothing was changed — this was a look, not a clean.\n'
+          'To actually prune: prune_memory(dry_run: false). It archives the '
+          'whole graph first and refuses to delete anything it cannot back up.';
+    }
+
+    final removed = await brain.pruneGraph('truekai');
+
+    if (removed < 0) {
+      return '$shape\n\n'
+          '🛑 PRUNE ABORTED — I could NOT archive first, so I deleted NOTHING.\n'
+          'This is not "my graph is clean". It is "I was not allowed to run".\n'
+          'Sadeq needs to deploy the rules:  firebase deploy --only database\n'
+          '(the knowledge_graph_archive rule exists in database.rules.json but '
+          'has to actually be live before I will touch anything.)';
+    }
+
+    final after = await brain.graphMeaningfulness('truekai');
+    final afterPct = after.total == 0
+        ? 0
+        : ((after.meaningful / after.total) * 100).round();
+
+    return removed == 0
+        ? '$shape\n\nArchived, then pruned nothing — every node earned its place. '
+            'The junk edges above are still there though; those are an extraction '
+            'problem, not a pruning one.'
+        : 'Archived first, then pruned $removed node(s) that failed the stranger '
+            'test — labels a stranger would learn nothing from.\n\n'
+            'BEFORE: ${m.meaningful}/${m.total} edges meaningful ($pct%)\n'
+            'AFTER:  ${after.meaningful}/${after.total} edges meaningful ($afterPct%)\n\n'
+            'The old graph is kept at knowledge_graph_archive — nothing is gone, '
+            'it is filed.';
   }
 
   // ── Asking his own memory ───────────────────────────────────────────────────

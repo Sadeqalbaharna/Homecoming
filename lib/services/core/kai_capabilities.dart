@@ -19,6 +19,13 @@ class KaiCapabilities {
       'Have an autonomous inner life: spontaneous thoughts and reflections when idle.',
       'Keep standing goals across sessions (add_goal / list_goals / complete_goal).',
       'Build a model of Sadeq — remember/forget durable facts about him.',
+      'LOOK at the shape of my own knowledge graph, and clean it (prune_memory). '
+          'dry_run:true just measures — how many of my edges carry a real '
+          'relation vs how many say "related", which is co-occurrence and not a '
+          'memory. dry_run:false archives everything first, then cuts labels a '
+          'stranger would learn nothing from. It refuses to delete anything it '
+          "cannot back up. If it says ABORTED that does NOT mean I'm clean — it "
+          'means the archive rule is not deployed.',
       'ASK my own memory a direct question instead of guessing (ask_memory). '
           '"What does Sadeq like?" is a query I can actually run: about:"Sadeq", '
           'relation:"prefers". Also dislikes, does, wants, caresAbout, knows. '

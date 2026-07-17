@@ -62,12 +62,13 @@ void main() {
   });
 
   group('the real surface is what is mounted', () {
-    test('KaiProjectCard is wired into the shell', () {
-      // This reads KaiProjectService — live layers, live percentages, and it
-      // reports 3/7 when the truth is 3/7. It was ALREADY in the file while the
-      // fossil sat next to it: the signature disease of this codebase is the
-      // correct thing existing beside the wrong thing that's actually wired.
-      expect(source, contains('KaiProjectCard(personaId: _kPersona)'));
+    test('both progress pies are wired into the shell', () {
+      // The dashboard now tracks two frozen-goal projects as interactive pies:
+      // Kai Smarter and the Sentience Ladder. The project ids must be explicit
+      // so a second card cannot accidentally render the same truth twice.
+      expect(source, contains('projectId: KaiProjectService.smarterId'));
+      expect(source, contains('projectId: KaiProjectService.sentienceId'));
+      expect('KaiProjectCard'.allMatches(source).length, greaterThanOrEqualTo(2));
     });
   });
 }

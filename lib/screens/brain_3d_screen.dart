@@ -147,9 +147,17 @@ class _Brain3DScreenState extends State<Brain3DScreen> {
       if (mounted) {
         setState(() {
           _backfilling = false;
-          _backfillStatus = removed > 0
-              ? 'Pruned $removed noise nodes.'
-              : 'Nothing to prune — graph is clean.';
+          // -1 is ABORTED, not zero. The prune refuses to delete anything it
+          // cannot archive first — and this line used to render that refusal as
+          // "graph is clean", which is the most reassuring possible way to say
+          // "I did not run".
+          _backfillStatus = removed < 0
+              ? 'ABORTED — could not archive first, so NOTHING was deleted. '
+                  'This is not a clean graph, it is a prune that refused to run. '
+                  'Deploy the rules: firebase deploy --only database'
+              : removed > 0
+                  ? 'Pruned $removed noise nodes.'
+                  : 'Nothing to prune — graph is clean.';
         });
         if (removed > 0) {
           await Future.delayed(const Duration(seconds: 2));
@@ -157,10 +165,12 @@ class _Brain3DScreenState extends State<Brain3DScreen> {
             setState(() { _backfillStatus = null; _loading = true; });
             _initGraph();
           }
-        } else {
+        } else if (removed == 0) {
           await Future.delayed(const Duration(seconds: 2));
           if (mounted) setState(() => _backfillStatus = null);
         }
+        // removed < 0 → ABORTED: leave it on screen. A failure that fades out
+        // after two seconds like a success is a failure nobody reads.
       }
     } catch (e) {
       if (mounted) {

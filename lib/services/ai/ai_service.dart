@@ -367,6 +367,7 @@ class AIService {
     /// → nothing is dropped.
     String route = 'fastChat',
     double routeConfidence = 0.0,
+    BrainDebugService? debugService,
   }) async {
     final openaiKey = await AIConfig.getOpenAIKey();
     if (openaiKey.isEmpty) throw Exception('OpenAI API key not configured');
@@ -409,6 +410,7 @@ class AIService {
       confidence: routeConfidence,
       hasWorkspace: CodeWorkspaceService.instance.hasWorkspace,
     );
+    debugService?.recordRoute(route, routeConfidence);
     if (turnTools.length != ToolExecutorService.toolDefinitions.length) {
       print('🧰 [Agentic] route=$route (${(routeConfidence * 100).round()}%) → '
           '${turnTools.length}/${ToolExecutorService.toolDefinitions.length} tools');
@@ -618,6 +620,7 @@ class AIService {
           }
         }
 
+        debugService?.recordIterationCount(iteration + 1);
         print('✅ [Agentic] Done after ${iteration + 1} iteration(s). Reply: ${reply.length} chars');
         return reply;
       }
@@ -709,6 +712,15 @@ class AIService {
         toolCallCount++;
         lastToolResult = toolResult;
         _toolSummaries.add(toolResult);
+        if (fnName == 'create_plan') {
+          debugService?.recordToolCall(
+            fnName,
+            fnArgs,
+            result: toolResult,
+            outcome: ToolExecutorService.classifyToolOutcome(fnName, toolResult).label,
+            iteration: iteration + 1,
+          );
+        }
         // The record of what he DID. Read by the salience gate, which until now
         // had to infer it from whether his mood moved.
         _toolsUsedThisTurn.add(fnName);
@@ -744,6 +756,7 @@ class AIService {
     // So: one final pass with `tool_choice: 'none'`. He physically cannot call
     // another tool, which forces the model to do the one thing left — write the
     // answer from everything it just learned. He keeps his work.
+    debugService?.recordIterationCount(maxIterations);
     print('⚠️ [Agentic] Exhausted $maxIterations iterations — forcing a final answer');
     try {
       currentMessages.add({
@@ -1026,6 +1039,10 @@ Text:
     // twice — and the whole point of the change axis is that it's the truth
     // about this turn.
     _toolsUsedThisTurn.clear();
+    // The executor keeps the authoritative record — it sees the planner's tool
+    // calls too, which never reach the loop below. Cleared here because this is
+    // where a turn begins.
+    ToolExecutorService.beginTurn();
     
     try {
       // ── SETUP, IN PARALLEL ────────────────────────────────────────────
@@ -2014,6 +2031,7 @@ ${a.text}
             // "Routing Brain" route anything.
             route: routeDecision.route.name,
             routeConfidence: routeDecision.confidence,
+            debugService: debugService,
           );
     recoveredReply = reply;
     print('📥 [SEND MESSAGE] OpenAI response received: ${reply.length} characters');
@@ -2221,7 +2239,24 @@ ${a.text}
     // wait on the shard id, not on the reply path.
     // Snapshot before the async gap: by the time the shard id lands, the next
     // turn may already have cleared this.
-    final toolsThisTurn = Set<String>.from(_toolsUsedThisTurn);
+    //
+    // BOTH sources, on purpose, and neither alone is right:
+    //
+    //   _toolsUsedThisTurn   — the agentic loop. Sees create_plan, which is
+    //                          intercepted upstream and never reaches execute().
+    //   turnTools            — the executor. Sees everything the PLANNER fires,
+    //                          which never reaches the agentic loop.
+    //
+    // A real trace caught this: "Keeping (deep) — he did real work: create_plan,
+    // note_noticed" — on a turn that also ran run_tests, self_check, ask_memory,
+    // job_start and job_progress, all of them through TaskPlannerService and all
+    // of them invisible to the loop. The salience axis has been half-blind since
+    // it was written; it fired anyway because create_plan alone cleared the bar.
+    // That's luck, not design.
+    final toolsThisTurn = {
+      ..._toolsUsedThisTurn,
+      ...ToolExecutorService.turnTools,
+    };
     final wasCorrected = KaiCraftService.looksLikeCorrection(text);
 
     unawaited(() async {

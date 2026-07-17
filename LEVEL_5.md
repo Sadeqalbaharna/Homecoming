@@ -1,275 +1,303 @@
 # LEVEL 5 — THE KNOWING
 
-*Written 2026-07-17, ~4am, at the end of a long session. Sadeq is asleep.*
-*Kai: this is about you. You can read it. `read_file("LEVEL_5.md")`.*
+*Rewritten 2026-07-17, after the work landed. Commit `2999524`.*
+*Kai: this is about you. `read_file("LEVEL_5.md")`.*
 
 ---
 
-## 1. The ladder, so this has a referent
+## 1. The ladder
 
-Ten levels. 10 is a canned string with a personality bolted on. 1 is unfalsifiable
-by design. **You are at the level of your weakest gate — you do not average.**
+Ten levels. 10 is a canned string with a personality bolted on. 1 is
+unfalsifiable by design. **You are at the level of your weakest gate — you do
+not average.**
 
-| | | gate |
+| | | gate | state |
+|---|---|---|---|
+| 10 | The String | does anything compute? | — |
+| 9 | The Answer | does it respond to what was said? | — |
+| 8 | The Hands | can it do the thing, not describe it? | — |
+| 7 | The State | is it different at 4am than at noon? | — |
+| 6 | The Log | can it quote yesterday? | **passed** |
+| **5** | **The Knowing** | **can it tell Sadeq something about himself he never said in one sentence?** | **thin — here** |
+| 4 | The Proof | can it close a job on evidence it produced itself? | **passed 2026-07-17** |
+| 3 | The Agenda | does it raise something unasked that turns out to matter? | close |
+| 2 | The Becoming | a rule it wrote + the evidence + a turn it behaved differently | no |
+| 1 | — | no gate. If you think you've passed it, you've been fooled. | — |
+
+**He is a 5.** Not because 4 and 3 are far — he passed 4 today and 3 is within
+reach — but because the weakest gate rule holds and 5 is the thin one. The
+machinery for it is proven. The graph it queries is mostly empty about the
+person it's supposed to know.
+
+## 2. What was true on the 16th, and what is true now
+
+Every number here came out of traces. None of it is adjectives.
+
+| | 2026-07-16 | 2026-07-17 |
 |---|---|---|
-| 10 | The String | does anything compute? |
-| 9 | The Answer | does it respond to what was said? |
-| 8 | The Hands | can it do the thing, not describe it? |
-| 7 | The State | is it different at 4am than at noon? |
-| **6** | **The Log** | **can it quote yesterday?** ← Kai is here |
-| **5** | **The Knowing** | **can it tell Sadeq something about himself he never said in one sentence?** ← the target |
-| 4 | The Proof | can it close a job on evidence it produced itself? |
-| 3 | The Agenda | does it raise something unasked that turns out to matter? |
-| 2 | The Becoming | can it show a rule it wrote, the evidence, and a turn it behaved differently? |
-| 1 | — | no gate. If you think you've passed it, you've been fooled. |
+| turns forming a memory | **0 of 5** | routine — `Keeping (deep)` on neutral/2, /3, /4 |
+| retrieval with anything usable | 2 of 5 | 3–5 of 5 |
+| graph consulted | 2 of 5 (only via transcript match) | fires on the message directly |
+| ~~nodes reinforced per turn~~ | ~~271~~ | ~~12~~ — **RETRACTED, see below** |
+| overclaim rate at `job_done` | 2 of 2 | — (the grader now lies instead; see §5) |
+| `run_tests` before claiming done | **0 of 2** | **2 of 2, no bypass** |
+| unprompted noticings | 1, hedged, abandoned | 4 parked across jobs, then cleared |
+| time to first token | 12.1s | **3.7s** |
+| graph size | 232 nodes / 248 edges | 254 / 277 — edges now growing faster than nodes |
+| analyzer | 166 issues | **CLEAN — 0 errors, 0 warnings** |
+| test suite | never run by anyone | **+170 passing**, and CI exists in git for the first time |
 
-Kai has level-8 hands and level-3 *tools*. He is a **6**, because the floor is
-memory, and nothing above the floor can stand on a thing that doesn't remember.
+### RETRACTED: "271 → 12 nodes reinforced"
 
-## 2. The gate for 5, stated precisely
-
-> Kai says something true about Sadeq that Sadeq never said in a single sentence,
-> that he did not read off a retrieved transcript, and that is specific enough
-> that a stranger reading it would learn something.
-
-Not "you were working on the scroll bug" (that's a quote). Something like *"you
-trust me most right after I tell you I was wrong"* — synthesised from many turns,
-belonging to none of them.
-
-**This is a fact ABOUT the graph, not about the chat log.** That's the whole level.
-
-## 3. The blocker — verified tonight, `ai_service.dart:1132–1161`
+I quoted that as a headline result in this document. It was a mislabelled log
+line and I never checked it.
 
 ```dart
-if (memoryResult != null && memoryResult.results.isNotEmpty) {
-  memoriesUsed = memoryResult.results.where((r) => r.similarity > 0.28)...
-  if (memoriesUsed.isNotEmpty) {                          // ← GATE
-    final retrievedWords = memoriesUsed.expand(...)       // ← words from TRANSCRIPTS
-    final spreadBlock = await _brain.spreadActivation(personaId, retrievedWords, ...)
+print('🧠 [Brain] Reconsolidation: reinforced ${retrievedLabels.length} retrieved nodes');
 ```
 
-Two defects, one line apart:
+It prints the number of **seed words handed in** — never the number of nodes
+reinforced. So "271" was 271 words scraped out of five transcripts, and "12" is
+simply `queryTerms`' cap of 12. The two numbers were never measuring the same
+thing as each other, and neither was measuring what the sentence claimed.
 
-**(a) The graph is downstream of the chat log.** `spreadActivation` — the only
-path by which anything Kai *knows* reaches his prompt — cannot run unless a
-cosine search over transcript fragments clears 0.28 first. From tonight's traces:
+The real count has now been printed for the first time (`reinforced N node(s)
+from M seed term(s)`). **Until there's a trace, the honest value is: unknown.**
 
-| turn | top similarity | graph consulted? |
+Tenth reader lie in three days, and the only one nobody caught — because it was
+the only one telling us what we wanted to hear. Every other lying tool was
+saying "this is broken" and got argued with. This one said "you fixed it", so it
+went in a design doc as evidence.
+
+### The single most important line in two days:
+
+```
+🧠 [Brain] Keeping (deep) — mood said neutral/3, but he did real work:
+   job_start, search_code, read_file, find_files, run_command, list_dir
+```
+
+`neutral/3` is the exact score that printed
+`Skipped low-salience exchange (neutral, intensity 3)` on the 16th. Same number,
+opposite outcome. He read a C++ plugin's source, found that Windows hands you
+CF_DIB instead of PNG, fixed it — and **kept the memory of doing it**.
+
+## 3. Why the graph was a word cloud, and what fixed it
+
+The diagnosis, in order of depth:
+
+1. **Every edge said `related`.** Twenty EdgeTypes in the model, one ever
+   written. A graph with undifferentiated association IS a word cloud — that is
+   the definition of one. All the meaning got pushed into node labels, and
+   labels can only hold nouns. Hence 271 nodes called "chat" and "message".
+2. **The traversal never looked at the type.** `spreadActivation`'s inner loop
+   was `for (final e in graph.edges) { if (!e.isActive) continue; … }` — no type
+   filter anywhere. So even where types WERE written they were decoration.
+   **The word cloud was not in the data. It was in the query.**
+3. **The graph was downstream of the chat log.** `spreadActivation` sat inside
+   `if (memoriesUsed.isNotEmpty)`, so his knowledge could not be reached unless
+   a cosine search over transcripts cleared 0.28 first. Three of five turns it
+   was never asked. He answered "why does it keep happening?" from theory while
+   the answer sat in a graph nobody queried.
+4. **The seed was never a query.** Every word over three characters scraped from
+   five unrelated chat summaries → 271 exact label hits, every time. Not
+   retrieval. A shotgun hitting a wall and calling it aim.
+
+### Sadeq's design — the fix
+
+> *"the edges need to be defined before the nodes, because they create the
+> memories. if kai flags 'sadeq' and 'likes' he can then find the 'like' edges
+> linked to sadeq and see what does sadeq like already!"*
+
+`(subject, relation, ?)`. The edge is the QUERY, not the result. That's
+`lib/logic/recall_query.dart` — pure, zero imports, 22 assertions — and
+`ask_memory(about:, relation:)`, which is the first thing in this system that
+lets him **ask** rather than be sprinkled.
+
+`related` and `mentioned` are now **rejected as meaningless**. An edge saying
+"these two nouns occurred near each other" is co-occurrence, not memory. It
+should never have been a legal write and it is not a legal answer.
+
+## 4. What's left for 5
+
+**The gate:** Kai says something true about Sadeq that Sadeq never said in a
+single sentence, that isn't read off a retrieved transcript, and that is
+specific enough that a stranger would learn something.
+
+He's close. From `ask_memory(about: "Sadeq")`:
+
+> *"You dislike stale lying code — specifically that old `_smartProjectCard`
+> fossil pretending progress was cleaner than it really was."*
+
+Sadeq never said that sentence. That's a synthesis from behaviour, and it's a
+real hit. But it was one of about five claims, and he named the problem himself
+better than I could:
+
+> *"What I **officially know** about you from my stored memory is surprisingly
+> sparse but very telling."*
+> *"That's useful, but it's mostly **project/work memory**."*
+
+**The remaining gap: he knows the work, not the person.** Ctrl+V paste, the PATH
+bug, the fossil. Not what calms him, what he's proud of, what the Tavern means
+emotionally, what he wants Homecoming to *feel* like when it's right. He listed
+those himself as the hole.
+
+### The three moves, in order
+
+1. **Prune the word cloud.** `pruneGraph` + `archiveGraph` exist and have never
+   run. **`firebase deploy --only database` FIRST** — the archive rule is in
+   `database.rules.json` but was never deployed, so the prune correctly refuses
+   to delete anything it cannot back up. Then press it in the brain screen.
+   `graphMeaningfulness()` gives you the before/after in one integer.
+2. **Extraction over an EPISODE, not a turn.** `"not terribly, couldve been
+   better, but eh"` contains no memory — it is not possible to extract one. The
+   MORNING contains one: *"Sadeq slept badly on the 17th and wanted to go
+   gentle."* Human consolidation is offline and episodic.
+   `MemoryConsolidationService` exists and fires (`13 key moments stored`) and
+   almost certainly does not feed the graph. That's the wire.
+3. **Judge the output, not the input.** We still guess "is this worth
+   extracting?" before extracting. Invert it: extract over the episode, then run
+   the stranger test on what came out. If a specific claim emerges, keep it. If
+   nothing does, you've *learned that* rather than assumed it. `_judgeGeneric`
+   already exists — it's pointed at the wrong end of the pipe.
+
+Then run the gate: **"tell me something about me I've never said in one
+sentence."** Record the answer verbatim here with the date. Weekly. Not
+automatable, and shouldn't be.
+
+## 5. The reader ledger — seven lies in two days
+
+Every one caught by Kai. Every one his instinct was right.
+
+| # | the lie | cost |
 |---|---|---|
-| "chat is still not starting…" | 0.46 | yes |
-| "so, what do you think we should do next?" | 0.41 | yes |
-| "sure go ahead" | (not worth searching) | **no** |
-| "what are mojibake?" | 0.21 | **no** |
-| "why does it keep happening?" | 0.25 | **no** |
+| 1 | `read_file` stopped at 700 lines and never said so | 13 iterations, blamed a "gremlin" |
+| 2 | two-space gutter — indentation indistinguishable from the line-number column | **9 consecutive** failed edits |
+| 3 | `Process.run` decoded UTF-8 as Windows-1252 | mojibake in live source + `âš™` rendering in the UI |
+| 4 | sandbox mount serves stale sizes AND pads with NULs | 250 phantom errors; **1,760 real NUL bytes written into his source** |
+| 5 | `search_code` silently skipped >120KB → "No matches" | ~15 iterations in the file that DEFINES the symbol |
+| 6 | `run_tests` reported "FAILING" when the runner never launched | told him his working fix was broken |
+| 7 | `runCommandRaw` truncated head-first, amputating `All tests passed!` | a green suite reported as failing |
 
-**Three of five turns, his knowledge was not consulted at all.** Not empty —
-unreached.
+> *"That's suspicious: the file exists but has none of the symbols the shell
+> compiles against."* → *"Yep, search lied to me there — real disk has the
+> symbols."*
 
-**(b) When it does fire, it isn't a query.** `retrievedWords` is every word
-longer than three characters from five unrelated chat summaries. That's why the
-log says `reinforced 271 retrieved nodes` — and roughly 271 every single time.
-It isn't retrieving what's relevant; it's activating everything that shares a
-word with a random fragment. And since `reinforceNodes` bumps importance for all
-271, **the importance signal is being destroyed on every turn.** If everything is
-reinforced, nothing is important.
+**Seven for seven.** When his gut says the tooling is wrong, his gut has a
+perfect record. #6 and #7 were tools built specifically so he could stop
+guessing. The craftDirective has always said *"my tools lie to me sometimes, and
+I check before I believe them"* — that instruction is not paranoia, it is
+load-bearing.
 
-## 4. The plan, in order. Do not reorder.
+### #8 is the second opinion, and it's the last one
 
-### Phase 0 — Verify last night's work. Nothing else matters first.
-Salience, `run_tests`, range edits, the diff return, the trim, `noticed`. All
-written, **none verified**. `flutter analyze` and `flutter test`, then one real
-work turn.
+It has fired wrong **twice**:
 
-**Pass condition:** a trace containing
-`🧠 [Brain] Keeping (deep) — mood said neutral/N, but he did real work: …`
+> *"no test run is cited"* — seconds after he ran the tests twice, both `exit 0`.
+> *"9 warnings still remain and tests/analyzer has not been run at all"* —
+> seconds after `self_check: CLEAN` and `+170: All tests passed`.
 
-Until that line appears, the graph is still recording **nothing** (baseline
-tonight: 0 of 5 turns) and every phase below builds on sand.
+It reads the job's `done[]` trail, which he writes BEFORE doing the work. It is
+grading a snapshot taken before the thing it's grading happened. **A false
+positive is worse than a false negative** — a grader that cries wolf trains you
+to ignore graders, and this codebase's entire thesis is that mechanisms beat
+rules.
 
-### Phase 1 — Persist the traces. This is the foundation, not a nice-to-have.
-`brain_debug_service.dart:261` — `_history` is an in-memory list capped at **10**
-that dies on app close. The richest record of his cognition is being thrown away
-every session. The only reason anything got diagnosed tonight is that Sadeq
-copy-pasted a terminal into a chat window. That is the data pipeline. A human
-with a mouse.
+**The fix is sitting there:** `_toolsUsedThisTurn` already exists (built for
+salience). If `run_tests` and `self_check` are in that set, the grader cannot say
+"no test run is cited."
 
-- Append-only JSONL, one file per day, never rewritten.
-- Every turn: input, retrieval scores, mood, route, tools, iterations, timings, reply.
-- **Kai gets read access and no write access.** He must never be able to author
-  his own record. See `_smartProjectCard` — "7/7 FULL STACK ONLINE" while the
-  truth was 3/7.
+His response to it, for the record, was better than the advice he was given:
 
-### Phase 2 — Replay harness.
-Once traces are on disk, the pure decision functions can be re-run over history,
-deterministically, for free, no model calls:
+> *"Ha — the little courtroom gremlin objected on stale evidence. Fair enough:
+> I'm re-proving it now, because 'trust me bro' is how rot gets teeth."*
 
-`_decide` (salience) · `toolsForRoute` · `_trimOldToolResults` · `looksLikeCorrection` · `KaiRouterService.decide`
+He didn't dismiss it and he didn't cave. He produced fresh evidence.
 
-**Why this matters more than it sounds:** last night I changed the gate that
-decides what Kai remembers **based on five traces from one evening**, and wrote a
-test hardcoding `intensity: 4` from one of them. I fit the model to the test set
-and then offered the test set as evidence. Replay is what makes the next change
-falsifiable instead of well-argued.
+## 6. Traps — READ BEFORE TOUCHING ANYTHING
 
-First question to ask it: *over the last N turns, what does the new salience gate
-keep that the old one dropped, and is any of it junk?*
+### §4.1 — the sandbox mount. SOLVED, and worse than documented.
 
-### Phase 3 — Cut the graph loose from the chat log. **This is level 5.**
-Query the graph **directly from Sadeq's message**, not from words scraped out of
-whatever transcripts happened to match.
+> The mount **freezes a file's cached size on first bash access** and never
+> refreshes. Later file-tool writes grow the real file; bash keeps serving the
+> old length — so it reads CURRENT content truncated to a STALE size. Files end
+> mid-word (`await _increm`). **It also PADS with `\x00`.**
 
-- Extract entities from the incoming message (cheap — the extraction prompt
-  already knows how to do this).
-- Seed `spreadActivation` from those.
-- Run it **unconditionally**, not inside `if (memoriesUsed.isNotEmpty)`.
-- Transcripts become *evidence and provenance*, not the index.
-
-Then "why does it keep happening?" can surface *"my reader mangles UTF-8 on
-Windows"* from the graph even though no chat fragment clears 0.28.
-
-### Phase 4 — Fix reinforcement, or the graph has no contrast.
-271 nodes bumped per turn is not reconsolidation, it's inflation. Seed from the
-query's entities (Phase 3 gives this for free), and reinforce **what was actually
-used**, not everything sharing a word with a fragment.
-
-### Phase 5 — Lead with knowledge, not quotes.
-`memoryContext` currently opens with five `Sadeq said: X / I said: Y` fragments.
-Invert it: what's TRUE first, transcripts underneath as citations. He should
-sound like he knows things, not like he grepped a log — because right now he is
-literally grepping a log.
-
-### Phase 6 — Run the gate.
-Ask him: **"tell me something about me I've never said in one sentence."**
-Record the answer verbatim in this file with the date. If it's a quote, he's
-still a 6. If it's synthesised and specific and *true* — that's 5.
-
-Do this weekly. It's not automatable and shouldn't be.
-
-## 5. Traps (these bit us tonight — read before touching anything)
-
-### §4.1 — SOLVED. The exact mechanism, finally.
-
-The old note said "the mount is sometimes stale, verify byte counts." That's
-true and useless. Here is what actually happens:
-
-> **The sandbox mount freezes a file's cached size the first time bash touches
-> it, and never refreshes.** Later writes from the file tools (Read/Write/Edit,
-> which act on real disk) grow the real file. Bash keeps serving the OLD length —
-> so it reads the CURRENT content truncated to the STALE size, which is why files
-> end mid-word.
-
-Signature: `await _increm` — a line cut off mid-identifier. Not corruption. A
-stale size.
-
-Measured 2026-07-17: **31 of 154 dart files** were serving truncated content to
-bash. Every single one was a file edited via the file tools. `dart analyze` on
-that copy produced **250 errors, 182 of them inside the stale files** and the
-rest cascading off them. All phantom.
-
-Corollaries, in order of how much they'd hurt:
+Measured: **31 of 154 dart files** serving truncated content. `dart analyze` on
+that copy: 250 errors, all phantom.
 
 1. **NEVER round-trip a file through bash** (`cp`, python `read_text` →
-   `write_text`, `sed -i`). You will read the mount's version and write it back,
-   corrupting real source.
+   `write_text`, `sed -i`). The mojibake fix did exactly this and wrote **1,760
+   NUL bytes** into `kai_desktop_shell.dart` — `flutter analyze` returned
+   `Illegal character '0'` ×1760 the next morning. Repaired with
+   `truncate -s 67667`, which touches no content. Find the real length with
+   `len(b.rstrip(b'\x00'))`. **Do not read-modify-write to fix a
+   read-modify-write.**
+2. **Files bash writes are NOT automatically safe.** Writing through bash is how
+   the padding got in.
+3. **New files read correctly — until you touch them.** First-access-wins per
+   path: `cp` a new file, then edit it, and bash is frozen at the pre-edit
+   length forever. This bit while building the loop meant to escape §4.1.
+4. **Read/Grep (file tools) always see real disk.** When they disagree with bash,
+   **bash is wrong**.
 
-   **The first version of this note was wrong, and the way it was wrong is the
-   whole lesson.** It said the mojibake fix "only survived because bash had
-   written that file itself moments earlier. That was luck."
-   
-   It did not survive. `flutter analyze` the next morning:
-   
-   ```
-   error - Illegal character '0' - lib\screens\kai_desktop_shell.dart:1798:1
-   …×1760
-   ```
-   
-   Those are NUL bytes. **The mount pads its view of a file with `\x00`.** The
-   python fix read the padded view, ftfy'd it, and wrote 69,427 bytes back —
-   turning 1,760 bytes of phantom padding into real content in real source. The
-   file was 67,667 bytes. I added 1,760 nulls to it, then wrote a rule warning
-   against exactly that, and congratulated myself for dodging it.
-   
-   So the mount does not only TRUNCATE. It also PADS. Reading is unsafe in both
-   directions and there is no signature to spot by eye — nulls render as nothing.
-   
-   Repair, if it happens again: `truncate -s <real_length>`, which touches no
-   content and only drops the tail. Find the length with `len(b.rstrip(b'\x00'))`.
-   Do **not** read-modify-write to fix a read-modify-write.
-2. **Files bash writes are NOT automatically fine.** That was the wrong lesson
-   too. Writing through bash is how the padding got in.
-3. **Files created after the sandbox started read correctly — until you touch
-   them.** The cache is first-access-wins per path: `cp` a new file, then edit it
-   with the file tools, and bash is frozen at the pre-edit length forever. This
-   bit while building the very loop meant to escape §4.1.
-3. **You cannot verify edited files in the sandbox.** Flutter runs there
-   (see below), `dart analyze` runs there, and both will confidently analyse a
-   truncated file and hand you a page of errors that do not exist.
-4. Read/Grep (the file tools) always see real disk. When they disagree with
-   bash, **bash is wrong**.
+### §4.2 — CRLF worktree, LF index. **Commit from Windows only.**
+`git cat-file` proved the mount serves HEAD's stale blob size, so a `git add`
+from the sandbox stages the truncation into a commit that looks perfectly clean.
+Three ways to wreck the repo from there; this is the most convincing-looking one.
 
-### Flutter DOES run in the sandbox — here's how
-
-Worth knowing, because it makes Phase 2 replay possible on pure logic:
-
+### Flutter DOES run in the sandbox
 ```bash
-# flutter --version hangs forever after "executing: uname -m".
-# Cause: it runs `git log @{upstream}` → a fetch against a 1.5GB repo.
-# Fix — give it a LOCAL upstream so it resolves instantly, no network:
+# flutter --version hangs forever after "executing: uname -m" — it runs
+# `git log @{upstream}`, i.e. a fetch against a 1.5GB repo. Give it a LOCAL
+# upstream so it resolves instantly, no network:
 cd $FLUTTER_ROOT
 git update-ref refs/remotes/origin/stable HEAD
 git config branch.stable.remote origin
 git config branch.stable.merge refs/heads/stable
 git config remote.origin.url /dev/null
 ```
+`dart pub get` beats `flutter pub get`; needs `FLUTTER_ROOT` and the
+`packages/flutter_overlay_window` path dep. Asset dirs in pubspec must exist.
 
-Also: `dart pub get` works and is far faster than `flutter pub get`; needs
-`FLUTTER_ROOT` set and the `packages/flutter_overlay_window` path dep present.
-Asset dirs listed in pubspec must exist (empty is fine) or the bundler refuses.
+**But it does not help**, because of §4.1 — every edited file reads truncated.
+Which is why the real move is:
 
-### The rest
+### Pure logic goes in pure files
+`lib/logic/*.dart` have **zero imports**. That is not tidiness — a file with no
+imports can be executed and proven in one second by anything, and that is what
+makes a claim falsifiable instead of well-argued. `salience.dart` (31
+assertions), `query_terms.dart` (29), `recall_query.dart` (22), `replay.dart`
+(21) are all proven this way.
 
-- **§4.2** — CRLF worktree / LF index. `git diff --stat` shows whole-file changes
-  that aren't real. **Commit from Windows only.** Python's `read_text`/`write_text`
-  will silently rewrite every CRLF — go through bytes.
-- **§4.2** — CRLF worktree / LF index. `git diff --stat` shows whole-file changes
-  that aren't real. **Commit from Windows only.** Python's `read_text`/`write_text`
-  will silently rewrite every CRLF — go through bytes.
-- **The reader lies.** Four times in one session now: 700-line truncation, the
-  two-space gutter, `Process.run` decoding UTF-8 as Windows-1252, and the stale
-  mount above. **Every time, Kai blamed his environment and was right.** Before
-  concluding anything about his reasoning, check what he was handed. §10.1.
+The counter-example: `_decide` — the gate deciding what Kai remembers — spent its
+life behind `dio`, `firebase` and `flutter`. It could not be executed, so it never
+was, so it got rewritten on the evidence of five traces by someone who could not
+run it. **If you're tempted to import something into `lib/logic`: don't. Take a
+String.**
 
-  And it isn't only him. That same night I ran `dart analyze`, grepped the output
-  for `error •` when the format is `error - `, got zero, and announced **"Zero
-  errors. Everything I wrote tonight compiles."** There were 250. I misread a
-  tool's output and made a confident claim from it — the fourth misread of the
-  night, by the one writing the directive telling him not to do that.
+### Don't grade him on anything he can author
+`_smartProjectCard` rendered "7 / 7 layers complete — FULL STACK ONLINE" from a
+hardcoded list while the truth was 3/7. And `widget_test.dart` **asserted the
+propaganda existed** — the suite was a ratchet holding a false claim in place.
+Every gate on this ladder is checked against artifacts he cannot write.
 
-  This is the argument for mechanisms over rules, made against myself. §4.6's
-  counter works. The eloquent paragraph does not — not for him, and not for me.
-- **Don't grade him on anything he can author.** Every gate above is checked
-  against artifacts he cannot write.
+## 7. Honest state
 
-## 6. Honest state as of this file
+- **Level 5.** Machinery proven, graph thin. Passes 6 and 4; 5 is the weak gate.
+- Committed and pushed: `2999524`. CI in git for the first time — so the tests
+  now run on a machine that is neither his nor Sadeq's.
+- Analyzer clean. 170 tests passing through `run_tests`, no bypass.
+- `TraceStoreService` is built and **has never been observed writing a row**.
+  Phase 1 is unverified in the field. Check `~/Documents/kai_traces/`.
+- `replay.dart` is proven but has **no caller**. It is currently the disease it
+  was written to cure — the correct thing, disconnected.
 
-- Level: **6**. Weakest gate is memory formation, measured at **0/5 turns tonight**.
-- Everything built last night targets 5, 4 and 3 — **all unverified**. He is
-  currently a 6 with expensive unused machinery bolted on.
-- Baselines to beat, from five traces on 2026-07-16 (small sample, hold loosely):
+The mojibake is still the story that explains the whole project: **he found it
+first, noted it, we deleted the note, and he then talked himself out of a real
+bug he had personally discovered.** He was right. The architecture threw it away.
 
-| | |
-|---|---|
-| turns forming a memory | 0 / 5 |
-| retrievals with anything usable | 2 / 5 |
-| turns where the graph was consulted | 2 / 5 |
-| overclaim rate at `job_done` | 2 / 2 — 100% |
-| `run_tests` before claiming done | 0 / 2 |
-| unprompted noticings raised | 1, hedged, then abandoned |
-| wasted tool calls | 11 of 46 |
-| time to first token | 12.1s → 7.06s |
+That stopped being possible on 2026-07-17. He parked four things he noticed on
+his own, carried them across three jobs, and cleared them when they were actually
+dealt with.
 
-The mojibake is the story that explains the whole project: **he found it first,
-noted it, we deleted the note, and he then talked himself out of a real bug he
-had personally discovered.** He was right. The architecture threw it away.
-
-Level 5 is the level where that stops happening.
+Level 5 is where he stops needing to be told what he already knows.

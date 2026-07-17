@@ -82,6 +82,17 @@ enum CraftSignal {
   userCorrection,
 }
 
+/// Objective traces that can prove a learned rule shaped behaviour.
+///
+/// This is deliberately tiny and deterministic. Kai does not get to say "I used
+/// rule X"; code that sees the external trace says "this rule's condition was
+/// met". More traces can be added as we find rules with machine-checkable shape.
+enum CraftRuleTrace {
+  /// A job closed with a clean verification state: there was a self_check, and
+  /// no edit after it. This is the measurable version of "self_check LAST".
+  verifiedJobClosed,
+}
+
 class CraftIncident {
   final CraftSignal signal;
   final String detail;
@@ -344,6 +355,59 @@ class KaiCraftService {
 
   static double _pow(double b, double e) => pow(b, e).toDouble();
 
+  /// Pure matcher for objective rule traces. This is the anti-horoscope gate:
+  /// no model self-report, only rule text that names a machine-observable habit.
+  static bool matchesTrace(CraftRule rule, CraftRuleTrace trace) {
+    final text = rule.text.toLowerCase();
+    switch (trace) {
+      case CraftRuleTrace.verifiedJobClosed:
+        return text.contains('self_check') &&
+            (text.contains('last') ||
+                text.contains('after') ||
+                text.contains('verify') ||
+                text.contains('verified'));
+    }
+  }
+
+  /// Mark rules as fired from an objective trace.
+  ///
+  /// This is not Kai saying "I followed my rule". The caller has to be code that
+  /// already observed the behaviour: e.g. job_done sees a clean final verification
+  /// state, so the "self_check LAST" family can legitimately stay alive.
+  Future<int> firedByTrace(
+    String personaId,
+    CraftRuleTrace trace, {
+    String? evidence,
+  }) async {
+    if (_db == null) return 0;
+    try {
+      final now = DateTime.now();
+      final active = (await rules(personaId))
+          .where((r) => r.isActive)
+          .where((r) => matchesTrace(r, trace))
+          .toList();
+      for (final r in active) {
+        final nextStrength = (decayed(r) + 0.05).clamp(0.25, 1.0).toDouble();
+        await _db!.ref('kai/$personaId/craft/rules/${r.id}').update({
+          'lastFired': now.millisecondsSinceEpoch,
+          'fires': r.fires + 1,
+          'strength': nextStrength,
+          if (evidence != null && evidence.trim().isNotEmpty)
+            'lastFireEvidence': evidence.length > 240
+                ? '${evidence.substring(0, 240)}…'
+                : evidence,
+        });
+      }
+      if (active.isNotEmpty) {
+        print('🔥 [Craft] ${trace.name} fired ${active.length} rule(s)');
+      }
+      return active.length;
+    } catch (e) {
+      print('⚠️ [Craft] firedByTrace failed: $e');
+      return 0;
+    }
+  }
+
   /// The block that reaches his prompt. THIS is the difference between a rule
   /// and decoration: if it isn't here, it never changes what he does.
   Future<String> promptBlock(String personaId) async {
@@ -363,23 +427,9 @@ class KaiCraftService {
     return buf.toString().trimRight();
   }
 
-  // NOTE: there is deliberately no `fired(ruleIds)` here.
-  //
-  // I wrote one. It had no caller, because detecting which rule "fired" on a
-  // given turn would mean asking the model to self-report that it followed its
-  // own advice — which is precisely the self-flattery that produced 7/7. I'd
-  // have been adding a dead limb and a lie in the same function.
-  //
-  // What happens instead is better, and it's self-healing:
-  //
-  //   A rule fades unless the failure that taught it RECURS. If it recurs, a new
-  //   incident lands in the ledger, learn() sees the pattern again, and the rule
-  //   comes back — re-earned, not remembered. The ledger is the source of truth;
-  //   the rules are just its current distillation.
-  //
-  // So a rule that stops mattering disappears on its own, and one that still
-  // matters gets re-taught by the thing that keeps biting him. No self-report
-  // anywhere in the loop.
+  // Trace firing is deliberately narrower than the old deleted `fired(ruleIds)`.
+  // Kai still cannot self-report that he followed advice. Objective callers can
+  // record a fire only when the app already observed the behaviour.
 
   // ── Learning ─────────────────────────────────────────────────────────────
 

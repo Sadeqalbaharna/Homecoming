@@ -316,6 +316,38 @@ class KnowledgeEdge {
   /// mind that was always right.
   final DateTime? supersededAt;
 
+  /// How well-supported this claim actually is — **Kai's design, and he was
+  /// right.**
+  ///
+  /// `strength` above is SALIENCE: how easily this edge comes up in thought.
+  /// `_hebbian` bumps it during retrieval and `spreadActivation` traverses by
+  /// it, so "used often → easier to reach". That is correct and worth keeping.
+  ///
+  /// The bug was that one number was doing two jobs. Claude's proposal was to
+  /// stop strengthening on retrieval — which would have deleted a working
+  /// mechanism because it was MISLABELLED. Kai's read:
+  ///
+  ///   "repeat-reference is the right signal for accessibility, but the wrong
+  ///    signal for truth."
+  ///   "A false thing can be referenced often... repetition could make a bad
+  ///    belief stronger. That's horoscope-brain. Worse: it's self-reinforcing
+  ///    horoscope-brain."
+  ///
+  /// So: two axes, and they must never be collapsed.
+  ///
+  ///   strength   ← retrieval. Use builds the road.
+  ///   confidence ← EVIDENCE. New sources, your confirmation, contradiction.
+  ///
+  /// Recall frequency moves the first and must never move the second, because
+  /// a graph that believes things harder for having thought about them is not a
+  /// memory. It's propaganda.
+  final double confidence;
+
+  /// Last time this edge fired during a real recall. Feeds gentle salience
+  /// decay — quiet ≠ false, so this can make a claim *less loud* and must never
+  /// make it less true.
+  final DateTime? lastActivatedAt;
+
   KnowledgeEdge({
     required this.fromId,
     required this.toId,
@@ -325,6 +357,8 @@ class KnowledgeEdge {
     this.label,
     this.sources = const [],
     this.supersededAt,
+    this.confidence = 0.5,
+    this.lastActivatedAt,
   });
 
   /// A claim he currently holds.
@@ -336,6 +370,8 @@ class KnowledgeEdge {
     String? label,
     List<String>? sources,
     DateTime? supersededAt,
+    double? confidence,
+    DateTime? lastActivatedAt,
   }) =>
       KnowledgeEdge(
         fromId: fromId,
@@ -346,6 +382,8 @@ class KnowledgeEdge {
         label: label ?? this.label,
         sources: sources ?? this.sources,
         supersededAt: supersededAt ?? this.supersededAt,
+        confidence: confidence ?? this.confidence,
+        lastActivatedAt: lastActivatedAt ?? this.lastActivatedAt,
       );
   
   /// Get color based on edge type
@@ -426,10 +464,25 @@ class KnowledgeEdge {
       supersededAt: json['supersededAt'] is int
           ? DateTime.fromMillisecondsSinceEpoch(json['supersededAt'] as int)
           : null,
+      // Legacy edges have no confidence, and 0.5 is the honest default: an edge
+      // written before evidence was tracked is one we genuinely don't know how
+      // well-supported it is. NOT `strength` — importing salience as confidence
+      // is precisely the conflation this field exists to end, and it would
+      // silently hand a self-reinforced belief a truth score it never earned.
+      confidence: (json['confidence'] as num?)?.toDouble() ?? 0.5,
+      lastActivatedAt: json['lastActivatedAt'] is int
+          ? DateTime.fromMillisecondsSinceEpoch(json['lastActivatedAt'] as int)
+          : null,
     );
   }
 
   /// Convert to JSON
+  ///
+  /// Every field, every time. `_saveGraph` used to be hand-rolled and silently
+  /// dropped anything it didn't know about — which is how `lastAccessed` and
+  /// `activationLevel` existed for months holding nothing. A new field that
+  /// doesn't survive a round trip is worse than no field: it looks like it
+  /// works.
   Map<String, dynamic> toJson() => {
     'fromId': fromId,
     'toId': toId,
@@ -437,8 +490,11 @@ class KnowledgeEdge {
     'strength': strength,
     'timestamp': timestamp.millisecondsSinceEpoch,
     'label': label,
+    'confidence': confidence,
     if (sources.isNotEmpty) 'sources': sources,
     if (supersededAt != null) 'supersededAt': supersededAt!.millisecondsSinceEpoch,
+    if (lastActivatedAt != null)
+      'lastActivatedAt': lastActivatedAt!.millisecondsSinceEpoch,
   };
 }
 

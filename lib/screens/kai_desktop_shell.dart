@@ -21,6 +21,7 @@ import '../services/ai/ai_service.dart';
 import '../services/ai/ai_config.dart'; // voice on/off lives here
 import '../services/ai/memory_service.dart'; // decay-by-use: the forget sweep
 import '../services/core/kai_project_service.dart';
+import '../services/core/reply_chunker_service.dart';
 import '../services/core/tool_policy_service.dart';
 import '../services/core/tool_executor_service.dart';
 import '../widgets/kai_project_card.dart';
@@ -100,6 +101,10 @@ class _ChatMsg {
   /// than his actual answer. Rendered quieter so the real reply still lands.
   final bool interim;
 
+  /// This reply is still unfolding into readable chunks, instead of landing as
+  /// one giant essay-brick.
+  final bool unfolding;
+
   /// What he was shown, if anything — kept so the bubble can display it.
   final Uint8List? image;
 
@@ -110,6 +115,7 @@ class _ChatMsg {
     this.user,
     this.text, {
     this.interim = false,
+    this.unfolding = false,
     this.image,
     this.attachments = const [],
   });
@@ -124,6 +130,7 @@ class KaiDesktopShell extends StatefulWidget {
 class _KaiDesktopShellState extends State<KaiDesktopShell> {
   final AIService _ai = AIService();
   final CodeWorkspaceService _ws = CodeWorkspaceService.instance;
+  final ReplyChunkerService _replyChunker = const ReplyChunkerService();
   final _inp = TextEditingController();
   final _inputFocus = FocusNode();
   final _scroll = ScrollController();
@@ -194,9 +201,10 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
     Timer(const Duration(minutes: 3), () {
       MemoryService.forgetWeak(_kPersona).catchError((_) => 0);
     });
-    // Make sure his 7-layer plan exists with its ORIGINAL goals frozen. No-ops
-    // if it's already there, so live progress is never overwritten.
+    // Make sure his tracked projects exist with their ORIGINAL goals frozen.
+    // No-ops if they're already there, so live progress is never overwritten.
     KaiProjectService.instance.ensureSmarterProject(_kPersona);
+    KaiProjectService.instance.ensureSentienceProject(_kPersona);
     // Severed-nerve check: shout if he's offered any tool with no policy. This
     // is what silently ate job_start / set_layer_progress — visible at boot now.
     ToolPolicyService.auditAgainstSchemas(ToolExecutorService.toolDefinitions);
@@ -473,8 +481,7 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
         },
       );
       if (!_isStaleGeneration(generation)) {
-        setState(() => _msgs.add(
-            _ChatMsg(false, resp.reply.isEmpty ? '(no reply)' : resp.reply)));
+        await _addAssistantReplyUnfolding(resp.reply, generation);
       }
     } catch (e) {
       if (!_isStaleGeneration(generation)) {
@@ -497,6 +504,32 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
           await _send(followUp, false);
         }
       }
+    }
+  }
+
+  List<String> _replyChunks(String text) => _replyChunker.chunks(text);
+
+
+  Future<void> _addAssistantReplyUnfolding(String reply, int generation) async {
+    final chunks = _replyChunks(reply);
+    if (_isStaleGeneration(generation)) return;
+
+    setState(() => _msgs.add(_ChatMsg(false, chunks.first, unfolding: true)));
+    _autoscroll();
+
+    final index = _msgs.length - 1;
+    for (var i = 1; i < chunks.length; i++) {
+      await Future<void>.delayed(Duration(milliseconds: i < 3 ? 260 : 160));
+      if (_isStaleGeneration(generation) || index >= _msgs.length) return;
+      setState(() => _msgs[index].text = '${_msgs[index].text.trimRight()}\n\n${chunks[i]}');
+      _autoscroll();
+    }
+
+    if (!_isStaleGeneration(generation) && index < _msgs.length) {
+      setState(() {
+        final done = _msgs[index];
+        _msgs[index] = _ChatMsg(false, done.text);
+      });
     }
   }
 
@@ -1155,6 +1188,7 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
                   fontFamily: 'monospace')),
           const SizedBox(height: 8),
           Expanded(
+            flex: 5,
             child: _ws.projects.isEmpty
                 ? const Padding(
                     padding: EdgeInsets.only(top: 10),
@@ -1167,20 +1201,26 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
                     ],
                   ),
           ),
-          const SizedBox(height: 12),
-          // The work stack gets a fixed slot and scrolls inside it.
-          //
-          // This was `height: 300` around a Column rendering all 7 layers fully
-          // expanded — ~833px of content in a 300px box. 833 − 300 = the "BOTTOM
-          // OVERFLOWED BY 533 PIXELS" stripe painted over the UI, with the last
-          // four layers simply unreachable.
-          //
-          // The card is now collapsible and its list is Expanded+scrollable, so
-          // it fits whatever it's given. 340 is a comfortable default: header,
-          // the open layer, and several collapsed rows visible at once.
-          const SizedBox(
-            height: 340,
-            child: KaiProjectCard(personaId: _kPersona),
+          const SizedBox(height: 10),
+          Expanded(
+            flex: 5,
+            child: Column(
+              children: [
+                Expanded(
+                  child: KaiProjectCard(
+                    personaId: _kPersona,
+                    projectId: KaiProjectService.smarterId,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Expanded(
+                  child: KaiProjectCard(
+                    personaId: _kPersona,
+                    projectId: KaiProjectService.sentienceId,
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -1478,7 +1518,7 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
                 // text showed literal ** and ### and made a careful answer look
                 // broken.
                 KaiRichText(
-                  text: m.text,
+                  text: m.unfolding ? '${m.text}\n\n▌' : m.text,
                   color: dim ? Colors.white38 : const Color(0xFFE4EEF6),
                   accent: dim ? Colors.white38 : accent,
                   selectable: true,

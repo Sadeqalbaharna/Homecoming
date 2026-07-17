@@ -53,7 +53,16 @@ class EdgeRow {
   /// Null is a smell: see [isMeaningful].
   final String? label;
 
+  /// SALIENCE — how easily this comes up in thought. Bumped by recall.
+  /// Deliberately NOT what claims are ranked by. See [confidence].
   final double strength;
+
+  /// How well-supported the claim is. Moves only on new evidence.
+  ///
+  /// The split is Kai's, on his own graph: "repeat-reference is the right
+  /// signal for accessibility, but the wrong signal for truth. A false thing
+  /// can be referenced often."
+  final double confidence;
 
   /// Memory shard ids — the actual words that were said. This is how he answers
   /// "because you told me, on the 3rd" instead of asserting a rumour.
@@ -68,6 +77,7 @@ class EdgeRow {
     required this.type,
     this.label,
     this.strength = 0.5,
+    this.confidence = 0.5,
     this.sources = const [],
     this.supersededAt,
   });
@@ -90,7 +100,13 @@ class Claim {
   final String subject;
   final String relation;
   final String object;
+
+  /// How easily it comes to mind. NOT how true it is.
   final double strength;
+
+  /// How well-supported it is. This is what claims are ranked by.
+  final double confidence;
+
   final List<String> sources;
   final bool stillBelieved;
 
@@ -99,6 +115,7 @@ class Claim {
     required this.relation,
     required this.object,
     required this.strength,
+    required this.confidence,
     required this.sources,
     required this.stillBelieved,
   });
@@ -200,13 +217,32 @@ List<Claim> recall(
       relation: phraseFor(e),
       object: forward ? e.toLabel : e.fromLabel,
       strength: e.strength,
+      confidence: e.confidence,
       sources: e.sources,
       stillBelieved: e.isActive,
     ));
   }
 
-  // Strongest first. A claim he's heard five times outranks one he heard once.
-  out.sort((a, b) => b.strength.compareTo(a.strength));
+  // ── Ranked by CONFIDENCE, not salience ─────────────────────────────────
+  //
+  // This used to sort by `strength`, and the comment said "a claim he's heard
+  // five times outranks one he heard once" — which is what I thought strength
+  // meant. It doesn't. `strength` is bumped by RECALL, so sorting by it ranks
+  // claims by how often he's already thought about them.
+  //
+  // That is a rich-get-richer loop pointed straight at the answer: the thing
+  // he mentions most gets recalled most gets mentioned most. He'd have become
+  // the friend who brings up the Tavern in every conversation — which is,
+  // word for word, the problem the refractory period was added to patch.
+  //
+  // "What does Sadeq like?" wants the best-SUPPORTED claim, not the most
+  // rehearsed one. Confidence moves only on new evidence. Ties break on
+  // salience, because between two equally-supported claims the one he actually
+  // reaches for is the more useful answer.
+  out.sort((a, b) {
+    final c = b.confidence.compareTo(a.confidence);
+    return c != 0 ? c : b.strength.compareTo(a.strength);
+  });
   return out.length > limit ? out.sublist(0, limit) : out;
 }
 

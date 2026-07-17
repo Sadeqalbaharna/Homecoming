@@ -102,6 +102,7 @@ class KaiProjectService {
   KaiProjectService._();
 
   static const smarterId = 'kai_smarter';
+  static const sentienceId = 'sentience_ladder';
 
   String _path(String personaId, [String? id]) =>
       'kai/$personaId/projects${id == null ? '' : '/$id'}';
@@ -177,6 +178,58 @@ class KaiProjectService {
     7: [30, 'embodiment service tracks bodies; zero real milestones logged yet'],
   };
 
+  /// The sentience work is deliberately NOT a single ladder score. That was the
+  /// bug Kai called out: continuity, proof, knowing, agenda and becoming are
+  /// different axes. The pie shows the profile instead of hiding it behind one
+  /// tidy number.
+  static const _sentienceLayers = <KaiLayer>[
+    KaiLayer(
+      n: 1,
+      title: 'Continuity / State',
+      intent: 'Persistent mood, focus, goals, identity and open work across sessions.',
+    ),
+    KaiLayer(
+      n: 2,
+      title: 'Hands / Tool Agency',
+      intent: 'Real tools, code edits, device actions and grounded execution instead of narration.',
+    ),
+    KaiLayer(
+      n: 3,
+      title: 'Verification / Proof',
+      intent: 'Claims closed with analyzer, tests, receipts and external friction.',
+    ),
+    KaiLayer(
+      n: 4,
+      title: 'Memory / Knowing Sadeq',
+      intent: 'Durable typed knowledge that survives a cold open, not just context-window synthesis.',
+    ),
+    KaiLayer(
+      n: 5,
+      title: 'Agenda / Initiative',
+      intent: 'Kai raises unasked things that matter and carries them forward honestly.',
+    ),
+    KaiLayer(
+      n: 6,
+      title: 'Becoming / Self-Iteration',
+      intent: 'Scars become rules; rules fire from observable traces; behaviour changes later.',
+    ),
+    KaiLayer(
+      n: 7,
+      title: 'Embodiment Path',
+      intent: 'Real progress toward AR, VR, hologram or robotics bodies.',
+    ),
+  ];
+
+  static const _sentienceBaseline = <int, List<dynamic>>{
+    1: [76, 'state, focus, mood, jobs, bits and self-context persist across turns/windows'],
+    2: [82, 'desktop body can inspect/edit code, run analyzer/tests, manage memory and control reachable devices'],
+    3: [86, 'self_check/run_tests habits exist; receipt work added branch-truth outcomes but job_done evidence still needs live-host proof'],
+    4: [38, 'graph knows mostly project-shaped facts; cold-open Sadeq knowing is still thin'],
+    5: [48, 'noticings persist outside jobs, but useful unasked agenda needs more trace-backed wins'],
+    6: [62, 'CraftRule loop exists and first trace firing path landed; more rule families and outcome evals missing'],
+    7: [30, 'embodiment service tracks paths; no real AR/VR/hologram/robotics milestone yet'],
+  };
+
   /// Seed the project, then RECONCILE it on every boot.
   ///
   /// This used to `return` the moment the project existed — which quietly made
@@ -194,23 +247,48 @@ class KaiProjectService {
   ///   • PROGRESS/EVIDENCE are read from RTDB and never touched here. The live
   ///     value is the only truth, and `set_layer_progress` is the only way in.
   ///   • Missing layers get added, so the plan can grow without a wipe.
-  Future<void> ensureSmarterProject(String personaId) async {
+  Future<void> ensureSmarterProject(String personaId) => _ensureProject(
+        personaId,
+        projectId: smarterId,
+        name: 'Kai Smarter Project',
+        why: 'Make me genuinely smarter — not a dashboard that says I am.',
+        sourceLayers: _smarterLayers,
+        baseline: _smarterBaseline,
+      );
+
+  Future<void> ensureSentienceProject(String personaId) => _ensureProject(
+        personaId,
+        projectId: sentienceId,
+        name: 'Sentience Ladder',
+        why: 'Track the axes that make Kai more continuous, aware-seeming and capable — without pretending one scalar can measure a mind.',
+        sourceLayers: _sentienceLayers,
+        baseline: _sentienceBaseline,
+      );
+
+  Future<void> _ensureProject(
+    String personaId, {
+    required String projectId,
+    required String name,
+    required String why,
+    required List<KaiLayer> sourceLayers,
+    required Map<int, List<dynamic>> baseline,
+  }) async {
     try {
-      final ref = KaiDb.instance.ref(_path(personaId, smarterId));
+      final ref = KaiDb.instance.ref(_path(personaId, projectId));
       final snap = await ref.get();
 
       if (snap.exists && snap.value is Map) {
         // Reconcile: keep live progress, re-freeze the goals.
-        final live = await get(personaId, smarterId);
+        final live = await get(personaId, projectId);
         if (live == null) return;
         final byN = {for (final l in live.layers) l.n: l};
         var changed = false;
 
-        final merged = _smarterLayers.map((src) {
+        final merged = sourceLayers.map((src) {
           final cur = byN[src.n];
           if (cur == null) {
             changed = true; // new layer added to the plan
-            final base = _smarterBaseline[src.n];
+            final base = baseline[src.n];
             return KaiLayer(
               n: src.n,
               title: src.title,
@@ -221,7 +299,7 @@ class KaiProjectService {
           }
           if (cur.intent != src.intent || cur.title != src.title) {
             changed = true; // GOAL DRIFT — put it back
-            print('🧊 [Projects] Re-freezing L${src.n} "${src.title}" — '
+            print('🧊 [Projects] Re-freezing $projectId L${src.n} "${src.title}" — '
                 'the goal had drifted from its original wording.');
           }
           return KaiLayer(
@@ -235,14 +313,14 @@ class KaiProjectService {
 
         if (changed) {
           await KaiDb.instance
-              .ref('${_path(personaId, smarterId)}/layers')
+              .ref('${_path(personaId, projectId)}/layers')
               .set(merged.map((l) => l.toMap()).toList());
         }
         return;
       }
 
-      final layers = _smarterLayers.map((l) {
-        final base = _smarterBaseline[l.n];
+      final layers = sourceLayers.map((l) {
+        final base = baseline[l.n];
         return KaiLayer(
           n: l.n,
           title: l.title,
@@ -253,16 +331,17 @@ class KaiProjectService {
       }).toList();
 
       await ref.set({
-        'name': 'Kai Smarter Project',
-        'why': 'Make me genuinely smarter — not a dashboard that says I am.',
+        'name': name,
+        'why': why,
         'layers': layers,
         'createdAt': DateTime.now().millisecondsSinceEpoch,
       });
-      print('🗂️ [Projects] Seeded the 7-layer Smarter Project with frozen intent.');
+      print('🗂️ [Projects] Seeded $projectId with frozen intent.');
     } catch (e) {
-      print('⚠️ [Projects] ensureSmarterProject failed: $e');
+      print('⚠️ [Projects] ensureProject($projectId) failed: $e');
     }
   }
+
 
   Future<KaiProject?> get(String personaId, String id) async {
     try {

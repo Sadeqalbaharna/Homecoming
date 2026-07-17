@@ -431,6 +431,23 @@ class ToolPolicyService {
       risk: ToolRisk.safeAction,
       capabilities: {ToolCapability.self},
     ),
+    // Looking at his own graph, and cleaning it.
+    //
+    // NOT needsUserApproval, and that is a real decision rather than an
+    // oversight. It archives the entire graph before touching anything and hard
+    // aborts if the backup fails — so the destructive case is already gated by
+    // something stronger than a dialog: a working restore point. And the default
+    // is dry_run:true, which changes nothing at all.
+    //
+    // Weighed against: this tool has existed for weeks behind a button on a
+    // PHONE-ONLY screen, so his graph has never once been cleaned. A safety that
+    // means the repair never happens is not a safety.
+    'prune_memory': ToolPolicy(
+      name: 'prune_memory',
+      risk: ToolRisk.destructive,
+      capabilities: {ToolCapability.memory, ToolCapability.self},
+      returnsData: true,
+    ),
     // Asking his own memory. Read-only, no approval, no model call — the same
     // reasoning as self_check and run_tests: anything standing between him and
     // finding out will get skipped exactly when it matters. He should be able

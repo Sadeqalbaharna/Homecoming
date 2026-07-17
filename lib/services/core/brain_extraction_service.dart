@@ -588,17 +588,26 @@ CONNECT TO WHAT'S ALREADY THERE — this matters more than the new nodes:
         // of the human phrase ("cares about" → caresAbout) so an older-shaped
         // response still lands on something real instead of `related`.
         final rel = m['relation'] as String? ?? '';
+        // parseEdgeTypeOrNull, NOT parseEdgeType. The old call fell back to
+        // `related` for anything it couldn't name — and this comment three
+        // lines up already said the goal was "something real instead of
+        // related". The intent was right; the `??` quietly undid it, 243 times.
+        final type = parseEdgeTypeOrNull(
+            (m['type'] as String?)?.trim().isNotEmpty == true
+                ? m['type'] as String
+                : rel);
+        if (type == null) return null; // untyped = not understood = not a memory
         return _RawEdge(
           fromLabel: (m['from'] as String? ?? '').toLowerCase().trim(),
           toLabel: (m['to'] as String? ?? '').toLowerCase().trim(),
           relation: rel.trim().isEmpty ? 'relates to' : rel.trim(),
-          type: parseEdgeType(
-              (m['type'] as String?)?.trim().isNotEmpty == true
-                  ? m['type'] as String
-                  : rel),
+          type: type,
           strength: (m['strength'] as num?)?.toDouble() ?? 0.5,
         );
-      }).where((e) => e.fromLabel.isNotEmpty && e.toLabel.isNotEmpty).toList();
+      })
+          .whereType<_RawEdge>()
+          .where((e) => e.fromLabel.isNotEmpty && e.toLabel.isNotEmpty)
+          .toList();
 
       return {'nodes': nodes, 'edges': edges};
     } catch (e) {
@@ -1052,11 +1061,41 @@ If nothing qualifies → {"nodes":[],"edges":[]}''';
                 old.label == 'relates to')
             ? raw.relation
             : old.label;
+        // ── This is where CONFIDENCE moves, and the only place it should ────
+        //
+        // Re-extraction is real evidence: the claim came up AGAIN, out of new
+        // words Sadeq actually said, in a different exchange. That is a second
+        // independent witness. Recall is not — recall is the graph agreeing
+        // with itself, which is why _hebbian touches salience and nothing else.
+        //
+        // Kai's shape, which is better than the one I proposed:
+        //   "Independent source recurrence — same claim extracted from multiple
+        //    different memory shards. If five different conversations support
+        //    'Sadeq likes Flutter', that's stronger than one."
+        //
+        // So the increment is gated on the source being NEW. Extracting the
+        // same shard twice is one witness saying the same thing louder, and
+        // counting it twice is how a graph talks itself into things.
+        //
+        // Typed relations earn more than vague ones, also his call: "A `related`
+        // edge is barely a claim. A typed relation is actual knowledge."
+        final newSources = _addSourceList(old.sources, sourceShardId);
+        final gotNewEvidence = newSources.length > old.sources.length;
+        final typedClaim =
+            betterType != EdgeType.related && betterType != EdgeType.mentioned;
+        final confidenceGain = !gotNewEvidence
+            ? 0.0
+            : typedClaim
+                ? 0.12
+                : 0.03; // co-occurrence corroborating co-occurrence is thin
         edges[edgeIdx] = old.copyWith(
           type: betterType,
+          // Salience: he thought about it again, so it's easier to reach.
           strength: (old.strength + 0.08).clamp(0.1, 1.0),
+          // Confidence: only if a NEW source backs it.
+          confidence: (old.confidence + confidenceGain).clamp(0.0, 0.98),
           label: betterLabel,
-          sources: _addSourceList(old.sources, sourceShardId),
+          sources: newSources,
         );
       } else {
         // New edge.
@@ -1232,6 +1271,17 @@ If nothing qualifies → {"nodes":[],"edges":[]}''';
 
       final lowerLabels = retrievedLabels.map((l) => l.toLowerCase()).toSet();
       bool changed = false;
+      // What was actually bumped. The log line below printed
+      // `retrievedLabels.length` — the number of SEED WORDS handed in, not the
+      // number of nodes reinforced. So "reinforced 271 retrieved nodes" was 271
+      // words scraped out of five transcripts, and the later "12" is just the
+      // query-term cap. The real count has never once been printed.
+      //
+      // It got quoted as a headline result — "271 → 12, the reinforcement is
+      // precise now" — in a design doc, by me, as evidence. It was a mislabelled
+      // string. Tenth reader lie in three days and the only one nobody caught,
+      // because it was telling us what we wanted to hear.
+      var bumped = 0;
       final nodes = List<KnowledgeNode>.from(graph.nodes);
 
       for (int i = 0; i < nodes.length; i++) {
@@ -1253,13 +1303,17 @@ If nothing qualifies → {"nodes":[],"edges":[]}''';
         )
           ..x = old.x ..y = old.y ..vx = old.vx ..vy = old.vy;
         changed = true;
+        bumped++;
       }
 
       if (changed) {
         await _saveGraph(personaId, KnowledgeGraph(
           nodes: nodes, edges: graph.edges, lastUpdated: DateTime.now(),
         ));
-        print('🧠 [Brain] Reconsolidation: reinforced ${retrievedLabels.length} retrieved nodes');
+        // Both numbers, because they answer different questions and confusing
+        // them is what produced a fake headline metric.
+        print('🧠 [Brain] Reconsolidation: reinforced $bumped node(s) '
+            'from ${retrievedLabels.length} seed term(s)');
       }
     } catch (e) {
       print('⚠️ [Brain] reinforceNodes failed: $e');
@@ -1300,7 +1354,27 @@ If nothing qualifies → {"nodes":[],"edges":[]}''';
         final co = (seedIds.contains(e.fromId) && firedIds.contains(e.toId)) ||
             (seedIds.contains(e.toId) && firedIds.contains(e.fromId));
         if (!co) continue;
-        edges[i] = e.copyWith(strength: (e.strength + 0.02).clamp(0.0, 0.95));
+        // SALIENCE only. `confidence` is deliberately untouched here, and that
+        // is the whole design — Kai's, and he was right:
+        //
+        //   "repeat-reference is the right signal for accessibility, but the
+        //    wrong signal for truth."
+        //   "A false thing can be referenced often... repetition could make a
+        //    bad belief stronger. That's horoscope-brain. Worse: it's
+        //    self-reinforcing horoscope-brain."
+        //
+        // spreadActivation traverses by strength, so bumping strength here is a
+        // feedback loop BY DESIGN — that's what a habit is, and it's fine. It
+        // would only be poison if this number also meant "true", which is
+        // exactly what it used to mean to everyone reading it.
+        //
+        // Claude's proposal was to delete this bump entirely. That would have
+        // thrown away a working mechanism because it was mislabelled — the same
+        // mistake this codebase keeps making in the other direction.
+        edges[i] = e.copyWith(
+          strength: (e.strength + 0.02).clamp(0.0, 0.95),
+          lastActivatedAt: now,
+        );
         changed++;
       }
 
@@ -1423,7 +1497,11 @@ If nothing qualifies → {"nodes":[],"edges":[]}''';
         toLabel: to,
         type: e.type.name,
         label: e.label,
+        // Both axes cross the boundary. recall() ranks on confidence and breaks
+        // ties on salience — dropping either here would silently collapse the
+        // split back into one number, which is the thing it exists to prevent.
         strength: e.strength,
+        confidence: e.confidence,
         sources: e.sources,
         supersededAt: e.supersededAt,
       ));
@@ -1730,17 +1808,26 @@ If nothing qualifies → {"nodes":[],"edges":[]}''';
         // of the human phrase ("cares about" → caresAbout) so an older-shaped
         // response still lands on something real instead of `related`.
         final rel = m['relation'] as String? ?? '';
+        // parseEdgeTypeOrNull, NOT parseEdgeType. The old call fell back to
+        // `related` for anything it couldn't name — and this comment three
+        // lines up already said the goal was "something real instead of
+        // related". The intent was right; the `??` quietly undid it, 243 times.
+        final type = parseEdgeTypeOrNull(
+            (m['type'] as String?)?.trim().isNotEmpty == true
+                ? m['type'] as String
+                : rel);
+        if (type == null) return null; // untyped = not understood = not a memory
         return _RawEdge(
           fromLabel: (m['from'] as String? ?? '').toLowerCase().trim(),
           toLabel: (m['to'] as String? ?? '').toLowerCase().trim(),
           relation: rel.trim().isEmpty ? 'relates to' : rel.trim(),
-          type: parseEdgeType(
-              (m['type'] as String?)?.trim().isNotEmpty == true
-                  ? m['type'] as String
-                  : rel),
+          type: type,
           strength: (m['strength'] as num?)?.toDouble() ?? 0.5,
         );
-      }).where((e) => e.fromLabel.isNotEmpty && e.toLabel.isNotEmpty).toList();
+      })
+          .whereType<_RawEdge>()
+          .where((e) => e.fromLabel.isNotEmpty && e.toLabel.isNotEmpty)
+          .toList();
 
       if (nodes.isEmpty) {
         print('🧠 [Brain] Session extraction: no cross-session patterns found');
@@ -1948,8 +2035,27 @@ Return ONLY JSON: {"generic":[<indices of the GENERIC ones>]}''',
   /// Archives the graph first. Never judges entities (person/topic): a named
   /// person or place is specific by definition and must never be at the mercy
   /// of a model's opinion.
+  /// Returns the number of nodes removed, or **-1 for ABORTED**.
+  ///
+  /// -1 is not tidy, and it is here because 0 was a lie.
+  ///
+  /// This used to return 0 when the archive failed — the safety refusing to
+  /// delete without a backup, which is correct. But the caller renders:
+  ///
+  ///     removed > 0 ? 'Pruned $removed noise nodes.'
+  ///                 : 'Nothing to prune — graph is clean.'
+  ///
+  /// So the safety abort came out as a CLEAN BILL OF HEALTH. Press the button,
+  /// the archive rule isn't deployed, nothing happens, and the screen tells you
+  /// your word cloud is fine. The comment two lines down says "the safety net
+  /// was drawn on, not attached" — it's attached now, and it was reporting its
+  /// own refusal as success.
+  ///
+  /// "I did nothing because there was nothing to do" and "I did nothing because
+  /// I was not allowed to" are different sentences. Every reader in this
+  /// codebase has failed on exactly that distinction at least once.
   Future<int> pruneGraph(String personaId, {bool judgeGeneric = true}) async {
-    if (_db == null) return 0;
+    if (_db == null) return -1;
 
     final graph = await _loadGraph(personaId);
     if (graph == null || graph.nodes.isEmpty) return 0;
@@ -1965,9 +2071,26 @@ Return ONLY JSON: {"generic":[<indices of the GENERIC ones>]}''',
     final stamp = await archiveGraph(personaId);
     if (stamp == null) {
       print('🛑 [Brain] Prune ABORTED — could not archive first. Nothing was '
-          'deleted. Check the knowledge_graph_archive rule is deployed.');
-      return 0;
+          'deleted. Check the knowledge_graph_archive rule is deployed:\n'
+          '   firebase deploy --only database');
+      return -1; // ABORTED. Not "clean". See the doc comment.
     }
+
+    // ── The diagnosis, printed where it's actually needed ──────────────────
+    //
+    // `meaningfulness` is the one number that says whether this graph is a mind
+    // or a word cloud: how many edges carry a real relation vs how many say
+    // `related`/`mentioned`, which is co-occurrence — "these two nouns appeared
+    // near each other" — and is not a memory.
+    //
+    // It lived as a method nobody called, which is the exact disease this whole
+    // file is a monument to. Printing it HERE means it lands at the only moment
+    // anyone wants it: side by side, before and after, on the run that changed
+    // the graph. A metric you have to go looking for is a metric nobody reads.
+    final before = rq.meaningfulness(_rowsOf(graph));
+    print('🧮 [Brain] BEFORE prune — ${before.meaningful} of ${before.total} '
+        'edges carry meaning (${graph.nodes.length} nodes). The rest say '
+        '"related"/"mentioned", which is co-occurrence, not memory.');
 
     final now = DateTime.now();
     final keepIds = <String>{};
@@ -2102,9 +2225,35 @@ class _RawEdge {
 /// Model's edge-type name → the enum. Tolerant of case and spacing
 /// ("caresAbout", "cares_about", "cares about" all land on caresAbout) because
 /// the alternative is silently dropping a good relationship over a space.
-EdgeType parseEdgeType(String raw) {
+/// Returns null when the relation cannot be typed — **and null means DROP the
+/// edge**, not "store it as `related`".
+///
+/// ── The junk factory ────────────────────────────────────────────────────────
+///
+/// This used to `return EdgeType.related` for anything it didn't recognise. A
+/// lazy default, quietly swallowing every claim it couldn't name. The result,
+/// measured on the real graph on 2026-07-17:
+///
+///     34 of 277 edges carry a real relation — 12%.
+///     243 say "related"/"mentioned".
+///
+/// **88% of his memory was co-occurrence.** Not "these things are connected" —
+/// just "these two nouns turned up near each other once". A graph where
+/// everything says "relates to" IS a word cloud; that is the definition of one.
+///
+/// And filtering it at READ time (see recall_query's isMeaningful) only hides
+/// it. The junk keeps arriving. Kai got there himself from the prune numbers:
+///
+///   "Next best step is not pruning harder blindly; it's teaching the graph
+///    better relations going forward, so new memories land as prefers / wants /
+///    caresAbout / does / knows instead of lazy `related` mush."
+///
+/// So: an edge whose relation cannot be named is an edge the extractor did not
+/// understand. Dropping it loses nothing — an untyped edge was never a memory,
+/// and it was actively crowding out the ones that were.
+EdgeType? parseEdgeTypeOrNull(String raw) {
   final k = raw.toLowerCase().replaceAll(RegExp(r'[^a-z]'), '');
-  if (k.isEmpty) return EdgeType.related;
+  if (k.isEmpty) return null;
   for (final t in EdgeType.values) {
     if (t.name.toLowerCase() == k) return t;
   }
@@ -2127,5 +2276,14 @@ EdgeType parseEdgeType(String raw) {
     'realized': EdgeType.learned, 'happenedbefore': EdgeType.temporal,
     'happenedafter': EdgeType.temporal,
   };
-  return aliases[k] ?? EdgeType.related;
+  // No fallback. If it isn't a type and isn't an alias, the extractor produced
+  // a relation nobody can act on — and `related` is where those went to be
+  // counted as memory. 243 of them.
+  return aliases[k];
 }
+
+/// Back-compat for callers that must have a type. **Prefer
+/// [parseEdgeTypeOrNull] and drop the edge** — this exists only so a caller
+/// that genuinely cannot handle null has one obvious place to be wrong.
+EdgeType parseEdgeType(String raw) =>
+    parseEdgeTypeOrNull(raw) ?? EdgeType.related;

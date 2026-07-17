@@ -57,6 +57,20 @@ const kChangedTheWorld = <String>{
   'edit_file', 'write_file', 'run_tests', 'job_done', 'code_task',
   'set_layer_progress', 'remember_bit', 'forget_bit', 'add_goal',
   'note_noticed',
+  // Surgery on his own head. He archived 254 nodes and deleted 152 of them —
+  // 60% of everything he'd ever stored — and the gate said:
+  //
+  //   🧠 [Brain] Skipped — nothing done, and mood said neutral/4: "do it"
+  //
+  // Nothing done. It was the single most consequential thing he has ever done
+  // to himself, and it was invisible because whoever added ask_memory to the
+  // looking set forgot this one existed. (Me. An hour earlier.)
+  //
+  // Here rather than kWentLooking even though dry_run:true only measures: the
+  // name is all this function gets, and the asymmetry is enormous. Over-keeping
+  // "I looked at my own graph" costs one shallow extraction. Missing "I deleted
+  // half my memory" costs the memory of having done it.
+  'prune_memory',
 };
 
 /// Tools that mean he went and looked. Weaker than making something, but it

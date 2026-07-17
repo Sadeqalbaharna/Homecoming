@@ -1,47 +1,13 @@
-// KaiProjectCard — the work stack. A layered project, live and collapsible.
+// KaiProjectCard — live project progress as an interactive pie.
 //
-// The previous version of this was a hardcoded `const layers = [...]` inside the
-// shell, which meant the only way to "make progress" was to edit a string
-// literal — and that's exactly what happened: seven `'status': 'done'` and a
-// test asserting the text said done.
-//
-// This one can't lie the same way. It streams from RTDB, so:
-//   • it shows what's ACTUALLY recorded, updating mid-run as Kai reports
-//   • progress is a NUMBER per layer, not a word — a half-built layer looks
-//     half-built instead of rounding itself up to "done"
-//   • the frozen `intent` is displayed, so the goal is visible next to the
-//     claim. You can always see what was actually promised.
-//
-// ── Why it's collapsible ───────────────────────────────────────────────────
-//
-// It used to render all seven layers expanded, unconditionally:
-//
-//     for (final l in p.layers) _layer(l)
-//
-// …inside a Column, inside a SizedBox(height: 300). Seven layers × ~76px of
-// title + intent + bar + evidence ≈ 833px. Result: "BOTTOM OVERFLOWED BY 533
-// PIXELS" painted across the UI, and the bottom four layers unreachable.
-//
-// A stack of seven things doesn't want to be seven open drawers. Collapsed it's
-// one line each — number, title, state — and the one you're actually working on
-// is open. The body scrolls, so it can never overflow again regardless of how
-// many layers exist.
-//
-// Wire-up: KaiProjectCard(personaId: 'truekai', projectId: KaiProjectService.smarterId)
+// Each slice is one frozen-goal layer. Click a slice and the evidence/intent
+// opens as a floating ticket instead of eating permanent dashboard space.
 library;
 
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
+
 import '../services/core/kai_project_service.dart';
-
-const _gpt = Color(0xFFFF9D2F); // in progress
-const _claude = Color(0xFF2ED9FF); // next up
-const _done = Color(0xFF7EE787); // done
-const _later = Color(0xFF5B7183); // not started, not next
-
-/// What a layer is, at a glance. Kept separate from `progress` on purpose:
-/// "next" isn't a number, it's a position in the queue, and it's the single most
-/// useful thing on this card.
-enum _State { done, active, next, later }
 
 class KaiProjectCard extends StatefulWidget {
   final String personaId;
@@ -58,16 +24,15 @@ class KaiProjectCard extends StatefulWidget {
 }
 
 class _KaiProjectCardState extends State<KaiProjectCard> {
-  /// Which layer is open. Null = all collapsed.
-  ///
-  /// Nullable and single-valued: opening one closes the others, because the
-  /// point of the stack is "what am I on", not "read everything at once". That
-  /// was the old behaviour and it's what overflowed.
-  int? _open;
+  int? _selectedLayer;
 
-  /// True once the user has touched it — after that, stop auto-opening. Nothing
-  /// worse than a panel that keeps reopening itself because the data ticked.
-  bool _touched = false;
+  @override
+  void didUpdateWidget(covariant KaiProjectCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.projectId != widget.projectId) {
+      _selectedLayer = null;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -75,220 +40,528 @@ class _KaiProjectCardState extends State<KaiProjectCard> {
       stream: KaiProjectService.instance.watch(widget.personaId, widget.projectId),
       builder: (context, snap) {
         final p = snap.data;
-        if (p == null || p.layers.isEmpty) return const SizedBox.shrink();
-        final pct = (p.completion * 100).round();
-
-        // The first layer that isn't done is "next". Everything after it is
-        // "later" — visible, but clearly not the thing.
-        final nextIdx = p.layers.indexWhere((l) => !l.isDone);
-
-        // Open the layer he's actually mid-way through; failing that, the next
-        // one. That's the line you want your eye on when you glance at this.
-        if (!_touched && _open == null && nextIdx >= 0) {
-          final active = p.layers.indexWhere((l) => !l.isDone && l.progress > 0);
-          _open = active >= 0 ? active : nextIdx;
+        if (p == null) {
+          return _Shell(
+            child: Center(
+              child: Text(
+                'PROJECT OFFLINE',
+                style: TextStyle(
+                  color: Colors.white.withOpacity(0.42),
+                  fontSize: 10,
+                  letterSpacing: 1.3,
+                ),
+              ),
+            ),
+          );
         }
 
-        return Container(
-          margin: const EdgeInsets.all(10),
-          padding: const EdgeInsets.fromLTRB(12, 11, 12, 8),
-          decoration: BoxDecoration(
-            color: Colors.black.withOpacity(0.32),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: _claude.withOpacity(0.28)),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+        final layers = p.layers;
+        final selected = layers.where((l) => l.n == _selectedLayer).firstOrNull;
+        final accent = _projectAccent(p.id);
+        final pct = (p.completion * 100).round();
+
+        return _Shell(
+          accent: accent,
+          child: Stack(
+            clipBehavior: Clip.none,
             children: [
-              Text(p.name.toUpperCase(),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 11,
-                      letterSpacing: 1.6,
-                      fontWeight: FontWeight.w700)),
-              const SizedBox(height: 2),
-              Text(p.why,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                      color: Colors.white.withOpacity(0.38),
-                      fontSize: 9.5,
-                      fontStyle: FontStyle.italic)),
-              const SizedBox(height: 9),
-              Row(
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Real completion — the MEAN of actual progress, not a count
-                  // of the word "done". 7/7 has to be earned in numbers.
-                  Text('$pct%',
-                      style: TextStyle(
-                          color: pct >= 100 ? _done : _gpt,
-                          fontSize: 13,
-                          fontFamily: 'monospace',
-                          fontWeight: FontWeight.w700)),
-                  const SizedBox(width: 8),
-                  Text('${p.doneCount}/${p.layers.length} layers done',
-                      style: const TextStyle(
-                          color: Color(0xFF6B8194),
-                          fontSize: 9,
-                          fontFamily: 'monospace')),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          p.name.toUpperCase(),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 1.1,
+                          ),
+                        ),
+                      ),
+                      Text(
+                        '$pct%',
+                        style: TextStyle(
+                          color: accent,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: -0.8,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${p.doneCount}/${layers.length} complete • tap a slice',
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.46),
+                      fontSize: 8.8,
+                      letterSpacing: 0.4,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        final chartSize = math.min(
+                          constraints.maxWidth,
+                          constraints.maxHeight,
+                        );
+                        return Center(
+                          child: SizedBox(
+                            width: chartSize,
+                            height: chartSize,
+                            child: _ProjectPie(
+                              project: p,
+                              selectedLayer: _selectedLayer,
+                              accent: accent,
+                              onSelected: (layer) {
+                                setState(() {
+                                  _selectedLayer =
+                                      _selectedLayer == layer.n ? null : layer.n;
+                                });
+                              },
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  _MiniLegend(project: p, selectedLayer: _selectedLayer),
                 ],
               ),
-              const SizedBox(height: 6),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(3),
-                child: LinearProgressIndicator(
-                  value: p.completion,
-                  minHeight: 3,
-                  backgroundColor: Colors.white.withOpacity(0.07),
-                  valueColor: AlwaysStoppedAnimation(pct >= 100 ? _done : _gpt),
-                ),
-              ),
-              const SizedBox(height: 8),
-              // Expanded + ListView: the stack takes whatever room it's given and
-              // scrolls the rest. Whatever height the parent decides, and however
-              // many layers exist, this cannot overflow again.
-              Expanded(
-                child: ListView.builder(
-                  padding: EdgeInsets.zero,
-                  itemCount: p.layers.length,
-                  itemBuilder: (_, i) => _layerTile(
-                    p.layers[i],
-                    i,
-                    i == nextIdx
-                        ? _State.next
-                        : p.layers[i].isDone
-                            ? _State.done
-                            : p.layers[i].progress > 0
-                                ? _State.active
-                                : _State.later,
+              if (selected != null)
+                Positioned(
+                  left: -6,
+                  right: -6,
+                  bottom: 22,
+                  child: _LayerTicket(
+                    layer: selected,
+                    accent: _sliceColor(selected.n),
+                    onClose: () => setState(() => _selectedLayer = null),
                   ),
                 ),
-              ),
             ],
           ),
         );
       },
     );
   }
+}
 
-  static Color _colour(_State s) => switch (s) {
-        _State.done => _done,
-        _State.active => _gpt,
-        _State.next => _claude,
-        _State.later => _later,
-      };
+class _Shell extends StatelessWidget {
+  final Widget child;
+  final Color accent;
 
-  static String _label(_State s, KaiLayer l) => switch (s) {
-        _State.done => 'DONE',
-        _State.active => '${l.progress}%',
-        _State.next => 'NEXT',
-        _State.later => l.progress > 0 ? '${l.progress}%' : '—',
-      };
+  const _Shell({
+    required this.child,
+    this.accent = const Color(0xFF7CFFEA),
+  });
 
-  Widget _layerTile(KaiLayer l, int i, _State s) {
-    final c = _colour(s);
-    final open = _open == i;
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.035),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: accent.withOpacity(0.22)),
+        boxShadow: [
+          BoxShadow(
+            color: accent.withOpacity(0.07),
+            blurRadius: 18,
+            spreadRadius: 0.5,
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.all(10),
+      child: child,
+    );
+  }
+}
 
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // ── The collapsed row. One line, always. ────────────────────────
-          InkWell(
-            onTap: () => setState(() {
-              _touched = true;
-              _open = open ? null : i;
-            }),
-            borderRadius: BorderRadius.circular(4),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              child: Row(
-                children: [
-                  Container(
-                    width: 16,
-                    height: 16,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: s == _State.next ? c.withOpacity(0.16) : null,
-                      border: Border.all(color: c.withOpacity(0.7)),
-                    ),
-                    child: Text('${l.n}',
-                        style: TextStyle(
-                            color: c, fontSize: 8, fontWeight: FontWeight.w700)),
+class _ProjectPie extends StatelessWidget {
+  final KaiProject project;
+  final int? selectedLayer;
+  final Color accent;
+  final ValueChanged<KaiLayer> onSelected;
+
+  const _ProjectPie({
+    required this.project,
+    required this.selectedLayer,
+    required this.accent,
+    required this.onSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTapUp: (details) {
+        final layer = _hitTest(details.localPosition, context.size ?? Size.zero);
+        if (layer != null) onSelected(layer);
+      },
+      child: CustomPaint(
+        painter: _ProjectPiePainter(
+          project: project,
+          selectedLayer: selectedLayer,
+          accent: accent,
+        ),
+        child: Center(
+          child: Container(
+            width: 72,
+            height: 72,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: Colors.black.withOpacity(0.62),
+              border: Border.all(color: Colors.white.withOpacity(0.10)),
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  '${(project.completion * 100).round()}%',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.8,
                   ),
-                  const SizedBox(width: 7),
-                  Expanded(
-                    child: Text(l.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                            color: Colors.white
-                                .withOpacity(s == _State.later ? 0.5 : 0.85),
-                            fontSize: 10.5,
-                            fontWeight: FontWeight.w600)),
+                ),
+                Text(
+                  'overall',
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.42),
+                    fontSize: 8,
+                    letterSpacing: 0.8,
                   ),
-                  const SizedBox(width: 4),
-                  Text(_label(s, l),
-                      style: TextStyle(
-                          color: c,
-                          fontSize: 9,
-                          fontFamily: 'monospace',
-                          fontWeight: FontWeight.w700)),
-                  // Affordance: this thing opens. Without it nobody discovers
-                  // that the evidence is in there.
-                  Icon(open ? Icons.expand_less : Icons.expand_more,
-                      size: 13, color: Colors.white.withOpacity(0.25)),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
-
-          // ── Open: the goal, the bar, the receipt. ───────────────────────
-          if (open)
-            Padding(
-              padding: const EdgeInsets.only(left: 23, top: 2, bottom: 6),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // The FROZEN goal, shown next to the claim. The whole failure
-                  // last time was the goal drifting to match the work — here you
-                  // can always read what was actually promised.
-                  Text(l.intent,
-                      style: TextStyle(
-                          color: Colors.white.withOpacity(0.32),
-                          fontSize: 8.8,
-                          height: 1.35)),
-                  const SizedBox(height: 4),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(2),
-                    child: LinearProgressIndicator(
-                      value: l.progress / 100,
-                      minHeight: 2,
-                      backgroundColor: Colors.white.withOpacity(0.06),
-                      valueColor: AlwaysStoppedAnimation(c.withOpacity(0.8)),
-                    ),
-                  ),
-                  if (l.evidence.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 4),
-                      child: Text('› ${l.evidence.last}',
-                          maxLines: 3,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                              color: c.withOpacity(0.55),
-                              fontSize: 8.2,
-                              height: 1.3,
-                              fontFamily: 'monospace')),
-                    ),
-                ],
-              ),
-            ),
-        ],
+        ),
       ),
     );
   }
+
+  KaiLayer? _hitTest(Offset local, Size size) {
+    if (project.layers.isEmpty || size.shortestSide <= 0) return null;
+    final center = Offset(size.width / 2, size.height / 2);
+    final delta = local - center;
+    final radius = size.shortestSide / 2;
+    final distance = delta.distance;
+    if (distance < radius * 0.34 || distance > radius) return null;
+
+    var angle = math.atan2(delta.dy, delta.dx) + math.pi / 2;
+    if (angle < 0) angle += math.pi * 2;
+
+    final sweep = math.pi * 2 / project.layers.length;
+    final idx = (angle / sweep).floor().clamp(0, project.layers.length - 1);
+    return project.layers[idx];
+  }
+}
+
+class _ProjectPiePainter extends CustomPainter {
+  final KaiProject project;
+  final int? selectedLayer;
+  final Color accent;
+
+  _ProjectPiePainter({
+    required this.project,
+    required this.selectedLayer,
+    required this.accent,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final layers = project.layers;
+    if (layers.isEmpty) return;
+
+    final center = Offset(size.width / 2, size.height / 2);
+    final baseRadius = size.shortestSide / 2 - 4;
+    final stroke = math.max(18.0, size.shortestSide * 0.18);
+    final rect = Rect.fromCircle(center: center, radius: baseRadius - stroke / 2);
+    final sweep = math.pi * 2 / layers.length;
+    const gap = 0.018;
+
+    final bg = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = stroke
+      ..strokeCap = StrokeCap.butt
+      ..color = Colors.white.withOpacity(0.06);
+
+    final fg = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.butt
+      ..strokeWidth = stroke;
+
+    final outline = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1
+      ..color = Colors.white.withOpacity(0.08);
+
+    for (var i = 0; i < layers.length; i++) {
+      final layer = layers[i];
+      final start = -math.pi / 2 + i * sweep + gap;
+      final usableSweep = sweep - gap * 2;
+      final selected = layer.n == selectedLayer;
+      final color = _sliceColor(layer.n);
+      final progressSweep = usableSweep * (layer.progress.clamp(0, 100) / 100);
+      final drawRect = selected
+          ? Rect.fromCircle(center: center, radius: baseRadius - stroke / 2 + 2)
+          : rect;
+
+      canvas.drawArc(drawRect, start, usableSweep, false, bg);
+      fg
+        ..strokeWidth = selected ? stroke + 5 : stroke
+        ..shader = SweepGradient(
+          startAngle: start,
+          endAngle: start + usableSweep,
+          colors: [color.withOpacity(0.95), color.withOpacity(0.42)],
+        ).createShader(drawRect);
+      canvas.drawArc(drawRect, start, progressSweep, false, fg);
+      fg.shader = null;
+
+      final labelAngle = start + usableSweep / 2;
+      final labelOffset = Offset(
+        center.dx + math.cos(labelAngle) * (baseRadius - stroke / 2),
+        center.dy + math.sin(labelAngle) * (baseRadius - stroke / 2),
+      );
+      _drawLabel(canvas, labelOffset, layer.n.toString(), selected, color);
+    }
+
+    canvas.drawCircle(center, baseRadius, outline);
+    canvas.drawCircle(center, baseRadius - stroke, outline);
+
+    final pulse = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2
+      ..color = accent.withOpacity(0.20);
+    canvas.drawCircle(center, baseRadius + 2, pulse);
+  }
+
+  void _drawLabel(
+    Canvas canvas,
+    Offset offset,
+    String text,
+    bool selected,
+    Color color,
+  ) {
+    final tp = TextPainter(
+      text: TextSpan(
+        text: text,
+        style: TextStyle(
+          color: selected ? Colors.black : Colors.white.withOpacity(0.86),
+          fontSize: selected ? 10.5 : 9,
+          fontWeight: FontWeight.w900,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+
+    final r = Rect.fromCenter(
+      center: offset,
+      width: selected ? 20 : 17,
+      height: selected ? 20 : 17,
+    );
+    canvas.drawOval(
+      r,
+      Paint()
+        ..color = selected ? color : Colors.black.withOpacity(0.55)
+        ..style = PaintingStyle.fill,
+    );
+    canvas.drawOval(
+      r,
+      Paint()
+        ..color = color.withOpacity(selected ? 0.95 : 0.40)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1,
+    );
+    tp.paint(canvas, offset - Offset(tp.width / 2, tp.height / 2));
+  }
+
+  @override
+  bool shouldRepaint(covariant _ProjectPiePainter oldDelegate) =>
+      oldDelegate.project != project ||
+      oldDelegate.selectedLayer != selectedLayer ||
+      oldDelegate.accent != accent;
+}
+
+class _LayerTicket extends StatelessWidget {
+  final KaiLayer layer;
+  final Color accent;
+  final VoidCallback onClose;
+
+  const _LayerTicket({
+    required this.layer,
+    required this.accent,
+    required this.onClose,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final lastEvidence = layer.evidence.isEmpty ? 'No evidence logged yet.' : layer.evidence.last;
+    return Material(
+      color: Colors.transparent,
+      child: Container(
+        decoration: BoxDecoration(
+          color: const Color(0xFF071014).withOpacity(0.96),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: accent.withOpacity(0.55)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.55),
+              blurRadius: 28,
+              offset: const Offset(0, 12),
+            ),
+            BoxShadow(color: accent.withOpacity(0.15), blurRadius: 22),
+          ],
+        ),
+        padding: const EdgeInsets.all(10),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 22,
+                  height: 22,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: accent.withOpacity(0.95),
+                  ),
+                  child: Text(
+                    '${layer.n}',
+                    style: const TextStyle(
+                      color: Colors.black,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    layer.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                Text(
+                  '${layer.progress}%',
+                  style: TextStyle(
+                    color: accent,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                InkWell(
+                  onTap: onClose,
+                  borderRadius: BorderRadius.circular(999),
+                  child: Padding(
+                    padding: const EdgeInsets.all(3),
+                    child: Icon(
+                      Icons.close_rounded,
+                      size: 14,
+                      color: Colors.white.withOpacity(0.55),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              layer.intent,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: Colors.white.withOpacity(0.72),
+                fontSize: 9.2,
+                height: 1.3,
+              ),
+            ),
+            const SizedBox(height: 7),
+            Container(
+              width: double.infinity,
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.045),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.white.withOpacity(0.07)),
+              ),
+              padding: const EdgeInsets.all(8),
+              child: Text(
+                'last: $lastEvidence',
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: Colors.white.withOpacity(0.50),
+                  fontSize: 8.6,
+                  height: 1.25,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MiniLegend extends StatelessWidget {
+  final KaiProject project;
+  final int? selectedLayer;
+
+  const _MiniLegend({required this.project, required this.selectedLayer});
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 4,
+      runSpacing: 4,
+      children: project.layers.map((l) {
+        final selected = l.n == selectedLayer;
+        final color = _sliceColor(l.n);
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 140),
+          width: selected ? 20 : 14,
+          height: 5,
+          decoration: BoxDecoration(
+            color: color.withOpacity(selected ? 0.95 : 0.35),
+            borderRadius: BorderRadius.circular(999),
+          ),
+        );
+      }).toList(),
+    );
+  }
+}
+
+Color _sliceColor(int n) {
+  const colors = [
+    Color(0xFF7CFFEA),
+    Color(0xFF8EA7FF),
+    Color(0xFFFFC857),
+    Color(0xFFFF6B9A),
+    Color(0xFFB967FF),
+    Color(0xFF65FF8F),
+    Color(0xFFFF8A5B),
+    Color(0xFF58D1FF),
+  ];
+  return colors[(n - 1).abs() % colors.length];
+}
+
+Color _projectAccent(String id) {
+  if (id == KaiProjectService.sentienceId) return const Color(0xFFB967FF);
+  return const Color(0xFF7CFFEA);
 }

@@ -302,5 +302,37 @@ void main() {
       expect(KaiCraftService.decayed(stale), lessThan(0.2),
           reason: 'a rule that stopped applying fades on its own');
     });
+
+    test('objective traces can fire matching rules without self-report', () {
+      final selfCheckLast = CraftRule(
+        id: 'a',
+        text: 'self_check then one more edit has broken the build 3x — check LAST',
+        evidence: const ['x', 'y'],
+        learnedAt: DateTime.now(),
+        lastFired: DateTime.now(),
+      );
+      final unrelated = CraftRule(
+        id: 'b',
+        text: 'ask memory before guessing about Sadeq',
+        evidence: const ['x', 'y'],
+        learnedAt: DateTime.now(),
+        lastFired: DateTime.now(),
+      );
+
+      expect(
+        KaiCraftService.matchesTrace(
+          selfCheckLast,
+          CraftRuleTrace.verifiedJobClosed,
+        ),
+        isTrue,
+      );
+      expect(
+        KaiCraftService.matchesTrace(
+          unrelated,
+          CraftRuleTrace.verifiedJobClosed,
+        ),
+        isFalse,
+      );
+    });
   });
 }

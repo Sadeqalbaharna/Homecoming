@@ -74,13 +74,39 @@ class BrainDebugTrace {
   final DateTime startTime;
   DateTime? endTime;
   final List<BrainStep> steps = [];
+  final List<Map<String, dynamic>> toolCalls = [];
   String? finalResponse;
+  String? route;
+  double? routeConfidence;
+  int? iterationCount;
   
   BrainDebugTrace({
     required this.id,
     required this.userInput,
     required this.startTime,
   });
+
+  void recordRoute({required String name, required double confidence}) {
+    route = name;
+    routeConfidence = confidence;
+  }
+
+  void recordToolCall({
+    required String name,
+    required Map<String, dynamic> args,
+    String? result,
+    String? outcome,
+    int? iteration,
+  }) {
+    toolCalls.add({
+      'name': name,
+      'args': args,
+      if (result != null) 'result': result,
+      if (outcome != null) 'outcome': outcome,
+      if (iteration != null) 'iteration': iteration,
+      'timestamp': DateTime.now().toIso8601String(),
+    });
+  }
   
   Duration get totalDuration => 
       endTime != null ? endTime!.difference(startTime) : Duration.zero;
@@ -131,6 +157,10 @@ class BrainDebugTrace {
     'endTime': endTime?.toIso8601String(),
     'totalDuration': totalDuration.inMilliseconds,
     'finalResponse': finalResponse,
+    'route': route,
+    'routeConfidence': routeConfidence,
+    'iterationCount': iterationCount,
+    'toolCalls': toolCalls,
     'steps': steps.map((s) => {
       'phase': s.phase.name,
       'description': s.description,
@@ -230,6 +260,33 @@ class BrainDebugService {
     return trace;
   }
   
+  void recordRoute(String route, double confidence) {
+    if (!_isEnabled || _currentTrace == null) return;
+    _currentTrace!.recordRoute(name: route, confidence: confidence);
+  }
+
+  void recordIterationCount(int count) {
+    if (!_isEnabled || _currentTrace == null) return;
+    _currentTrace!.iterationCount = count;
+  }
+
+  void recordToolCall(
+    String name,
+    Map<String, dynamic> args, {
+    String? result,
+    String? outcome,
+    int? iteration,
+  }) {
+    if (!_isEnabled || _currentTrace == null) return;
+    _currentTrace!.recordToolCall(
+      name: name,
+      args: Map<String, dynamic>.from(args),
+      result: result,
+      outcome: outcome,
+      iteration: iteration,
+    );
+  }
+
   /// Add a step to current trace
   void addStep(BrainPhase phase, String description, {Map<String, dynamic>? data}) {
     if (!_isEnabled || _currentTrace == null) return;
