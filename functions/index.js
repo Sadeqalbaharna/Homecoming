@@ -20,14 +20,49 @@ const functions = require('firebase-functions');
 const admin = require('firebase-admin');
 const { OpenAI } = require('openai');
 
-// Initialize Firebase Admin
-admin.initializeApp();
+// Initialize Firebase Admin with an EXPLICIT database URL.
+//
+// This was bare `admin.initializeApp()`, which leaves admin to infer the RTDB
+// URL from FIREBASE_CONFIG. In the deployed runtime that's usually there — but
+// the deploy ANALYSIS step (and any local run) has no such config, so
+// `admin.database()` on the next line threw "Can't determine Firebase Database
+// URL" at module load. A throw at load means zero exports are discovered, and
+// the CLI reports that as the maddeningly wrong "No function matches given
+// --only filters." An hour looked like a filter bug; it was line 25 failing to
+// find a URL. Pin it and it loads everywhere: deploy, runtime, and a local
+// `node -e require`.
+//
+// europe-west1, and the homecoming project — NOT the kingdom-ac44f rtdb that
+// also lives in this repo's docs.
+admin.initializeApp({
+  databaseURL: 'https://homecoming-74f73-default-rtdb.europe-west1.firebasedatabase.app',
+});
 const db = admin.database();
 
-// Initialize OpenAI (using environment variable set during deployment)
-// Priority: 1) .env file (process.env), 2) functions.config() (deprecated)
+// Initialize OpenAI from functions/.env (OPENAI_API_KEY).
+//
+// This used to fall back to `functions.config().openai?.key`. That call is
+// evaluated at module load, and the current CLI treats functions.config() as
+// removed — so accessing it threw during analysis, the module failed to load,
+// no exports were found, and deploy reported "No function matches given --only
+// filters." A dead fallback took the whole codebase down with it. .env is the
+// single source now.
+// The `|| 'MISSING_AT_LOAD'` is not lazy sloppiness — it's load safety.
+//
+// `new OpenAI({ apiKey: undefined })` THROWS at construction. This runs at
+// module load, so an absent key doesn't degrade a feature, it stops the entire
+// codebase from loading — which the deploy CLI reports as "No function matches
+// given --only filters." Same trap as admin.database() above: a throw at import
+// makes zero functions discoverable.
+//
+// The deploy analysis step and a local `node -e require` don't have functions/
+// as their cwd, so dotenv finds no .env and the key is empty there — even though
+// the deployed RUNTIME has it (proven: the voice pass and decider both made real
+// OpenAI calls). So: construct with a placeholder so load ALWAYS succeeds. If
+// the key is truly missing when a call is made, it 401s at the call site, where
+// it's caught and logged — a failed feature, not a dead deploy.
 const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY || functions.config().openai?.key,
+  apiKey: process.env.OPENAI_API_KEY || 'MISSING_AT_LOAD',
 });
 
 // ============= CONFIGURATION =============
@@ -551,6 +586,48 @@ exports.proactiveKai = functions.pubsub
     return null;
   });
 
+// ── Test hatch: make Kai reach out NOW, skipping the rate gates ──────────────
+//
+// The scheduled function is correct and, by design, un-triggerable on demand:
+// unread-waiting + 45-min gap + daily budget + "active in the last 2h" mean that
+// to see one fire naturally you must go quiet for hours and get lucky. Every gate
+// is right; together they are why this pipeline sat unobserved and broken for
+// months. So: same escape hatch as /nudge on the desktop, one tier up.
+//
+// GET https://us-central1-homecoming-74f73.cloudfunctions.net/proactiveKaiNow?persona=truekai&key=<TEST_KEY>
+//
+// It skips the RATE gates only. It does NOT skip the real one — the model still
+// decides should_reach_out, so a forced call with nothing to say still sends
+// nothing. Returns JSON so you can see exactly what happened without digging
+// through logs.
+//
+// Gated by a shared secret so a stray URL can't make Kai text. Remove this whole
+// export before this is anything other than Sadeq's phone.
+exports.proactiveKaiNow = functions.https.onRequest(async (req, res) => {
+  const persona = (req.query.persona || 'truekai').toString();
+  const key = (req.query.key || '').toString();
+  const expected = process.env.PROACTIVE_TEST_KEY;
+
+  if (!expected || key !== expected) {
+    res.status(403).json({ ok: false, error: 'bad or missing key' });
+    return;
+  }
+
+  try {
+    console.log(`📲 [Proactive] FORCED run for ${persona}`);
+    await _checkAndPushForPersona(persona, { force: true });
+    res.json({
+      ok: true,
+      note: 'Forced check ran. See the response in functions:log — whether he ' +
+            'reached out depends on should_reach_out and whether a live token ' +
+            'exists. Force skips the clock, not his mind.',
+    });
+  } catch (e) {
+    console.error(`📲 [Proactive] FORCED run failed:`, e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 // Rewrite a reach-out reason as a text Kai would actually send.
 //
 // The decider (gpt-4o-mini) said WHY he's reaching out. This says it in his
@@ -618,8 +695,16 @@ Write the text.`;
   }
 }
 
-async function _checkAndPushForPersona(personaId) {
+async function _checkAndPushForPersona(personaId, opts = {}) {
   const now = Date.now();
+
+  // Force skips the RATE gates — unread-waiting, min-gap, daily budget, recent
+  // activity — so the pipeline can be tested on demand. It does NOT skip the
+  // real gate: the model still decides `should_reach_out`, and if he has nothing
+  // to say, forcing changes nothing. See exports.proactiveKaiNow. The whole
+  // reason this exists is that every rate gate is correct AND together they make
+  // the thing impossible to watch, which is how it went un-observed for months.
+  const force = opts.force === true;
 
   // ── A budget, not an interval ─────────────────────────────────────────────
   //
@@ -692,7 +777,7 @@ async function _checkAndPushForPersona(personaId) {
     .equalTo(false)
     .limitToLast(1)
     .get();
-  if (pendingSnap.exists()) {
+  if (!force && pendingSnap.exists()) {
     const waiting = Object.values(pendingSnap.val() || {})[0];
     const created = waiting?.createdAt || 0;
     const ageMs = now - created;
@@ -704,7 +789,7 @@ async function _checkAndPushForPersona(personaId) {
   }
 
   const lastSentSnap = await db.ref(`kai/${personaId}/proactive/last_sent`).get();
-  if (lastSentSnap.exists() && now - lastSentSnap.val() < MIN_GAP_MS) {
+  if (!force && lastSentSnap.exists() && now - lastSentSnap.val() < MIN_GAP_MS) {
     console.log(`📲 [Proactive] ${personaId}: too soon (${Math.round((now - lastSentSnap.val()) / 60000)}m)`);
     return;
   }
@@ -717,7 +802,7 @@ async function _checkAndPushForPersona(personaId) {
   const budgetSnap = await db.ref(`kai/${personaId}/proactive/budget`).get();
   const budget = budgetSnap.exists() ? budgetSnap.val() : {};
   const sentToday = budget.day === dayKey ? (budget.count || 0) : 0;
-  if (sentToday >= MAX_PER_DAY) {
+  if (!force && sentToday >= MAX_PER_DAY) {
     console.log(`📲 [Proactive] ${personaId}: spent today (${sentToday}/${MAX_PER_DAY})`);
     return;
   }
@@ -727,7 +812,7 @@ async function _checkAndPushForPersona(personaId) {
     .orderByChild('timestamp')
     .limitToLast(1)
     .get();
-  if (activitySnap.exists()) {
+  if (!force && activitySnap.exists()) {
     const cards = Object.values(activitySnap.val() || {});
     const lastActivity = cards[0]?.timestamp || 0;
     if (now - lastActivity < RECENT_ACTIVE_MS) {
@@ -876,6 +961,28 @@ Is there something genuinely worth reaching out about right now?`;
   // into an empty string, which is exactly the mobile drop we just chased down.
   const message = (await _writeInHisVoice(result.reason, noticed)) || result.message;
 
+  // ── Land it in the conversation, not just the queue ───────────────────────
+  //
+  // The proactive_queue and the chat are two different stores. The push and the
+  // avatar-screen "pending message" read the queue; the P5 messenger reads
+  // `conversations/{persona}` via ConversationStoreService.getHistory. So a
+  // proactive text hit the lock screen and then WASN'T in the chat when Sadeq
+  // opened it — it lived somewhere the chat can't see.
+  //
+  // A message he sent first is a real turn. So write it as one: empty
+  // userMessage (nobody prompted him), his line as aiResponse. getHistory
+  // renders the empty user side as nothing and shows his line, exactly like any
+  // other turn. This is the "honest fix" the unread-forever comment pointed at —
+  // and it also feeds his own memory pipeline (onTurnWrite), so the thing he
+  // reached out about becomes something he remembers reaching out about.
+  await db.ref(`conversations/${personaId}`).push().set({
+    userMessage: '',
+    aiResponse: message,
+    personalityDeltas: {},
+    timestamp: now,
+    proactive: true, // marks it as him-first, for anything that wants to know
+  });
+
   // ── Store message in proactive queue ──────────────────────────────────────
   const queueRef = db.ref(`kai/${personaId}/proactive_queue`).push();
   await queueRef.set({
@@ -910,15 +1017,6 @@ Is there something genuinely worth reaching out about right now?`;
   // This was `Object.keys(...).map(k => k.replace(/_/g, '.'))` — reconstructing
   // the token from its Firebase key by turning every underscore into a dot. FCM
   // tokens are full of real underscores, so that produced 14 invalid tokens and
-  // "sent to 0/14". The client now stores the real token as value.token; old
-  // rows stored a bare timestamp under a mangled key and are unrecoverable, so
-  // they're skipped (and pruned below) rather than mailed to a corrupted
-  // address.
-  // ── Read the token from the value, never rebuild it from the key ──────────
-  //
-  // This was `Object.keys(...).map(k => k.replace(/_/g, '.'))` — reconstructing
-  // the token from its Firebase key by turning every underscore into a dot. FCM
-  // tokens are full of real underscores, so that produced 14 invalid tokens and
   // "sent to 0/14". The client now stores the real token as value.token, keyed
   // by a harmless hash; old rows stored a bare timestamp under a mangled key and
   // are unrecoverable, so they're skipped (and pruned) rather than mailed to a
@@ -948,8 +1046,6 @@ Is there something genuinely worth reaching out about right now?`;
   }
   const tokens = entries.map(e => e.token);
 
-  if (tokens.length === 0) return;
-
   // ── The notification used to be deliberately blank ───────────────────────
   //
   //   title: '•', body: ''   // "Kai only speaks after tap"
@@ -976,6 +1072,12 @@ Is there something genuinely worth reaching out about right now?`;
         sound: 'default',
         priority: 'default',
         channelId: 'kai_proactive',
+        // The status-bar silhouette (white bolt) and accent. The manifest sets
+        // these as defaults too, but naming them here makes it explicit and
+        // covers channels that don't inherit the default. `icon` is a drawable
+        // NAME, not a path — it must exist in android res as ic_stat_kai.
+        icon: 'ic_stat_kai',
+        color: '#D41F26',
       },
     },
     apns: {
@@ -992,6 +1094,16 @@ Is there something genuinely worth reaching out about right now?`;
   try {
     const response = await admin.messaging().sendEachForMulticast(push);
     console.log(`📲 [Proactive] ${personaId}: sent to ${response.successCount}/${tokens.length} devices`);
+
+    // If it actually reached a device, the queue entry has done its job: mark it
+    // delivered. Without this, `delivered` only flipped when the app opened, so
+    // the "don't talk over an unread one" gate stayed armed forever, the message
+    // could re-show on the avatar screen, and forced test runs stacked visible
+    // duplicates. It's also now in the conversation history above, so the chat
+    // shows it regardless — the queue only needs to remember it was sent.
+    if (response.successCount > 0) {
+      await queueRef.update({ delivered: true, deliveredAt: Date.now() });
+    }
 
     // Remove tokens FCM reports as no longer registered — by their real key,
     // which each entry still carries. (This used to rebuild the key with

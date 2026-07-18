@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The P5 red. Tints the notification's app-name and small icon in the
+         shade, so a Kai push reads as Kai at a glance. Matches P5Palette.bg in
+         kai_p5_chat.dart (0xFFD41F26). -->
+    <color name="kai_red">#D41F26</color>
+	<color name="ic_launcher_background">#D41F26</color>
+</resources>

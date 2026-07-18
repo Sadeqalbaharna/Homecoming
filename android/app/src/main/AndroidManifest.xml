@@ -45,11 +45,23 @@
 
     <application
         android:name="${applicationName}"
-        android:label="homecoming_app"
+        android:label="Kai"
         android:icon="@mipmap/ic_launcher"
         android:usesCleartextTraffic="true">
         <!-- Flutter v2 embedding (v1 was removed in Flutter 3.x) -->
         <meta-data android:name="flutterEmbedding" android:value="2" />
+
+        <!-- The status-bar icon for Kai's push notifications.
+             Android renders the small icon as a WHITE SILHOUETTE regardless of
+             its colours, so this MUST be a monochrome shape — his face would
+             just become a white blob. ic_stat_kai is the P5 bolt. The accent
+             colour tints the app-name and icon in the shade. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_stat_kai" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_color"
+            android:resource="@color/kai_red" />
         <!-- usesCleartextTraffic=false is fine since you're using HTTPS.
              Set true only if you ever point to http:// during dev. -->
 
