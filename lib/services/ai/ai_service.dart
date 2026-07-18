@@ -297,10 +297,36 @@ class AIService {
   /// Older models (gpt-4o and friends, still used by contemplation/journal/etc.)
   /// keep the classic pair. Both families have to keep working, because this one
   /// helper is on the only path Kai has to speak.
+  /// Reasoning headroom for GPT-5.x, in tokens.
+  ///
+  /// ── The empty reply, explained ────────────────────────────────────────────
+  ///
+  /// GPT-5.x is a REASONING model, and `max_completion_tokens` is the budget for
+  /// reasoning tokens PLUS visible output — the thinking counts against the cap
+  /// even though you never see it.
+  ///
+  /// So replyCeiling=120 on a text didn't mean "≤120 visible characters." It
+  /// meant "≤120 tokens total, reasoning first." From a device log, same model,
+  /// same screen:
+  ///
+  ///   "hi?"                          → light reasoning → Reply: 94 chars
+  ///   "between me and you and Claude…" → heavier reasoning → Reply: 0 chars
+  ///
+  /// The second one spent the whole 120 thinking and had nothing left to say.
+  /// That is the "drops sometimes" — not random, proportional to how much he
+  /// chews. The cap that killed the desktop's essays was starving the messenger.
+  ///
+  /// So the ceiling applies to OUTPUT, and reasoning gets its own room on top.
+  /// A non-reasoning model (gpt-4o) has no reasoning phase, so it gets nothing
+  /// extra and the cap stays a clean output limit. On a normal 8000-token turn
+  /// this is noise; on a 120-token text it's the difference between him
+  /// answering and him vanishing.
+  static const _gpt5ReasoningHeadroom = 512;
+
   static Map<String, dynamic> _lengthParams(String model, int limit) {
     final isGpt5 = model.toLowerCase().startsWith('gpt-5');
     return isGpt5
-        ? {'max_completion_tokens': limit}
+        ? {'max_completion_tokens': limit + _gpt5ReasoningHeadroom}
         : {'max_tokens': limit, 'temperature': 0.7};
   }
 
