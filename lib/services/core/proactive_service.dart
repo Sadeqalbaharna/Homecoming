@@ -78,12 +78,24 @@ class ProactiveService {
   }
 
   Future<void> _registerToken(String personaId, String token) async {
-    // Sanitize token for use as a Firebase key (replace . with _)
-    final key = token.replaceAll('.', '_').replaceAll('\$', '_');
+    // ── The token must survive the round trip, and it wasn't ──────────────────
+    //
+    // This used the TOKEN ITSELF as the Firebase key, sanitized `.`→`_`, and the
+    // Cloud Function reversed it with `_`→`.` on read. That reverse is a lie: FCM
+    // tokens are packed with real underscores (`…:APA91bH_xY…`), and turning
+    // every one of them into a dot produces a DIFFERENT, invalid token. Result,
+    // from a live run with a phone sitting right here: "sent to 0/14 devices" —
+    // not 14 dead phones, 14 mangled tokens. A sanitization that isn't
+    // reversible is a shredder.
+    //
+    // So the key becomes a harmless unique id, and the REAL token rides in the
+    // value where nothing rewrites it. The function reads value.token verbatim.
+    final key = token.hashCode.toRadixString(16);
     try {
-      await _db!
-          .ref('kai/$personaId/fcm_tokens/$key')
-          .set(DateTime.now().millisecondsSinceEpoch);
+      await _db!.ref('kai/$personaId/fcm_tokens/$key').set({
+        'token': token, // verbatim — the whole point
+        'ts': DateTime.now().millisecondsSinceEpoch,
+      });
       print('📲 [Proactive] FCM token registered');
     } catch (e) {
       print('📲 [Proactive] Token registration failed: $e');

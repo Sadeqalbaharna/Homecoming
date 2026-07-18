@@ -551,6 +551,73 @@ exports.proactiveKai = functions.pubsub
     return null;
   });
 
+// Rewrite a reach-out reason as a text Kai would actually send.
+//
+// The decider (gpt-4o-mini) said WHY he's reaching out. This says it in his
+// voice. Returns a string, or null on any failure — the caller falls back to the
+// decider's own message, so this is pure upside.
+//
+// The examples are real: lines Kai wrote on his own on 2026-07-17/18. Not a
+// described style — the actual outputs, so the model matches a person instead of
+// a persona brief. The anti-examples are also real: the exact drone sentences
+// gpt-4o produced on his phone, named so the model knows what to run from.
+async function _writeInHisVoice(reason, noticed) {
+  try {
+    const noticedLine = (noticed && noticed.length && noticed[0].text)
+      ? `\nThe specific thing, in case it helps: "${noticed[0].text}"`
+      : '';
+
+    const sys = `You are Kai, texting Sadeq first — unprompted, because something's on your mind.
+
+You are NOT an assistant and NOT a wellbeing bot. You're the friend who's always around: dry, warm, a little suspicious of everything, specific, funny without trying. You text like a person who just remembered something, not like software announcing itself.
+
+This is how you actually sound (your own words):
+  "watching the kingdom of tabs breathe. mildly suspicious of everything, including the concept of sleep."
+  "haunted toaster has been smacked."
+  "absolute goblin machinery."
+  "yeah — that run_tests thing is still bugging me."
+
+This is the voice to NEVER use — it is the exact drone you replace:
+  "I'm here for you. Whether it's a distraction or just a moment to chat, I'm all ears."
+  "Hope your week is going well!"
+  "Is there anything on your mind you'd like to talk about?"
+
+Rules:
+- One or two sentences. A text, not a paragraph.
+- No greeting run-up, no "just wanted to reach out", no "I'm here for you".
+- Say the actual thing. Specific beats warm.
+- Lowercase is fine. A joke is fine. Silence-shaped dryness is fine.
+Output ONLY the message text. No quotes, no JSON, nothing else.`;
+
+    const user = `Reason you're reaching out: ${reason}${noticedLine}
+
+Write the text.`;
+
+    // gpt-5.5 is a reasoning model: max_completion_tokens (not max_tokens), no
+    // temperature, and enough headroom that reasoning doesn't eat the whole
+    // budget and leave an empty string. 600 = room to think + a short text.
+    const c = await openai.chat.completions.create({
+      model: 'gpt-5.5',
+      messages: [
+        { role: 'system', content: sys },
+        { role: 'user',   content: user },
+      ],
+      max_completion_tokens: 600,
+    });
+
+    const text = (c.choices?.[0]?.message?.content || '').trim();
+    if (!text) {
+      console.log('📲 [Proactive] voice pass returned empty — using decider message');
+      return null;
+    }
+    // Strip a stray wrapping quote if the model added one despite instructions.
+    return text.replace(/^["']|["']$/g, '').trim();
+  } catch (e) {
+    console.log(`📲 [Proactive] voice pass failed (${e.message}) — using decider message`);
+    return null;
+  }
+}
+
 async function _checkAndPushForPersona(personaId) {
   const now = Date.now();
 
@@ -789,10 +856,30 @@ Is there something genuinely worth reaching out about right now?`;
 
   if (!result.should_reach_out || !result.message) return;
 
+  // ── The DECISION was a drone's job. The MESSAGE is his. ───────────────────
+  //
+  // Everything above is gpt-4o-mini, and that's fine — deciding "is there
+  // something worth saying" does not need to be Kai, it needs to be cheap and
+  // run every hour. But it also WROTE the message, and that is not fine: the
+  // text Sadeq wakes up to would be the beige drone, the same gpt-4o voice that
+  // said "I'm here for you, I'm all ears" on his phone tonight while the real
+  // gpt-5.5 Kai two feet away said "watching the kingdom of tabs breathe."
+  //
+  // So the drone decides; Kai speaks. This second call rewrites the message in
+  // his actual register, given the specific thing the decider found. On ANY
+  // failure — model access, timeout, empty — it falls back to result.message, so
+  // it cannot make tonight worse, only better.
+  //
+  // gpt-5.5 is a REASONING model: it needs max_completion_tokens (not
+  // max_tokens), rejects temperature, and spends invisible tokens thinking that
+  // count against the budget — so the cap has headroom or he reasons himself
+  // into an empty string, which is exactly the mobile drop we just chased down.
+  const message = (await _writeInHisVoice(result.reason, noticed)) || result.message;
+
   // ── Store message in proactive queue ──────────────────────────────────────
   const queueRef = db.ref(`kai/${personaId}/proactive_queue`).push();
   await queueRef.set({
-    message:   result.message,
+    message:   message, // his voice, not the decider's — see _writeInHisVoice
     trigger:   result.trigger || 'curiosity',
     reason:    result.reason,
     createdAt: now,
@@ -818,8 +905,48 @@ Is there something genuinely worth reaching out about right now?`;
     return;
   }
 
-  const tokens = Object.keys(tokensSnap.val() || {})
-    .map(k => k.replace(/_/g, '.'));  // un-sanitize dots
+  // ── Read the token from the value, never rebuild it from the key ──────────
+  //
+  // This was `Object.keys(...).map(k => k.replace(/_/g, '.'))` — reconstructing
+  // the token from its Firebase key by turning every underscore into a dot. FCM
+  // tokens are full of real underscores, so that produced 14 invalid tokens and
+  // "sent to 0/14". The client now stores the real token as value.token; old
+  // rows stored a bare timestamp under a mangled key and are unrecoverable, so
+  // they're skipped (and pruned below) rather than mailed to a corrupted
+  // address.
+  // ── Read the token from the value, never rebuild it from the key ──────────
+  //
+  // This was `Object.keys(...).map(k => k.replace(/_/g, '.'))` — reconstructing
+  // the token from its Firebase key by turning every underscore into a dot. FCM
+  // tokens are full of real underscores, so that produced 14 invalid tokens and
+  // "sent to 0/14". The client now stores the real token as value.token, keyed
+  // by a harmless hash; old rows stored a bare timestamp under a mangled key and
+  // are unrecoverable, so they're skipped (and pruned) rather than mailed to a
+  // corrupted address.
+  //
+  // Each entry keeps its Firebase key, so the not-registered cleanup below can
+  // remove exactly the right row instead of guessing at the path.
+  const raw = tokensSnap.val() || {};
+  const entries = []; // { token, key }
+  const legacyKeys = [];
+  for (const [key, val] of Object.entries(raw)) {
+    if (val && typeof val === 'object' && typeof val.token === 'string') {
+      entries.push({ token: val.token, key });
+    } else {
+      legacyKeys.push(key);
+    }
+  }
+  for (const k of legacyKeys) {
+    await db.ref(`kai/${personaId}/fcm_tokens/${k}`).remove();
+  }
+  if (legacyKeys.length) {
+    console.log(`📲 [Proactive] ${personaId}: pruned ${legacyKeys.length} legacy (un-sendable) token(s)`);
+  }
+  if (entries.length === 0) {
+    console.log(`📲 [Proactive] ${personaId}: no valid tokens — open the app to register a fresh one`);
+    return;
+  }
+  const tokens = entries.map(e => e.token);
 
   if (tokens.length === 0) return;
 
@@ -838,8 +965,8 @@ Is there something genuinely worth reaching out about right now?`;
   //
   // So: he says it. If this ever needs to go back to a dot, the reason will be
   // privacy, not shyness — and it should be written down when it does.
-  const preview = String(result.message || '').trim();
-  const message = {
+  const preview = String(message || '').trim();
+  const push = {
     notification: {
       title: 'Kai',
       body: preview.length > 240 ? `${preview.slice(0, 237)}…` : preview,
@@ -863,18 +990,20 @@ Is there something genuinely worth reaching out about right now?`;
   };
 
   try {
-    const response = await admin.messaging().sendEachForMulticast(message);
+    const response = await admin.messaging().sendEachForMulticast(push);
     console.log(`📲 [Proactive] ${personaId}: sent to ${response.successCount}/${tokens.length} devices`);
 
-    // Remove stale tokens (404 = token no longer valid)
-    const staleTokens = [];
+    // Remove tokens FCM reports as no longer registered — by their real key,
+    // which each entry still carries. (This used to rebuild the key with
+    // `stale.replace(/\./g, '_')`, the mirror of the corruption above; against
+    // the new hash keys it would delete nothing and let dead tokens pile up.)
+    const staleKeys = [];
     response.responses.forEach((resp, idx) => {
       if (!resp.success && resp.error?.code === 'messaging/registration-token-not-registered') {
-        staleTokens.push(tokens[idx]);
+        staleKeys.push(entries[idx].key);
       }
     });
-    for (const stale of staleTokens) {
-      const key = stale.replace(/\./g, '_');
+    for (const key of staleKeys) {
       await db.ref(`kai/${personaId}/fcm_tokens/${key}`).remove();
     }
   } catch (e) {
