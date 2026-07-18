@@ -39,6 +39,48 @@ List<dynamic> _asList(dynamic v) {
   return [];
 }
 
+/// Recursively retype a map so nested casts in fromJson survive the plugin.
+///
+/// ── The bug this fixes, which made Kai amnesiac on his phone ────────────────
+///
+/// KaiDb is a facade: REST on desktop, the firebase_database plugin on mobile.
+/// REST returns data decoded by dart:convert — real `Map<String, dynamic>`, all
+/// the way down. The plugin returns `Map<Object?, Object?>`.
+///
+/// KnowledgeNode.fromJson does `json['metadata'] as Map<String, dynamic>?`. That
+/// cast does NOT return null on a type mismatch — it THROWS. Every node has a
+/// metadata field, so on mobile every single node threw, _loadGraph parsed 0 of
+/// 168, and its (correct) guard refused to continue rather than let the next
+/// save wipe the lot. Result, straight from a device log:
+///
+///   ❌ [Brain] _loadGraph REFUSED: parsed 0 of 168 stored nodes — schema mismatch
+///
+/// So on the phone his entire memory of Sadeq was unreadable — hasMemory:false
+/// on every turn — while the desktop read the same 168 nodes without blinking.
+/// It looked like a schema mismatch. It was a Map<Object?,Object?> the outer
+/// `.from()` copy never reached, because that copy is shallow and the landmine
+/// is one level down.
+///
+/// Fixing it at the model (every `as Map` → tolerant) would fix today's field
+/// and lie in wait for the next nested one. Fixing it HERE, at the I/O boundary
+/// where the plugin's typing actually enters, fixes the whole tree once.
+///
+/// Cheap and safe on desktop: the structure is already String-keyed, so this
+/// just rebuilds an identical tree.
+Map<String, dynamic> _deepStringMap(Map input) {
+  dynamic conv(dynamic v) {
+    if (v is Map) {
+      return <String, dynamic>{
+        for (final e in v.entries) e.key.toString(): conv(e.value),
+      };
+    }
+    if (v is List) return v.map(conv).toList();
+    return v;
+  }
+
+  return conv(input) as Map<String, dynamic>;
+}
+
 /// Jaccard similarity between two node labels at word level (0.0–1.0).
 /// Used for pattern separation: prevents near-duplicate nodes like
 /// "exercise" / "gym workout" / "working out" fragmenting the graph.
@@ -1169,7 +1211,7 @@ If nothing qualifies → {"nodes":[],"edges":[]}''';
       final nodes = <KnowledgeNode>[];
       for (final n in _asList(data['nodes'])) {
         try {
-          final m = Map<String, dynamic>.from(n as Map);
+          final m = _deepStringMap(n as Map);
           nodes.add(KnowledgeNode.fromJson(m)
             ..x = (m['x'] as num?)?.toDouble() ?? 0
             ..y = (m['y'] as num?)?.toDouble() ?? 0);
@@ -1181,7 +1223,7 @@ If nothing qualifies → {"nodes":[],"edges":[]}''';
       final edges = <KnowledgeEdge>[];
       for (final e in _asList(data['edges'])) {
         try {
-          edges.add(KnowledgeEdge.fromJson(Map<String, dynamic>.from(e as Map)));
+          edges.add(KnowledgeEdge.fromJson(_deepStringMap(e as Map)));
         } catch (_) {}
       }
 

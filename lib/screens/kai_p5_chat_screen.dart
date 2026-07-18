@@ -189,6 +189,25 @@ class _KaiP5ChatScreenState extends State<KaiP5ChatScreen> {
       final reply = resp.reply.trim();
       if (reply.isNotEmpty && reply != '(no reply)') {
         setState(() => _msgs.add(_P5Msg(reply, fromKai: true)));
+      } else {
+        // An empty reply is the silent drop. The turn ran, cost money, and put
+        // nothing on screen — so it reads as him ignoring you, which is the one
+        // thing a friend who's-always-around must never accidentally do.
+        //
+        // The desktop documents exactly this: "out of rounds, gagged at the
+        // door… 55 characters of nothing." Here it's rarer (tools are off, the
+        // ceiling is tiny) but rare is precisely what "drops sometimes" is. If
+        // the interims already said something this turn, they carry it and we
+        // stay quiet; otherwise say the true thing, in his voice.
+        final saidSomething =
+            _msgs.isNotEmpty && _msgs.last.fromKai && _msgs.last.interim;
+        if (!saidSomething) {
+          setState(() => _msgs.add(const _P5Msg(
+                'lost my thread there for a sec. say that again?',
+                fromKai: true,
+                interim: true,
+              )));
+        }
       }
     } catch (e) {
       if (!mounted) return;

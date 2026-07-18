@@ -226,7 +226,16 @@ class KnowledgeNode {
       timestamp: DateTime.fromMillisecondsSinceEpoch(json['timestamp'] as int),
       tags: (json['tags'] as List?)?.cast<String>() ?? [],
       importance: (json['importance'] as num?)?.toDouble() ?? 0.5,
-      metadata: json['metadata'] as Map<String, dynamic>? ?? {},
+      // NOT `as Map<String, dynamic>?`. That cast THROWS — it does not return
+      // null — when the value is a `Map<Object?, Object?>`, which is exactly what
+      // the firebase_database plugin hands back on mobile (desktop reads REST and
+      // gets String-keyed maps). Every node carries metadata, so that one cast
+      // made every node on the phone unparseable: "parsed 0 of 168 nodes", and
+      // Kai ran memoryless on mobile while the desktop read the same graph fine.
+      // Read tolerantly, retype the keys, keep the values.
+      metadata: (json['metadata'] as Map?)
+              ?.map((k, v) => MapEntry(k.toString(), v)) ??
+          <String, dynamic>{},
       emotionalIntensity: (json['emotionalIntensity'] as num?)?.toDouble() ?? 0.0,
       accessCount: json['accessCount'] as int? ?? 0,
       retention: (json['retention'] as num?)?.toDouble() ?? 1.0,
