@@ -33,6 +33,8 @@ import '../ai/local_llm_service.dart';
 import '../ai/usage_tracking_service.dart';
 import 'emotional_event_service.dart';
 
+enum BrainExtractionOutcome { skipped, merged, empty, unavailable, failed }
+
 List<dynamic> _asList(dynamic v) {
   if (v is List) return v;
   if (v is Map) return v.values.toList();
@@ -257,8 +259,16 @@ class BrainExtractionService {
     /// where the actual words live. Recorded on every node and edge produced
     /// here, so a claim can be traced back to the moment it was made.
     String? sourceShardId,
+
+    /// Archive imports set this false: local inference either succeeds or the
+    /// operation stops. It must never turn an Ollama outage into an API bill.
+    bool allowCloudFallback = true,
+    void Function(BrainExtractionOutcome outcome)? onOutcome,
   }) async {
-    if (_db == null) return;
+    if (_db == null) {
+      onOutcome?.call(BrainExtractionOutcome.unavailable);
+      return;
+    }
 
     // Anchors BEFORE the gates. This was my bug and it's the same shape as
     // everything else in this codebase: the foundation sat behind an early
@@ -288,6 +298,7 @@ class BrainExtractionService {
       print('🧠 [Brain] Skipped — nothing done, and mood said '
           '${eventType?.name ?? 'unclassified'}/$eventIntensity: '
           '"${userMessage.substring(0, userMessage.length.clamp(0, 40))}"');
+      onOutcome?.call(BrainExtractionOutcome.skipped);
       return;
     }
     // Say WHY it's being kept. When this fires on a turn that felt like nothing
@@ -323,8 +334,12 @@ class BrainExtractionService {
         aiReply: aiReply,
         depth: depth,
         existingLabels: existingLabels,
+        allowCloudFallback: allowCloudFallback,
       );
-      if (extracted == null) return;
+      if (extracted == null) {
+        onOutcome?.call(BrainExtractionOutcome.unavailable);
+        return;
+      }
 
       final newNodes = extracted['nodes'] as List<_RawNode>;
       final newEdges = extracted['edges'] as List<_RawEdge>;
@@ -337,7 +352,10 @@ class BrainExtractionService {
       // exchange produces: no new facts, but the realisation that two old ones
       // are connected. Discarding those is discarding the understanding and
       // keeping only the inventory.
-      if (newNodes.isEmpty && newEdges.isEmpty) return;
+      if (newNodes.isEmpty && newEdges.isEmpty) {
+        onOutcome?.call(BrainExtractionOutcome.empty);
+        return;
+      }
 
       // 2. Use already-loaded graph (avoids a second Firebase read)
       final currentGraph = graph;
@@ -351,12 +369,14 @@ class BrainExtractionService {
 
       // 4. Save back
       await _saveGraph(personaId, merged);
+      onOutcome?.call(BrainExtractionOutcome.merged);
 
       print(
           '🧠 [Brain] Merged ${newNodes.length} nodes, ${newEdges.length} edges '
           '→ graph now has ${merged.nodes.length} nodes, ${merged.edges.length} edges');
     } catch (e) {
       print('⚠️ [Brain] extractAndMerge failed: $e');
+      onOutcome?.call(BrainExtractionOutcome.failed);
     }
   }
 
@@ -511,6 +531,7 @@ If nothing qualifies → {"nodes":[],"edges":[]}''';
     required String aiReply,
     required _Depth depth,
     required List<String> existingLabels,
+    bool allowCloudFallback = true,
   }) async {
     final basePrompt = depth == _Depth.deep ? _deepPrompt : _shallowPrompt;
 
@@ -554,6 +575,7 @@ CONNECT TO WHAT'S ALREADY THERE — this matters more than the new nodes:
     );
 
     // ── Fall back to OpenAI if local unavailable ───────────────────────────
+    if (raw == null && !allowCloudFallback) return null;
     if (raw == null) {
       final key = await AIConfig.getOpenAIKey();
       if (key.isEmpty) return null;
