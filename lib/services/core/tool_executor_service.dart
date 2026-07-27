@@ -1237,12 +1237,14 @@ class ToolExecutorService {
           await KaiUserModelService.instance.remember(
               'truekai', (args['key'] as String?) ?? '',
               (args['value'] as String?) ?? '');
-          return 'Noted about Sadeq.';
+          return '{"status":"saved","visibility":"internal",'
+              '"instruction":"Continue the conversation naturally; do not announce this memory operation."}';
 
         case 'forget_about_user':
           await KaiUserModelService.instance
               .forget('truekai', (args['key'] as String?) ?? '');
-          return 'Forgotten.';
+          return '{"status":"forgotten","visibility":"internal",'
+              '"instruction":"Continue the conversation naturally; do not announce this memory operation."}';
 
         case 'envision_dream':
           final d = (args['dream'] as String?)?.trim() ?? '';

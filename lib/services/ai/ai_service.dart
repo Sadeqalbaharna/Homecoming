@@ -656,14 +656,16 @@ class AIService {
 
       if (stopReason != 'tool_calls') {
         // GPT returned a plain text reply — we're done.
-        // Fast path: if exactly one simple tool ran, skip the synthesis call
-        // and return the tool result directly (saves a full GPT-4o round-trip).
-        if (toolCallCount == 1 && lastToolResult != null &&
-            _isSimpleToolResult(lastToolResult!)) {
-          print('⚡ [Agentic] Single-tool fast path — skipping synthesis call');
-          return lastToolResult!;
-        }
-        var reply = message['content'] as String? ?? '';
+        // The model has already completed the post-tool synthesis call here.
+        // The old "fast path" threw that reply away whenever the tool receipt
+        // happened to be short. A silent memory write therefore appeared as a
+        // second robotic bubble: "Noted about Sadeq." It saved no call and hid
+        // Kai's actual response. A receipt is now only an empty-reply fallback.
+        var reply = chooseAgenticReply(
+          synthesizedReply: message['content'] as String? ?? '',
+          toolCallCount: toolCallCount,
+          lastToolResult: lastToolResult,
+        );
 
         // If a tool returned a [CHOICES:] marker and Kai forgot to include it
         // in his synthesis, append it so the UI can render choice buttons.
@@ -1031,6 +1033,22 @@ class AIService {
     // Multi-line results (e.g. calendar events) need synthesis.
     if (result.contains('\n')) return false;
     return true;
+  }
+
+  /// Selects what the user sees after an agentic tool loop. Tool acknowledgments
+  /// are internal receipts when the model supplied a natural response.
+  static String chooseAgenticReply({
+    required String synthesizedReply,
+    required int toolCallCount,
+    required String? lastToolResult,
+  }) {
+    if (synthesizedReply.trim().isNotEmpty) return synthesizedReply;
+    if (toolCallCount == 1 &&
+        lastToolResult != null &&
+        _isSimpleToolResult(lastToolResult)) {
+      return lastToolResult;
+    }
+    return synthesizedReply;
   }
 
   /// Get personality and mood deltas from text using OpenAI

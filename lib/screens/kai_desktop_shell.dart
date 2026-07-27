@@ -942,6 +942,18 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
                       child: const KaiHudOverlay(opacity: 0.55),
                     ),
                   ),
+                  // ── Ambient inner thoughts ────────────────────────────────
+                  // Not a mood-widget line, not a log, not a corner prisoner:
+                  // thoughts now live in the background stack, behind the main
+                  // panels, drifting through safe lanes and fading back out.
+                  const Positioned.fill(
+                    child: KaiInnerMonologue(
+                      personaId: _kPersona,
+                      ambient: true,
+                      maxLines: 3,
+                      maxWidth: 280,
+                    ),
+                  ),
                   Row(
                     children: [
                       _projectsPanel(),
@@ -949,37 +961,11 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
                       _cortexPane(),
                     ],
                   ),
-                  // ── His ambient state, in one column, out of the way ──────
-                  //
-                  // The monologue has now been homeless twice. It started
-                  // spanning the chat column at bottom:16 — straight over the
-                  // composer. It was moved to bottom-left, "the quiet lower half
-                  // of the projects rail"… which then stopped being quiet when
-                  // the work stack moved in underneath it. Hence a wandering
-                  // thought printed across the project card.
-                  //
-                  // It lives with the telemetry now, because they're the same
-                  // KIND of thing: what he's thinking and what he's doing, both
-                  // glanceable, both ignorable, neither ever on top of something
-                  // you need to click. Right edge, bottom-anchored, stacked.
-                  //
-                  // (KaiPresence in the cortex pane shows his LATEST thought —
-                  // this is the feed. Same stream, different question: "what is
-                  // he thinking" vs "what has he been thinking".)
                   Positioned(
                     right: 14,
                     bottom: 14,
                     width: 270,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        const KaiInnerMonologue(personaId: _kPersona),
-                        const SizedBox(height: 8),
-                        // Watch him work — the long think stops being dead air.
-                        KaiTelemetry(lines: _toolLog, active: _sending),
-                      ],
-                    ),
+                    child: KaiTelemetry(lines: _toolLog, active: _sending),
                   ),
                   if (_paletteOpen)
                     Positioned.fill(
