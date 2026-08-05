@@ -9,6 +9,11 @@ void main() {
     expect(source, contains("import '../core/kai_router_service.dart';"));
     expect(source, contains('const KaiRouterService().decide('));
     expect(source, contains('routeDecision.promptBlock()'));
+    expect(source, contains('route: routeDecision.route'));
     expect(source, contains('hasImage: image != null && image.isNotEmpty'));
+    expect(source, contains('KaiJobService.instance.current(personaId)'));
+    expect(source, contains('hasActiveJob: activeJob != null'));
+    expect(source, contains('ensureHomecomingWorkspace()'));
+    expect(source, contains("I'm activating my hands"));
   });
 }

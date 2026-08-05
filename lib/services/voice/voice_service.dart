@@ -159,12 +159,16 @@ class VoiceService {
         throw Exception('No internet connection. Please connect to WiFi or mobile data.');
       }
       
-      // Create multipart form data with correct MIME type for m4a
+      final extension = audioPath.toLowerCase().endsWith('.wav') ? 'wav' : 'm4a';
+      final mediaType = extension == 'wav'
+          ? MediaType('audio', 'wav')
+          : MediaType('audio', 'mp4');
+      // Create multipart form data with the real recording container.
       final formData = FormData.fromMap({
         'file': await MultipartFile.fromFile(
           audioPath,
-          filename: 'audio.m4a',
-          contentType: MediaType('audio', 'mp4'),
+          filename: 'audio.$extension',
+          contentType: mediaType,
         ),
         'model': VoiceConfig.whisperModel,
         if (VoiceConfig.whisperLanguage.isNotEmpty) 

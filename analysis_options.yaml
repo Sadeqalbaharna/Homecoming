@@ -25,6 +25,11 @@ analyzer:
     # go_router), so it can only ever produce noise.
     - ARCHIVED_REDUNDANT/**
 
+    # Generated/build output is not source. Flutter may leave stale snapshots in
+    # build/ with relative imports that are meaningless from this project root;
+    # analyzing them turns Kai's health check into a haunted attic inspection.
+    - build/**
+
     # A VENDORED dependency, and its example app is not our code.
     #
     # packages/flutter_overlay_window/example/ is the plugin author's demo. It

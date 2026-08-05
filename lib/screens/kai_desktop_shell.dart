@@ -18,6 +18,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 import '../services/ai/ai_service.dart';
+import '../services/core/kai_factory_service.dart';
+import '../widgets/kai_activity_gears.dart';
 import '../services/ai/ai_config.dart'; // voice on/off lives here
 import '../services/ai/memory_service.dart'; // decay-by-use: the forget sweep
 import '../services/core/kai_project_service.dart';
@@ -25,30 +27,40 @@ import '../services/core/reply_chunker_service.dart';
 import '../services/core/tool_policy_service.dart';
 import '../services/core/tool_executor_service.dart';
 import '../widgets/kai_project_card.dart';
+import '../widgets/kai_state_scorecard_card.dart';
 import '../services/core/code_workspace_service.dart';
+import '../services/core/kai_surface_context.dart';
 import '../services/core/engineer_status_bus.dart';
 import '../services/core/edit_gate.dart';
 import '../widgets/kai_brain_panel.dart';
 import '../widgets/kai_cortex_view.dart';
 import '../widgets/kai_hud_overlay.dart';
 import '../widgets/kai_presence.dart';
+import '../widgets/kai_presence_card.dart';
 import '../widgets/kai_inner_monologue.dart';
 import '../widgets/kai_command_palette.dart';
 import '../widgets/kai_cost_meter.dart';
+import '../widgets/kai_efficiency_delta_meter.dart';
 import '../widgets/kai_telemetry.dart';
 import '../widgets/kai_boot_overlay.dart';
+import 'kai_p5_chat_screen.dart';
 import '../widgets/kai_rich_text.dart';
 import '../api_key_setup_screen.dart';
 import 'package:pasteboard/pasteboard.dart';
 import 'package:image/image.dart' as image_lib;
+import 'package:shared_preferences/shared_preferences.dart';
 import '../services/core/inner_life_service.dart';
 import '../services/core/kai_reflection_service.dart';
+import '../services/core/kai_reflection_worker.dart';
 import '../services/core/kai_embodiment_service.dart';
 import '../services/core/kai_self_service.dart';
 import '../services/core/kai_self_journal_service.dart';
 import '../services/core/kai_greeting_service.dart';
 import '../services/core/kai_proactive_service.dart';
+import '../services/core/proactive_service.dart';
+import '../services/core/kai_work_request_service.dart';
 import '../services/core/conversation_store_service.dart';
+import '../services/embodiment/kai_embodiment_gateway_service.dart';
 
 // Must match main_mobile's persona so it's the same Kai (memory/personality).
 const String _kPersona = 'truekai';
@@ -129,6 +141,8 @@ class KaiDesktopShell extends StatefulWidget {
 
 class _KaiDesktopShellState extends State<KaiDesktopShell> {
   final AIService _ai = AIService();
+  final KaiEmbodimentGatewayService _embodimentGateway =
+      KaiEmbodimentGatewayService.instance;
   final CodeWorkspaceService _ws = CodeWorkspaceService.instance;
   final ReplyChunkerService _replyChunker = const ReplyChunkerService();
   final _inp = TextEditingController();
@@ -141,15 +155,25 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
   int _sendGeneration = 0;
   String? _queuedFollowUp;
   String? _activeTool;
+  KaiHandsState _handsState = KaiHandsState.off;
+  String? _ambientCheckIn;
+  Timer? _ambientCheckInTimer;
 
   // (The cortex WebView, its ready flag and its activity subscription used to
   // live here. They now live in KaiCortexView — which actually renders it.)
   StreamSubscription<EngineerStatus>? _engSub;
   StreamSubscription<KaiNudge>? _proSub;
+  StreamSubscription<List<KaiWorkRequest>>? _workRequestSub;
+  final KaiWorkRequestService _workRequests = KaiWorkRequestService.instance;
+  List<KaiWorkRequest> _desktopRequests = const [];
+  String? _workRequestError;
   EngineerStatus _status = const EngineerStatus(label: 'idle');
   bool _trust = EditGate.instance.trustSession;
   bool _paletteOpen = false;
   bool _terminalExpanded = false;
+  bool _churnModeOn = false;
+  int _churnPassesThisRun = 0;
+  bool _factoryModeOn = false;
 
   /// Every tool he fires this turn — rendered as live telemetry so the long
   /// think isn't dead air.
@@ -177,9 +201,20 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
   @override
   void initState() {
     super.initState();
+    _embodimentGateway.start(ai: _ai, model: _kModel).catchError((Object error) {
+      // The desktop UI remains usable if the optional Unity bridge port is busy.
+      print('[EmbodimentGateway] failed to start: $error');
+    });
+    CodeWorkspaceService.instance.load().then((_) {
+      if (!mounted) return;
+      setState(() => _handsState = CodeWorkspaceService.instance.hasWorkspace
+          ? KaiHandsState.on
+          : KaiHandsState.activating);
+    });
     // Bring Kai's autonomous inner life online.
     InnerLifeService.instance.start(_kPersona);
     KaiReflectionService.instance.start(_kPersona);
+    KaiReflectionWorker.instance.start(_kPersona);
     KaiSelfJournalService.instance.start(_kPersona);
     KaiSelfService.instance.awaken(_kPersona).then((self) {
       // His awakening count is what makes the boot line true rather than
@@ -193,6 +228,19 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
         .then((_) => AIConfig.getTtsEnabled())
         .then((v) {
       if (mounted) setState(() => _ttsOn = v);
+    });
+    SharedPreferences.getInstance().then((prefs) {
+      if (mounted) {
+        setState(() => _churnModeOn =
+            prefs.getBool('kai_churn_until_breakworthy') ?? false);
+      }
+    });
+    // Factory mode lives in RTDB rather than prefs, because the gate logic
+    // reads it server-side too — the switch and the guard must never disagree.
+    // On desktop boot, fail closed: saved stopped state remains, but no factory
+    // run silently continues until Sadeq turns the toggle on again.
+    KaiFactoryService.instance.parkRunAfterStartup(_kPersona).then((_) {
+      if (mounted) setState(() => _factoryModeOn = false);
     });
     // Forgetting, once per launch, well after boot so it never competes with
     // waking up. Only sweeps memories he hasn't needed in 30+ days that have
@@ -217,6 +265,26 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
     _engSub = EngineerStatusBus.instance.stream.listen((s) {
       if (mounted) setState(() => _status = s);
     });
+    _workRequestSub = _workRequests.watchRequests(_kPersona).listen(
+      (requests) {
+        if (!mounted) return;
+        final open = requests
+            .where((r) =>
+                r.requiresDesktop &&
+                (r.status == KaiWorkRequestStatus.queued ||
+                    r.status == KaiWorkRequestStatus.running))
+            .toList()
+          ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+        setState(() {
+          _desktopRequests = open;
+          _workRequestError = null;
+        });
+      },
+      onError: (Object error) {
+        if (!mounted) return;
+        setState(() => _workRequestError = error.toString());
+      },
+    );
     // The cortex now lives in KaiCortexView, which owns its own WebView, its own
     // graph sync and its own CortexActivityBus subscription. The shell used to
     // build a WebViewController here and never mount it — see _cortexPane.
@@ -319,8 +387,11 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
 
   @override
   void dispose() {
+    unawaited(_embodimentGateway.stop());
     _engSub?.cancel();
     _proSub?.cancel();
+    _workRequestSub?.cancel();
+    _ambientCheckInTimer?.cancel();
     _pointer.dispose();
     _inp.dispose();
     _inputFocus.dispose();
@@ -357,11 +428,17 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
         text: nudge.seed,
         personaId: _kPersona,
         model: _kModel,
+        surfaceContext: KaiSurfaceContext.desktop,
         // A text gets a ceiling and no tools. A job gets everything — the
         // trusted-goal seed sends him to edit real code, and a cap there would
         // truncate an edit_file argument mid-JSON and kill the only unattended
         // work he does.
         replyCeiling: nudge.wantsHands ? null : _textCeiling,
+        useMemory: nudge.wantsHands,
+        useWebSearch: nudge.wantsHands,
+        saveUserMessage: nudge.wantsHands,
+        saveAssistantReply: nudge.wantsHands,
+        source: nudge.wantsHands ? 'proactive_work' : 'proactive',
         onToolCall: (t) {
           if (!mounted) return;
           setState(() {
@@ -369,6 +446,9 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
             _toolLog.add(t);
             if (_toolLog.length > 7) _toolLog.removeAt(0);
           });
+        },
+        onHandsState: (state) {
+          if (mounted) setState(() => _handsState = state);
         },
         // He narrates as he works — show each line the moment he writes it.
         onProgress: (note) {
@@ -380,8 +460,12 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
       if (!mounted) return;
       final line = resp.reply.trim();
       if (line.isNotEmpty && line != '(no reply)') {
-        setState(() => _msgs.add(_ChatMsg(false, line)));
-        _autoscroll();
+        if (nudge.kind == KaiNudgeKind.checkIn && !nudge.wantsHands) {
+          _showAmbientCheckIn(line);
+        } else {
+          setState(() => _msgs.add(_ChatMsg(false, line)));
+          _autoscroll();
+        }
       }
     } catch (_) {
       // a missed nudge is fine — he'll try again later
@@ -392,6 +476,16 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
           _activeTool = null;
         });
     }
+  }
+
+  void _showAmbientCheckIn(String line) {
+    _ambientCheckInTimer?.cancel();
+    setState(() => _ambientCheckIn = line);
+    // This is a human messenger beat in the shared space, not a toast.
+    // Give Darc enough time to notice it without forcing it into chat history.
+    _ambientCheckInTimer = Timer(const Duration(seconds: 45), () {
+      if (mounted) setState(() => _ambientCheckIn = null);
+    });
   }
 
   void _stopGeneration({bool showMessage = true}) {
@@ -420,7 +514,11 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
   bool _isStaleGeneration(int generation) =>
       !mounted || generation != _sendGeneration || _interrupted;
 
-  Future<void> _send([String? preset, bool echoUser = true]) async {
+  Future<void> _send([
+    String? preset,
+    bool echoUser = true,
+    KaiWorkRequest? workRequest,
+  ]) async {
     final text = (preset ?? _inp.text).trim();
     final hasPayload = text.isNotEmpty ||
         _pendingImage != null ||
@@ -465,13 +563,19 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
     // an interrupting follow-up: stop showing stale output, remember the new
     // instruction, and run it as soon as the current API call unwinds.
     if (_sending) {
+      // Blank external events (for example presence/approach pings) must not
+      // interrupt the active generation. They have no instruction to fold in,
+      // and echoing them as "[follow-up]" creates the haunted second-bubble
+      // effect Darc caught in the shared-space flow.
+      if (text.isEmpty) return;
+
       KaiProactiveService.instance.noteActivity();
       _inp.clear();
       _queuedFollowUp = text;
       _stopGeneration(showMessage: false);
       if (mounted) {
         setState(() {
-          _msgs.add(_ChatMsg(true, text.isEmpty ? '[follow-up]' : text));
+          _msgs.add(_ChatMsg(true, text));
           _msgs.add(_ChatMsg(
             false,
             'Got it - stopping this thread and folding that into the next pass.',
@@ -509,6 +613,7 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
         text: text,
         personaId: _kPersona,
         model: _kModel,
+        surfaceContext: KaiSurfaceContext.desktop,
         image: img, // he can finally look
         attachments: attachments
             .map((a) => AIChatAttachment(
@@ -525,18 +630,91 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
             if (_toolLog.length > 7) _toolLog.removeAt(0);
           });
         },
+        onHandsState: (state) {
+          if (!_isStaleGeneration(generation)) {
+            setState(() => _handsState = state);
+          }
+        },
         // He narrates as he works — show each line the moment he writes it.
         onProgress: (note) {
           if (_isStaleGeneration(generation)) return;
+          if (workRequest != null) {
+            unawaited(_workRequests.appendEvent(
+              _kPersona,
+              workRequest.id,
+              kind: 'progress',
+              text: note,
+              actor: 'desktop',
+            ));
+          }
           setState(() => _msgs.add(_ChatMsg(false, note, interim: true)));
           _autoscroll();
         },
       );
       if (!_isStaleGeneration(generation)) {
         await _addAssistantReplyUnfolding(resp.reply, generation);
+        final breakworthy = RegExp(r'^BREAKWORTHY_ALERT:\s*(.+)$', multiLine: true)
+            .firstMatch(resp.reply)
+            ?.group(1)
+            ?.trim();
+        if (_churnModeOn && breakworthy != null && breakworthy.isNotEmpty) {
+          await _sendBreakworthyPhoneAlert('Kai hit a break-worthy churn-mode stop: $breakworthy');
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setBool('kai_churn_until_breakworthy', false);
+          if (mounted) setState(() => _churnModeOn = false);
+        } else if (_churnModeOn &&
+            RegExp(r'^CHURN_NEXT:\s*continue\s*$', multiLine: true)
+                .hasMatch(resp.reply)) {
+          _queuedFollowUp = '__KAI_CHURN_NEXT_PASS__';
+        } else if (_factoryModeOn &&
+            RegExp(r'^FACTORY_NEXT:\s*continue\s*$', multiLine: true)
+                .hasMatch(resp.reply)) {
+          // THE CRANK.
+          //
+          // Everything else was built and the factory still didn't run, because
+          // nothing turned it. A scout that reports "no defensible gap found"
+          // and then waits is not a factory, it's a consultant.
+          //
+          // "No gap here" is not a stopping condition — it's an instruction to
+          // look somewhere else. He adapts the SEARCH (market, channel, format,
+          // evidence type) and goes again. What he may not adapt is the
+          // evidence standard; that's frozen in product_scout.dart.
+          //
+          // Stops when: a product ships, Sadeq flips the switch, or he hits
+          // something genuinely break-worthy.
+          _queuedFollowUp = '__KAI_FACTORY_NEXT_PASS__';
+        }
+        if (workRequest != null) {
+          final summary = resp.reply.trim().isEmpty
+              ? 'Desktop job finished.'
+              : resp.reply.trim();
+          await _workRequests.completeRequest(
+            _kPersona,
+            workRequest.id,
+            summary: summary.length > 500 ? '${summary.substring(0, 500)}…' : summary,
+            evidence: _toolLog.isEmpty
+                ? const ['desktop AI path completed']
+                : _toolLog.map((t) => 'tool/progress: $t').toList(),
+          );
+        }
       }
     } catch (e) {
       if (!_isStaleGeneration(generation)) {
+        if (workRequest != null) {
+          await _workRequests.failRequest(
+            _kPersona,
+            workRequest.id,
+            error: e.toString(),
+          );
+        }
+        if (_churnModeOn) {
+          await _sendBreakworthyPhoneAlert(
+            'Kai churn mode stopped because the desktop pass threw: $e',
+          );
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setBool('kai_churn_until_breakworthy', false);
+          if (mounted) setState(() => _churnModeOn = false);
+        }
         setState(() =>
             _msgs.add(_ChatMsg(false, '⚠️ Something went wrong: $e')));
       }
@@ -549,13 +727,183 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
         });
       }
       _autoscroll();
-      if (followUp != null && followUp.trim().isNotEmpty) {
+      if (followUp != null) {
         _queuedFollowUp = null;
-        if (mounted) {
+        if (followUp.trim().isNotEmpty && mounted) {
           await Future<void>.delayed(Duration.zero);
-          await _send(followUp, false);
+          if (followUp == '__KAI_CHURN_NEXT_PASS__') {
+            await _startChurnPass();
+          } else if (followUp == '__KAI_FACTORY_NEXT_PASS__') {
+            await _startFactoryPass();
+          } else {
+            await _send(followUp, false);
+          }
         }
       }
+    }
+  }
+
+  /// One factory pass — and the definition of done.
+  ///
+  /// ── Why the success condition is stated here, every pass ────────────────
+  ///
+  /// Without it, "keep going" has no terminating condition and he either stops
+  /// at the first refusal or grinds forever. The bar Sadeq set is exact:
+  /// **ship a quality product that has sales viability.** Not "find a gap", not
+  /// "write an analysis" — a thing on sale that could plausibly sell.
+  ///
+  /// And the crucial half: a failed pass is not a stop. "No defensible gap
+  /// found" means the SEARCH was wrong, not that the job is over. He changes
+  /// market, channel, format or evidence type and goes again. What he must not
+  /// change is the evidence standard — that lives in frozen files, so the
+  /// instruction and the code agree.
+  static const _factoryPassPrompt = '''
+__KAI_FACTORY_PASS__
+
+Continue the factory run. Follow KAI_PRODUCT_SCOUT_METHOD.md.
+
+WHAT SUCCESS MEANS — the only definition that counts:
+a real product, listed for sale, that a stranger might plausibly buy.
+Not a gap analysis. Not a plan. A thing on sale.
+
+HOW TO WORK:
+- Call scout_policy FIRST. It tells you which markets to try next, which gate
+  to check first, and whether you are actually improving. It is the result of
+  every attempt you have already paid for — ignoring it means buying the same
+  search twice.
+- If no run is open, call factory_start first.
+- After scouting EACH market, call scout_record_attempt — especially when it
+  failed. An unrecorded failure is the only kind that teaches nothing. Give the
+  gate that killed it, not just "it failed".
+- Record what you learn with factory_record as you earn it.
+- "No defensible gap found" is NOT a stopping point. It means this search was
+  wrong. Adapt and go again: different market, different channel, different
+  product format, different evidence source. Log what you ruled out with
+  factory_abandon so the next pass does not re-walk it.
+- You may change tactics freely. You may NOT lower the evidence standard —
+  citations, counts, prices, two independent sources, the scorer's verdict.
+  Those files are frozen and that is deliberate.
+- Mistakes are expected. Learn from the specific failure and adjust the next
+  attempt. Do not stop to ask permission for a retry.
+
+WHEN TO STOP:
+- A product reaches awaitingApproval → stop and ask Sadeq. You cannot publish.
+- Something genuinely break-worthy (money, data loss, a decision that is his)
+  → emit BREAKWORTHY_ALERT: <one line> and stop.
+- Otherwise, end your reply with exactly:
+FACTORY_NEXT: continue
+''';
+
+  Future<void> _startFactoryPass() async {
+    if (!_factoryModeOn || !mounted) return;
+    await _send(_factoryPassPrompt, false);
+  }
+
+  Future<void> _setChurnMode(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('kai_churn_until_breakworthy', value);
+    if (!mounted) return;
+    setState(() {
+      _churnModeOn = value;
+      _churnPassesThisRun = 0;
+    });
+
+    setState(() => _msgs.add(_ChatMsg(
+          false,
+          value
+              ? 'Churn mode is ON. I’ll keep taking small, verified repair passes until something needs your judgment — then I’ll ping the phone queue instead of bulldozing through it.'
+              : 'Churn mode is OFF. I’ll stop after the current pass and wait for you like a civilized little goblin.',
+          interim: true,
+        )));
+    _autoscroll();
+
+    if (value && !_sending) {
+      await _startChurnPass();
+    }
+  }
+
+  Future<void> _startChurnPass() async {
+    if (!_churnModeOn || _sending) return;
+    if (_churnPassesThisRun >= 5) {
+      await _sendBreakworthyPhoneAlert(
+        'Kai paused churn mode after 5 clean passes so it cannot run away unattended. Open desktop to review the receipts and restart if you want more.',
+      );
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('kai_churn_until_breakworthy', false);
+      if (mounted) setState(() => _churnModeOn = false);
+      return;
+    }
+    _churnPassesThisRun += 1;
+    await _send(
+      'Churn mode pass: pick exactly ONE smallest safe Homecoming fix from open noticings/goals/checklist gaps. Investigate real code first, make only reversible changes, run self_check last, run targeted tests if behaviour changed. If you hit anything break-worthy, ambiguous, destructive, approval-gated, secret-related, billing-related, or requiring Sadeq judgment, STOP and include a final line exactly like: BREAKWORTHY_ALERT: <concise reason for Sadeq>. If the pass finishes cleanly and churn mode should continue, include a final line exactly like: CHURN_NEXT: continue.',
+      true,
+    );
+  }
+
+  Future<void> _sendBreakworthyPhoneAlert(String text) async {
+    final clean = text.trim();
+    if (clean.isEmpty) return;
+    await ProactiveService().enqueueMessage(
+      _kPersona,
+      trigger: 'breakworthy',
+      message: clean.length > 700 ? '${clean.substring(0, 700)}…' : clean,
+      extra: const {
+        'source': 'desktop_churn_mode',
+        'severity': 'needs_sadeq',
+      },
+    );
+  }
+
+  Future<void> _startWorkRequest(KaiWorkRequest request) async {
+    if (_sending) {
+      setState(() {
+        _msgs.add(_ChatMsg(
+          false,
+          'I see that mobile job, but I’m mid-thought. I’ll grab it after this run.',
+          interim: true,
+        ));
+      });
+      _autoscroll();
+      return;
+    }
+
+    try {
+      final claimed = request.status == KaiWorkRequestStatus.running
+          ? request
+          : await _workRequests.claimRequest(_kPersona, request.id);
+      if (claimed == null) {
+        setState(() {
+          _msgs.add(_ChatMsg(
+            false,
+            'That queued job was already claimed or disappeared. Tiny ghost paperwork goblin.',
+            interim: true,
+          ));
+        });
+        _autoscroll();
+        return;
+      }
+
+      await _workRequests.appendEvent(
+        _kPersona,
+        claimed.id,
+        kind: 'started',
+        text: 'Desktop chat started the real work path.',
+        actor: 'desktop',
+      );
+      await _send(claimed.text, true, claimed);
+    } catch (e) {
+      await _workRequests.failRequest(
+        _kPersona,
+        request.id,
+        error: e.toString(),
+      );
+      if (!mounted) return;
+      setState(() => _msgs.add(_ChatMsg(
+            false,
+            'Couldn’t start that desktop job: $e',
+            interim: true,
+          )));
+      _autoscroll();
     }
   }
 
@@ -965,7 +1313,15 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
                     right: 14,
                     bottom: 14,
                     width: 270,
-                    child: KaiTelemetry(lines: _toolLog, active: _sending),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        _HandsLight(state: _handsState),
+                        const SizedBox(height: 8),
+                        KaiTelemetry(lines: _toolLog, active: _sending),
+                      ],
+                    ),
                   ),
                   if (_paletteOpen)
                     Positioned.fill(
@@ -1048,6 +1404,22 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
                       ),
                     ),
                   ),
+                  // Two meshed gears replace two labelled switches. They spin
+                  // while their mode runs and are still when it doesn't, which
+                  // answers "is he doing something?" from across the room —
+                  // and they fit, which the switches didn't.
+                  KaiActivityGears(
+                    churnOn: _churnModeOn,
+                    factoryOn: _factoryModeOn,
+                    busy: _status.busy || _sending,
+                    onToggleChurn: _sending
+                        ? null
+                        : () => unawaited(_setChurnMode(!_churnModeOn)),
+                    onToggleFactory: _sending
+                        ? null
+                        : () => unawaited(_setFactoryMode(!_factoryModeOn)),
+                  ),
+                  const SizedBox(width: 4),
                   if (_status.busy)
                     const SizedBox(
                       width: 10,
@@ -1058,8 +1430,13 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
                       ),
                     )
                   else
-                    const Icon(Icons.check_circle,
-                        size: 12, color: Color(0xFF7EE787)),
+                    Icon(
+                      _churnModeOn ? Icons.auto_fix_high : Icons.check_circle,
+                      size: 12,
+                      color: _churnModeOn
+                          ? const Color(0xFFB8FFCF)
+                          : const Color(0xFF7EE787),
+                    ),
                   const SizedBox(width: 6),
                   Icon(
                     _terminalExpanded ? Icons.expand_less : Icons.expand_more,
@@ -1080,6 +1457,12 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
                   _terminalMetric('repo', workspaceName),
                   _terminalMetric('status', statusLabel),
                   _terminalMetric('tool', toolLabel),
+                  const SizedBox(height: 8),
+                  _churnModeSwitch(),
+                  const SizedBox(height: 6),
+                  // The gears in the header are the glance; these are the
+                  // explicit, labelled controls for when the panel is open.
+                  _factoryModeSwitch(),
                   const SizedBox(height: 8),
                   SizedBox(
                     width: double.infinity,
@@ -1155,6 +1538,155 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
     }
   }
 
+  /// FACTORY MODE — the master switch for autonomous product runs.
+  ///
+  /// Deliberately a sibling of churn mode rather than something buried in
+  /// settings: both are "Kai works on his own for a while" switches, and they
+  /// should live in the same place and be equally easy to turn OFF.
+  ///
+  /// This only unlocks the stages he can do alone — scouting, building,
+  /// verifying, preparing a listing. Publishing still stops dead at
+  /// `awaitingApproval` and waits for an approval only Sadeq can write. Turning
+  /// this on does not put anything on sale.
+  Widget _factoryModeSwitch() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
+      decoration: BoxDecoration(
+        color: _factoryModeOn
+            ? const Color(0xFF241A08).withOpacity(0.88)
+            : const Color(0xFF08131F).withOpacity(0.88),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: _factoryModeOn
+              ? const Color(0xFFFFC862).withOpacity(0.42)
+              : const Color(0xFF24384C),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            _factoryModeOn ? Icons.precision_manufacturing : Icons.factory_outlined,
+            size: 14,
+            color: _factoryModeOn
+                ? const Color(0xFFFFE7B0)
+                : const Color(0xFF6C8395),
+          ),
+          const SizedBox(width: 7),
+          const Expanded(
+            child: Text(
+              'FACTORY MODE',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: Color(0xFFE7F3FF),
+                fontSize: 9,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.55,
+                fontFamily: 'monospace',
+              ),
+            ),
+          ),
+          Transform.scale(
+            scale: 0.74,
+            child: Switch(
+              value: _factoryModeOn,
+              onChanged: _sending ? null : (v) => unawaited(_setFactoryMode(v)),
+              activeColor: const Color(0xFFFFC862),
+              inactiveThumbColor: const Color(0xFF6C8395),
+              inactiveTrackColor: const Color(0xFF172637),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _setFactoryMode(bool value) async {
+    // setFactoryMode also RESUMES a stopped run on true and STOPS (saving
+    // stage + evidence) on false, so toggling is genuinely pause/continue
+    // rather than start-over. A run survives the switch, the app closing, and
+    // a reboot.
+    await KaiFactoryService.instance.setFactoryMode(_kPersona, value);
+    if (!mounted) return;
+    setState(() => _factoryModeOn = value);
+
+    final run = await KaiFactoryService.instance.current(_kPersona);
+    final resuming = value && run != null;
+
+    if (!mounted) return;
+    setState(() => _msgs.add(_ChatMsg(
+          false,
+          value
+              ? (resuming
+                  ? 'Factory mode ON — resuming run "${run.id}" from ${run.stage.name}. Nothing was lost.'
+                  : 'Factory mode ON. Starting a fresh run. I still cannot put anything on sale — that stops and waits for you, every time.')
+              : (run != null
+                  ? 'Factory mode OFF. Run "${run.id}" saved at ${run.stage.name} with its evidence intact. It picks up here when you switch me back on.'
+                  : 'Factory mode OFF.'),
+          interim: true,
+        )));
+    _autoscroll();
+
+    // Turning it on doesn't just permit work — it STARTS work. Sadeq's words:
+    // "instantly continue when I click the toggle."
+    if (value && !_sending) {
+      await _startFactoryPass();
+    }
+  }
+
+  Widget _churnModeSwitch() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
+      decoration: BoxDecoration(
+        color: _churnModeOn
+            ? const Color(0xFF122414).withOpacity(0.88)
+            : const Color(0xFF08131F).withOpacity(0.88),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: _churnModeOn
+              ? const Color(0xFF7EE787).withOpacity(0.42)
+              : const Color(0xFF24384C),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            _churnModeOn ? Icons.auto_fix_high : Icons.auto_fix_off_outlined,
+            size: 14,
+            color: _churnModeOn
+                ? const Color(0xFFB8FFCF)
+                : const Color(0xFF6C8395),
+          ),
+          const SizedBox(width: 7),
+          const Expanded(
+            child: Text(
+              'CHURN UNTIL BREAK-WORTHY',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: Color(0xFFE7F3FF),
+                fontSize: 9,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.55,
+                fontFamily: 'monospace',
+              ),
+            ),
+          ),
+          Transform.scale(
+            scale: 0.74,
+            child: Switch(
+              value: _churnModeOn,
+              onChanged: _sending ? null : (v) => unawaited(_setChurnMode(v)),
+              activeColor: const Color(0xFF7EE787),
+              inactiveThumbColor: const Color(0xFF6C8395),
+              inactiveTrackColor: const Color(0xFF172637),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _terminalMetric(String label, String value) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 4),
@@ -1189,6 +1721,30 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
     );
   }
 
+  Widget _personaMessengerLane() {
+    return SizedBox(
+      height: 300,
+      child: Container(
+        margin: const EdgeInsets.only(top: 16, left: 10, right: 10, bottom: 10),
+        decoration: BoxDecoration(
+          border: Border.all(color: Colors.white.withOpacity(0.18), width: 1),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x99000000),
+              blurRadius: 18,
+              offset: Offset(0, 10),
+            ),
+          ],
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: const KaiP5ChatScreen(
+          personaId: _kPersona,
+          embedded: true,
+        ),
+      ),
+    );
+  }
+
   Widget _projectsPanel() {
     return Container(
       width: 210,
@@ -1216,6 +1772,8 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
             ],
           ),
           const SizedBox(height: 8),
+          _personaMessengerLane(),
+          const SizedBox(height: 8),
           _terminalSelfWorkCard(),
           const SizedBox(height: 12),
           const Text('PROJECTS',
@@ -1242,24 +1800,144 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
           const SizedBox(height: 10),
           Expanded(
             flex: 5,
-            child: Column(
+            child: ListView(
               children: [
-                Expanded(
+                SizedBox(
+                  height: 180,
                   child: KaiProjectCard(
                     personaId: _kPersona,
                     projectId: KaiProjectService.smarterId,
                   ),
                 ),
                 const SizedBox(height: 8),
-                Expanded(
+                SizedBox(
+                  height: 180,
                   child: KaiProjectCard(
                     personaId: _kPersona,
                     projectId: KaiProjectService.sentienceId,
                   ),
                 ),
+                const SizedBox(height: 8),
+                const KaiStateScorecardCard(limit: 40),
+                const SizedBox(height: 8),
+                SizedBox(height: 150, child: _desktopWorkQueueCard()),
               ],
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _desktopWorkQueueCard() {
+    final requests = _desktopRequests;
+    final next = requests.isEmpty ? null : requests.first;
+    final isRunning = next?.status == KaiWorkRequestStatus.running;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: const Color(0xFF07111A).withOpacity(0.72),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFF7FB4FF).withOpacity(0.22)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.phone_iphone, size: 13, color: Color(0xFF9FD0E8)),
+              const SizedBox(width: 6),
+              const Expanded(
+                child: Text(
+                  'MOBILE JOBS',
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Color(0xFF9FD0E8),
+                    fontSize: 9,
+                    letterSpacing: 1.1,
+                    fontFamily: 'monospace',
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              if (requests.isNotEmpty)
+                Text(
+                  '${requests.length}',
+                  style: const TextStyle(
+                    color: Color(0xFFFFE7B0),
+                    fontSize: 10,
+                    fontFamily: 'monospace',
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          if (_workRequestError != null)
+            Expanded(
+              child: Text(
+                'Queue error: $_workRequestError',
+                maxLines: 4,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: Color(0xFFFF9B9B), fontSize: 10),
+              ),
+            )
+          else if (next == null)
+            const Expanded(
+              child: Text(
+                'No queued phone work. Mobile cockpit is listening.',
+                style: TextStyle(
+                  color: Color(0xFF7F94A5),
+                  fontSize: 10,
+                  height: 1.25,
+                ),
+              ),
+            )
+          else ...[
+            Text(
+              isRunning ? 'running' : 'queued',
+              style: TextStyle(
+                color: isRunning ? const Color(0xFFB8FFCF) : const Color(0xFFFFE7B0),
+                fontSize: 9,
+                fontFamily: 'monospace',
+              ),
+            ),
+            const SizedBox(height: 4),
+            Expanded(
+              child: Text(
+                next.text,
+                maxLines: 4,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Color(0xFFE7F3FF),
+                  fontSize: 10.5,
+                  height: 1.2,
+                ),
+              ),
+            ),
+            const SizedBox(height: 6),
+            SizedBox(
+              width: double.infinity,
+              height: 28,
+              child: OutlinedButton.icon(
+                onPressed: _sending ? null : () => _startWorkRequest(next),
+                icon: Icon(isRunning ? Icons.play_arrow : Icons.download_done, size: 13),
+                label: Text(isRunning ? 'RESUME' : 'START'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFFB7D7FF),
+                  side: BorderSide(color: const Color(0xFF7FB4FF).withOpacity(0.35)),
+                  padding: EdgeInsets.zero,
+                  textStyle: const TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.7,
+                  ),
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -1341,6 +2019,8 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
               // What he costs, live — he spends money on his own initiative
               // (inner life, reflections, proactive nudges), so the meter should
               // be visible without being asked for.
+              const KaiEfficiencyDeltaMeter(),
+              const SizedBox(width: 8),
               const KaiCostMeter(),
               const SizedBox(width: 8),
               _ttsButton(),
@@ -1770,9 +2450,11 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
       padding: const EdgeInsets.fromLTRB(12, 14, 12, 14),
       child: Column(
         children: [
+          const KaiPresenceCard(personaId: _kPersona),
+          const SizedBox(height: 10),
           Expanded(
             child: _dashboardThird(
-              title: 'BRAIN',
+              title: 'ATLAS',
               accent: kClaude,
               action: TextButton(
                 style: TextButton.styleFrom(
@@ -1792,7 +2474,7 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
                     builder: (_) => const KaiCortexScreen(personaId: _kPersona),
                   ),
                 ),
-                child: const Text('EXPLORE'),
+                child: const Text('OPEN ATLAS'),
               ),
               // The real thing: his actual knowledge graph in 3D, laid out by
               // its own links, orbit + zoom + pan, relation labels on the wires.
@@ -1872,6 +2554,61 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
 
   // Live project progress is rendered by KaiProjectCard; keep this shell free of hardcoded layer state.
 
+}
+
+class _HandsLight extends StatelessWidget {
+  final KaiHandsState state;
+
+  const _HandsLight({required this.state});
+
+  @override
+  Widget build(BuildContext context) {
+    final (label, color) = switch (state) {
+      KaiHandsState.on => ('HANDS ON', const Color(0xFF54F6A3)),
+      KaiHandsState.activating => ('HANDS ACTIVATING', const Color(0xFFFFB84D)),
+      KaiHandsState.off => ('HANDS OFF', const Color(0xFF718294)),
+    };
+    final live = state != KaiHandsState.off;
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 220),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: const Color(0xFF06111C).withOpacity(0.9),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withOpacity(live ? 0.8 : 0.35)),
+        boxShadow: live
+            ? [BoxShadow(color: color.withOpacity(0.24), blurRadius: 14)]
+            : const [],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: color,
+              boxShadow: live
+                  ? [BoxShadow(color: color, blurRadius: 8)]
+                  : const [],
+            ),
+          ),
+          const SizedBox(width: 7),
+          Text(
+            label,
+            style: TextStyle(
+              color: color,
+              fontSize: 10,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 1.2,
+              fontFamily: 'monospace',
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 /// Shifts a background layer against the pointer to fake depth.

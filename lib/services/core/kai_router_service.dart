@@ -49,7 +49,11 @@ Use this as a posture hint, not a cage:
 class KaiRouterService {
   const KaiRouterService();
 
-  KaiRouteDecision decide(String message, {bool hasImage = false}) {
+  KaiRouteDecision decide(
+    String message, {
+    bool hasImage = false,
+    bool hasActiveJob = false,
+  }) {
     final text = message.trim();
     final lower = text.toLowerCase();
     final reasons = <String>[];
@@ -90,11 +94,11 @@ class KaiRouterService {
       pick(KaiRoute.contemplate, 0.78, 'deep design/strategy/thinking signal detected');
     }
 
-    // Trust mode / "go ahead" during engineering work should keep momentum in
-    // coding instead of collapsing into a generic acknowledgement.
-    if (_containsAny(lower, _continuationSignals) &&
-        _containsAny(lower, _projectSignals)) {
-      pick(KaiRoute.coding, 0.80, 'continuation of an active project/build request');
+    // Trust mode / "go ahead" during an already-open job should keep momentum in
+    // coding instead of collapsing into generic chatter. The important signal is
+    // the persisted job, not whether Sadeq happened to repeat "project".
+    if (hasActiveJob && _containsAny(lower, _continuationSignals)) {
+      pick(KaiRoute.coding, 0.80, 'continuation of an active persisted job');
     }
 
     if (text.length <= 24 && route == KaiRoute.fastChat) {
@@ -206,6 +210,10 @@ class KaiRouterService {
     'go ahead',
     'keep going',
     'continue',
+    'and now',
+    'what now',
+    'what next',
+    'and?',
     'do it',
     'trust',
     'no pitstops',

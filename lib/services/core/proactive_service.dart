@@ -144,6 +144,26 @@ class ProactiveService {
   ///
   /// Still swallowed, because a broken write must never break an app resume.
   /// But it says so now.
+  Future<void> enqueueMessage(
+    String personaId, {
+    required String message,
+    String trigger = 'checkin',
+    Map<String, Object?> extra = const {},
+  }) async {
+    if (_db == null) return;
+    final clean = message.trim();
+    if (clean.isEmpty) return;
+
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await _db!.ref('kai/$personaId/proactive_queue').push().set({
+      'message': clean,
+      'trigger': trigger.trim().isEmpty ? 'checkin' : trigger.trim(),
+      'createdAt': now,
+      'delivered': false,
+      ...extra,
+    });
+  }
+
   Future<void> markDelivered(String personaId, String messageId) async {
     if (_db == null) return;
     try {

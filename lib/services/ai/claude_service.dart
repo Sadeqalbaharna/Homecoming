@@ -116,7 +116,20 @@ class ClaudeService {
         data: {
           'model': model,
           'max_tokens': maxTokens,
-          if (system != null && system.isNotEmpty) 'system': system,
+          // Unlike OpenAI, Anthropic does NOT cache automatically — you must
+          // mark a breakpoint or you pay full input price on every call, even
+          // for a byte-identical system prompt. The block-array form with
+          // cache_control caches everything up to and including the system
+          // prompt (tools included). Reads cost ~10% of normal input price;
+          // the one-time write costs ~125%. Any repeated caller wins.
+          if (system != null && system.isNotEmpty)
+            'system': [
+              {
+                'type': 'text',
+                'text': system,
+                'cache_control': {'type': 'ephemeral'},
+              }
+            ],
           if (temperature != null) 'temperature': temperature,
           'messages': messages,
         },
@@ -135,11 +148,18 @@ class ClaudeService {
       final usage = data['usage'] as Map<String, dynamic>?;
       final inTok  = (usage?['input_tokens']  as num?)?.toInt() ?? 0;
       final outTok = (usage?['output_tokens'] as num?)?.toInt() ?? 0;
-      if (inTok > 0 || outTok > 0) {
+      final cacheRead =
+          (usage?['cache_read_input_tokens'] as num?)?.toInt() ?? 0;
+      final cacheWrite =
+          (usage?['cache_creation_input_tokens'] as num?)?.toInt() ?? 0;
+      _printCacheUsage(operation, usage);
+      if (inTok > 0 || outTok > 0 || cacheRead > 0 || cacheWrite > 0) {
         UsageTrackingService.trackAnthropic(
           model: model,
           inputTokens: inTok,
           outputTokens: outTok,
+          cacheReadTokens: cacheRead,
+          cacheCreationTokens: cacheWrite,
           operation: operation,
         ).catchError((_) {});
       }
@@ -203,7 +223,19 @@ class ClaudeService {
           data: {
             'model': model,
             'max_tokens': maxTokens,
-            if (system != null && system.isNotEmpty) 'system': system,
+            // See completeMessages: Anthropic caching is opt-in per request.
+            // In THIS loop it matters most of all — every iteration re-sends
+            // the system prompt, the full tool manifest, AND every previous
+            // round's tool results at full price. A 14-iteration engineer job
+            // used to pay for the same prefix 14 times over.
+            if (system != null && system.isNotEmpty)
+              'system': [
+                {
+                  'type': 'text',
+                  'text': system,
+                  'cache_control': {'type': 'ephemeral'},
+                }
+              ],
             'tools': tools,
             'messages': messages,
           },
@@ -213,9 +245,19 @@ class ClaudeService {
         final usage = data['usage'] as Map<String, dynamic>?;
         final inTok = (usage?['input_tokens'] as num?)?.toInt() ?? 0;
         final outTok = (usage?['output_tokens'] as num?)?.toInt() ?? 0;
-        if (inTok > 0 || outTok > 0) {
+        final cacheRead =
+            (usage?['cache_read_input_tokens'] as num?)?.toInt() ?? 0;
+        final cacheWrite =
+            (usage?['cache_creation_input_tokens'] as num?)?.toInt() ?? 0;
+        _printCacheUsage('$operation iter$iter', usage);
+        if (inTok > 0 || outTok > 0 || cacheRead > 0 || cacheWrite > 0) {
           UsageTrackingService.trackAnthropic(
-                  model: model, inputTokens: inTok, outputTokens: outTok, operation: operation)
+                  model: model,
+                  inputTokens: inTok,
+                  outputTokens: outTok,
+                  cacheReadTokens: cacheRead,
+                  cacheCreationTokens: cacheWrite,
+                  operation: operation)
               .catchError((_) {});
         }
 
@@ -246,6 +288,14 @@ class ClaudeService {
               'content': out,
             });
           }
+          // Moving breakpoint: mark the newest tool_result so the ENTIRE
+          // conversation so far (system + tools + all previous rounds) is a
+          // cache read on the next iteration, and only this round's results
+          // are new tokens. Strip older markers first — Anthropic allows at
+          // most 4 breakpoints per request, and a stale one per round would
+          // blow past that by iteration 4.
+          _stripCacheMarkers(messages);
+          results.last['cache_control'] = {'type': 'ephemeral'};
           messages.add({'role': 'user', 'content': results});
           continue; // loop again with the tool results in context
         }
@@ -264,6 +314,35 @@ class ClaudeService {
       // ignore: avoid_print
       print('⚠️ [ClaudeService] tool loop ($operation) failed: $e');
       return null;
+    }
+  }
+
+  /// Remove every cache_control marker from prior turns so the single moving
+  /// breakpoint in completeWithTools never exceeds Anthropic's 4-marker limit.
+  static void _stripCacheMarkers(List<Map<String, dynamic>> messages) {
+    for (final m in messages) {
+      final c = m['content'];
+      if (c is List) {
+        for (final b in c) {
+          if (b is Map) b.remove('cache_control');
+        }
+      }
+    }
+  }
+
+  /// Cache visibility — the same rule as the OpenAI path: if this prints 0 on
+  /// a warm repeated call, the prefix is mutating and nothing else will say so.
+  ///
+  /// (trackAnthropic now takes the cache tiers as parameters and prices them
+  /// correctly — this print is the per-call receipt, the tracker is the ledger.)
+  static void _printCacheUsage(String operation, Map<String, dynamic>? usage) {
+    if (usage == null) return;
+    final read = (usage['cache_read_input_tokens'] as num?)?.toInt() ?? 0;
+    final wrote = (usage['cache_creation_input_tokens'] as num?)?.toInt() ?? 0;
+    if (read > 0 || wrote > 0) {
+      // ignore: avoid_print
+      print('💾 [Claude cache] $operation: read $read cached tokens, '
+          'wrote $wrote new to cache');
     }
   }
 

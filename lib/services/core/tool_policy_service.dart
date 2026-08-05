@@ -431,6 +431,12 @@ class ToolPolicyService {
       risk: ToolRisk.safeAction,
       capabilities: {ToolCapability.self},
     ),
+    'run_self_improvement_loop': ToolPolicy(
+      name: 'run_self_improvement_loop',
+      risk: ToolRisk.safeAction,
+      capabilities: {ToolCapability.self, ToolCapability.coding},
+      returnsData: true,
+    ),
     // Looking at his own graph, and cleaning it.
     //
     // NOT needsUserApproval, and that is a real decision rather than an
@@ -467,6 +473,12 @@ class ToolPolicyService {
       capabilities: {ToolCapability.self},
       requiredArgs: {'what'},
     ),
+    'make_commitment': ToolPolicy(
+      name: 'make_commitment',
+      risk: ToolRisk.safeAction,
+      capabilities: {ToolCapability.self},
+      requiredArgs: {'kind', 'text', 'reason'},
+    ),
     'noticed_done': ToolPolicy(
       name: 'noticed_done',
       risk: ToolRisk.safeAction,
@@ -479,6 +491,12 @@ class ToolPolicyService {
       capabilities: {ToolCapability.self},
       requiredArgs: {'layer', 'progress', 'evidence'},
     ),
+    'set_checklist_status': ToolPolicy(
+      name: 'set_checklist_status',
+      risk: ToolRisk.safeAction,
+      capabilities: {ToolCapability.self},
+      requiredArgs: {'layer', 'item', 'status', 'evidence'},
+    ),
     // Proof. Read-only and no approval — the same reasoning as self_check, and
     // for the same reason: anything that stands between him and finding out
     // whether he was right will be skipped when he's tired, and being tired is
@@ -487,6 +505,84 @@ class ToolPolicyService {
       name: 'run_tests',
       risk: ToolRisk.read,
       capabilities: {ToolCapability.self, ToolCapability.coding},
+      returnsData: true,
+    ),
+    // ── Factory tools ────────────────────────────────────────────────────
+    //
+    // Added because the executor warned about every one of them: "has no
+    // policy entry — allowing it". Allowing by default is the right failure
+    // mode for a warning, and the wrong one to leave in place: an undeclared
+    // tool is one whose blast radius nobody has stated.
+    //
+    // The risk levels are not decoration. `storefront_publish` puts Sadeq's
+    // name and money behind a product, so it is destructive and needs
+    // approval, exactly like write_file. Everything that only reads is read.
+    'scout_score': ToolPolicy(
+      name: 'scout_score',
+      risk: ToolRisk.read,
+      capabilities: {ToolCapability.planning},
+      returnsData: true,
+    ),
+    'scout_policy': ToolPolicy(
+      name: 'scout_policy',
+      risk: ToolRisk.read,
+      capabilities: {ToolCapability.planning},
+      returnsData: true,
+    ),
+    'scout_record_attempt': ToolPolicy(
+      name: 'scout_record_attempt',
+      risk: ToolRisk.sideEffect,
+      capabilities: {ToolCapability.planning, ToolCapability.memory},
+    ),
+    'factory_status': ToolPolicy(
+      name: 'factory_status',
+      risk: ToolRisk.read,
+      capabilities: {ToolCapability.planning},
+      returnsData: true,
+    ),
+    'factory_start': ToolPolicy(
+      name: 'factory_start',
+      risk: ToolRisk.sideEffect,
+      capabilities: {ToolCapability.planning},
+    ),
+    'factory_record': ToolPolicy(
+      name: 'factory_record',
+      risk: ToolRisk.sideEffect,
+      capabilities: {ToolCapability.planning, ToolCapability.memory},
+    ),
+    'factory_advance': ToolPolicy(
+      name: 'factory_advance',
+      risk: ToolRisk.sideEffect,
+      capabilities: {ToolCapability.planning},
+    ),
+    'factory_abandon': ToolPolicy(
+      name: 'factory_abandon',
+      risk: ToolRisk.sideEffect,
+      capabilities: {ToolCapability.planning},
+    ),
+    'factory_learn': ToolPolicy(
+      name: 'factory_learn',
+      risk: ToolRisk.read,
+      capabilities: {ToolCapability.planning, ToolCapability.memory},
+      returnsData: true,
+    ),
+    // Reaches the outside world and spends the operator's credibility.
+    'storefront_publish': ToolPolicy(
+      name: 'storefront_publish',
+      risk: ToolRisk.destructive,
+      capabilities: {ToolCapability.web, ToolCapability.planning},
+      needsUserApproval: true,
+    ),
+    'storefront_sales': ToolPolicy(
+      name: 'storefront_sales',
+      risk: ToolRisk.read,
+      capabilities: {ToolCapability.web},
+      returnsData: true,
+    ),
+    'usage_report': ToolPolicy(
+      name: 'usage_report',
+      risk: ToolRisk.read,
+      capabilities: {ToolCapability.self},
       returnsData: true,
     ),
     'self_check': ToolPolicy(
@@ -600,7 +696,30 @@ class ToolPolicyService {
       );
     }
 
+    if (toolName == 'run_tests') {
+      final target = args['target'];
+      if (target is List) {
+        return const ToolValidationResult.blocked(
+          'run_tests accepts one target path, not a list. Run the whole suite, run one file/directory, or run separate tool calls — do not report tool misuse as a test failure.',
+        );
+      }
+      if (target is String && _looksLikeMultipleRunTestTargets(target)) {
+        return const ToolValidationResult.blocked(
+          'run_tests accepts one target path. Space-joined test targets become one invalid path, so this is tool misuse, not a failing test suite. Run one target at a time or run the whole suite.',
+        );
+      }
+    }
+
     return const ToolValidationResult.ok();
+  }
+
+  static bool _looksLikeMultipleRunTestTargets(String target) {
+    final trimmed = target.trim();
+    if (trimmed.isEmpty) return false;
+    final parts = trimmed.split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
+    if (parts.length <= 1) return false;
+    final pathLike = RegExp(r'(^test[\\/]|_test\.dart$|\.dart$|[\\/])');
+    return parts.where((p) => pathLike.hasMatch(p)).length >= 2;
   }
 
   static String promptBrief() {

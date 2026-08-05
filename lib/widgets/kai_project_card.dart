@@ -310,7 +310,7 @@ class _ProjectPiePainter extends CustomPainter {
       final usableSweep = sweep - gap * 2;
       final selected = layer.n == selectedLayer;
       final color = _sliceColor(layer.n);
-      final progressSweep = usableSweep * (layer.progress.clamp(0, 100) / 100);
+      final progressSweep = usableSweep * (layer.honestProgress / 100);
       final drawRect = selected
           ? Rect.fromCircle(center: center, radius: baseRadius - stroke / 2 + 2)
           : rect;
@@ -459,7 +459,7 @@ class _LayerTicket extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  '${layer.progress}%',
+                  '${layer.honestProgress}%',
                   style: TextStyle(
                     color: accent,
                     fontSize: 14,
@@ -492,6 +492,32 @@ class _LayerTicket extends StatelessWidget {
                 height: 1.3,
               ),
             ),
+            if (layer.checklist.isNotEmpty) ...[
+              const SizedBox(height: 7),
+              Text(
+                'checklist proven: ${layer.checklistProven}/${layer.checklist.length}',
+                style: TextStyle(
+                  color: accent.withOpacity(0.82),
+                  fontSize: 8.4,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.3,
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                layer.checklist.map((i) {
+                  final status = layer.checklistStatus[i] ?? ChecklistStatus.pending;
+                  return '• [${status.label}] $i';
+                }).join('\n'),
+                maxLines: 4,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: Colors.white.withOpacity(0.52),
+                  fontSize: 8.1,
+                  height: 1.18,
+                ),
+              ),
+            ],
             const SizedBox(height: 7),
             Container(
               width: double.infinity,

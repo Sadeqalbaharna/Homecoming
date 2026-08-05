@@ -20,6 +20,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:homecoming_app/services/core/kai_project_service.dart';
 
 void main() {
   final source =
@@ -69,6 +70,113 @@ void main() {
   test('progress requires evidence — a number alone is not a claim', () {
     expect(source, contains('Progress needs evidence'),
         reason: 'a bare percentage with no receipts is how 7/7 happened');
+  });
+
+  test('Sentience layers have frozen checklist denominators', () {
+    const requiredItems = [
+      'mood persists across turns/windows',
+      'code can be inspected and edited with diffs',
+      'tests/run_tests prove behaviour changes',
+      'cold-open retrieval works without prompt stuffing',
+      'unasked noticings persist outside a job',
+      'replay compares old vs new behaviour',
+      'robotics progress milestones are logged when real',
+    ];
+
+    for (final item in requiredItems) {
+      expect(source, contains("'$item'"),
+          reason: 'missing Sentience checklist denominator item: $item');
+    }
+  });
+
+  test('checklists are persisted, preserved, and rendered into Kai context', () {
+    expect(source, contains('final List<String> checklist'));
+    expect(source, contains('final Map<String, ChecklistStatus> checklistStatus'));
+    expect(source, contains("'checklist': checklist"));
+    expect(source, contains("'checklistStatus':"));
+    expect(source, contains('checklistStatus: old.checklistStatus'),
+        reason: 'setLayerProgress must preserve checklist proof status');
+    expect(source, contains('checklist: old.checklist'),
+        reason: 'setLayerProgress must preserve the frozen checklist');
+    expect(source, contains('checklist: src.checklist'),
+        reason: 'ensureProject must re-freeze checklist drift from source');
+    expect(source, contains('checklist proven:'),
+        reason: 'Kai prompt context must show proven/total, not just a percent');
+    expect(source, contains(r'[${status.label}]'),
+        reason: 'Kai prompt context must show each checklist item status');
+  });
+
+  test('checklist statuses calculate honest layer progress', () {
+    const layer = KaiLayer(
+      n: 6,
+      title: 'Becoming / Self-Iteration',
+      intent: 'Scars become rules; rules fire from observable traces; behaviour changes later.',
+      progress: 86,
+      checklist: [
+        'scar is recorded',
+        'rule is wired',
+        'rule is tested',
+        'rule fires live',
+      ],
+      checklistStatus: {
+        'scar is recorded': ChecklistStatus.wired,
+        'rule is wired': ChecklistStatus.tested,
+        'rule is tested': ChecklistStatus.usedLive,
+        'rule fires live': ChecklistStatus.trusted,
+      },
+    );
+
+    expect(layer.checklistProven, 4);
+    expect(layer.checklistScore, 71);
+    expect(layer.honestProgress, 71,
+        reason: 'checklist-backed layers must score from item proof, not the manually stored percentage');
+  });
+
+  test('checklist status has a callable evidence-backed updater path', () {
+    expect(source, contains('Future<String> setChecklistStatus'));
+    expect(source, contains('Checklist status needs evidence'));
+    expect(source, contains('The checklist text is frozen; use the exact item'));
+    expect(source, contains('updatedStatus[matchedItem] = status'));
+
+    final executor = File('lib/services/core/tool_executor_service.dart')
+        .readAsStringSync();
+    expect(executor, contains("'name': 'set_checklist_status'"));
+    expect(executor, contains("case 'set_checklist_status':"));
+    expect(executor, contains('KaiProjectService.instance.setChecklistStatus'));
+
+    final policy = File('lib/services/core/tool_policy_service.dart')
+        .readAsStringSync();
+    expect(policy, contains("'set_checklist_status': ToolPolicy"));
+    expect(policy, contains("requiredArgs: {'layer', 'item', 'status', 'evidence'}"));
+
+    final capabilities = File('lib/services/core/kai_capabilities.dart')
+        .readAsStringSync();
+    expect(capabilities, contains('set_checklist_status'));
+  });
+
+  test('self-improvement loop is exposed through schema dispatcher policy and capability manifest', () {
+    final executor = File('lib/services/core/tool_executor_service.dart')
+        .readAsStringSync();
+    expect(executor, contains("'name': 'run_self_improvement_loop'"));
+    expect(executor, contains("case 'run_self_improvement_loop':"));
+    expect(executor, contains('KaiSelfImprovementRunner.instance.run'));
+
+    final policy = File('lib/services/core/tool_policy_service.dart')
+        .readAsStringSync();
+    expect(policy, contains("'run_self_improvement_loop': ToolPolicy"));
+
+    final capabilities = File('lib/services/core/kai_capabilities.dart')
+        .readAsStringSync();
+    expect(capabilities, contains('run_self_improvement_loop'));
+  });
+
+  test('the visible project ticket shows checklist proof status', () {
+    final card = File('lib/widgets/kai_project_card.dart').readAsStringSync();
+    expect(card, contains('checklist proven:'));
+    expect(card, contains('layer.checklistProven'));
+    expect(card, contains('ChecklistStatus.pending'));
+    expect(card, contains('layer.honestProgress'),
+        reason: 'the dashboard must render checklist-calculated progress, not the manual percentage');
   });
 
   test('the old self-graded dashboard is really gone', () {

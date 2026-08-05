@@ -60,11 +60,10 @@ class ClaudeCodeAgent {
         {
           'name': 'list_dir',
           'description':
-              'List entries of a workspace-relative directory. Use "" for the workspace root.',
+              'List entries of a workspace-relative directory. Defaults to the workspace root when path is omitted, empty, ".", or "/".',
           'input_schema': {
             'type': 'object',
             'properties': {'path': {'type': 'string'}},
-            'required': ['path'],
           },
         },
         {

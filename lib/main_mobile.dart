@@ -19,6 +19,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'services/ai/ai_service.dart';
 import 'services/core/firebase_service.dart';
 import 'services/core/memory_consolidation_service.dart';
+import 'services/core/brain_extraction_service.dart';
+import 'services/core/kai_working_on_service.dart';
 import 'services/automation/wake_on_lan_service.dart';
 import 'services/voice/voice_activation_service.dart';
 import 'services/voice/voice_service.dart';
@@ -28,7 +30,7 @@ import 'services/automation/home_automation_service.dart';
 import 'screens/home_remote_screen.dart';
 import 'screens/chaos_journal_screen.dart';
 import 'screens/mind_map_screen.dart';
-import 'screens/brain_3d_screen.dart';
+import 'screens/kai_cortex_screen.dart';
 import 'screens/activity_feed_screen.dart';
 import 'screens/worlds_screen.dart';
 import 'screens/kai_desktop_shell.dart';
@@ -40,6 +42,7 @@ import 'api_key_setup_screen.dart';
 import 'services/core/kai_state_service.dart';
 import 'services/core/emotional_event_service.dart';
 import 'services/core/memory_reflection_service.dart';
+import 'services/core/kai_reflection_worker.dart';
 import 'services/core/personality_drift_service.dart';
 import 'services/core/proactive_service.dart';
 import 'services/core/default_mode_service.dart';
@@ -56,14 +59,17 @@ import 'services/core/tavern_status_service.dart';
 import 'screens/tavern_register_screen.dart';
 import 'screens/tavern_link_screen.dart';
 import 'widgets/plan_card.dart';
+import 'constants.dart';
+import 'services/core/kai_surface_context.dart';
 
 /// ===== Layout / Window =====
+/// Local to this file on purpose — nothing else lays out the avatar. These used
+/// to be duplicated in constants.dart, where the copies quietly disagreed
+/// (kSpriteAlignY was 0.35 there, 0.30 here) because neither was ever read from
+/// the other file. kCanvasWidth/Height/kSpriteAlignY/kUiLiftPx/kIdleAfter were
+/// dead in both places and are gone.
 const double kSpriteSize = 170;
 const double kRingPadding = 48;
-const double kCanvasWidth = 560;
-const double kCanvasHeight = 600;
-const double kSpriteAlignY = 0.30;
-const double kUiLiftPx = 64;
 
 /// ===== Avatar assets + timings =====
 const String kAvatarIdleFrameDir      = 'assets/avatar/idle_frames/';
@@ -76,11 +82,9 @@ const int kAttentionFrameCount = 121;
 const int kThinkingFrameCount  = 241;
 const int kSpeakingFrameCount  = 121;
 
-const Duration kIdleAfter = Duration(seconds: 15);
 const Duration kAttentionPulse = Duration(seconds: 2);
 
-/// Persona IDs
-const String kPersonaKai = 'truekai';
+// kPersonaKai now comes from constants.dart — one canonical 'truekai'.
 
 /// Global AI service instance
 final aiService = AIService();
@@ -447,8 +451,38 @@ class _MobileKaiState extends State<_MobileKai>
       if (mounted) setState(() => _isLoading = false);
       MemoryReflectionService().maybeReflect(personaId: _personaId)
           .catchError((e) => print('⚠️ [Reflection] $e'));
+      KaiReflectionWorker.instance.start(_personaId);
       PersonalityDriftService().maybeDrift(personaId: _personaId)
           .catchError((e) => print('⚠️ [Drift] $e'));
+      // Look at the shape of his own memory and park anything genuinely odd —
+      // a contradiction he holds, a belief he revised, a preference whose reason
+      // he never learned. This is the second feeder for `noticed`, the one that
+      // needs no tool call, so the messenger Kai (tools off) finally has more
+      // than one thing on his mind. Fire-and-forget; a failed reflection must
+      // never block the app opening.
+      //
+      // NOT `.then(...).catchError((e) => print(...))`: on a Future<int> that
+      // handler "might complete normally" without returning an int — the §4
+      // latent-crash smell Kai caught here at :462. A plain async/try-catch has
+      // no such trap.
+      unawaited(() async {
+        try {
+          final n = await BrainExtractionService().reflectAndNotice(_personaId);
+          if (n > 0) print('🔎 [Notice] parked $n new observation(s)');
+        } catch (e) {
+          print('⚠️ [Notice] $e');
+        }
+      }());
+      // Give him the broad strokes of what we're building — once, if he's never
+      // had them. So he knows the arc of his own project instead of being told
+      // about it every time.
+      unawaited(() async {
+        try {
+          await KaiWorkingOnService.instance.seedOnce(_personaId);
+        } catch (e) {
+          print('⚠️ [WorkingOn] $e');
+        }
+      }());
       // first-run only: offer to link the customer's NFC badge to their account
       unawaited(_maybePromptTavernLink());
     } catch (e) {
@@ -1102,6 +1136,7 @@ class _MobileKaiState extends State<_MobileKai>
         text: text,
         personaId: _personaId,
         model: _modelId,
+        surfaceContext: KaiSurfaceContext.mobile,
         adaptUser: _adaptToUser,
         ctxTurns: _ctxTurns,
         onToolCall: (toolName) {
@@ -1111,59 +1146,9 @@ class _MobileKaiState extends State<_MobileKai>
           if (mounted) setState(() => _activePlan = plan);
         },
       );
-      setState(() {
-        // Parse and strip [CHOICES: A | B | C] from the reply
-        final rawReply = resp.reply.isEmpty ? "(no reply)" : resp.reply;
-        final choiceMatch = RegExp(r'\[CHOICES:\s*([^\]]+)\]').firstMatch(rawReply);
-        if (choiceMatch != null) {
-          _choices = choiceMatch.group(1)!
-              .split('|')
-              .map((s) => s.trim())
-              .where((s) => s.isNotEmpty)
-              .toList();
-          _reply = rawReply.replaceAll(choiceMatch.group(0)!, '').trim();
-        } else {
-          _choices = null;
-          _reply = rawReply;
-        }
-        _memoriesUsed = resp.memoriesUsed; // NEW: Track memories used
-        _debugInfo = resp.debugInfo; // NEW: Track debug info
-        // Collapse plan card once Kai's reply is ready; keep it visible
-        if (_activePlan != null) _planExpanded = false;
-        print('🔍 [DEBUG] debugInfo captured: ${_debugInfo != null ? "YES" : "NO"}');
-        if (_debugInfo != null) {
-          print('🔍 [DEBUG] debugInfo keys: ${_debugInfo!.keys.join(", ")}');
-        }
-      });
-      _spawnDeltas(resp.actualDeltas);
-
-      // 🃏 Save activity card (fire-and-forget)
-      ActivityCardService().saveCard(
-        personaId:         _personaId,
-        userMessage:       text,
-        kaiReply:          resp.reply,
-        personalityDelta:  resp.personalityDelta,
-        moodDelta:         resp.moodDelta,
-        tags:              resp.tags,
-        mbti:              resp.mbti,
-        memoriesUsed:      resp.memoriesUsed,
-        webSearchUsed:     resp.webSearchUsed,
-        curiosityQuestion: resp.curiosityQuestion?.question,
-        inputTokens:       resp.promptInputTokens,
-        outputTokens:      resp.promptOutputTokens,
-        costUsd:           resp.promptCostUsd,
-      ).catchError((e) => print('⚠️ [ActivityCard] $e'));
+      await _applyKaiResponse(resp, activityUserMessage: text);
 
       // Note: Conversation already saved to Firebase in ai_service.sendMessage()
-      
-      if (resp.ttsBase64 != null) {
-        final mp3Path = await _writeTempMp3(base64Decode(resp.ttsBase64!));
-        if (_autoPlayTts) {
-          await _player.stop();
-          await _player.play(DeviceFileSource(mp3Path));
-        }
-        setState(() => _ttsPath = mp3Path);
-      }
     } catch (e) {
       setState(() {
         _error = e.toString();
@@ -1239,19 +1224,114 @@ class _MobileKaiState extends State<_MobileKai>
     _switchToAnimation('attention');
   }
 
+  Future<void> _applyKaiResponse(
+    ChatResponse resp, {
+    required String activityUserMessage,
+  }) async {
+    setState(() {
+      // Parse and strip [CHOICES: A | B | C] from the reply
+      final rawReply = resp.reply.isEmpty ? "(no reply)" : resp.reply;
+      final choiceMatch = RegExp(r'\[CHOICES:\s*([^\]]+)\]').firstMatch(rawReply);
+      if (choiceMatch != null) {
+        _choices = choiceMatch.group(1)!
+            .split('|')
+            .map((s) => s.trim())
+            .where((s) => s.isNotEmpty)
+            .toList();
+        _reply = rawReply.replaceAll(choiceMatch.group(0)!, '').trim();
+      } else {
+        _choices = null;
+        _reply = rawReply;
+      }
+      _memoriesUsed = resp.memoriesUsed; // NEW: Track memories used
+      _debugInfo = resp.debugInfo; // NEW: Track debug info
+      // Collapse plan card once Kai's reply is ready; keep it visible
+      if (_activePlan != null) _planExpanded = false;
+      print('🔍 [DEBUG] debugInfo captured: ${_debugInfo != null ? "YES" : "NO"}');
+      if (_debugInfo != null) {
+        print('🔍 [DEBUG] debugInfo keys: ${_debugInfo!.keys.join(", ")}');
+      }
+    });
+    _spawnDeltas(resp.actualDeltas);
+
+    // 🃏 Save activity card (fire-and-forget)
+    ActivityCardService().saveCard(
+      personaId:         _personaId,
+      userMessage:       activityUserMessage,
+      kaiReply:          resp.reply,
+      personalityDelta:  resp.personalityDelta,
+      moodDelta:         resp.moodDelta,
+      tags:              resp.tags,
+      mbti:              resp.mbti,
+      memoriesUsed:      resp.memoriesUsed,
+      webSearchUsed:     resp.webSearchUsed,
+      curiosityQuestion: resp.curiosityQuestion?.question,
+      inputTokens:       resp.promptInputTokens,
+      outputTokens:      resp.promptOutputTokens,
+      costUsd:           resp.promptCostUsd,
+    ).catchError((e) => print('⚠️ [ActivityCard] $e'));
+
+    if (resp.ttsBase64 != null) {
+      final mp3Path = await _writeTempMp3(base64Decode(resp.ttsBase64!));
+      if (_autoPlayTts) {
+        await _player.stop();
+        await _player.play(DeviceFileSource(mp3Path));
+      }
+      setState(() => _ttsPath = mp3Path);
+    }
+  }
+
   /// Called when the user taps the avatar while attention-seeking.
-  void _deliverPendingProactive() {
+  Future<void> _deliverPendingProactive() async {
     final event = _pendingProactiveEvent;
-    if (event == null) return;
+    if (event == null || _sending) return;
     setState(() {
       _pendingProactiveEvent = null;
       _isAttentionSeeking = false;
+      _sending = true;
+      _error = null;
+      _activeToolName = null;
+      _memoriesUsed = [];
+      _activePlan = null;
+      _planExpanded = true;
+      _choices = null;
     });
     HapticFeedback.lightImpact();
     _setBubble(true);
-    // Inject as a Kai-initiated opening line — agentic loop continues naturally
-    setState(() => _controller.text = '(proactive) ${event.message}');
-    _send();
+
+    final seed = '(proactive) ${event.message}';
+    try {
+      final resp = await aiService.sendMessage(
+        text: seed,
+        personaId: _personaId,
+        model: _modelId,
+        surfaceContext: KaiSurfaceContext.mobile,
+        adaptUser: _adaptToUser,
+        useMemory: false,
+        useWebSearch: false,
+        saveUserMessage: false,
+        saveAssistantReply: true,
+        source: 'proactive',
+        onToolCall: (toolName) {
+          if (mounted) setState(() => _activeToolName = toolName);
+        },
+        onPlanUpdate: (plan) {
+          if (mounted) setState(() => _activePlan = plan);
+        },
+      );
+      await _applyKaiResponse(resp, activityUserMessage: '[Kai proactive]');
+    } catch (e) {
+      setState(() {
+        _error = e.toString();
+        _devOpen = true;
+      });
+    } finally {
+      if (!_isSpeaking) _switchToAnimation('idle');
+      setState(() {
+        _sending = false;
+        _activeToolName = null;
+      });
+    }
   }
 
   Future<String> _writeTempMp3(Uint8List bytes) async {
@@ -2314,11 +2394,11 @@ class _MobileKaiState extends State<_MobileKai>
                   ),
                   _MobileButton(
                     icon: Icons.hub_outlined,
-                    label: 'Brain',
+                    label: 'Atlas',
                     onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) => Brain3DScreen(personaId: _personaId),
+                        builder: (_) => KaiCortexScreen(personaId: _personaId),
                       ),
                     ),
                     onLongPress: () => Navigator.push(
@@ -2344,7 +2424,7 @@ class _MobileKaiState extends State<_MobileKai>
                     onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) => const WorldsScreen(),
+                        builder: (_) => WorldsScreen(personaId: _personaId),
                       ),
                     ),
                   ),

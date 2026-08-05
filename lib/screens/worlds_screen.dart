@@ -6,7 +6,12 @@
 library;
 
 import 'package:flutter/material.dart';
+
+import '../services/core/kai_project_service.dart';
+import '../services/core/kai_work_request_service.dart';
 import '../services/core/project_registry_service.dart';
+import '../widgets/kai_project_card.dart';
+import '../widgets/kai_state_scorecard_card.dart';
 
 // Homecoming palette
 const _stroke = Color(0xFFFFE7B0); // warm gold
@@ -14,7 +19,12 @@ const _bg = Color(0xFF0B0B0F);
 const _card = Color(0x22FFFFFF);
 
 class WorldsScreen extends StatelessWidget {
-  const WorldsScreen({super.key});
+  final String personaId;
+
+  const WorldsScreen({
+    super.key,
+    required this.personaId,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -42,37 +52,51 @@ class WorldsScreen extends StatelessWidget {
       body: StreamBuilder<List<ProjectEntry>>(
         stream: registry.watch(),
         builder: (context, snap) {
-          if (snap.connectionState == ConnectionState.waiting) {
-            return const Center(
-                child: CircularProgressIndicator(color: _stroke));
-          }
-          if (snap.hasError) {
-            return _Message(
-              icon: Icons.lock_outline,
-              title: "Couldn't read the registry",
-              body:
-                  'This is usually a permissions issue — make sure you are signed in. '
-                  '(${snap.error})',
-            );
-          }
-          final worlds = snap.data ?? const [];
-          if (worlds.isEmpty) {
-            return const _Message(
-              icon: Icons.public_off,
-              title: 'No worlds yet',
-              body:
-                  'Tap "Add world" to register your first project. Kai will keep '
-                  'a top-down view of every world you add here.',
-            );
-          }
-          return ListView.separated(
+          final worlds = snap.data ?? const <ProjectEntry>[];
+          return ListView(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
-            itemCount: worlds.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 12),
-            itemBuilder: (_, i) => _WorldCard(
-              entry: worlds[i],
-              onTap: () => _openEditor(context, registry, worlds[i]),
-            ),
+            children: [
+              _KaiGrowthSection(personaId: personaId),
+              const SizedBox(height: 18),
+              const _SectionHeader(
+                eyebrow: 'WORLDS REGISTRY',
+                title: 'Projects Kai oversees',
+                body:
+                    'Homecoming, Tavern, Lionheart, and any other world with code or lore worth tracking.',
+              ),
+              const SizedBox(height: 10),
+              if (snap.connectionState == ConnectionState.waiting)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 24),
+                  child: Center(
+                    child: CircularProgressIndicator(color: _stroke),
+                  ),
+                )
+              else if (snap.hasError)
+                _Message(
+                  icon: Icons.lock_outline,
+                  title: "Couldn't read the registry",
+                  body:
+                      'This is usually a permissions issue — make sure you are signed in. '
+                      '(${snap.error})',
+                )
+              else if (worlds.isEmpty)
+                const _Message(
+                  icon: Icons.public_off,
+                  title: 'No worlds yet',
+                  body:
+                      'Tap "Add world" to register your first project. Kai will keep '
+                      'a top-down view of every world you add here.',
+                )
+              else
+                for (final world in worlds) ...[
+                  _WorldCard(
+                    entry: world,
+                    onTap: () => _openEditor(context, registry, world),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+            ],
           );
         },
       ),
@@ -92,6 +116,327 @@ class WorldsScreen extends StatelessWidget {
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (_) => _WorldEditor(registry: registry, existing: existing),
+    );
+  }
+}
+
+class _KaiGrowthSection extends StatelessWidget {
+  final String personaId;
+
+  const _KaiGrowthSection({required this.personaId});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const _SectionHeader(
+          eyebrow: 'KAI GROWTH',
+          title: 'Brain cockpit',
+          body:
+              'The live state of Kai getting smarter — project layers, replay scorecard, and desktop work queue.',
+        ),
+        const SizedBox(height: 10),
+        SizedBox(
+          height: 260,
+          child: KaiProjectCard(
+            personaId: personaId,
+            projectId: KaiProjectService.smarterId,
+          ),
+        ),
+        const SizedBox(height: 12),
+        SizedBox(
+          height: 260,
+          child: KaiProjectCard(
+            personaId: personaId,
+            projectId: KaiProjectService.sentienceId,
+          ),
+        ),
+        const SizedBox(height: 12),
+        const KaiStateScorecardCard(),
+        const SizedBox(height: 12),
+        _DesktopQueueCard(personaId: personaId),
+      ],
+    );
+  }
+}
+
+class _DesktopQueueCard extends StatelessWidget {
+  final String personaId;
+
+  const _DesktopQueueCard({required this.personaId});
+
+  @override
+  Widget build(BuildContext context) {
+    final service = KaiWorkRequestService.instance;
+    return StreamBuilder<List<KaiWorkRequest>>(
+      stream: service.watchRequests(personaId),
+      builder: (context, snap) {
+        final all = snap.data ?? const <KaiWorkRequest>[];
+        final open = all.where((r) => r.isOpen).take(3).toList();
+        final latest = open.isNotEmpty ? open : all.take(2).toList();
+        final openCount = all.where((r) => r.isOpen).length;
+
+        return Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.035),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: _stroke.withOpacity(0.22)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 34,
+                    height: 34,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Colors.black.withOpacity(0.45),
+                      border: Border.all(color: _stroke.withOpacity(0.45)),
+                    ),
+                    child: const Icon(Icons.computer_outlined,
+                        color: _stroke, size: 18),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Expanded(
+                              child: Text(
+                                'Desktop work queue',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ),
+                            _QueueCountChip(count: openCount),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Mobile can queue work here; desktop-Kai picks it up with real tools and streams receipts back.',
+                          style: TextStyle(
+                            color: Colors.white.withOpacity(0.58),
+                            fontSize: 11.5,
+                            height: 1.35,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              if (snap.connectionState == ConnectionState.waiting) ...[
+                const SizedBox(height: 12),
+                LinearProgressIndicator(
+                  minHeight: 2,
+                  color: _stroke.withOpacity(0.7),
+                  backgroundColor: Colors.white.withOpacity(0.08),
+                ),
+              ] else if (snap.hasError) ...[
+                const SizedBox(height: 12),
+                Text(
+                  'Could not read queue: ${snap.error}',
+                  style: const TextStyle(color: Color(0xFFFF8A80), fontSize: 11.5),
+                ),
+              ] else if (latest.isEmpty) ...[
+                const SizedBox(height: 12),
+                Text(
+                  'No queued desktop work. Honest empty state. Beautifully boring.',
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.52),
+                    fontSize: 11.5,
+                    height: 1.35,
+                  ),
+                ),
+              ] else ...[
+                const SizedBox(height: 12),
+                for (final request in latest) ...[
+                  _WorkRequestRow(request: request),
+                  if (request != latest.last) const SizedBox(height: 8),
+                ],
+              ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _QueueCountChip extends StatelessWidget {
+  final int count;
+
+  const _QueueCountChip({required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    final label = count == 0 ? 'idle' : '$count open';
+    final color = count == 0 ? Colors.white.withOpacity(0.46) : _stroke;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.35),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withOpacity(0.55)),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: color,
+          fontSize: 10.5,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
+  }
+}
+
+class _WorkRequestRow extends StatelessWidget {
+  final KaiWorkRequest request;
+
+  const _WorkRequestRow({required this.request});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = switch (request.status) {
+      KaiWorkRequestStatus.queued => _stroke,
+      KaiWorkRequestStatus.running => const Color(0xFF8FD7FF),
+      KaiWorkRequestStatus.done => const Color(0xFF8FE3A0),
+      KaiWorkRequestStatus.failed => const Color(0xFFFF8A80),
+      KaiWorkRequestStatus.cancelled => Colors.white.withOpacity(0.45),
+    };
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.24),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white.withOpacity(0.08)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(_iconFor(request.status), color: color, size: 16),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  request.text,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    height: 1.25,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  _subtitleFor(request),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.48),
+                    fontSize: 10.5,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            request.status.name,
+            style: TextStyle(
+              color: color,
+              fontSize: 10.5,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static IconData _iconFor(KaiWorkRequestStatus status) {
+    return switch (status) {
+      KaiWorkRequestStatus.queued => Icons.schedule,
+      KaiWorkRequestStatus.running => Icons.bolt,
+      KaiWorkRequestStatus.done => Icons.check_circle_outline,
+      KaiWorkRequestStatus.failed => Icons.error_outline,
+      KaiWorkRequestStatus.cancelled => Icons.cancel_outlined,
+    };
+  }
+
+  static String _subtitleFor(KaiWorkRequest request) {
+    if ((request.summary ?? '').isNotEmpty) return request.summary!;
+    if ((request.error ?? '').isNotEmpty) return request.error!;
+    if ((request.claimedBy ?? '').isNotEmpty) {
+      return 'claimed by ${request.claimedBy}';
+    }
+    return request.requiresDesktop
+        ? 'waiting for desktop body'
+        : 'available to any body';
+  }
+}
+
+
+class _SectionHeader extends StatelessWidget {
+  final String eyebrow;
+  final String title;
+  final String body;
+
+  const _SectionHeader({
+    required this.eyebrow,
+    required this.title,
+    required this.body,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          eyebrow,
+          style: TextStyle(
+            color: _stroke.withOpacity(0.72),
+            fontSize: 10,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 1.5,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          title,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 22,
+            fontWeight: FontWeight.w900,
+            letterSpacing: -0.5,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          body,
+          style: TextStyle(
+            color: Colors.white.withOpacity(0.58),
+            fontSize: 12,
+            height: 1.35,
+          ),
+        ),
+      ],
     );
   }
 }

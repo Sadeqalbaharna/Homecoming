@@ -43,6 +43,20 @@ Map<String, dynamic> read(String id, int len) =>
 
 Map<String, dynamic> user(String t) => {'role': 'user', 'content': t};
 Map<String, dynamic> asst(String t) => {'role': 'assistant', 'content': t};
+Map<String, dynamic> asstToolCall(String id, String name, int argLen) => {
+      'role': 'assistant',
+      'content': '',
+      'tool_calls': [
+        {
+          'id': id,
+          'type': 'function',
+          'function': {
+            'name': name,
+            'arguments': '{"payload":"${'x' * argLen}"}',
+          },
+        }
+      ],
+    };
 
 bool _isWhole(Map<String, dynamic> m, int len) =>
     (m['content'] as String).length == len;
@@ -51,12 +65,16 @@ bool _isClipped(Map<String, dynamic> m) =>
 
 void main() {
   group('the working set survives — the bug', () {
-    test('a single big result is NOT clipped', () {
-      // THE regression. One read_file, one iteration later, still readable.
+    test('a single big result is NOT old-clipped, but huge blobs are capped', () {
+      // THE regression. One read_file, one iteration later, still readable —
+      // but no longer immortal at arbitrary size.
       final msgs = [user('read the shell'), tool('a', 5000)];
       AIService.trimOldToolResultsForTesting(msgs);
-      expect(_isWhole(msgs[1], 5000), isTrue,
-          reason: 'his only tool result is his entire working set');
+      expect(_isClipped(msgs[1]), isFalse,
+          reason: 'his only tool result is his active working set, not stale');
+      expect((msgs[1]['content'] as String).length, lessThan(5000),
+          reason: 'active does not mean unlimited');
+      expect(msgs[1]['content'], contains('truncated'));
     });
 
     test('two and three results stay whole', () {
@@ -141,7 +159,9 @@ void main() {
       final theRead = msgs.firstWhere((m) => m['tool_call_id'] == 'the-read');
       expect(_isClipped(theRead), isFalse,
           reason: 'he still has to quote these exact bytes into edit_file');
-      expect(_isWhole(theRead, 9000), isTrue);
+      expect((theRead['content'] as String).length, lessThan(9000));
+      expect(theRead['content'], contains('truncated'),
+          reason: 'recent read_file survives as material, but not as an unlimited blob');
     });
 
     test('but chatter behind it still gets clipped', () {
@@ -166,11 +186,35 @@ void main() {
       }
       AIService.trimOldToolResultsForTesting(msgs);
       final reads = msgs.where((m) => m['role'] == 'tool').toList();
-      // 9 reads, keepMaterial = 6 → the first three are genuinely history.
+      // 9 reads, keepMaterial = 2 → the first seven are genuinely history.
       expect(_isClipped(reads[0]), isTrue);
-      expect(_isClipped(reads[2]), isTrue);
-      expect(_isClipped(reads[3]), isFalse);
+      expect(_isClipped(reads[6]), isTrue);
+      expect(_isClipped(reads[7]), isFalse);
       expect(_isClipped(reads[8]), isFalse);
+    });
+
+    test('material window and hard cap are intentionally cheaper now', () {
+      final msgs = <Map<String, dynamic>>[user('work on the widget')];
+      for (var i = 0; i < 6; i++) {
+        msgs..add(asst('...')) ..add(read('r$i', 12000));
+      }
+
+      final stats = AIService.trimOldToolResultsForTesting(msgs);
+      final reads = msgs.where((m) => m['role'] == 'tool').toList();
+
+      // Old default: keep 6 reads, hard-cap each to 14k, so all six 12k reads
+      // survived whole: ~72k chars carried into every later GPT iteration.
+      // Middle default: keep 4 reads, hard-cap at 9k: roughly 37k chars carried.
+      // Current default: keep 2 reads, hard-cap at 4k: roughly 10k chars carried.
+      // That's the knife Sadeq asked for: a smaller working pile every loop,
+      // with the option to re-read a precise range when exact bytes matter.
+      expect(_isClipped(reads[0]), isTrue);
+      expect(_isClipped(reads[1]), isTrue);
+      expect(_isClipped(reads[2]), isTrue);
+      expect(_isClipped(reads[3]), isTrue);
+      expect((reads[4]['content'] as String).length, lessThanOrEqualTo(4200));
+      expect((reads[5]['content'] as String).length, lessThanOrEqualTo(4200));
+      expect(stats.approxTokensSaved, greaterThanOrEqualTo(14000));
     });
 
     test('an untagged result is treated as disposable, not material', () {
@@ -191,6 +235,28 @@ void main() {
       final tools = msgs.where((m) => m['role'] == 'tool').toList();
       expect(_isClipped(tools[0]), isTrue);
       expect(_isClipped(tools[1]), isTrue);
+    });
+  });
+
+  group('assistant tool-call arguments are not immortal receipts', () {
+    test('old argument blobs are compacted while the latest calls stay intact', () {
+      final msgs = <Map<String, dynamic>>[user('go')];
+      for (var i = 0; i < 5; i++) {
+        msgs
+          ..add(asstToolCall('c$i', 'edit_file', 3000))
+          ..add(tool('r$i', 40, name: 'edit_file'));
+      }
+
+      final saved = AIService.trimOldAssistantToolCallsForTesting(msgs);
+      String argsAt(int i) => (((msgs[i]['tool_calls'] as List).first
+          as Map)['function'] as Map)['arguments'] as String;
+
+      expect(argsAt(1), contains('"_trimmed":true'));
+      expect(argsAt(3), contains('"_trimmed":true'));
+      expect(argsAt(5), contains('"_trimmed":true'));
+      expect(argsAt(7).length, greaterThan(2500));
+      expect(argsAt(9).length, greaterThan(2500));
+      expect(saved, greaterThan(2000));
     });
   });
 }

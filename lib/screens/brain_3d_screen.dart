@@ -47,8 +47,8 @@ class _Brain3DScreenState extends State<Brain3DScreen> {
   // Label overlay toggle
   bool _showLabels = false;
 
-  // Desktop native mind-map selection.
-  String? _selectedNativeNodeId;
+  // Desktop memory atlas selection.
+  String? _selectedAtlasNodeId;
 
   @override
   void initState() {
@@ -204,6 +204,13 @@ class _Brain3DScreenState extends State<Brain3DScreen> {
         'label':      m['label'] ?? '',
         'type':       m['type'] ?? 'concept',
         'importance': (m['importance'] as num?)?.toDouble() ?? 0.5,
+        // Living Memory Atlas position data — lets the native Atlas restore
+        // hand-placed chambers instead of regenerating the constellation.
+        'atlasPosition': m['atlasPosition'],
+        'atlasX': m['atlasX'],
+        'atlasY': m['atlasY'],
+        'x': m['x'],
+        'y': m['y'],
         // Age data — used for vitality-based brightness in the 3D renderer
         'lastSeen':   meta?['lastSeen'],  // ms epoch of last access
         'timestamp':  m['timestamp'],      // ms epoch of creation
@@ -223,6 +230,38 @@ class _Brain3DScreenState extends State<Brain3DScreen> {
     }
 
     return {'nodes': nodes, 'links': links};
+  }
+
+  Future<void> _saveAtlasNodePosition(String nodeId, Offset position) async {
+    final graphData = _graphData;
+    final rawNodes = graphData?['nodes'];
+    if (rawNodes is List) {
+      for (final rawNode in rawNodes) {
+        if (rawNode is Map && rawNode['id'] == nodeId) {
+          rawNode['atlasPosition'] = {'x': position.dx, 'y': position.dy};
+          rawNode['atlasX'] = position.dx;
+          rawNode['atlasY'] = position.dy;
+          break;
+        }
+      }
+    }
+
+    if (!FirebaseService.isAvailable) return;
+
+    final nodes = _asList(_graphData?['nodes']);
+    final nodeIndex = nodes.indexWhere((node) {
+      if (node is! Map) return false;
+      return node['id'] == nodeId;
+    });
+    if (nodeIndex < 0) return;
+
+    await KaiDb.instance
+        .ref('knowledge_graph/${widget.personaId}/nodes/$nodeIndex')
+        .update({
+      'atlasPosition': {'x': position.dx, 'y': position.dy},
+      'atlasX': position.dx,
+      'atlasY': position.dy,
+    });
   }
 
   String _buildHtml(Map<String, dynamic> graphData) {
@@ -498,7 +537,7 @@ window.toggleLabels = function() {
   }
 
   Widget _buildNativeInspector() {
-    final map = _NativeMindMapData.fromGraph(_graphData);
+    final map = _MemoryAtlasData.fromGraph(_graphData);
 
     return SafeArea(
       child: Padding(
@@ -530,7 +569,7 @@ window.toggleLabels = function() {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'INTERACTIVE RTDB MIND MAP',
+                              'INTERACTIVE MEMORY ATLAS',
                               style: TextStyle(
                                 color: const Color(0xFFFFE7B0).withOpacity(0.82),
                                 fontSize: 12,
@@ -556,7 +595,7 @@ window.toggleLabels = function() {
                       TextButton.icon(
                         onPressed: map.nodes.isEmpty
                             ? null
-                            : () => setState(() => _selectedNativeNodeId = null),
+                            : () => setState(() => _selectedAtlasNodeId = null),
                         icon: const Icon(Icons.center_focus_strong_rounded, size: 16),
                         label: const Text('RESET'),
                         style: TextButton.styleFrom(
@@ -583,12 +622,13 @@ window.toggleLabels = function() {
                             ),
                           ),
                         )
-                      : _NativeMindMapView(
+                      : _MemoryAtlasView(
                           data: map,
                           showLabels: _showLabels,
-                          selectedNodeId: _selectedNativeNodeId,
+                          selectedNodeId: _selectedAtlasNodeId,
                           onNodeSelected: (id) =>
-                              setState(() => _selectedNativeNodeId = id),
+                              setState(() => _selectedAtlasNodeId = id),
+                          onNodePositioned: _saveAtlasNodePosition,
                         ),
                 ),
               ],
@@ -781,29 +821,37 @@ window.toggleLabels = function() {
   }
 }
 
-class _NativeMindMapNode {
+class _AtlasNode {
   final String id;
   final String label;
   final String type;
   final double importance;
   final Offset position;
 
-  const _NativeMindMapNode({
+  const _AtlasNode({
     required this.id,
     required this.label,
     required this.type,
     required this.importance,
     required this.position,
   });
+
+  _AtlasNode copyWith({Offset? position}) => _AtlasNode(
+        id: id,
+        label: label,
+        type: type,
+        importance: importance,
+        position: position ?? this.position,
+      );
 }
 
-class _NativeMindMapLink {
+class _AtlasLink {
   final String source;
   final String target;
   final String relation;
   final double strength;
 
-  const _NativeMindMapLink({
+  const _AtlasLink({
     required this.source,
     required this.target,
     required this.relation,
@@ -811,18 +859,25 @@ class _NativeMindMapLink {
   });
 }
 
-class _NativeMindMapData {
-  final List<_NativeMindMapNode> nodes;
-  final List<_NativeMindMapLink> links;
+class _MemoryAtlasData {
+  final List<_AtlasNode> nodes;
+  final List<_AtlasLink> links;
   final Rect bounds;
 
-  const _NativeMindMapData({
+  const _MemoryAtlasData({
     required this.nodes,
     required this.links,
     required this.bounds,
   });
 
-  factory _NativeMindMapData.fromGraph(Map<String, dynamic>? graph) {
+  _AtlasNode? nodeById(String id) {
+    for (final node in nodes) {
+      if (node.id == id) return node;
+    }
+    return null;
+  }
+
+  factory _MemoryAtlasData.fromGraph(Map<String, dynamic>? graph) {
     final rawNodes = (graph?['nodes'] as List?)
             ?.whereType<Map>()
             .map((n) => Map<String, dynamic>.from(n))
@@ -841,9 +896,9 @@ class _NativeMindMapData {
     });
 
     if (rawNodes.isEmpty) {
-      return const _NativeMindMapData(
-        nodes: <_NativeMindMapNode>[],
-        links: <_NativeMindMapLink>[],
+      return const _MemoryAtlasData(
+        nodes: <_AtlasNode>[],
+        links: <_AtlasLink>[],
         bounds: Rect.fromLTWH(-450, -320, 900, 640),
       );
     }
@@ -859,12 +914,12 @@ class _NativeMindMapData {
     final typeKeys = byType.keys.toList()
       ..sort((a, b) => byType[b]!.length.compareTo(byType[a]!.length));
 
-    final nodes = <_NativeMindMapNode>[];
-    final links = <_NativeMindMapLink>[];
+    final nodes = <_AtlasNode>[];
+    final links = <_AtlasLink>[];
     final seenLinks = <String>{};
 
     const rootId = '__kai_memory_root__';
-    nodes.add(const _NativeMindMapNode(
+    nodes.add(const _AtlasNode(
       id: rootId,
       label: 'Kai memory',
       type: 'root',
@@ -886,14 +941,14 @@ class _NativeMindMapData {
       hubByType[type] = hubId;
       idSet.add(hubId);
 
-      nodes.add(_NativeMindMapNode(
+      nodes.add(_AtlasNode(
         id: hubId,
         label: type.toUpperCase(),
         type: 'hub:$type',
         importance: 0.86,
         position: hubPos,
       ));
-      links.add(const _NativeMindMapLink(
+      links.add(const _AtlasLink(
         source: rootId,
         target: '',
         relation: 'branch',
@@ -914,18 +969,19 @@ class _NativeMindMapData {
         final distance = 130.0 + row * 92.0 + importance * 42.0;
         final sideJitter = (((id.hashCode & 0xFFFF) / 0xFFFF) - 0.5) * 26.0;
         final tangent = Offset(-math.sin(angle), math.cos(angle));
-        final pos = hubPos +
+        final fallbackPos = hubPos +
             Offset(math.cos(leafAngle), math.sin(leafAngle)) * distance +
             tangent * sideJitter;
+        final pos = _readPersistedAtlasPosition(raw) ?? fallbackPos;
 
-        nodes.add(_NativeMindMapNode(
+        nodes.add(_AtlasNode(
           id: id,
           label: label,
           type: type,
           importance: importance,
           position: pos,
         ));
-        links.add(_NativeMindMapLink(
+        links.add(_AtlasLink(
           source: hubId,
           target: id,
           relation: 'contains',
@@ -945,7 +1001,7 @@ class _NativeMindMapData {
       if (!realNodeIds.contains(source) || !realNodeIds.contains(target) || source == target) continue;
       final key = source.compareTo(target) <= 0 ? '$source->$target' : '$target->$source';
       if (!seenLinks.add(key)) continue;
-      links.add(_NativeMindMapLink(
+      links.add(_AtlasLink(
         source: source,
         target: target,
         relation: '${raw['relation'] ?? raw['label'] ?? ''}',
@@ -964,22 +1020,36 @@ class _NativeMindMapData {
       bottom = math.max(bottom, node.position.dy);
     }
 
-    return _NativeMindMapData(
+    return _MemoryAtlasData(
       nodes: nodes,
       links: links,
-      bounds: Rect.fromLTRB(left - 260, top - 220, right + 260, bottom + 220),
+      bounds: Rect.fromLTRB(left - 120, top - 120, right + 120, bottom + 120),
     );
   }
 }
 
-extension _NativeMindMapLinkCopy on _NativeMindMapLink {
-  _NativeMindMapLink copyWith({
+Offset? _readPersistedAtlasPosition(Map<String, dynamic> raw) {
+  final atlasPosition = raw['atlasPosition'];
+  if (atlasPosition is Map) {
+    final x = (atlasPosition['x'] as num?)?.toDouble();
+    final y = (atlasPosition['y'] as num?)?.toDouble();
+    if (x != null && y != null) return Offset(x, y);
+  }
+
+  final x = (raw['atlasX'] ?? raw['x']) as num?;
+  final y = (raw['atlasY'] ?? raw['y']) as num?;
+  if (x != null && y != null) return Offset(x.toDouble(), y.toDouble());
+  return null;
+}
+
+extension _AtlasLinkCopy on _AtlasLink {
+  _AtlasLink copyWith({
     String? source,
     String? target,
     String? relation,
     double? strength,
   }) =>
-      _NativeMindMapLink(
+      _AtlasLink(
         source: source ?? this.source,
         target: target ?? this.target,
         relation: relation ?? this.relation,
@@ -987,34 +1057,81 @@ extension _NativeMindMapLinkCopy on _NativeMindMapLink {
       );
 }
 
-class _NativeMindMapView extends StatefulWidget {
-  final _NativeMindMapData data;
+class _MemoryAtlasView extends StatefulWidget {
+  final _MemoryAtlasData data;
   final bool showLabels;
   final String? selectedNodeId;
   final ValueChanged<String?> onNodeSelected;
+  final Future<void> Function(String nodeId, Offset position) onNodePositioned;
 
-  const _NativeMindMapView({
+  const _MemoryAtlasView({
     required this.data,
     required this.showLabels,
     required this.selectedNodeId,
     required this.onNodeSelected,
+    required this.onNodePositioned,
   });
 
   @override
-  State<_NativeMindMapView> createState() => _NativeMindMapViewState();
+  State<_MemoryAtlasView> createState() => _MemoryAtlasViewState();
 }
 
-class _NativeMindMapViewState extends State<_NativeMindMapView> {
+class _MemoryAtlasViewState extends State<_MemoryAtlasView> {
+  static const double _memoryChamberFocusScale = 2.15;
+
   late final TransformationController _controller;
+  final Map<String, Offset> _draggedNodePositions = <String, Offset>{};
+  _AtlasNode? _draggingNode;
+  Offset? _dragOffset;
+  Offset? _dragStartPosition;
+  bool _nodeDragConsumedTap = false;
+  double _atlasZoom = 1.0;
+  String? _atlasPositionStatus;
+
+  String get _semanticZoomBand {
+    if (_atlasZoom < 0.72) return 'constellation';
+    if (_atlasZoom > 1.85) return 'memory chamber';
+    return 'neighbourhood';
+  }
+
+  _MemoryAtlasData get _paintedData {
+    if (_draggedNodePositions.isEmpty) return widget.data;
+    return _MemoryAtlasData(
+      nodes: widget.data.nodes
+          .map(
+            (node) => node.copyWith(
+              position: _draggedNodePositions[node.id] ?? node.position,
+            ),
+          )
+          .toList(growable: false),
+      links: widget.data.links,
+    );
+  }
 
   @override
   void initState() {
     super.initState();
     _controller = TransformationController();
+    _controller.addListener(_syncAtlasZoom);
+  }
+
+  void _syncAtlasZoom() {
+    final zoom = _controller.value.getMaxScaleOnAxis();
+    if ((zoom - _atlasZoom).abs() < 0.04) return;
+    setState(() => _atlasZoom = zoom);
+  }
+
+  @override
+  void didUpdateWidget(covariant _MemoryAtlasView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.data != widget.data) {
+      _resetAtlasView();
+    }
   }
 
   @override
   void dispose() {
+    _controller.removeListener(_syncAtlasZoom);
     _controller.dispose();
     super.dispose();
   }
@@ -1026,58 +1143,179 @@ class _NativeMindMapViewState extends State<_NativeMindMapView> {
       math.max(650, widget.data.bounds.height),
     );
     final origin = Offset(size.width / 2, size.height / 2);
+    final selectedNode = widget.selectedNodeId == null
+        ? null
+        : widget.data.nodeById(widget.selectedNodeId!);
 
-    return Stack(
-      children: [
-        Positioned.fill(
-          child: InteractiveViewer(
-            transformationController: _controller,
-            minScale: 0.18,
-            maxScale: 3.8,
-            boundaryMargin: const EdgeInsets.all(900),
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTapUp: (details) {
-                final local = details.localPosition - origin;
-                final hit = _hitNode(local);
-                widget.onNodeSelected(hit?.id);
-              },
-              child: CustomPaint(
-                size: size,
-                painter: _MindMapPainter(
-                  data: widget.data,
-                  origin: origin,
-                  showLabels: widget.showLabels,
-                  selectedNodeId: widget.selectedNodeId,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return Stack(
+          children: [
+            Positioned.fill(
+              child: InteractiveViewer(
+                transformationController: _controller,
+                minScale: 0.18,
+                maxScale: 3.8,
+                boundaryMargin: const EdgeInsets.all(900),
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTapUp: (details) {
+                    if (_nodeDragConsumedTap) {
+                      _nodeDragConsumedTap = false;
+                      return;
+                    }
+                    if (_draggingNode != null) return;
+                    final local = details.localPosition - origin;
+                    final hit = _hitNode(local);
+                    widget.onNodeSelected(hit?.id);
+                    _travelToMemoryChamber(
+                      hit,
+                      viewport: constraints.biggest,
+                      origin: origin,
+                    );
+                  },
+                  onPanStart: (details) {
+                    final local = details.localPosition - origin;
+                    final hit = _hitNode(local);
+                    if (hit == null) return;
+                    setState(() {
+                      _draggingNode = hit;
+                      _dragOffset = hit.position - local;
+                      _dragStartPosition = hit.position;
+                      widget.onNodeSelected(hit.id);
+                    });
+                  },
+                  onPanUpdate: (details) {
+                    final node = _draggingNode;
+                    final dragOffset = _dragOffset;
+                    if (node == null || dragOffset == null) return;
+                    final local = details.localPosition - origin;
+                    final nextPosition = local + dragOffset;
+                    setState(() {
+                      _draggedNodePositions[node.id] = nextPosition;
+                    });
+                  },
+                  onPanEnd: (_) => _finishNodeDrag(),
+                  onPanCancel: _finishNodeDrag,
+                  child: CustomPaint(
+                    size: size,
+                    painter: _MemoryAtlasPainter(
+                      data: _paintedData,
+                      origin: origin,
+                      showLabels: widget.showLabels,
+                      selectedNodeId: widget.selectedNodeId,
+                      semanticZoomBand: _semanticZoomBand,
+                    ),
+                  ),
                 ),
               ),
             ),
-          ),
-        ),
-        if (widget.selectedNodeId != null && widget.data.nodes.isNotEmpty)
-          Positioned(
-            left: 14,
-            right: 14,
-            bottom: 14,
-            child: _NodeDetailCard(
-              node: widget.data.nodes.firstWhere(
-                (n) => n.id == widget.selectedNodeId,
-                orElse: () => widget.data.nodes.first,
+            Positioned(
+              top: 12,
+              left: 12,
+              child: _MemoryAtlasHud(
+                selectedNode: selectedNode,
+                nodeCount: widget.data.nodes.length,
+                linkCount: widget.data.links.length,
+                semanticZoomBand: _semanticZoomBand,
+                positionStatus: _atlasPositionStatus,
+                onReset: _resetAtlasView,
+                onFlyToSelected: selectedNode == null
+                    ? null
+                    : () => _focusMemoryChamber(
+                          selectedNode,
+                          viewport: constraints.biggest,
+                          origin: origin,
+                        ),
               ),
-              links: widget.data.links
-                  .where((l) => l.source == widget.selectedNodeId || l.target == widget.selectedNodeId)
-                  .toList(),
-              onClose: () => widget.onNodeSelected(null),
             ),
-          ),
-      ],
+            if (selectedNode != null && widget.data.nodes.isNotEmpty)
+              Positioned(
+                left: 14,
+                right: 14,
+                bottom: 14,
+                child: _NodeDetailCard(
+                  node: selectedNode,
+                  links: widget.data.links
+                      .where((l) => l.source == widget.selectedNodeId || l.target == widget.selectedNodeId)
+                      .toList(),
+                  onClose: () => widget.onNodeSelected(null),
+                ),
+              ),
+          ],
+        );
+      },
     );
   }
 
-  _NativeMindMapNode? _hitNode(Offset local) {
-    _NativeMindMapNode? best;
+  void _travelToMemoryChamber(
+    _AtlasNode? node, {
+    required Size viewport,
+    required Offset origin,
+  }) {
+    if (node == null) return;
+
+    _focusMemoryChamber(node, viewport: viewport, origin: origin);
+  }
+
+  void _focusMemoryChamber(
+    _AtlasNode node, {
+    required Size viewport,
+    required Offset origin,
+  }) {
+    final scale = _memoryChamberFocusScale;
+    final graphPoint = origin + node.position;
+    final center = Offset(viewport.width / 2, viewport.height / 2);
+    final matrix = Matrix4.identity()
+      ..translate(center.dx - graphPoint.dx * scale, center.dy - graphPoint.dy * scale)
+      ..scale(scale);
+    _controller.value = matrix;
+    if ((_atlasZoom - scale).abs() >= 0.04) {
+      setState(() => _atlasZoom = scale);
+    }
+  }
+
+  void _resetAtlasView() {
+    _controller.value = Matrix4.identity();
+    if ((_atlasZoom - 1.0).abs() >= 0.04) {
+      setState(() => _atlasZoom = 1.0);
+    }
+  }
+
+  Future<void> _finishNodeDrag() async {
+    final node = _draggingNode;
+    final position = node == null ? null : _draggedNodePositions[node.id];
+    final startPosition = _dragStartPosition;
+    final moved = position != null &&
+        startPosition != null &&
+        (position - startPosition).distance > 1;
+    setState(() {
+      _draggingNode = null;
+      _dragOffset = null;
+      _dragStartPosition = null;
+      _nodeDragConsumedTap = moved;
+      if (moved) {
+        _atlasPositionStatus = 'saving…';
+      }
+    });
+    if (node == null || position == null || !moved) {
+      return;
+    }
+
+    try {
+      await widget.onNodePositioned(node.id, position);
+      if (!mounted) return;
+      setState(() => _atlasPositionStatus = 'saved');
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _atlasPositionStatus = 'save failed');
+    }
+  }
+
+  _AtlasNode? _hitNode(Offset local) {
+    _AtlasNode? best;
     var bestDistance = double.infinity;
-    for (final node in widget.data.nodes) {
+    for (final node in _paintedData.nodes) {
       final radius = 8 + node.importance * 17;
       final distance = (node.position - local).distance;
       if (distance <= radius + 12 && distance < bestDistance) {
@@ -1089,9 +1327,142 @@ class _NativeMindMapViewState extends State<_NativeMindMapView> {
   }
 }
 
+class _MemoryAtlasHud extends StatelessWidget {
+  final _AtlasNode? selectedNode;
+  final int nodeCount;
+  final int linkCount;
+  final String semanticZoomBand;
+  final String? positionStatus;
+  final VoidCallback onReset;
+  final VoidCallback? onFlyToSelected;
+
+  const _MemoryAtlasHud({
+    required this.selectedNode,
+    required this.nodeCount,
+    required this.linkCount,
+    required this.semanticZoomBand,
+    required this.positionStatus,
+    required this.onReset,
+    required this.onFlyToSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 330),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xCC02030B),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0x334CEBFF)),
+        boxShadow: const [
+          BoxShadow(color: Color(0x55000000), blurRadius: 22, offset: Offset(0, 8)),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: const [
+              Icon(Icons.rocket_launch_rounded, color: Color(0xFF4CEBFF), size: 16),
+              SizedBox(width: 7),
+              Text(
+                'LIVING MEMORY ATLAS',
+                style: TextStyle(
+                  color: Color(0xFFBDF7FF),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 1.4,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            selectedNode == null
+                ? 'Pan, zoom, tap a memory to enter its chamber.'
+                : 'Chamber: ${selectedNode!.label}',
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: Color(0xCCFFE7B0), fontSize: 12, height: 1.3),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 7,
+            runSpacing: 7,
+            children: [
+              _hudChip('nodes', '$nodeCount'),
+              _hudChip('links', '$linkCount'),
+              _hudChip('semantic zoom', semanticZoomBand),
+              if (positionStatus != null) _hudChip('atlas position', positionStatus!),
+              _hudChip('quest path', 'AR cockpit'),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _hudButton(
+                icon: Icons.center_focus_strong_rounded,
+                label: 'RESET ATLAS',
+                onPressed: onReset,
+              ),
+              const SizedBox(width: 8),
+              _hudButton(
+                icon: Icons.travel_explore_rounded,
+                label: 'ENTER CHAMBER',
+                onPressed: onFlyToSelected,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  static Widget _hudChip(String label, String value) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: const Color(0x124CEBFF),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: const Color(0x224CEBFF)),
+        ),
+        child: Text(
+          '$label: $value',
+          style: const TextStyle(color: Color(0xAAE9FCFF), fontSize: 10.5),
+        ),
+      );
+
+  static Widget _hudButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback? onPressed,
+  }) {
+    return TextButton.icon(
+      onPressed: onPressed,
+      icon: Icon(icon, size: 14),
+      label: Text(label),
+      style: TextButton.styleFrom(
+        foregroundColor: const Color(0xFF4CEBFF),
+        disabledForegroundColor: const Color(0x334CEBFF),
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
+        minimumSize: Size.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        textStyle: const TextStyle(
+          fontSize: 10.5,
+          fontWeight: FontWeight.w900,
+          letterSpacing: 0.8,
+        ),
+      ),
+    );
+  }
+}
+
 class _NodeDetailCard extends StatelessWidget {
-  final _NativeMindMapNode node;
-  final List<_NativeMindMapLink> links;
+  final _AtlasNode node;
+  final List<_AtlasLink> links;
   final VoidCallback onClose;
 
   const _NodeDetailCard({
@@ -1141,6 +1512,7 @@ class _NodeDetailCard extends StatelessWidget {
             spacing: 8,
             runSpacing: 8,
             children: [
+              _miniChip('memory chamber'),
               _miniChip(node.type),
               _miniChip('importance ${(node.importance * 100).round()}%'),
               _miniChip('${links.length} links'),
@@ -1177,18 +1549,23 @@ class _NodeDetailCard extends StatelessWidget {
       );
 }
 
-class _MindMapPainter extends CustomPainter {
-  final _NativeMindMapData data;
+class _MemoryAtlasPainter extends CustomPainter {
+  final _MemoryAtlasData data;
   final Offset origin;
   final bool showLabels;
   final String? selectedNodeId;
+  final String semanticZoomBand;
 
-  const _MindMapPainter({
+  const _MemoryAtlasPainter({
     required this.data,
     required this.origin,
     required this.showLabels,
     required this.selectedNodeId,
+    required this.semanticZoomBand,
   });
+
+  bool get _constellationMode => semanticZoomBand == 'constellation';
+  bool get _memoryChamberMode => semanticZoomBand == 'memory chamber';
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1196,6 +1573,8 @@ class _MindMapPainter extends CustomPainter {
     _paintGrid(canvas, size);
 
     final byId = {for (final node in data.nodes) node.id: node};
+    final focusedNodeIds = _focusedNodeIdsFor(selectedNodeId);
+    final focusActive = selectedNodeId != null;
 
     for (final link in data.links) {
       final a = byId[link.source];
@@ -1213,11 +1592,18 @@ class _MindMapPainter extends CustomPainter {
         ..quadraticBezierTo(control.dx, control.dy, pb.dx, pb.dy);
 
       final scaffold = a.id.startsWith('__') || b.id.startsWith('__');
+      final chamberNeighbour = focusedNodeIds.contains(a.id) && focusedNodeIds.contains(b.id);
       final alpha = selected
-          ? 0.78
-          : scaffold
-              ? 0.50
-              : (0.055 + link.strength * 0.16);
+          ? 0.90
+          : _memoryChamberMode && focusActive
+              ? (chamberNeighbour ? 0.42 : 0.018)
+              : focusActive
+                  ? 0.025
+                  : _constellationMode && !scaffold
+                      ? 0.018
+                      : scaffold
+                          ? (_constellationMode ? 0.62 : 0.50)
+                          : (0.055 + link.strength * 0.16);
       final linkColor = scaffold
           ? Color.lerp(_colorForType(a.type), _colorForType(b.type), 0.55)!
           : const Color(0xFFFFC76A);
@@ -1226,19 +1612,45 @@ class _MindMapPainter extends CustomPainter {
         Paint()
           ..color = linkColor.withOpacity(alpha)
           ..strokeWidth = selected
-              ? 2.8
-              : scaffold
-                  ? 1.6 + link.strength * 1.3
-                  : 0.45 + link.strength * 1.0
+              ? 3.1
+              : focusActive
+                  ? 0.32
+                  : scaffold
+                      ? 1.6 + link.strength * 1.3
+                      : 0.45 + link.strength * 1.0
           ..style = PaintingStyle.stroke
-          ..maskFilter = scaffold || selected
-              ? const MaskFilter.blur(BlurStyle.normal, 2.2)
-              : null,
+          ..maskFilter = selected
+              ? const MaskFilter.blur(BlurStyle.normal, 2.8)
+              : scaffold && !focusActive
+                  ? const MaskFilter.blur(BlurStyle.normal, 2.2)
+                  : null,
       );
     }
 
-    for (final node in data.nodes) {
-      _paintNode(canvas, origin + node.position, node);
+    if (selectedNodeId != null) {
+      final selected = byId[selectedNodeId];
+      if (selected != null) {
+        _paintFocusReticle(canvas, origin + selected.position, selected);
+      }
+    }
+
+    for (final node in data.nodes.where((n) => !focusedNodeIds.contains(n.id))) {
+      _paintNode(
+        canvas,
+        origin + node.position,
+        node,
+        focusActive: focusActive,
+        focused: false,
+      );
+    }
+    for (final node in data.nodes.where((n) => focusedNodeIds.contains(n.id))) {
+      _paintNode(
+        canvas,
+        origin + node.position,
+        node,
+        focusActive: focusActive,
+        focused: true,
+      );
     }
   }
 
@@ -1255,7 +1667,13 @@ class _MindMapPainter extends CustomPainter {
     }
   }
 
-  void _paintNode(Canvas canvas, Offset center, _NativeMindMapNode node) {
+  void _paintNode(
+    Canvas canvas,
+    Offset center,
+    _AtlasNode node, {
+    required bool focusActive,
+    required bool focused,
+  }) {
     final selected = selectedNodeId == node.id;
     final synthetic = node.id.startsWith('__');
     final root = node.type == 'root';
@@ -1266,38 +1684,74 @@ class _MindMapPainter extends CustomPainter {
         : hub
             ? 18.0
             : 7 + node.importance * 15;
+    final constellationAmbient = _constellationMode && !root && !hub && !selected;
+    final chamberDistant = _memoryChamberMode && focusActive && !focused && !selected;
+    final nodeOpacity = chamberDistant
+        ? 0.08
+        : focusActive && !focused
+            ? 0.18
+            : constellationAmbient
+                ? 0.46
+                : 1.0;
+    final glowOpacity = selected
+        ? 0.34
+        : focused
+            ? 0.20
+            : chamberDistant
+                ? 0.018
+                : focusActive
+                    ? 0.035
+                    : constellationAmbient
+                        ? 0.055
+                        : 0.12;
 
     canvas.drawCircle(
       center,
-      radius * (selected ? 2.2 : 1.8),
+      radius * (selected ? 2.35 : focused ? 2.0 : 1.8),
       Paint()
-        ..color = color.withOpacity(selected ? 0.28 : 0.12)
+        ..color = color.withOpacity(glowOpacity)
         ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 16),
     );
-    canvas.drawCircle(center, radius, Paint()..color = color.withOpacity(synthetic ? 0.78 : 0.90));
+    canvas.drawCircle(
+      center,
+      radius,
+      Paint()..color = color.withOpacity((synthetic ? 0.78 : 0.90) * nodeOpacity),
+    );
     canvas.drawCircle(
       center,
       radius,
       Paint()
-        ..color = const Color(0xEE000011)
+        ..color = const Color(0xEE000011).withOpacity(focusActive && !focused ? 0.36 : 0.93)
         ..style = PaintingStyle.stroke
-        ..strokeWidth = selected ? 2.4 : 1.0,
+        ..strokeWidth = selected ? 2.4 : focused ? 1.45 : 1.0,
     );
 
-    if (root || hub || showLabels || selected || node.importance > 0.72) {
+    final ambientImportanceCutoff = _constellationMode ? 0.86 : 0.72;
+    final showAmbientLabel = !focusActive &&
+        (root || hub || showLabels || node.importance > ambientImportanceCutoff);
+    final showFocusLabel = focusActive &&
+        focused &&
+        (!_memoryChamberMode || selected || hub || root || node.importance > 0.34);
+    if (selected || showFocusLabel || showAmbientLabel) {
       final painter = TextPainter(
         text: TextSpan(
           text: node.label,
           style: TextStyle(
-            color: selected ? const Color(0xFFFFE7B0) : const Color(0xCCFFE7B0),
+            color: selected
+                ? const Color(0xFFFFE7B0)
+                : focused
+                    ? const Color(0xDDE9FCFF)
+                    : const Color(0xCCFFE7B0),
             fontSize: root
                 ? 15
                 : hub
                     ? 12
                     : selected
                         ? 13
-                        : 10.5,
-            fontWeight: (selected || synthetic) ? FontWeight.w800 : FontWeight.w600,
+                        : focused
+                            ? 11.5
+                            : 10.5,
+            fontWeight: (selected || synthetic || focused) ? FontWeight.w800 : FontWeight.w600,
           ),
         ),
         maxLines: 2,
@@ -1315,6 +1769,51 @@ class _MindMapPainter extends CustomPainter {
         Paint()..color = const Color(0xAA050511),
       );
       painter.paint(canvas, rect.topLeft + const Offset(5, 3));
+    }
+  }
+
+  Set<String> _focusedNodeIdsFor(String? nodeId) {
+    if (nodeId == null) return const <String>{};
+    final ids = <String>{nodeId};
+    for (final link in data.links) {
+      if (link.source == nodeId) ids.add(link.target);
+      if (link.target == nodeId) ids.add(link.source);
+    }
+    return ids;
+  }
+
+  void _paintFocusReticle(Canvas canvas, Offset center, _AtlasNode node) {
+    final color = _colorForType(node.type);
+    final radius = 44 + node.importance * 18;
+    final paint = Paint()
+      ..color = color.withOpacity(0.42)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.6
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 1.8);
+
+    canvas.drawCircle(center, radius, paint);
+    canvas.drawCircle(
+      center,
+      radius + 13,
+      Paint()
+        ..color = color.withOpacity(0.13)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.0,
+    );
+
+    const tick = 10.0;
+    for (final angle in const [0.0, math.pi / 2, math.pi, math.pi * 1.5]) {
+      final direction = Offset(math.cos(angle), math.sin(angle));
+      final outer = center + direction * (radius + 7);
+      final inner = center + direction * (radius - tick);
+      canvas.drawLine(
+        inner,
+        outer,
+        Paint()
+          ..color = color.withOpacity(0.46)
+          ..strokeWidth = 1.4
+          ..style = PaintingStyle.stroke,
+      );
     }
   }
 
@@ -1351,8 +1850,9 @@ class _MindMapPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _MindMapPainter oldDelegate) =>
+  bool shouldRepaint(covariant _MemoryAtlasPainter oldDelegate) =>
       oldDelegate.data != data ||
       oldDelegate.showLabels != showLabels ||
-      oldDelegate.selectedNodeId != selectedNodeId;
+      oldDelegate.selectedNodeId != selectedNodeId ||
+      oldDelegate.semanticZoomBand != semanticZoomBand;
 }

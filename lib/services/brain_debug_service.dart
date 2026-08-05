@@ -3,22 +3,23 @@
 library;
 
 import 'dart:async';
+import 'dart:math';
 
 import 'core/trace_store_service.dart';
 
 enum BrainPhase {
-  listening,           // Voice input detection
-  processing,          // Understanding input
-  workingMemory,       // Active context loading
-  semanticRetrieval,   // Long-term memory search
-  episodicRetrieval,   // Experience recall
-  emotionalCheck,      // Emotional memory triggers
-  proceduralCheck,     // Pattern matching
-  reasoning,           // GPT processing
-  responseGeneration,  // Creating output
-  consolidation,       // Memory storage
-  tts,                // Text-to-speech
-  complete,           // Done
+  listening, // Voice input detection
+  processing, // Understanding input
+  workingMemory, // Active context loading
+  semanticRetrieval, // Long-term memory search
+  episodicRetrieval, // Experience recall
+  emotionalCheck, // Emotional memory triggers
+  proceduralCheck, // Pattern matching
+  reasoning, // GPT processing
+  responseGeneration, // Creating output
+  consolidation, // Memory storage
+  tts, // Text-to-speech
+  complete, // Done
 }
 
 class BrainStep {
@@ -27,7 +28,7 @@ class BrainStep {
   final DateTime timestamp;
   final Map<String, dynamic> data;
   final Duration duration;
-  
+
   BrainStep({
     required this.phase,
     required this.description,
@@ -35,7 +36,7 @@ class BrainStep {
     this.data = const {},
     required this.duration,
   });
-  
+
   String get emoji {
     switch (phase) {
       case BrainPhase.listening:
@@ -64,7 +65,7 @@ class BrainStep {
         return '✅';
     }
   }
-  
+
   String get phaseName => phase.name.toUpperCase();
 }
 
@@ -108,6 +109,32 @@ class BrainDebugTrace {
   String? route;
   double? routeConfidence;
   int? iterationCount;
+  int? promptInputTokens;
+  int? promptOutputTokens;
+  double? promptCostUsd;
+  int? manifestToolCount;
+  int? manifestTotalToolCount;
+  int? manifestSchemaChars;
+  int? manifestApproxTokens;
+
+  /// Exact tool manifests attached to model requests in this turn.
+  /// Counts alone cannot diagnose a missing or misspelled coding tool.
+  final List<Map<String, dynamic>> modelRequestTools = [];
+  int toolTrimIterations = 0;
+  int toolTrimResults = 0;
+  int toolTrimCompactedResults = 0;
+  int toolTrimHardCappedResults = 0;
+  int toolTrimCharsBefore = 0;
+  int toolTrimCharsAfter = 0;
+  int toolTrimCharsSaved = 0;
+  int toolTrimApproxTokensSaved = 0;
+  int assistantToolCallArgApproxTokensSaved = 0;
+  Map<String, int>? moodCurrent;
+  Map<String, int>? moodDelta;
+  Map<String, int>? promptComponentChars;
+  Map<String, int>? promptComponentApproxTokens;
+  Map<String, int>? nonSystemInputChars;
+  Map<String, int>? nonSystemInputApproxTokens;
 
   BrainDebugTrace({
     required this.id,
@@ -118,6 +145,54 @@ class BrainDebugTrace {
   void recordRoute({required String name, required double confidence}) {
     route = name;
     routeConfidence = confidence;
+  }
+
+  void recordManifest({
+    required int toolCount,
+    required int totalToolCount,
+    required int schemaChars,
+  }) {
+    manifestToolCount = toolCount;
+    manifestTotalToolCount = totalToolCount;
+    manifestSchemaChars = schemaChars;
+    manifestApproxTokens = (schemaChars / 4).round();
+  }
+
+  void recordModelRequestTools({
+    required int request,
+    required String model,
+    required String toolChoice,
+    required Iterable<String> toolNames,
+  }) {
+    modelRequestTools.add({
+      'request': request,
+      'model': model,
+      'toolChoice': toolChoice,
+      'toolNames': toolNames.toList(growable: false),
+    });
+  }
+
+  void recordToolTrim({
+    required int results,
+    required int compactedResults,
+    required int hardCappedResults,
+    required int charsBefore,
+    required int charsAfter,
+  }) {
+    final saved = max(0, charsBefore - charsAfter);
+    toolTrimIterations++;
+    toolTrimResults += results;
+    toolTrimCompactedResults += compactedResults;
+    toolTrimHardCappedResults += hardCappedResults;
+    toolTrimCharsBefore += charsBefore;
+    toolTrimCharsAfter += charsAfter;
+    toolTrimCharsSaved += saved;
+    toolTrimApproxTokensSaved += (saved / 4).round();
+  }
+
+  void recordAssistantToolCallArgTrim({required int approxTokensSaved}) {
+    if (approxTokensSaved <= 0) return;
+    assistantToolCallArgApproxTokensSaved += approxTokensSaved;
   }
 
   /// One line of thinking-out-loud, as he wrote it.
@@ -136,8 +211,7 @@ class BrainDebugTrace {
   /// This is the shape the graph and the messenger want: not the report he
   /// wrote once he knew he was being read, but the running commentary he wrote
   /// while he was still just working.
-  String get interimText =>
-      interims.map((i) => i['text'] as String).join('\n');
+  String get interimText => interims.map((i) => i['text'] as String).join('\n');
 
   void recordToolCall({
     required String name,
@@ -155,19 +229,55 @@ class BrainDebugTrace {
       'timestamp': DateTime.now().toIso8601String(),
     });
   }
-  
-  Duration get totalDuration => 
+
+  void recordUsage({
+    required int inputTokens,
+    required int outputTokens,
+    required double costUsd,
+  }) {
+    promptInputTokens = inputTokens;
+    promptOutputTokens = outputTokens;
+    promptCostUsd = costUsd;
+  }
+
+  void recordPromptComponents(Map<String, int> componentChars) {
+    promptComponentChars = Map<String, int>.from(componentChars);
+    promptComponentApproxTokens = componentChars.map(
+      (key, value) => MapEntry(key, (value / 4).round()),
+    );
+  }
+
+  void recordNonSystemInput(Map<String, int> componentChars) {
+    final merged = Map<String, int>.from(nonSystemInputChars ?? const {});
+    for (final entry in componentChars.entries) {
+      merged[entry.key] = (merged[entry.key] ?? 0) + entry.value;
+    }
+    nonSystemInputChars = merged;
+    nonSystemInputApproxTokens = merged.map(
+      (key, value) => MapEntry(key, (value / 4).round()),
+    );
+  }
+
+  void recordMood({
+    required Map<String, int> current,
+    required Map<String, int> delta,
+  }) {
+    moodCurrent = Map<String, int>.from(current);
+    moodDelta = Map<String, int>.from(delta);
+  }
+
+  Duration get totalDuration =>
       endTime != null ? endTime!.difference(startTime) : Duration.zero;
-  
+
   void addStep(BrainStep step) {
     steps.add(step);
     print(_formatStep(step));
   }
-  
+
   void complete(String response) {
     finalResponse = response;
     endTime = DateTime.now();
-    
+
     print('\n${'=' * 80}');
     print('🧠 BRAIN TRACE COMPLETE');
     print('=' * 80);
@@ -177,16 +287,16 @@ class BrainDebugTrace {
     print('Steps: ${steps.length}');
     print('${'=' * 80}\n');
   }
-  
+
   String _formatStep(BrainStep step) {
     final ms = step.duration.inMilliseconds;
     final buffer = StringBuffer();
-    
+
     buffer.writeln('\n${'-' * 80}');
     buffer.writeln('${step.emoji} [${step.phaseName}] ${step.description}');
     buffer.writeln('   ⏱️  Duration: ${ms}ms');
     buffer.writeln('   🕐 Timestamp: ${step.timestamp.toIso8601String()}');
-    
+
     if (step.data.isNotEmpty) {
       buffer.writeln('   📊 Data:');
       step.data.forEach((key, value) {
@@ -194,35 +304,61 @@ class BrainDebugTrace {
       });
     }
     buffer.writeln('-' * 80);
-    
+
     return buffer.toString();
   }
-  
+
   Map<String, dynamic> toJson() => {
-    'id': id,
-    'userInput': userInput,
-    'startTime': startTime.toIso8601String(),
-    'endTime': endTime?.toIso8601String(),
-    'totalDuration': totalDuration.inMilliseconds,
-    'finalResponse': finalResponse,
-    'route': route,
-    'routeConfidence': routeConfidence,
-    'iterationCount': iterationCount,
-    'toolCalls': toolCalls,
-    // Him, as opposed to finalResponse, which is the assistant. See [interims].
-    'interims': interims,
-    'steps': steps.map((s) => {
-      'phase': s.phase.name,
-      'description': s.description,
-      'timestamp': s.timestamp.toIso8601String(),
-      'duration': s.duration.inMilliseconds,
-      'data': s.data,
-    }).toList(),
-  };
-  
+        'id': id,
+        'userInput': userInput,
+        'startTime': startTime.toIso8601String(),
+        'endTime': endTime?.toIso8601String(),
+        'totalDuration': totalDuration.inMilliseconds,
+        'finalResponse': finalResponse,
+        'route': route,
+        'routeConfidence': routeConfidence,
+        'iterationCount': iterationCount,
+        'promptInputTokens': promptInputTokens,
+        'promptOutputTokens': promptOutputTokens,
+        'promptCostUsd': promptCostUsd,
+        'manifestToolCount': manifestToolCount,
+        'manifestTotalToolCount': manifestTotalToolCount,
+        'manifestSchemaChars': manifestSchemaChars,
+        'manifestApproxTokens': manifestApproxTokens,
+        'modelRequestTools': modelRequestTools,
+        'toolTrimIterations': toolTrimIterations,
+        'toolTrimResults': toolTrimResults,
+        'toolTrimCompactedResults': toolTrimCompactedResults,
+        'toolTrimHardCappedResults': toolTrimHardCappedResults,
+        'toolTrimCharsBefore': toolTrimCharsBefore,
+        'toolTrimCharsAfter': toolTrimCharsAfter,
+        'toolTrimCharsSaved': toolTrimCharsSaved,
+        'toolTrimApproxTokensSaved': toolTrimApproxTokensSaved,
+        'assistantToolCallArgApproxTokensSaved':
+            assistantToolCallArgApproxTokensSaved,
+        'promptComponentChars': promptComponentChars,
+        'promptComponentApproxTokens': promptComponentApproxTokens,
+        'nonSystemInputChars': nonSystemInputChars,
+        'nonSystemInputApproxTokens': nonSystemInputApproxTokens,
+        'moodCurrent': moodCurrent,
+        'moodDelta': moodDelta,
+        'toolCalls': toolCalls,
+        // Him, as opposed to finalResponse, which is the assistant. See [interims].
+        'interims': interims,
+        'steps': steps
+            .map((s) => {
+                  'phase': s.phase.name,
+                  'description': s.description,
+                  'timestamp': s.timestamp.toIso8601String(),
+                  'duration': s.duration.inMilliseconds,
+                  'data': s.data,
+                })
+            .toList(),
+      };
+
   String toDetailedString() {
     final buffer = StringBuffer();
-    
+
     buffer.writeln('\n${'=' * 80}');
     buffer.writeln('🧠 BRAIN TRACE: $id');
     buffer.writeln('=' * 80);
@@ -233,10 +369,11 @@ class BrainDebugTrace {
       buffer.writeln('⏱️  Total: ${totalDuration.inMilliseconds}ms');
     }
     buffer.writeln('${'=' * 80}\n');
-    
+
     for (int i = 0; i < steps.length; i++) {
       final step = steps[i];
-      buffer.writeln('${i + 1}. ${step.emoji} [${step.phaseName}] (${step.duration.inMilliseconds}ms)');
+      buffer.writeln(
+          '${i + 1}. ${step.emoji} [${step.phaseName}] (${step.duration.inMilliseconds}ms)');
       buffer.writeln('   ${step.description}');
       if (step.data.isNotEmpty) {
         step.data.forEach((key, value) {
@@ -245,13 +382,13 @@ class BrainDebugTrace {
       }
       buffer.writeln();
     }
-    
+
     if (finalResponse != null) {
       buffer.writeln('=' * 80);
       buffer.writeln('💬 Final Response: "$finalResponse"');
       buffer.writeln('=' * 80);
     }
-    
+
     return buffer.toString();
   }
 }
@@ -260,27 +397,28 @@ class BrainDebugService {
   static final BrainDebugService _instance = BrainDebugService._internal();
   factory BrainDebugService() => _instance;
   BrainDebugService._internal();
-  
+
   bool _isEnabled = true;
   BrainDebugTrace? _currentTrace;
   final List<BrainDebugTrace> _history = [];
-  final StreamController<BrainStep> _stepController = StreamController<BrainStep>.broadcast();
-  
+  final StreamController<BrainStep> _stepController =
+      StreamController<BrainStep>.broadcast();
+
   Stream<BrainStep> get stepStream => _stepController.stream;
   bool get isEnabled => _isEnabled;
   BrainDebugTrace? get currentTrace => _currentTrace;
   List<BrainDebugTrace> get history => List.unmodifiable(_history);
-  
+
   void enable() {
     _isEnabled = true;
     print('🔍 [BRAIN DEBUG] Enabled - Detailed cognitive tracing active');
   }
-  
+
   void disable() {
     _isEnabled = false;
     print('🔍 [BRAIN DEBUG] Disabled');
   }
-  
+
   /// Start a new brain trace
   BrainDebugTrace startTrace(String userInput) {
     if (!_isEnabled) {
@@ -290,15 +428,15 @@ class BrainDebugService {
         startTime: DateTime.now(),
       );
     }
-    
+
     final trace = BrainDebugTrace(
       id: 'trace_${DateTime.now().millisecondsSinceEpoch}',
       userInput: userInput,
       startTime: DateTime.now(),
     );
-    
+
     _currentTrace = trace;
-    
+
     print('\n${'=' * 80}');
     print('🧠 NEW BRAIN TRACE STARTED');
     print('=' * 80);
@@ -306,18 +444,82 @@ class BrainDebugService {
     print('Input: "$userInput"');
     print('Time: ${trace.startTime.toIso8601String()}');
     print('${'=' * 80}\n');
-    
+
     return trace;
   }
-  
+
   void recordRoute(String route, double confidence) {
     if (!_isEnabled || _currentTrace == null) return;
     _currentTrace!.recordRoute(name: route, confidence: confidence);
   }
 
+  /// Delegate that ai_service actually calls. The trace-level [recordManifest]
+  /// (the tool-manifest telemetry Kai added) had no service-level entry point,
+  /// so the caller wouldn't compile. Same shape as recordRoute above.
+  void recordManifest({
+    required int toolCount,
+    required int totalToolCount,
+    required int schemaChars,
+  }) {
+    if (!_isEnabled || _currentTrace == null) return;
+    _currentTrace!.recordManifest(
+      toolCount: toolCount,
+      totalToolCount: totalToolCount,
+      schemaChars: schemaChars,
+    );
+  }
+
+  void recordModelRequestTools({
+    required int request,
+    required String model,
+    required String toolChoice,
+    required Iterable<String> toolNames,
+  }) {
+    if (!_isEnabled || _currentTrace == null) return;
+    _currentTrace!.recordModelRequestTools(
+      request: request,
+      model: model,
+      toolChoice: toolChoice,
+      toolNames: toolNames,
+    );
+    addStep(
+      BrainPhase.reasoning,
+      'Model request $request sent with ${toolNames.length} tools',
+      data: {
+        'model': model,
+        'toolChoice': toolChoice,
+        'toolNames': toolNames.join(', '),
+      },
+    );
+  }
+
+  void recordToolTrim({
+    required int results,
+    required int compactedResults,
+    required int hardCappedResults,
+    required int charsBefore,
+    required int charsAfter,
+  }) {
+    if (!_isEnabled || _currentTrace == null) return;
+    _currentTrace!.recordToolTrim(
+      results: results,
+      compactedResults: compactedResults,
+      hardCappedResults: hardCappedResults,
+      charsBefore: charsBefore,
+      charsAfter: charsAfter,
+    );
+  }
+
   void recordIterationCount(int count) {
     if (!_isEnabled || _currentTrace == null) return;
     _currentTrace!.iterationCount = count;
+  }
+
+  void recordAssistantToolCallArgTrim({required int approxTokensSaved}) {
+    if (!_isEnabled || _currentTrace == null) return;
+    _currentTrace!.recordAssistantToolCallArgTrim(
+      approxTokensSaved: approxTokensSaved,
+    );
   }
 
   void recordToolCall(
@@ -337,19 +539,57 @@ class BrainDebugService {
     );
   }
 
-  /// Add a step to current trace
-  void addStep(BrainPhase phase, String description, {Map<String, dynamic>? data}) {
+  void recordUsage({
+    required int inputTokens,
+    required int outputTokens,
+    required double costUsd,
+  }) {
     if (!_isEnabled || _currentTrace == null) return;
-    
+    _currentTrace!.recordUsage(
+      inputTokens: inputTokens,
+      outputTokens: outputTokens,
+      costUsd: costUsd,
+    );
+  }
+
+  /// Per-section character counts for the assembled system prompt.
+  ///
+  /// The trace has held this since the context-budget work; the forwarder on
+  /// the service was never written, so `ai_service` called a method that did
+  /// not exist and the whole app stopped compiling. Every other recorder on
+  /// this class is the same shape — guard, then delegate — and this one is now
+  /// no exception.
+  void recordPromptComponents(Map<String, int> componentChars) {
+    if (!_isEnabled || _currentTrace == null) return;
+    _currentTrace!.recordPromptComponents(componentChars);
+  }
+
+  /// Per-section character counts for non-system chat payloads sent to the model.
+  void recordNonSystemInput(Map<String, int> componentChars) {
+    if (!_isEnabled || _currentTrace == null) return;
+    _currentTrace!.recordNonSystemInput(componentChars);
+  }
+
+  void recordMood({
+    required Map<String, int> current,
+    required Map<String, int> delta,
+  }) {
+    if (!_isEnabled || _currentTrace == null) return;
+    _currentTrace!.recordMood(current: current, delta: delta);
+  }
+
+  /// Add a step to current trace
+  void addStep(BrainPhase phase, String description,
+      {Map<String, dynamic>? data}) {
+    if (!_isEnabled || _currentTrace == null) return;
+
     final now = DateTime.now();
-    final lastStep = _currentTrace!.steps.isNotEmpty 
-        ? _currentTrace!.steps.last 
-        : null;
-    
-    final duration = lastStep != null 
-        ? now.difference(lastStep.timestamp)
-        : Duration.zero;
-    
+    final lastStep =
+        _currentTrace!.steps.isNotEmpty ? _currentTrace!.steps.last : null;
+
+    final duration =
+        lastStep != null ? now.difference(lastStep.timestamp) : Duration.zero;
+
     final step = BrainStep(
       phase: phase,
       description: description,
@@ -357,11 +597,11 @@ class BrainDebugService {
       data: data ?? {},
       duration: duration,
     );
-    
+
     _currentTrace!.addStep(step);
     _stepController.add(step);
   }
-  
+
   /// Complete current trace
   void completeTrace(String response) {
     if (!_isEnabled || _currentTrace == null) return;
@@ -394,20 +634,20 @@ class BrainDebugService {
 
     _currentTrace = null;
   }
-  
+
   /// Get statistics
   Map<String, dynamic> getStats() {
     if (_history.isEmpty) {
       return {'totalTraces': 0};
     }
-    
+
     final totalDuration = _history.fold<int>(
-      0, 
+      0,
       (sum, trace) => sum + trace.totalDuration.inMilliseconds,
     );
-    
+
     final avgDuration = totalDuration / _history.length;
-    
+
     final phaseStats = <BrainPhase, List<int>>{};
     for (final trace in _history) {
       for (final step in trace.steps) {
@@ -415,34 +655,36 @@ class BrainDebugService {
         phaseStats[step.phase]!.add(step.duration.inMilliseconds);
       }
     }
-    
+
     final avgPhaseStats = <String, double>{};
     phaseStats.forEach((phase, durations) {
       final avg = durations.reduce((a, b) => a + b) / durations.length;
       avgPhaseStats[phase.name] = avg;
     });
-    
+
     return {
       'totalTraces': _history.length,
       'avgDurationMs': avgDuration.round(),
       'avgPhaseDurations': avgPhaseStats,
-      'recentTraces': _history.map((t) => {
-        'id': t.id,
-        'input': t.userInput.length > 50 
-            ? '${t.userInput.substring(0, 50)}...' 
-            : t.userInput,
-        'durationMs': t.totalDuration.inMilliseconds,
-        'stepCount': t.steps.length,
-      }).toList(),
+      'recentTraces': _history
+          .map((t) => {
+                'id': t.id,
+                'input': t.userInput.length > 50
+                    ? '${t.userInput.substring(0, 50)}...'
+                    : t.userInput,
+                'durationMs': t.totalDuration.inMilliseconds,
+                'stepCount': t.steps.length,
+              })
+          .toList(),
     };
   }
-  
+
   /// Clear history
   void clearHistory() {
     _history.clear();
     print('🔍 [BRAIN DEBUG] History cleared');
   }
-  
+
   void dispose() {
     _stepController.close();
   }
@@ -451,10 +693,10 @@ class BrainDebugService {
 /// Helper to wrap timed operations
 class BrainTimer {
   final DateTime _start = DateTime.now();
-  
+
   Duration get elapsed => DateTime.now().difference(_start);
   int get elapsedMs => elapsed.inMilliseconds;
-  
+
   void log(String message) {
     print('⏱️  [${elapsedMs}ms] $message');
   }

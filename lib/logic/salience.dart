@@ -55,8 +55,8 @@ enum SalienceDepth { skip, shallow, deep }
 /// Tools that mean the world is different than it was an hour ago.
 const kChangedTheWorld = <String>{
   'edit_file', 'write_file', 'run_tests', 'job_done', 'code_task',
-  'set_layer_progress', 'remember_bit', 'forget_bit', 'add_goal',
-  'note_noticed',
+  'run_self_improvement_loop', 'set_layer_progress', 'remember_bit',
+  'forget_bit', 'add_goal', 'note_noticed',
   // Surgery on his own head. He archived 254 nodes and deleted 152 of them —
   // 60% of everything he'd ever stored — and the gate said:
   //

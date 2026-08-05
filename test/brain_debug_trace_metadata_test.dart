@@ -35,6 +35,82 @@ void main() {
     expect(toolCalls.single, containsPair('args', {'target': 'myself'}));
   });
 
+  test('trace JSON carries manifest schema stats for cost measurement', () {
+    final trace = BrainDebugTrace(
+      id: 'trace-manifest',
+      userInput: 'quick chat',
+      startTime: DateTime.utc(2026, 7, 18),
+    );
+
+    trace.recordManifest(
+      toolCount: 18,
+      totalToolCount: 46,
+      schemaChars: 7200,
+    );
+
+    final json = trace.toJson();
+    expect(json['manifestToolCount'], 18);
+    expect(json['manifestTotalToolCount'], 46);
+    expect(json['manifestSchemaChars'], 7200);
+    expect(json['manifestApproxTokens'], 1800);
+  });
+
+  test('trace JSON carries exact tools sent with every model request', () {
+    final trace = BrainDebugTrace(
+      id: 'trace-request-tools',
+      userInput: 'fix the desktop tool bridge',
+      startTime: DateTime.utc(2026, 8, 2),
+    );
+
+    trace.recordModelRequestTools(
+      request: 1,
+      model: 'gpt-5.5',
+      toolChoice: 'auto',
+      toolNames: const ['read_file', 'edit_file', 'run_tests'],
+    );
+    trace.recordModelRequestTools(
+      request: 2,
+      model: 'gpt-5.5',
+      toolChoice: 'none',
+      toolNames: const ['read_file', 'edit_file', 'run_tests'],
+    );
+
+    final requests = trace.toJson()['modelRequestTools'] as List<dynamic>;
+    expect(requests, hasLength(2));
+    expect(requests.first['request'], 1);
+    expect(requests.first['toolChoice'], 'auto');
+    expect(requests.first['toolNames'],
+        containsAll(['read_file', 'edit_file', 'run_tests']));
+    expect(requests.last['toolChoice'], 'none');
+  });
+
+  test('trace JSON carries prompt component sizes for efficiency measurement',
+      () {
+    final trace = BrainDebugTrace(
+      id: 'trace-prompt-components',
+      userInput: 'keep going',
+      startTime: DateTime.utc(2026, 7, 21),
+    );
+
+    trace.recordPromptComponents({
+      'staticPreamble': 6400,
+      'kaiLiveState': 12000,
+      'systemPromptTotal': 24000,
+    });
+
+    final json = trace.toJson();
+    expect(json['promptComponentChars'], {
+      'staticPreamble': 6400,
+      'kaiLiveState': 12000,
+      'systemPromptTotal': 24000,
+    });
+    expect(json['promptComponentApproxTokens'], {
+      'staticPreamble': 1600,
+      'kaiLiveState': 3000,
+      'systemPromptTotal': 6000,
+    });
+  });
+
   test('brain debug service records route and tool calls on current trace', () {
     final service = BrainDebugService();
     service.enable();
@@ -57,7 +133,8 @@ void main() {
     expect(json['toolCalls'], isNotEmpty);
   });
 
-  test('planner-fired tools are recorded as structured trace tool calls', () async {
+  test('planner-fired tools are recorded as structured trace tool calls',
+      () async {
     final service = BrainDebugService();
     service.enable();
     final trace = service.startTrace('plan two cheap tools');
@@ -91,7 +168,8 @@ void main() {
       'create_plan',
       planArgs,
       result: result,
-      outcome: ToolExecutorService.classifyToolOutcome('create_plan', result).label,
+      outcome:
+          ToolExecutorService.classifyToolOutcome('create_plan', result).label,
       iteration: 1,
     );
 
@@ -102,11 +180,11 @@ void main() {
       'get_current_time',
       'create_plan',
     ]);
-    expect(toolCalls.where((c) => c['name'] == 'get_current_time'), hasLength(2));
+    expect(
+        toolCalls.where((c) => c['name'] == 'get_current_time'), hasLength(2));
     expect(
       toolCalls.where((c) => c['name'] == 'get_current_time'),
       everyElement(containsPair('outcome', isNotEmpty)),
     );
   });
 }
-

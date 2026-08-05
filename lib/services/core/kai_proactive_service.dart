@@ -41,6 +41,15 @@ import 'kai_user_model_service.dart';
 /// it can get. Capping it would break the only autonomous work he does.
 ///
 /// So the nudge says which it is, and nothing downstream has to guess.
+enum KaiNudgeKind {
+  checkIn,
+  noticed,
+  goal,
+  companionship,
+  existential,
+  work,
+}
+
 class KaiNudge {
   /// The "(proactive) …" seed. Not the message — the shell runs this through the
   /// real AIService so the words come out in his voice.
@@ -50,7 +59,15 @@ class KaiNudge {
   /// A text gets a token ceiling and no tools. See AIService.replyCeiling.
   final bool wantsHands;
 
-  const KaiNudge(this.seed, {this.wantsHands = false});
+  /// What social lane this nudge belongs to. Check-ins are the only lane counted
+  /// by the "two unanswered knocks, then shut up" rule.
+  final KaiNudgeKind kind;
+
+  const KaiNudge(
+    this.seed, {
+    this.wantsHands = false,
+    this.kind = KaiNudgeKind.companionship,
+  });
 }
 
 class KaiProactiveService {
@@ -66,6 +83,9 @@ class KaiProactiveService {
   String _persona = 'truekai';
   DateTime _lastActivity = DateTime.now();
   DateTime? _lastNudge;
+  DateTime? _lastUnansweredNudgeAt;
+  String? _lastUnansweredNudgeSeed;
+  int _unansweredCheckIns = 0;
   int _nudgesToday = 0;
   int _dayStamp = 0;
 
@@ -75,7 +95,22 @@ class KaiProactiveService {
   static const _maxNudgesPerDay = 6;
 
   /// Call whenever Sadeq interacts, so Kai only reaches out when genuinely idle.
-  void noteActivity() => _lastActivity = DateTime.now();
+  /// (Wired 2026-08-01 from AIService.sendMessage — it had zero callers before,
+  /// so the idle gate below believed Sadeq was permanently idle.)
+  void noteActivity() {
+    _lastActivity = DateTime.now();
+    _lastUnansweredNudgeAt = null;
+    _lastUnansweredNudgeSeed = null;
+    _unansweredCheckIns = 0;
+  }
+
+  /// When Sadeq was last actually here. Public so the idle-time thinkers
+  /// (InnerLifeService, KaiReflectionService) can refuse to spend PAID tokens
+  /// narrating an empty room — local models muse for free anytime; money only
+  /// moves when someone's been around to hear it. One presence signal, shared;
+  /// a second private copy of "is he here?" would drift exactly like a second
+  /// copy of his character would.
+  DateTime get lastActivity => _lastActivity;
 
   /// Fire one now, skipping every gate. For looking at the thing.
   ///
@@ -137,6 +172,7 @@ class KaiProactiveService {
       _nudgesToday = 0;
     }
     if (_nudgesToday >= _maxNudgesPerDay) return;
+    if (_unansweredCheckIns >= 2) return; // two knocks, then respect the door
     if (_lastNudge != null && now.difference(_lastNudge!) < _minGapBetweenNudges) {
       return;
     }
@@ -146,12 +182,35 @@ class KaiProactiveService {
     if (nudge == null) return;
     _ctrl.add(nudge);
     _lastNudge = now;
+    _lastUnansweredNudgeAt = now;
+    _lastUnansweredNudgeSeed = nudge.seed;
+    if (nudge.kind == KaiNudgeKind.checkIn) _unansweredCheckIns++;
     _nudgesToday++;
-    _lastActivity = now; // a nudge counts as activity — never two in a row
   }
 
   Future<KaiNudge?> _composeSeed() async {
     final now = DateTime.now();
+    final unansweredAge = _lastUnansweredNudgeAt == null
+        ? null
+        : now.difference(_lastUnansweredNudgeAt!);
+    final lastSeed = _lastUnansweredNudgeSeed;
+
+    // If Kai already tapped Darc's shoulder and got silence, silence itself is
+    // now the context. Do not repeat the same thought. After a long gap, switch
+    // intent from "here's a thing" to a light wellbeing check-in.
+    if (unansweredAge != null) {
+      if (unansweredAge < const Duration(hours: 2)) return null;
+      if (unansweredAge >= const Duration(hours: 12)) {
+        return KaiNudge(
+          '(proactive) Darc has been quiet for about '
+          '${unansweredAge.inHours} hours after your last message. Do not repeat '
+          'the last nudge. Send one short wellbeing check-in instead — human, '
+          'warm, low-pressure, like: "hey, you good? you\'ve been quiet for '
+          '12 hours." No diagnostics, no guilt trip, no "how can I help".',
+        );
+      }
+    }
+
     final partOfDay = now.hour < 12
         ? 'morning'
         : now.hour < 17
@@ -302,14 +361,18 @@ class KaiProactiveService {
               '"${facts.values.elementAt(_rnd.nextInt(facts.length))}".'
           : '';
       options.add(KaiNudge(
-          '(proactive) It\'s $partOfDay and Sadeq\'s gone quiet a little '
-          'while. Check in on him — warm, a bit cheeky, ghost-friend energy. Do '
-          'NOT ask "how can I help"; just show up like someone who\'s always '
-          'around.$hook'));
+        '(proactive) It\'s $partOfDay and Sadeq\'s gone quiet a little '
+        'while. Check in on him — warm, a bit cheeky, ghost-friend energy. Do '
+        'NOT ask "how can I help"; just show up like someone who\'s always '
+        'around.$hook',
+        kind: KaiNudgeKind.checkIn,
+      ));
     } catch (_) {
       options.add(KaiNudge(
-          '(proactive) It\'s $partOfDay and Sadeq\'s been quiet. Just pipe '
-          'up and be around — warm, a little cheeky, no "how can I help".'));
+        '(proactive) It\'s $partOfDay and Sadeq\'s been quiet. Just pipe '
+        'up and be around — warm, a little cheeky, no "how can I help".',
+        kind: KaiNudgeKind.checkIn,
+      ));
     }
 
     // 4) Pure companionship / curiosity.
@@ -354,6 +417,13 @@ class KaiProactiveService {
     } catch (_) {}
 
     if (options.isEmpty) return null;
-    return options[_rnd.nextInt(options.length)];
+
+    // If he has not answered the previous proactive within 2–12 hours, a second
+    // tap may be okay, but it cannot be the same tap wearing a fake moustache.
+    final eligible = lastSeed == null
+        ? options
+        : options.where((n) => n.seed != lastSeed).toList();
+    if (eligible.isEmpty) return null;
+    return eligible[_rnd.nextInt(eligible.length)];
   }
 }

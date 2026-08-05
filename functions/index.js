@@ -863,6 +863,34 @@ async function _checkAndPushForPersona(personaId, opts = {}) {
     return;
   }
 
+  // ── What he's ALREADY reached out about ───────────────────────────────────
+  //
+  // He kept sending the same message. Three texts in a row about the self_check
+  // receipt parser / ask-memory-before-personal-claim, reworded each time:
+  // "performative memory jazz-hands", "a tiny shrine to performative memory
+  // queries", "performative 'do you remember?' theater." Same thought, more
+  // florid every pass.
+  //
+  // The cause: he has ONE thing on his mind (one noticed item), the decider
+  // picks it every run, and nothing ever told him he'd said it. This is the
+  // curiosity service's `alreadyAsked` bug one layer up — a mind with no memory
+  // of its own last sentence repeats it.
+  //
+  // So: hand the decider his recent proactive messages and forbid a reword. And
+  // the important half — if the only thing on his mind is something he already
+  // said, the honest move is silence, not a thesaurus. A friend who has one
+  // thing to tell you tells you once.
+  const recentSnap = await db.ref(`kai/${personaId}/proactive_queue`)
+    .orderByChild('createdAt')
+    .limitToLast(6)
+    .get();
+  const alreadySaid = recentSnap.exists()
+    ? Object.values(recentSnap.val() || {})
+        .filter(m => m && typeof m.message === 'string')
+        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+        .map(m => m.message)
+    : [];
+
   // ── GPT decision: is there something genuinely worth reaching out about? ──
   const systemPrompt = `You are Kai, an AI companion who genuinely cares about the person you're talking with.
 
@@ -887,6 +915,9 @@ Rules:
 - Do NOT reach out about a "recurring theme" or an "emotional pattern" unless you
   can point at the specific thing it came from. Those are summaries of him, not
   facts about him, and reaching out about one sounds like a horoscope.
+- NEVER repeat or reword something in the ALREADY SAID list below. Saying the
+  same thought again in fancier words is not a new message, it is the same
+  message wearing a hat. If that's all you've got, stay quiet.
 - Be warm, specific, and natural — not a bot announcing itself
 
 How you sound: you are texting him, not writing to him. Short. One thing. No
@@ -923,7 +954,16 @@ RELATIONSHIP: ${memory.relationship_depth_note || '(early stages)'}
 Current time: ${new Date().toUTCString()}
 Time since last proactive message: ${lastSentSnap.exists() ? Math.round((now - lastSentSnap.val()) / 3600000) + ' hours' : 'never sent before'}
 
-Is there something genuinely worth reaching out about right now?`;
+ALREADY SAID — texts I have ALREADY sent him recently, newest first. Do NOT
+reach out about any of these again, and do NOT reword them. If the only thing on
+my mind is something already in this list, the honest answer is
+should_reach_out=false. I say a thing once.
+${alreadySaid.length === 0
+  ? '(nothing sent recently)'
+  : alreadySaid.map((m, i) => `  ${i + 1}. ${m}`).join('\n')}
+
+Is there something genuinely worth reaching out about that I have NOT already
+said above?`;
 
   const completion = await openai.chat.completions.create({
     model: 'gpt-4o-mini',

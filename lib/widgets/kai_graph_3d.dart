@@ -32,6 +32,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart' show Ticker;
 
 import '../models/knowledge_node.dart';
+import '../services/core/cortex_activity_bus.dart';
 import '../services/core/firebase_service.dart';
 import '../services/core/kai_db.dart';
 
@@ -99,13 +100,19 @@ class _KaiGraph3DState extends State<KaiGraph3D>
   final List<_GNode> _nodes = [];
   final List<_GEdge> _edges = [];
   StreamSubscription? _sub;
+  StreamSubscription<CortexEvent>? _activitySub;
   Timer? _debounce;
+  Timer? _activeNodeTimer;
   Ticker? _ticker;
 
   double _yaw = 0.4;
   double _pitch = -0.15;
   double _zoom = 1.0;
   bool _autoRotate = true;
+  bool _showAllLabels = false;
+  int? _hoveredNode;
+  int? _activeNode;
+  int? _focusedNode;
 
   // gesture bookkeeping
   double _zoom0 = 1;
@@ -114,6 +121,7 @@ class _KaiGraph3DState extends State<KaiGraph3D>
   void initState() {
     super.initState();
     _startSync();
+    _activitySub = CortexActivityBus.instance.stream.listen(_onActivity);
     _ticker = createTicker((_) {
       if (_autoRotate) {
         _yaw += 0.0016;
@@ -126,9 +134,28 @@ class _KaiGraph3DState extends State<KaiGraph3D>
   @override
   void dispose() {
     _sub?.cancel();
+    _activitySub?.cancel();
     _debounce?.cancel();
+    _activeNodeTimer?.cancel();
     _ticker?.dispose();
     super.dispose();
+  }
+
+  void _onActivity(CortexEvent e) {
+    if (!mounted) return;
+    if (e.type == 'reset') {
+      _activeNodeTimer?.cancel();
+      setState(() => _activeNode = null);
+      return;
+    }
+    if (e.type != 'memory' || e.nodeId == null) return;
+    final index = _nodes.indexWhere((n) => n.id == e.nodeId);
+    if (index < 0) return;
+    _activeNodeTimer?.cancel();
+    setState(() => _activeNode = index);
+    _activeNodeTimer = Timer(Duration(milliseconds: e.ms ?? 3200), () {
+      if (mounted && _activeNode == index) setState(() => _activeNode = null);
+    });
   }
 
   void _startSync() {
@@ -304,6 +331,64 @@ class _KaiGraph3DState extends State<KaiGraph3D>
         orElse: () => EdgeType.related,
       );
 
+  // Same camera math as the painter, kept here only for hover hit-testing.
+  ({Offset p, double depth}) _project(_V3 v, Size size) {
+    final cy = cos(_yaw), sy = sin(_yaw);
+    final x1 = v.x * cy - v.z * sy;
+    final z1 = v.x * sy + v.z * cy;
+    final cp = cos(_pitch), sp = sin(_pitch);
+    final y2 = v.y * cp - z1 * sp;
+    final z2 = v.y * sp + z1 * cp;
+
+    const camZ = 420.0;
+    final persp = camZ / (camZ + z2);
+    final s = min(size.width, size.height) / 380 * _zoom;
+    return (
+      p: Offset(
+        size.width / 2 + x1 * persp * s,
+        size.height / 2 + y2 * persp * s,
+      ),
+      depth: persp.clamp(0.35, 2.2),
+    );
+  }
+
+  void _updateHover(Offset localPosition, Size size) {
+    int? hit;
+    var best = double.infinity;
+    for (var i = 0; i < _nodes.length; i++) {
+      final pr = _project(_nodes[i].p, size);
+      final radius = ((1.6 + _nodes[i].importance * 3.4) * pr.depth).clamp(4.0, 16.0);
+      final d = (pr.p - localPosition).distance;
+      if (d <= radius * 1.9 && d < best) {
+        hit = i;
+        best = d;
+      }
+    }
+    if (hit != _hoveredNode) setState(() => _hoveredNode = hit);
+  }
+
+  void _flyToNode(int index) {
+    if (index < 0 || index >= _nodes.length) return;
+    setState(() {
+      _focusedNode = index;
+      _activeNode = index;
+      _autoRotate = false;
+      _zoom = max(_zoom, 1.8);
+    });
+  }
+
+  void _resetView() {
+    setState(() {
+      _focusedNode = null;
+      _hoveredNode = null;
+      _activeNode = null;
+      _yaw = 0.4;
+      _pitch = -0.15;
+      _zoom = 1.0;
+      _autoRotate = true;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_nodes.isEmpty) {
@@ -348,21 +433,311 @@ class _KaiGraph3DState extends State<KaiGraph3D>
             _pitch = (_pitch + d.focalPointDelta.dy * 0.006).clamp(-1.4, 1.4);
           });
         },
-        onDoubleTap: () => setState(() {
-          _autoRotate = true;
-          _zoom = 1.0;
-          _pitch = -0.15;
-        }),
-        child: CustomPaint(
-          painter: _GraphPainter(
-            nodes: _nodes,
-            edges: _edges,
-            yaw: _yaw,
-            pitch: _pitch,
-            zoom: _zoom,
-            compact: widget.compact,
+        onDoubleTap: () {
+          final hovered = _hoveredNode;
+          if (hovered != null) {
+            _flyToNode(hovered);
+          } else {
+            _resetView();
+          }
+        },
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final size = Size(constraints.maxWidth, constraints.maxHeight);
+            return MouseRegion(
+              onHover: (e) => _updateHover(e.localPosition, size),
+              onExit: (_) {
+                if (_hoveredNode != null) setState(() => _hoveredNode = null);
+              },
+              child: Stack(
+                children: [
+                  CustomPaint(
+                    painter: _GraphPainter(
+                      nodes: _nodes,
+                      edges: _edges,
+                      yaw: _yaw,
+                      pitch: _pitch,
+                      zoom: _zoom,
+                      compact: widget.compact,
+                      showAllLabels: _showAllLabels,
+                      hoveredNode: _hoveredNode,
+                      activeNode: _activeNode,
+                      focusedNode: _focusedNode,
+                    ),
+                    child: const SizedBox.expand(),
+                  ),
+                  Positioned(
+                    left: widget.compact ? 8 : 14,
+                    top: widget.compact ? 8 : 14,
+                    child: widget.compact
+                        ? _CompactAtlasBadge(
+                            nodeCount: _nodes.length,
+                            edgeCount: _edges.length,
+                            isFocused: _focusedNode != null,
+                          )
+                        : _AtlasStatusBadge(
+                            zoom: _zoom,
+                            nodeCount: _nodes.length,
+                            edgeCount: _edges.length,
+                            isFocused: _focusedNode != null,
+                            hoveredLabel: _hoveredNode == null
+                                ? null
+                                : _nodes[_hoveredNode!].label,
+                          ),
+                  ),
+                  Positioned(
+                    right: widget.compact ? 8 : 14,
+                    top: widget.compact ? 8 : 14,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (_focusedNode != null) ...[
+                          _GraphPillButton(
+                            label: 'RESET',
+                            active: true,
+                            onTap: _resetView,
+                          ),
+                          const SizedBox(width: 8),
+                        ],
+                        _GraphPillButton(
+                          label: _showAllLabels ? 'LABELS ON' : 'LABELS',
+                          active: _showAllLabels,
+                          onTap: () => setState(() => _showAllLabels = !_showAllLabels),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _CompactAtlasBadge extends StatelessWidget {
+  final int nodeCount;
+  final int edgeCount;
+  final bool isFocused;
+
+  const _CompactAtlasBadge({
+    required this.nodeCount,
+    required this.edgeCount,
+    required this.isFocused,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+        decoration: BoxDecoration(
+          color: const Color(0xFF020914).withOpacity(0.72),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: _kClaude.withOpacity(0.32)),
+          boxShadow: [
+            BoxShadow(
+              color: _kClaude.withOpacity(0.13),
+              blurRadius: 14,
+              spreadRadius: 1,
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'ATLAS',
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.92),
+                    fontSize: 9,
+                    fontFamily: 'monospace',
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 1.8,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Container(
+                  width: 5,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: isFocused ? _kClaude : _kGpt,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: (isFocused ? _kClaude : _kGpt).withOpacity(0.55),
+                        blurRadius: 8,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 3),
+            Text(
+              '$nodeCount memories · $edgeCount links',
+              style: TextStyle(
+                color: Colors.white.withOpacity(0.50),
+                fontSize: 8,
+                fontFamily: 'monospace',
+                letterSpacing: 0.2,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _GraphPillButton extends StatelessWidget {
+  final String label;
+  final bool active;
+  final VoidCallback onTap;
+
+  const _GraphPillButton({
+    required this.label,
+    required this.active,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = active ? _kClaude : Colors.white;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+          decoration: BoxDecoration(
+            color: const Color(0xFF020914).withOpacity(active ? 0.82 : 0.46),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: color.withOpacity(active ? 0.62 : 0.24)),
+            boxShadow: active
+                ? [BoxShadow(color: color.withOpacity(0.22), blurRadius: 10)]
+                : const [],
           ),
-          child: const SizedBox.expand(),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: color.withOpacity(active ? 0.96 : 0.55),
+              fontSize: 8,
+              fontFamily: 'monospace',
+              letterSpacing: 1.4,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AtlasStatusBadge extends StatelessWidget {
+  final double zoom;
+  final int nodeCount;
+  final int edgeCount;
+  final bool isFocused;
+  final String? hoveredLabel;
+
+  const _AtlasStatusBadge({
+    required this.zoom,
+    required this.nodeCount,
+    required this.edgeCount,
+    required this.isFocused,
+    required this.hoveredLabel,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final hovered = hoveredLabel;
+    final status = hovered != null
+        ? 'hovering: $hovered'
+        : isFocused
+            ? 'focused flight active · double-tap empty space to reset'
+            : 'drag to orbit · scroll/pinch to zoom · double-tap a node to fly';
+
+    return IgnorePointer(
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 340),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: const Color(0xFF020914).withOpacity(0.62),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: _kClaude.withOpacity(0.22)),
+          boxShadow: [
+            BoxShadow(
+              color: _kClaude.withOpacity(0.10),
+              blurRadius: 18,
+              spreadRadius: 1,
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Living Memory Atlas',
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.92),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: _kClaude.withOpacity(0.14),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: _kClaude.withOpacity(0.38)),
+                  ),
+                  child: Text(
+                    'BETA',
+                    style: TextStyle(
+                      color: _kClaude.withOpacity(0.92),
+                      fontSize: 8,
+                      fontFamily: 'monospace',
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 1.1,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 5),
+            Text(
+              '$nodeCount memories · $edgeCount links · ${(zoom * 100).round()}% zoom',
+              style: TextStyle(
+                color: Colors.white.withOpacity(0.46),
+                fontSize: 10,
+                fontFamily: 'monospace',
+                letterSpacing: 0.2,
+              ),
+            ),
+            const SizedBox(height: 5),
+            Text(
+              status,
+              style: TextStyle(
+                color: Colors.white.withOpacity(0.62),
+                fontSize: 10,
+                height: 1.25,
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -374,6 +749,10 @@ class _GraphPainter extends CustomPainter {
   final List<_GEdge> edges;
   final double yaw, pitch, zoom;
   final bool compact;
+  final bool showAllLabels;
+  final int? hoveredNode;
+  final int? activeNode;
+  final int? focusedNode;
 
   _GraphPainter({
     required this.nodes,
@@ -382,6 +761,10 @@ class _GraphPainter extends CustomPainter {
     required this.pitch,
     required this.zoom,
     required this.compact,
+    required this.showAllLabels,
+    required this.hoveredNode,
+    required this.activeNode,
+    required this.focusedNode,
   });
 
   // Rotate by yaw/pitch, then perspective-divide. Returns screen point + a
@@ -423,14 +806,17 @@ class _GraphPainter extends CustomPainter {
         fromId: '', toId: '', type: e.type,
         strength: e.strength, timestamp: DateTime.now(),
       ).color;
+      final isFocusEdge = focusedNode == null || e.a == focusedNode || e.b == focusedNode;
+      final focusFade = isFocusEdge ? 1.0 : 0.16;
 
       // Superseded claims are drawn as faint grey ghosts — he used to think
       // this. Kept, not deleted: a mind that changed is more real than one that
       // was always right, and "he believed X until March" is knowledge too.
       final col = e.superseded ? const Color(0xFF6B7A88) : base;
-      final op = e.superseded
-          ? 0.10 * depth
-          : (base.opacity * (0.35 + e.strength * 0.5) * depth);
+      final op = (e.superseded
+              ? 0.10 * depth
+              : (base.opacity * (0.35 + e.strength * 0.5) * depth)) *
+          focusFade;
 
       canvas.drawLine(
         a.p,
@@ -443,23 +829,54 @@ class _GraphPainter extends CustomPainter {
     }
 
     // ── relation labels ─────────────────────────────────────────────────────
-    // "cares for" on the wire — the thing this whole exercise exists for. Only
-    // when zoomed in: every relation at once is an unreadable hairball.
-    if (zoom > 1.35) {
+    // "cares for" on the wire — the thing this whole exercise exists for.
+    // Even with LABELS on, relation text gets messy faster than node text:
+    // every edge wants the midpoint. Keep the hot path immediate, then budget
+    // the rest by useful/visible edges so the cortex reads like a map, not soup.
+    final hotNode = hoveredNode ?? activeNode ?? focusedNode;
+    final shouldShowRelationLabels =
+        zoom > 1.35 && (showAllLabels || hotNode != null);
+    if (shouldShowRelationLabels) {
       final reveal = ((zoom - 1.35) / 0.5).clamp(0.0, 1.0);
+      final relationCandidates = <_GEdge>[];
       for (final e in edges) {
         if (e.relation.isEmpty || e.relation == 'relates to') continue;
         if (e.superseded) continue; // history, not a current claim
+        final isHotEdge = hotNode != null && (e.a == hotNode || e.b == hotNode);
+        if (!showAllLabels && !isHotEdge) continue;
         final a = proj[e.a], b = proj[e.b];
         final depth = (a.depth + b.depth) / 2;
         if (depth < 0.75) continue; // behind the mass — don't clutter
+        relationCandidates.add(e);
+      }
+
+      relationCandidates.sort((a, b) {
+        final aHot = hotNode != null && (a.a == hotNode || a.b == hotNode);
+        final bHot = hotNode != null && (b.a == hotNode || b.b == hotNode);
+        final hotCmp = (bHot ? 1 : 0) - (aHot ? 1 : 0);
+        if (hotCmp != 0) return hotCmp;
+
+        final aDepth = (proj[a.a].depth + proj[a.b].depth) / 2;
+        final bDepth = (proj[b.a].depth + proj[b.b].depth) / 2;
+        final aScore = a.strength * aDepth;
+        final bScore = b.strength * bDepth;
+        return bScore.compareTo(aScore);
+      });
+
+      final relationBudget = showAllLabels ? (compact ? 6 : 18) : 8;
+      var drawnRelations = 0;
+      for (final e in relationCandidates) {
+        if (drawnRelations >= relationBudget) break;
+        final a = proj[e.a], b = proj[e.b];
+        final isHotEdge = hotNode != null && (e.a == hotNode || e.b == hotNode);
         _text(
           canvas,
           Offset((a.p.dx + b.p.dx) / 2, (a.p.dy + b.p.dy) / 2),
           e.relation,
-          const Color(0xFFA8C6DE).withOpacity(0.85 * reveal),
-          8.5,
+          const Color(0xFFA8C6DE).withOpacity((isHotEdge ? 0.95 : 0.72) * reveal),
+          isHotEdge ? 9.0 : 8.0,
         );
+        drawnRelations++;
       }
     }
 
@@ -467,37 +884,61 @@ class _GraphPainter extends CustomPainter {
     final order = List.generate(nodes.length, (i) => i)
       ..sort((i, j) => proj[i].depth.compareTo(proj[j].depth));
 
+    bool isFocusedOrNeighbor(int index) {
+      if (focusedNode == null) return true;
+      if (index == focusedNode) return true;
+      return edges.any((e) =>
+          (e.a == focusedNode && e.b == index) ||
+          (e.b == focusedNode && e.a == index));
+    }
+
     for (final i in order) {
       final n = nodes[i];
       final pr = proj[i];
       final col = _nodeColour(n.type);
       final r = (1.6 + n.importance * 3.4) * pr.depth;
+      final focusFade = isFocusedOrNeighbor(i) ? 1.0 : 0.18;
 
       // cheap bloom: a wide soft disc under a bright core
       canvas.drawCircle(pr.p, r * 2.6,
-          Paint()..color = col.withOpacity(0.10 * pr.depth));
+          Paint()..color = col.withOpacity(0.10 * pr.depth * focusFade));
       canvas.drawCircle(pr.p, r,
-          Paint()..color = col.withOpacity((0.55 + n.importance * 0.45).clamp(0.0, 1.0)));
+          Paint()..color = col.withOpacity(((0.55 + n.importance * 0.45) * focusFade).clamp(0.0, 1.0)));
     }
 
     // ── node names ──────────────────────────────────────────────────────────
-    // Legible at rest — you should be able to read what's in there without
-    // flying around. Culled to the front half so the back doesn't bleed through.
-    final labelBudget = compact ? 14 : 48;
-    final byImp = List.generate(nodes.length, (i) => i)
-      ..sort((i, j) => nodes[j].importance.compareTo(nodes[i].importance));
+    // Hidden by default, but not dead: hover/activity/focus labels still appear
+    // with LABELS off so the cortex can be explored without turning into soup.
+    final labelSet = <int>{
+      if (showAllLabels) ...List.generate(nodes.length, (i) => i),
+      if (hoveredNode != null) hoveredNode!,
+      if (activeNode != null) activeNode!,
+      if (focusedNode != null) focusedNode!,
+    };
+    final labelBudget = showAllLabels ? (compact ? 14 : 48) : labelSet.length;
+    final orderedLabels = labelSet.toList()
+      ..sort((i, j) {
+        final activeCmp = (j == activeNode ? 1 : 0) - (i == activeNode ? 1 : 0);
+        if (activeCmp != 0) return activeCmp;
+        final hoverCmp = (j == hoveredNode ? 1 : 0) - (i == hoveredNode ? 1 : 0);
+        if (hoverCmp != 0) return hoverCmp;
+        return nodes[j].importance.compareTo(nodes[i].importance);
+      });
     var drawn = 0;
-    for (final i in byImp) {
+    for (final i in orderedLabels) {
       if (drawn >= labelBudget) break;
+      if (i < 0 || i >= nodes.length) continue;
       final pr = proj[i];
-      if (pr.depth < 0.9) continue;
+      if (showAllLabels && pr.depth < 0.9) continue;
+      final isHot = i == hoveredNode || i == activeNode || i == focusedNode;
       _text(
         canvas,
-        pr.p + Offset(0, -(6 + nodes[i].importance * 4)),
+        pr.p + Offset(0, -(7 + nodes[i].importance * 5)),
         nodes[i].label,
-        _nodeColour(nodes[i].type)
-            .withOpacity((0.45 + nodes[i].importance * 0.5).clamp(0.0, 0.95)),
-        compact ? 7.5 : 9.5,
+        _nodeColour(nodes[i].type).withOpacity(isHot
+            ? 0.98
+            : (0.45 + nodes[i].importance * 0.5).clamp(0.0, 0.82)),
+        compact ? (isHot ? 8.5 : 7.5) : (isHot ? 10.5 : 9.5),
       );
       drawn++;
     }
@@ -506,7 +947,7 @@ class _GraphPainter extends CustomPainter {
       _text(
         canvas,
         Offset(size.width / 2, size.height - 12),
-        '${nodes.length} nodes · ${edges.length} links · drag to orbit · scroll to zoom',
+        '${nodes.length} nodes · ${edges.length} links · drag to orbit · scroll to zoom · double-click node to fly',
         Colors.white.withOpacity(0.28),
         8,
       );
@@ -555,5 +996,9 @@ class _GraphPainter extends CustomPainter {
       old.pitch != pitch ||
       old.zoom != zoom ||
       old.nodes != nodes ||
-      old.edges != edges;
+      old.edges != edges ||
+      old.showAllLabels != showAllLabels ||
+      old.hoveredNode != hoveredNode ||
+      old.activeNode != activeNode ||
+      old.focusedNode != focusedNode;
 }

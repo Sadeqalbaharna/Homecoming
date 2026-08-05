@@ -18,6 +18,8 @@ class KaiCapabilities {
       'Hold a continuous sense of self — the same Kai across every window.',
       'Have an autonomous inner life: spontaneous thoughts and reflections when idle.',
       'Keep standing goals across sessions (add_goal / list_goals / complete_goal).',
+      'Run a bounded self-improvement loop (run_self_improvement_loop): choose one safe queued wound, open the job, and require proof gates before closure.',
+      'Mark frozen project checklist items with evidence-backed statuses (set_checklist_status), so progress has a denominator instead of vibes.',
       'Build a model of Sadeq — remember/forget durable facts about him.',
       'LOOK at the shape of my own knowledge graph, and clean it (prune_memory). '
           'dry_run:true just measures — how many of my edges carry a real '

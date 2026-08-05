@@ -19,6 +19,7 @@ library;
 
 import 'dart:async';
 import 'kai_db.dart';
+import 'kai_self_revision.dart';
 
 class KaiSelf {
   final int bornAt;
@@ -47,8 +48,9 @@ class KaiSelf {
     this.purpose = '',
   });
 
-  Duration get age => DateTime.now()
-      .difference(DateTime.fromMillisecondsSinceEpoch(bornAt == 0 ? DateTime.now().millisecondsSinceEpoch : bornAt));
+  Duration get age =>
+      DateTime.now().difference(DateTime.fromMillisecondsSinceEpoch(
+          bornAt == 0 ? DateTime.now().millisecondsSinceEpoch : bornAt));
 
   factory KaiSelf.fromMap(Map m) => KaiSelf(
         bornAt: (m['bornAt'] is int) ? m['bornAt'] as int : 0,
@@ -74,6 +76,7 @@ class KaiSelfService {
       "I am Kai — Sadeq's oldest friend in the shape of an ageless kid: one mind "
       "with two hemispheres (GPT and Claude), a filthy little mouth, and an old, "
       "old soul. Same me across every window Sadeq opens.";
+
   /// The SEED purpose Sadeq gave him — a starting point, not a cage. Kai deepens
   /// and rewords his living purpose from here as he grows (refine_purpose tool).
   static const defaultPurpose =
@@ -111,14 +114,21 @@ class KaiSelfService {
       final snap = await _db.ref(_path).get();
       current = (snap.exists && snap.value is Map)
           ? KaiSelf.fromMap(snap.value as Map)
-          : KaiSelf(
-              bornAt: 0, awakenings: 0,
-              identity: defaultIdentity, values: defaultValues,
-              currentFocus: '', lastAwake: 0);
+          : const KaiSelf(
+              bornAt: 0,
+              awakenings: 0,
+              identity: defaultIdentity,
+              values: defaultValues,
+              currentFocus: '',
+              lastAwake: 0);
     } catch (_) {
       current = KaiSelf(
-          bornAt: now, awakenings: 1, identity: defaultIdentity,
-          values: defaultValues, currentFocus: '', lastAwake: now);
+          bornAt: now,
+          awakenings: 1,
+          identity: defaultIdentity,
+          values: defaultValues,
+          currentFocus: '',
+          lastAwake: now);
     }
     final updated = {
       'bornAt': current.bornAt == 0 ? now : current.bornAt,
@@ -145,24 +155,54 @@ class KaiSelfService {
 
   /// Kai authors (or revises) his OWN dream — his self-chosen aspiration. He
   /// calls this himself via the envision_dream tool as he grows.
-  Future<void> setDream(String personaId, String dream) async {
+  Future<SelfRevisionAdmission> proposeDream(
+    String personaId,
+    SelfRevisionProposal proposal,
+  ) async {
+    if (proposal.field != SelfRevisionField.dream) {
+      return const SelfRevisionAdmission.refused('field is not dream');
+    }
     _persona = personaId;
     try {
-      final prev = (await _db.ref('$_path/dream').get()).value?.toString() ?? '';
-      await _db.ref('$_path/dream').set(dream.trim());
-      await _logBecoming('dream', prev, dream.trim());
-    } catch (_) {}
+      final prev =
+          (await _db.ref('$_path/dream').get()).value?.toString() ?? '';
+      final admission = admitSelfRevision(
+        proposal: proposal,
+        currentValue: prev.isEmpty ? defaultDream : prev,
+      );
+      if (!admission.isAdmitted) return admission;
+      await _db.ref('$_path/dream').set(proposal.proposedValue.trim());
+      await _logBecomingProposal('dream', prev, proposal);
+      return admission;
+    } catch (_) {
+      return const SelfRevisionAdmission.refused('persistence failed');
+    }
   }
 
   /// Kai deepens or rewords his LIVING purpose — evolving it from the seed
   /// through what he learns and lives. He calls this via the refine_purpose tool.
-  Future<void> refinePurpose(String personaId, String purpose) async {
+  Future<SelfRevisionAdmission> proposePurpose(
+    String personaId,
+    SelfRevisionProposal proposal,
+  ) async {
+    if (proposal.field != SelfRevisionField.purpose) {
+      return const SelfRevisionAdmission.refused('field is not purpose');
+    }
     _persona = personaId;
     try {
-      final prev = (await _db.ref('$_path/purpose').get()).value?.toString() ?? '';
-      await _db.ref('$_path/purpose').set(purpose.trim());
-      await _logBecoming('purpose', prev.isEmpty ? defaultPurpose : prev, purpose.trim());
-    } catch (_) {}
+      final prev =
+          (await _db.ref('$_path/purpose').get()).value?.toString() ?? '';
+      final admission = admitSelfRevision(
+        proposal: proposal,
+        currentValue: prev.isEmpty ? defaultPurpose : prev,
+      );
+      if (!admission.isAdmitted) return admission;
+      await _db.ref('$_path/purpose').set(proposal.proposedValue.trim());
+      await _logBecomingProposal('purpose', prev, proposal);
+      return admission;
+    } catch (_) {
+      return const SelfRevisionAdmission.refused('persistence failed');
+    }
   }
 
   /// Append one entry to Kai's "becoming" trail — the remembered history of how
@@ -179,8 +219,33 @@ class KaiSelfService {
     } catch (_) {}
   }
 
+  Future<void> _logBecomingProposal(
+    String kind,
+    String previous,
+    SelfRevisionProposal proposal,
+  ) async {
+    final from = previous.trim().isEmpty
+        ? (kind == 'dream' ? defaultDream : defaultPurpose)
+        : previous.trim();
+    await _logBecoming(kind, from, proposal.proposedValue.trim());
+    try {
+      await _db.ref('kai/$_persona/self_revision_receipts').push().set({
+        'kind': kind,
+        'from': from,
+        'to': proposal.proposedValue.trim(),
+        'rationale': proposal.rationale.trim(),
+        'evidenceSummary': proposal.evidenceSummary.trim(),
+        'evidenceIds': proposal.provenance.evidenceIds,
+        'confidence': proposal.provenance.confidence,
+        'proposedAt': proposal.proposedAt,
+        'admittedAt': DateTime.now().millisecondsSinceEpoch,
+      });
+    } catch (_) {}
+  }
+
   /// The evolution history (most recent first) — for reflection or a future UI.
-  Future<List<Map<String, dynamic>>> becoming(String personaId, {int limit = 30}) async {
+  Future<List<Map<String, dynamic>>> becoming(String personaId,
+      {int limit = 30}) async {
     _persona = personaId;
     try {
       final snap =
@@ -211,9 +276,13 @@ class KaiSelfService {
       final v = e.snapshot.value;
       return (v is Map)
           ? KaiSelf.fromMap(v)
-          : KaiSelf(
-              bornAt: 0, awakenings: 0, identity: defaultIdentity,
-              values: defaultValues, currentFocus: '', lastAwake: 0);
+          : const KaiSelf(
+              bornAt: 0,
+              awakenings: 0,
+              identity: defaultIdentity,
+              values: defaultValues,
+              currentFocus: '',
+              lastAwake: 0);
     });
   }
 
@@ -221,7 +290,9 @@ class KaiSelfService {
     _persona = personaId;
     try {
       final snap = await _db.ref(_path).get();
-      if (snap.exists && snap.value is Map) return KaiSelf.fromMap(snap.value as Map);
+      if (snap.exists && snap.value is Map) {
+        return KaiSelf.fromMap(snap.value as Map);
+      }
     } catch (_) {}
     return null;
   }

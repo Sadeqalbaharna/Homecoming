@@ -1,8 +1,10 @@
 // ConversationStoreService — Phase 3 of the unified Kai mind.
 //
-// Single source of truth for conversation history, cross-surface.
-// Firebase is canonical; an in-memory session buffer avoids hitting
-// Firebase on every turn during an active conversation.
+// Single source of truth for conversation history, scoped by surface.
+// Same Kai, separate rooms: in-person/shared-space chat and messenger app
+// transcripts must not cross-populate. Firebase is canonical; an in-memory
+// session buffer avoids hitting Firebase on every turn during an active
+// conversation.
 //
 // Firebase path: /conversations/{personaId}/{pushId}
 //   { userMessage, aiResponse, personalityDeltas, timestamp }
@@ -24,7 +26,7 @@ class ConversationStoreService {
   factory ConversationStoreService() => _instance;
   ConversationStoreService._internal();
 
-  // In-memory session buffer — keyed by personaId
+  // In-memory session buffer — keyed by personaId + surfaceId.
   // Each entry is a formatted string: "[timestamp] User: ..." or "[timestamp] Kai: ..."
   final Map<String, List<String>> _sessionBuffer = {};
   final Map<String, bool> _loaded = {};
@@ -32,17 +34,32 @@ class ConversationStoreService {
   static KaiDb? get _db =>
       FirebaseService.isAvailable ? KaiDb.instance : null;
 
-  static String _path(String personaId) => 'conversations/$personaId';
+  static String _key(String personaId, String surfaceId) => '$personaId::$surfaceId';
+
+  static String _path(String personaId, String surfaceId) =>
+      'conversations/$personaId/$surfaceId';
 
   // ── Public API ─────────────────────────────────────────────────────────────
 
+  /// Clears in-memory state. Used by tests and logout-style resets; Firebase is untouched.
+  void resetSessionForTesting() {
+    _sessionBuffer.clear();
+    _loaded.clear();
+  }
+
   /// Returns the last [maxTurns] exchanges as formatted strings.
-  /// Loads from Firebase on first call for this persona, then uses session buffer.
-  Future<List<String>> getHistory(String personaId, {int maxTurns = 20}) async {
-    if (!(_loaded[personaId] ?? false)) {
-      await _loadFromFirebase(personaId, turns: maxTurns);
+  /// Loads from Firebase on first call for this persona + surface, then uses
+  /// the matching session buffer.
+  Future<List<String>> getHistory(
+    String personaId, {
+    String surfaceId = 'in_person',
+    int maxTurns = 20,
+  }) async {
+    final key = _key(personaId, surfaceId);
+    if (!(_loaded[key] ?? false)) {
+      await _loadFromFirebase(personaId, surfaceId, turns: maxTurns);
     }
-    final buffer = _sessionBuffer[personaId] ?? [];
+    final buffer = _sessionBuffer[key] ?? [];
     final maxMessages = maxTurns * 2;
     if (buffer.length <= maxMessages) return List.unmodifiable(buffer);
     return List.unmodifiable(buffer.sublist(buffer.length - maxMessages));
@@ -52,22 +69,28 @@ class ConversationStoreService {
   /// Fire-and-forget for the Firebase write — never blocks the chat.
   Future<void> saveTurn({
     required String personaId,
-    required String userMessage,
-    required String aiReply,
+    String surfaceId = 'in_person',
+    String? userMessage,
+    String? aiReply,
     required Map<String, int> personalityDeltas,
   }) async {
     final ts = DateTime.now().millisecondsSinceEpoch;
+    final hasUser = userMessage != null && userMessage.trim().isNotEmpty;
+    final hasKai = aiReply != null && aiReply.trim().isNotEmpty;
+    if (!hasUser && !hasKai) return;
 
     // Kai's own machinery must never be remembered as something SADEQ said.
     // "(proactive)" turns are Kai reaching out unprompted — the seed is an
     // instruction to himself, so we store a neutral marker instead. Otherwise he
     // reads his own nudge back later and thinks Sadeq wrote it.
-    final storedUser = _sanitiseUser(userMessage);
+    final storedUser = hasUser ? _sanitiseUser(userMessage!) : '';
+    final storedKai = hasKai ? aiReply! : '';
 
-    // Append to session buffer immediately (no await)
-    final buffer = _sessionBuffer.putIfAbsent(personaId, () => []);
-    buffer.add('[$ts] User: $storedUser');
-    buffer.add('[$ts] Kai: $aiReply');
+    // Append to the matching surface session buffer immediately (no await).
+    final key = _key(personaId, surfaceId);
+    final buffer = _sessionBuffer.putIfAbsent(key, () => []);
+    if (storedUser.isNotEmpty) buffer.add('[$ts] User: $storedUser');
+    if (storedKai.isNotEmpty) buffer.add('[$ts] Kai: $storedKai');
 
     // Keep buffer from growing unbounded (cap at 60 messages = 30 turns)
     if (buffer.length > 60) buffer.removeRange(0, buffer.length - 60);
@@ -75,8 +98,9 @@ class ConversationStoreService {
     // Write to Firebase (fire-and-forget)
     _writeToFirebase(
       personaId: personaId,
+      surfaceId: surfaceId,
       userMessage: storedUser,
-      aiReply: aiReply,
+      aiReply: storedKai,
       personalityDeltas: personalityDeltas,
       timestamp: ts,
     ).catchError((e) => print('⚠️ [ConvStore] Firebase write failed: $e'));
@@ -90,16 +114,22 @@ class ConversationStoreService {
     return userMessage;
   }
 
-  /// Clears the session buffer for a persona (e.g. on persona switch).
-  void clearSession(String personaId) {
-    _sessionBuffer.remove(personaId);
-    _loaded.remove(personaId);
+  /// Clears the session buffer for a persona + surface (e.g. on persona switch).
+  void clearSession(String personaId, {String surfaceId = 'in_person'}) {
+    final key = _key(personaId, surfaceId);
+    _sessionBuffer.remove(key);
+    _loaded.remove(key);
   }
 
   // ── Private ────────────────────────────────────────────────────────────────
 
-  Future<void> _loadFromFirebase(String personaId, {int turns = 20}) async {
-    _loaded[personaId] = true; // Mark as attempted even if Firebase is down
+  Future<void> _loadFromFirebase(
+    String personaId,
+    String surfaceId, {
+    int turns = 20,
+  }) async {
+    final key = _key(personaId, surfaceId);
+    _loaded[key] = true; // Mark as attempted even if Firebase is down
 
     if (_db == null) {
       print('📭 [ConvStore] Firebase unavailable — starting with empty history');
@@ -110,12 +140,12 @@ class ConversationStoreService {
       // Fetch last (turns * 2 + a little headroom) records.
       // No orderByChild to avoid index requirement — sort client-side.
       final snap = await _db!
-          .ref(_path(personaId))
+          .ref(_path(personaId, surfaceId))
           .limitToLast(turns * 2 + 10)
           .get();
 
       if (!snap.exists || snap.value == null) {
-        print('📭 [ConvStore] No history in Firebase for $personaId');
+        print('📭 [ConvStore] No history in Firebase for $personaId/$surfaceId');
         return;
       }
 
@@ -132,15 +162,15 @@ class ConversationStoreService {
       }).toList()
         ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
 
-      // Convert to formatted strings and seed the session buffer
-      final buffer = _sessionBuffer.putIfAbsent(personaId, () => []);
+      // Convert to formatted strings and seed the matching surface buffer.
+      final buffer = _sessionBuffer.putIfAbsent(key, () => []);
       for (final r in records) {
         if (r.userMessage.isEmpty && r.aiResponse.isEmpty) continue;
         buffer.add('[${r.timestamp}] User: ${r.userMessage}');
         buffer.add('[${r.timestamp}] Kai: ${r.aiResponse}');
       }
 
-      print('📬 [ConvStore] Loaded ${records.length} turns from Firebase for $personaId');
+      print('📬 [ConvStore] Loaded ${records.length} turns from Firebase for $personaId/$surfaceId');
     } catch (e) {
       print('⚠️ [ConvStore] Firebase load failed: $e');
     }
@@ -148,17 +178,19 @@ class ConversationStoreService {
 
   Future<void> _writeToFirebase({
     required String personaId,
+    required String surfaceId,
     required String userMessage,
     required String aiReply,
     required Map<String, int> personalityDeltas,
     required int timestamp,
   }) async {
     if (_db == null) return;
-    await _db!.ref(_path(personaId)).push().set({
+    await _db!.ref(_path(personaId, surfaceId)).push().set({
       'userMessage':       userMessage,
       'aiResponse':        aiReply,
       'personalityDeltas': personalityDeltas,
       'timestamp':         timestamp,
+      'surfaceId':         surfaceId,
     });
   }
 }

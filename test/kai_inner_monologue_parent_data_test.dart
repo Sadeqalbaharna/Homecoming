@@ -3,6 +3,29 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:homecoming_app/widgets/kai_inner_monologue.dart';
 
 void main() {
+  test('only explicitly model-generated records qualify as inner thoughts', () {
+    expect(
+      KaiInnerMonologue.isGenuineThought({
+        'text': 'a new connection clicked',
+        'origin': 'model_generated',
+      }),
+      isTrue,
+    );
+    expect(
+      KaiInnerMonologue.isGenuineThought({
+        'text': 'Ideas are smashing into each other in here and I love it.',
+        'synthetic': true,
+      }),
+      isFalse,
+    );
+    expect(
+      KaiInnerMonologue.isGenuineThought({
+        'text': 'legacy unproven record',
+      }),
+      isFalse,
+    );
+  });
+
   testWidgets('ambient thought positions only as a direct Stack child',
       (tester) async {
     await tester.pumpWidget(

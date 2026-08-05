@@ -106,6 +106,47 @@ class CodeWorkspaceService {
     }
   }
 
+  /// Acquire the Homecoming repo without making the model guess a path.
+  /// Used when a persisted coding job resumes before a workspace was restored.
+  Future<bool> ensureHomecomingWorkspace() async {
+    await load();
+
+    bool valid(String? path) {
+      if (path == null || path.trim().isEmpty) return false;
+      final root = Directory(path.trim());
+      return root.existsSync() &&
+          File('${root.path}${Platform.pathSeparator}pubspec.yaml').existsSync() &&
+          Directory('${root.path}${Platform.pathSeparator}lib').existsSync();
+    }
+
+    if (valid(_root)) return true;
+
+    for (final project in _projects) {
+      if (nameOf(project).toLowerCase() == 'homecoming_app' && valid(project)) {
+        await setRoot(project);
+        return true;
+      }
+    }
+
+    final candidates = <String>[];
+    var cursor = Directory.current;
+    for (var i = 0; i < 8; i++) {
+      candidates.add(cursor.path);
+      final parent = cursor.parent;
+      if (parent.path == cursor.path) break;
+      cursor = parent;
+    }
+    if (Platform.isWindows) candidates.add(r'C:\code\homecoming_app');
+
+    for (final candidate in candidates) {
+      if (nameOf(candidate).toLowerCase() == 'homecoming_app' && valid(candidate)) {
+        await setRoot(candidate);
+        return true;
+      }
+    }
+    return false;
+  }
+
   /// Short display name (last path segment) for a project path.
   static String nameOf(String path) {
     final parts = path.replaceAll('\\', '/').split('/')..removeWhere((s) => s.isEmpty);
@@ -119,7 +160,7 @@ class CodeWorkspaceService {
     while (r.startsWith('/')) {
       r = r.substring(1);
     }
-    if (r.isEmpty) return _root;
+    if (r.isEmpty || r == '.') return _root;
     final segs = r.split('/').where((s) => s.isNotEmpty).toList();
     for (final s in segs) {
       if (s == '..' || s == '.' || s.contains(':')) return null; // no escaping

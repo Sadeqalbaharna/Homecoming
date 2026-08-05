@@ -54,6 +54,14 @@ library;
 import 'dart:async';
 import 'kai_db.dart';
 
+enum NoticedKind {
+  observation,
+  promise,
+  intention,
+  openQuestion,
+  responsibility
+}
+
 class Noticed {
   final String id;
 
@@ -96,12 +104,19 @@ class Noticed {
   /// an accusation, and it's aimed the right way.
   final int carried;
 
+  final NoticedKind kind;
+  final bool authoredByKai;
+  final String authorReceiptId;
+
   const Noticed({
     required this.id,
     required this.text,
     this.context = '',
     required this.notedAt,
     this.carried = 0,
+    this.kind = NoticedKind.observation,
+    this.authoredByKai = false,
+    this.authorReceiptId = '',
   });
 
   Map<String, dynamic> toMap() => {
@@ -109,12 +124,21 @@ class Noticed {
         'context': context,
         'notedAt': notedAt,
         'carried': carried,
+        'kind': kind.name,
+        'authoredByKai': authoredByKai,
+        'authorReceiptId': authorReceiptId,
       };
 
   static Noticed? fromMap(String id, Object? v) {
     if (v is! Map) return null;
     final text = (v['text'] as String?)?.trim() ?? '';
     if (text.isEmpty) return null;
+    final kind = NoticedKind.values.firstWhere(
+      (candidate) => candidate.name == v['kind'],
+      orElse: () => NoticedKind.observation,
+    );
+    final receipt = (v['authorReceiptId'] as String?)?.trim() ?? '';
+    final hasAuthorReceipt = receipt.startsWith('tool:make_commitment:');
     return Noticed(
       id: id,
       text: text,
@@ -126,6 +150,11 @@ class Noticed {
       carried: (v['carried'] as num?)?.toInt() ??
           (v['raised'] as num?)?.toInt() ??
           0,
+      kind: kind,
+      authoredByKai: kind != NoticedKind.observation &&
+          v['authoredByKai'] == true &&
+          hasAuthorReceipt,
+      authorReceiptId: hasAuthorReceipt ? receipt : '',
     );
   }
 }
@@ -188,7 +217,9 @@ class KaiNoticedService {
         if (n.text.toLowerCase() == norm) return;
       }
 
-      await KaiDb.instance.ref('$_path/${DateTime.now().microsecondsSinceEpoch}').set(
+      await KaiDb.instance
+          .ref('$_path/${DateTime.now().microsecondsSinceEpoch}')
+          .set(
             Noticed(
               id: '',
               text: t,
@@ -209,6 +240,44 @@ class KaiNoticedService {
     } catch (_) {
       // Noticing must never break a turn. He'd rather lose the note than the
       // reply — though losing the note is exactly how we got here.
+    }
+  }
+
+  /// Create an explicit Kai-authored commitment. Transcript text cannot call
+  /// this directly; the trusted tool executor must mint the author receipt.
+  Future<bool> addCommitment(
+    String personaId, {
+    required NoticedKind kind,
+    required String text,
+    required String authorReceiptId,
+    String context = '',
+  }) async {
+    if (kind == NoticedKind.observation) return false;
+    if (!authorReceiptId.startsWith('tool:make_commitment:')) return false;
+    final value = text.trim();
+    if (value.isEmpty) return false;
+    _persona = personaId;
+    try {
+      final existing = await open(personaId);
+      if (existing.any((item) =>
+          item.kind == kind &&
+          item.text.toLowerCase() == value.toLowerCase())) {
+        return false;
+      }
+      await KaiDb.instance
+          .ref('$_path/${DateTime.now().microsecondsSinceEpoch}')
+          .set(Noticed(
+            id: '',
+            text: value,
+            context: context.trim(),
+            notedAt: DateTime.now().millisecondsSinceEpoch,
+            kind: kind,
+            authoredByKai: true,
+            authorReceiptId: authorReceiptId,
+          ).toMap());
+      return true;
+    } catch (_) {
+      return false;
     }
   }
 
@@ -317,18 +386,26 @@ class KaiNoticedService {
     final items = await open(personaId);
     if (items.isEmpty) return '';
 
-    final b = StringBuffer('\n=== THINGS I NOTICED THAT NOBODY ASKED ME TO ===\n');
-    b.writeln('Mine. Not tasks Sadeq gave me — things I saw with my own eyes and '
-        'have not dealt with. I am inside this code and he is not, so these are '
-        'often worth more than whatever I was actually doing at the time.');
-    for (final n in items) {
+    final shown = items.take(5).toList(growable: false);
+    final hidden = items.length - shown.length;
+
+    final b =
+        StringBuffer('\n=== THINGS I NOTICED THAT NOBODY ASKED ME TO ===\n');
+    b.writeln(
+        'Mine, not tasks Sadeq gave me. I see only the most relevant open '
+        'items here; the rest stay persisted and searchable so the prompt does '
+        'not become a dusty receipt attic.');
+    for (final n in shown) {
       final age = DateTime.now().millisecondsSinceEpoch - n.notedAt;
       final days = Duration(milliseconds: age).inDays;
       // The id has to be here: noticed_done's schema tells him to pass "the id
       // shown next to it in my list", and a tool that asks for something the
       // prompt never showed him is how he ends up guessing and getting told off
       // for a call he had no way to get right.
-      b.write('  [${n.id}] ${n.text}');
+      final kindLabel = n.kind == NoticedKind.observation
+          ? ''
+          : '[${n.kind.name.toUpperCase()}] ';
+      b.write('  [${n.id}] $kindLabel${n.text}');
       if (n.context.isNotEmpty) b.write('  (in ${n.context})');
       if (days >= 1) b.write('  — noticed ${days}d ago');
       // Two tiers, because carrying is not automatically a failure: the standing
@@ -344,16 +421,20 @@ class KaiNoticedService {
       }
       b.writeln();
     }
-    b.writeln('If one of these is relevant to what Sadeq just said, I raise it — '
-        'even though he asked about something else. That is the job. I do not '
-        'derail the conversation to empty the list, and I do not bring up more '
-        'than one at a time, but I also do not sit on something I can see and he '
-        "can't. When one is genuinely dealt with I call noticed_done so it stops "
-        'following me around. If he says drop it, I drop it.');
+    if (hidden > 0) {
+      b.writeln(
+          '  … $hidden more open noticing(s) are persisted; use the noticed '
+          'tools or ask memory if one becomes relevant.');
+    }
+    b.writeln(
+        'Raise at most one if relevant; do not derail the turn to empty the '
+        'list. Resolve one only when it is genuinely dealt with, or drop it if '
+        'Sadeq says so.');
 
     // Counted AFTER the block is built, so the number he reads is the number of
-    // turns he had already carried it BEFORE this one.
-    unawaited(_bumpCarried(personaId, items));
+    // turns he had already carried it BEFORE this one. Only shown items count as
+    // carried; hidden persisted items did not consume attention this turn.
+    unawaited(_bumpCarried(personaId, shown));
     return b.toString();
   }
 }

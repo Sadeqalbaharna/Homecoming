@@ -313,8 +313,8 @@ class KaiCortexScreen extends StatelessWidget {
         backgroundColor: const Color(0xFF02040A),
         foregroundColor: const Color(0xFFCFE3F5),
         elevation: 0,
-        title: const Text('Kai · Cortex',
-            style: TextStyle(fontSize: 13, letterSpacing: 4)),
+        title: const Text('Living Memory Atlas · Beta',
+            style: TextStyle(fontSize: 13, letterSpacing: 2.4)),
       ),
       body: KaiCortexView(personaId: personaId),
     );

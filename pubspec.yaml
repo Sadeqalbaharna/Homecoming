@@ -54,6 +54,7 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0
+  test: ^1.25.8
   # Generates the launcher icon at every Android/iOS density from one PNG.
   flutter_launcher_icons: ^0.14.1
 

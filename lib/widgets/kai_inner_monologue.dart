@@ -71,6 +71,11 @@ class KaiInnerMonologue extends StatefulWidget {
     this.maxWidth = 260,
   });
 
+  static bool isGenuineThought(Map value) =>
+      value['text'] != null &&
+      value['synthetic'] != true &&
+      value['origin'] == 'model_generated';
+
   /// Keeps AnimatedPositioned under its required Stack parent. Public only so
   /// the parent-data contract can be exercised without a live database stream.
   static Widget ambientLayer({
@@ -120,7 +125,10 @@ class _KaiInnerMonologueState extends State<KaiInnerMonologue> {
       if (v is! Map) return;
       final list = <_Thought>[];
       v.forEach((_, val) {
-        if (val is Map && val['text'] != null) {
+        // Fail closed: only records explicitly stamped by a model-generation
+        // path are inner thoughts. Historical templates and offline fallbacks
+        // may remain in RTDB, but the UI must never impersonate them as mind.
+        if (val is Map && KaiInnerMonologue.isGenuineThought(val)) {
           list.add(_Thought(
             (val['text'] ?? '').toString(),
             (val['ts'] is int) ? val['ts'] as int : 0,

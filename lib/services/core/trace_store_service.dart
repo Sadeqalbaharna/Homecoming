@@ -65,9 +65,14 @@ class TraceStoreService {
   Directory? _dir;
   bool _failedOnce = false;
 
+  /// Test-only seam: keeps TraceStore readable without mocking path_provider.
+  /// Production never sets this; real traces still live outside the repo.
+  Directory? debugOverrideDir;
+
   /// Where the corpus lives. Outside the repo on purpose: it's data, not source,
   /// and it must never end up in a commit or be rewritten by a checkout.
   Future<Directory?> _traceDir() async {
+    if (debugOverrideDir != null) return debugOverrideDir;
     if (_dir != null) return _dir;
     if (_failedOnce) return null;
     try {

@@ -129,6 +129,8 @@ class _UsageStatsScreenState extends State<UsageStatsScreen> {
                       const SizedBox(height: 16),
                       _buildTotalCostCard(),
                       const SizedBox(height: 16),
+                      _buildCacheSavingsCard(),
+                      const SizedBox(height: 16),
                       _buildCostBreakdownCard(),
                       const SizedBox(height: 16),
                       _buildFirebaseUsageCard(),
@@ -259,14 +261,90 @@ class _UsageStatsScreenState extends State<UsageStatsScreen> {
     );
   }
 
+  /// What prompt caching is actually worth, in dollars — the receipt for the
+  /// stable-prefix work. All reads null-safe: these keys only exist once the
+  /// cache-aware trackers have fired at least once (see _buildSessionCard's
+  /// war story about this screen and the service drifting apart).
+  Widget _buildCacheSavingsCard() {
+    final saved = (_usageData!['cache_saved'] as num?)?.toDouble() ?? 0.0;
+    final openaiCached =
+        (_usageData!['openai_cached_tokens'] as num?)?.toInt() ?? 0;
+    final claudeCached =
+        (_usageData!['anthropic_cache_read_tokens'] as num?)?.toInt() ?? 0;
+    if (saved == 0.0 && openaiCached == 0 && claudeCached == 0) {
+      // Nothing cached yet — don't render an empty brag.
+      return const SizedBox.shrink();
+    }
+    // Net saving can be briefly negative (Anthropic charges a premium to WRITE
+    // the cache before reads repay it). Show it honestly rather than clamping.
+    final positive = saved >= 0;
+    return Card(
+      color: positive ? Colors.green.shade50 : Colors.orange.shade50,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.savings,
+                    size: 20, color: positive ? Colors.green : Colors.orange),
+                const SizedBox(width: 8),
+                const Text(
+                  'Prompt Cache Savings',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            _buildStatRow(
+              positive ? 'Saved by caching' : 'Cache write premium (so far)',
+              UsageTrackingService.formatCost(saved.abs()),
+              positive ? Colors.green : Colors.orange,
+            ),
+            if (openaiCached > 0)
+              _buildStatRow(
+                'OpenAI cached prompt tokens',
+                UsageTrackingService.formatTokens(openaiCached),
+                Colors.blue,
+              ),
+            if (claudeCached > 0)
+              _buildStatRow(
+                'Claude cached prompt tokens',
+                UsageTrackingService.formatTokens(claudeCached),
+                Colors.deepPurple,
+              ),
+            const SizedBox(height: 4),
+            Text(
+              positive
+                  ? 'Dollars NOT spent re-reading the same prompt. If this stops '
+                      'growing, something above the turn boundary is mutating.'
+                  : 'Cache writes cost a premium before reads repay it — this '
+                      'should flip positive within a few turns. If it doesn\'t, '
+                      'the prefix is churning.',
+              style: TextStyle(color: Colors.grey[600], fontSize: 12),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildCostBreakdownCard() {
     final openaiCost = _usageData!['openai_cost'] as double;
+    // Claude was inside total_cost but had no row here — the meter could say
+    // what Kai cost, never which hemisphere spent it. Null-safe: the key is
+    // new to getUsageStats.
+    final anthropicCost =
+        (_usageData!['anthropic_cost'] as num?)?.toDouble() ?? 0.0;
     final elevenlabsCost = _usageData!['elevenlabs_cost'] as double;
     final firebaseCost = _usageData!['firebase_cost'] as double? ?? 0.0;
     final functionsCost = _usageData!['functions_cost'] as double? ?? 0.0;
     final googleCost = _usageData!['google_cost'] as double? ?? 0.0;
     final totalCost = _usageData!['total_cost'] as double;
 
+    final anthropicPercent =
+        totalCost > 0 ? (anthropicCost / totalCost * 100) : 0.0;
     final openaiPercent = totalCost > 0 ? (openaiCost / totalCost * 100) : 0.0;
     final elevenlabsPercent = totalCost > 0 ? (elevenlabsCost / totalCost * 100) : 0.0;
     final firebasePercent = totalCost > 0 ? (firebaseCost / totalCost * 100) : 0.0;
@@ -296,6 +374,15 @@ class _UsageStatsScreenState extends State<UsageStatsScreen> {
               openaiPercent,
               Colors.green,
             ),
+            if (anthropicCost > 0) ...[
+              const SizedBox(height: 12),
+              _buildCostBreakdownRow(
+                'Anthropic (Claude)',
+                anthropicCost,
+                anthropicPercent,
+                Colors.deepPurple,
+              ),
+            ],
             const SizedBox(height: 12),
             _buildCostBreakdownRow(
               'ElevenLabs (TTS)',

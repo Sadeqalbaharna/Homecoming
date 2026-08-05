@@ -1,13 +1,19 @@
-// lib/core/constants.dart
-import 'package:flutter/material.dart';
-
-/// ===== Layout / Window =====
-const double kSpriteSize = 170;
-const double kRingPadding = 48;
-const double kCanvasWidth = 560;
-const double kCanvasHeight = 600;
-const double kSpriteAlignY = 0.35;
-const bool   kAlwaysOnTop  = false;
+// lib/constants.dart
+//
+// Cross-cutting identity constants ONLY — the things that must have exactly one
+// value across the whole app because a second value means a second Kai.
+//
+// This file used to also carry layout sizes, avatar GIF paths, ring colours and
+// an attention-pulse duration. Every one of them was dead: nothing imported this
+// file except kai_p5_chat_screen (for kKaiModel), and main_mobile.dart declared
+// its own copies of the layout constants a few lines into the file. Two of those
+// copies had DIFFERENT values from the ones here (kSpriteAlignY 0.35 vs 0.30,
+// kAttentionPulse 1200ms vs 2s) — a disagreement that was invisible precisely
+// because the dead half was never read. The GIF paths were superseded by the
+// frame-sequence directories when the avatar moved off GIFs.
+//
+// UI layout constants now live next to the only widget that uses them
+// (main_mobile.dart). What belongs HERE is what more than one voice needs.
 
 /// ===== Persona IDs =====
 /// Kai's single canonical brain id. Everything that reads/writes Kai's
@@ -52,17 +58,8 @@ const String kPersonaKai = 'truekai';
 /// `model.startsWith('gpt-5')` — GPT-5.x needs max_completion_tokens and rejects
 /// max_tokens outright. So this constant is not cosmetic; it changes the shape
 /// of every request.
+///
+/// STILL UNRESOLVED: ai_service.sendMessage's own default is 'gpt-4o' and
+/// main_mobile._modelId is 'gpt-4o' with a toggle to 'gpt-5'. This constant is
+/// the intended answer; those two are not yet wired to it.
 const String kKaiModel = 'gpt-5.5';
-
-/// ===== Timings =====
-const Duration kAttentionPulse = Duration(milliseconds: 1200);
-
-/// ===== Avatar GIF assets (ensure files + pubspec.yaml) =====
-const String kAvatarIdleGif      = 'assets/avatar/idle.gif';
-const String kAvatarAttentionGif = 'assets/avatar/attention.gif';
-const String kAvatarThinkingGif  = 'assets/avatar/thinking.gif';
-const String kAvatarSpeakingGif  = 'assets/avatar/speaking.gif';
-
-/// ===== Visuals =====
-const Color kRingColor = Color(0x66FFFFFF);
-const Color kGlowColor = Color(0x33FFFFFF);

@@ -40,10 +40,27 @@ void main() {
     expect(decision.promptBlock(), contains('deepen the idea with structure'));
   });
 
-  test('trust-mode continuation of Kai Smarter Project stays in coding momentum', () {
+  test('trust-mode continuation is cheap chat without an active job', () {
     final decision = router.decide('okay, go ahead, I give you trust on the Kai smarter layers');
+
+    expect(decision.route, KaiRoute.fastChat);
+  });
+
+  test('trust-mode continuation of an active job stays in coding momentum', () {
+    final decision = router.decide(
+      'okay, go ahead',
+      hasActiveJob: true,
+    );
 
     expect(decision.route, KaiRoute.coding);
     expect(decision.promptBlock(), contains('Route: coding'));
+  });
+
+  test('and now continues an active coding job instead of falling to chat', () {
+    final decision = router.decide('and now?', hasActiveJob: true);
+
+    expect(decision.route, KaiRoute.coding);
+    expect(decision.confidence, greaterThanOrEqualTo(0.8));
+    expect(decision.reasons, contains('continuation of an active persisted job'));
   });
 }

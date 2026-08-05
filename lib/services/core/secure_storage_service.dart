@@ -34,12 +34,33 @@ class SecureStorageService {
   static const String _googleCseIdName = 'google_cse_id';
   static const String _anthropicKeyName = 'anthropic_api_key';
 
+  // ── MARKETPLACE CREDENTIALS (factory mode) ────────────────────────────────
+  //
+  // ⚑ THIS IS WHERE THE STOREFRONT KEYS LIVE. Deliberately here and NOT in
+  // secrets.dart: these tokens can create listings and read sales, so they live
+  // in the OS keychain rather than in any file that could be committed by
+  // accident. Same reasoning as the Anthropic key above.
+  //
+  // To fill them:
+  //   Gumroad → Settings → Advanced → create application → Generate access
+  //             token. Redirect URI can be http://127.0.0.1 for personal use.
+  //             Needs the `edit_products` scope.
+  //   Etsy    → developers.etsy.com → "Create a seller app" (approved in
+  //             minutes, own shop only — no review queue). Needs a live shop.
+  //
+  // Then call setGumroadToken(...) / setEtsyKey(...) once from the settings UI.
+  // Nothing in the factory can publish without these, which is the safe default.
+  static const String _gumroadTokenName = 'gumroad_access_token';
+  static const String _etsyKeyName = 'etsy_api_key';
+
   // Cache keys in memory after first read (performance optimization)
   String? _cachedOpenAIKey;
   String? _cachedElevenLabsKey;
   String? _cachedGoogleKey;
   String? _cachedGoogleCseId;
   String? _cachedAnthropicKey;
+  String? _cachedGumroadToken;
+  String? _cachedEtsyKey;
   
   /// Initialize and check if keys exist
   Future<bool> hasKeys() async {
@@ -198,6 +219,55 @@ class SecureStorageService {
     }
   }
 
+  // ── Marketplace credentials ───────────────────────────────────────────────
+
+  /// Gumroad access token. Empty until Sadeq sets it — factory publishing stays
+  /// shut without it, which is the correct default.
+  Future<String?> getGumroadToken() async {
+    if (_cachedGumroadToken != null) return _cachedGumroadToken;
+    try {
+      _cachedGumroadToken = await _storage.read(key: _gumroadTokenName);
+      return _cachedGumroadToken;
+    } catch (e) {
+      print('❌ Error reading Gumroad token: $e');
+      return null;
+    }
+  }
+
+  Future<void> setGumroadToken(String token) async {
+    try {
+      await _storage.write(key: _gumroadTokenName, value: token);
+      _cachedGumroadToken = token;
+      print('✅ Gumroad token saved securely');
+    } catch (e) {
+      print('❌ Error saving Gumroad token: $e');
+      rethrow;
+    }
+  }
+
+  /// Etsy API key (seller-app scope — his own shop only).
+  Future<String?> getEtsyKey() async {
+    if (_cachedEtsyKey != null) return _cachedEtsyKey;
+    try {
+      _cachedEtsyKey = await _storage.read(key: _etsyKeyName);
+      return _cachedEtsyKey;
+    } catch (e) {
+      print('❌ Error reading Etsy key: $e');
+      return null;
+    }
+  }
+
+  Future<void> setEtsyKey(String key) async {
+    try {
+      await _storage.write(key: _etsyKeyName, value: key);
+      _cachedEtsyKey = key;
+      print('✅ Etsy key saved securely');
+    } catch (e) {
+      print('❌ Error saving Etsy key: $e');
+      rethrow;
+    }
+  }
+
   /// Delete all stored keys (logout/reset)
   Future<void> deleteAllKeys() async {
     try {
@@ -207,6 +277,8 @@ class SecureStorageService {
       _cachedGoogleKey = null;
       _cachedGoogleCseId = null;
       _cachedAnthropicKey = null;
+      _cachedGumroadToken = null;
+      _cachedEtsyKey = null;
       print('✅ All keys deleted');
     } catch (e) {
       print('❌ Error deleting keys: $e');

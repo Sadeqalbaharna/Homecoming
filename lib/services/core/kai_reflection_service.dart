@@ -43,6 +43,7 @@ import '../ai/local_llm_service.dart';
 import '../ai/usage_tracking_service.dart';
 import 'kai_context_block.dart';
 import 'kai_db.dart';
+import 'kai_proactive_service.dart';
 import 'kai_self_service.dart';
 
 class KaiReflectionService {
@@ -162,6 +163,18 @@ Hard rules, because this is exactly where it goes wrong:
       );
       if (out != null && out.trim().isNotEmpty) return _tidy(out);
 
+      // DON'T PAY TO NARRATE AN EMPTY ROOM — same gate as InnerLifeService,
+      // same presence signal (noteActivity via sendMessage). This fires every
+      // 6 minutes forever; with local Qwen down that was 10 paid calls an hour
+      // whether Sadeq had been gone five minutes or five days. Local muses
+      // free; money waits for company. The synthetic-tagged offline net below
+      // carries the beat.
+      if (DateTime.now()
+              .difference(KaiProactiveService.instance.lastActivity) >
+          const Duration(minutes: 60)) {
+        return null;
+      }
+
       final key = await AIConfig.getOpenAIKey();
       if (key.isEmpty) return null;
       final res = await _dio.post(
@@ -241,6 +254,7 @@ Hard rules, because this is exactly where it goes wrong:
       'text': text,
       'ts': DateTime.now().millisecondsSinceEpoch,
       'kind': 'reflection',
+      if (!synthetic) 'origin': 'model_generated',
       // The flag KaiContextBlock._lastThoughtBlock checks. A canned line may be
       // shown in the HUD; it may never be injected into his prompt as his own
       // thinking. Tag it honestly at the source — that's the only place that

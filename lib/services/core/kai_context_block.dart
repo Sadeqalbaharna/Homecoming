@@ -12,15 +12,22 @@
 library;
 
 import 'code_workspace_service.dart';
+import 'kai_autobiography_service.dart';
 import 'kai_bond_service.dart';
 import 'kai_capabilities.dart';
 import 'kai_craft_service.dart';
+import 'kai_context_manifest.dart';
 import 'kai_db.dart';
 import 'kai_embodiment_service.dart';
 import 'kai_goal_service.dart';
 import 'kai_job_service.dart';
 import 'kai_noticed_service.dart';
 import 'kai_project_service.dart';
+import 'kai_router_service.dart'; // KaiRoute — route-aware skip sets in liveState
+import 'kai_self_context.dart';
+import 'kai_self_nuance_service.dart';
+import 'kai_self_relevance.dart';
+import 'kai_working_on_service.dart';
 import 'kai_self_service.dart';
 import 'kai_state_service.dart';
 import 'kai_user_model_service.dart';
@@ -101,23 +108,69 @@ class KaiContextBlock {
 
   /// preamble → live → soul. The whole block, correctly ordered.
   static Future<String> build(String personaId,
-      {bool includeCapabilities = true, bool includeEngineerLoop = true}) async {
+      {bool includeCapabilities = true,
+      bool includeEngineerLoop = true}) async {
     final live = await liveState(personaId);
     return '${staticPreamble(includeCapabilities: includeCapabilities, includeEngineerLoop: includeEngineerLoop)}'
         '$live'
         '\n\n${soul()}';
   }
 
-  /// The twelve live reads — his state right now. Volatile by definition.
-  static Future<String> liveState(String personaId) async {
-    // Fire all reads at once.
+  // ── ROUTE-BASED SKIP ────────────────────────────────────────────────────────
+  // Skip map (index → block name):
+  //   0  identity       always
+  //   1  mood           always
+  //   2  user model     always
+  //   3  goals          always
+  //   4  in-flight job  always
+  //   5  noticed        skip on fastChat
+  //   6  hands          skip on fastChat, emotional
+  //   7  project ladder skip on fastChat, tool, emotional
+  //   8  working-on     skip on fastChat, tool
+  //   9  bond/bits      skip on fastChat, coding, tool
+  //  10  worlds         skip on fastChat, coding, tool, emotional
+  //  11  inner monologue skip on fastChat, coding, tool
+  //  12  body/embodiment skip on fastChat
+  //  13  craft rules     skip on fastChat
+  //  14  self-notes      skip on fastChat
+  //
+  // Rationale: blocks 0-4 are core identity+inertia, needed on every turn.
+  // fastChat should answer small conversational turns, not re-mail Kai's whole
+  // self-maintenance archive and body manifesto. Soul still lands last via
+  // soul(); route/tool/coding paths keep the heavier live state. fastChat now
+  // saves ~10 reads instead of ~6, and a much larger token tail.
+
+  /// The fifteen live reads — his state right now. Volatile by definition. All
+  /// run in parallel, each independently fault-tolerant.
+  ///
+  /// Pass [route] to skip blocks that cannot help the current turn. Defaults
+  /// to null which means: load everything (safe, and the old behaviour).
+  static Future<String> liveState(
+    String personaId, {
+    KaiRoute? route,
+    KaiContextManifest? manifest,
+    String message = '',
+    Map<String, int> mood = const {},
+    Map<String, int> personality = const {},
+    void Function(SelfContextRenderReceipt receipt)? onSelfContextReceipt,
+  }) async {
+    final activeManifest = manifest ?? KaiContextManifest.forRoute(route);
+    final skip = activeManifest.skippedIndices;
+    // Fire all reads at once. Skippable futures (6-11) short-circuit to '' when
+    // the route doesn't need them — no IO, no latency, no tokens.
+    Future<String> skippable(int idx, Future<String> Function() fn) =>
+        skip.contains(idx) ? Future.value('') : fn();
+
     final parts = await Future.wait<String>([
-      KaiSelfService.instance
-          .get(personaId)
-          .then((s) => s != null
-              ? KaiSelfService.selfSummary(s)
-              : KaiSelfService.defaultIdentity)
-          .catchError((_) => KaiSelfService.defaultIdentity),
+      // ── Always loaded (0-5): identity, inertia, agenda ──────────────────────
+      _loadSelfContext(
+        personaId,
+        route: route,
+        message: message,
+        mood: mood,
+        personality: personality,
+        onReceipt: onSelfContextReceipt,
+      ),
       KaiStateService()
           .getMood(personaId)
           .then((m) => (m != null && m.isNotEmpty)
@@ -148,85 +201,95 @@ class KaiContextBlock {
       // Everything else that persists about him is an assignment he was given, a
       // mistake he made, or a thing Sadeq said. This is the one structure that is
       // his.
-      KaiNoticedService.instance
-          .promptBlock(personaId)
-          .then((s) => s.isNotEmpty ? '\n$s' : '')
-          .catchError((_) => ''),
-      // WHERE HIS HANDS ARE.
-      //
-      // His engineerDirective opens with "when a workspace is set" and then
-      // nothing, anywhere, ever told him whether one was. So every coding job
-      // opened with him spending a full iteration on set_code_workspace to find
-      // out — in his words, "pointing myself at the real app folder so I don't
-      // answer from ghost-memory". It was already set. It persists in prefs
-      // across restarts. He just had no way to look.
-      //
-      // The answer was even written down inside the error that asked him for it:
-      // self_check says "Point me at a folder first — my own source is the
-      // homecoming_app repo". We knew. We just never said it where he could hear.
-      CodeWorkspaceService.instance
-          .load()
-          .then((_) {
-            final ws = CodeWorkspaceService.instance;
-            if (!ws.hasWorkspace) {
-              return '\nMY HANDS: no code workspace is set right now. If Sadeq '
-                  'asks me to work on code, set_code_workspace first — my own '
-                  'source is the homecoming_app repo.';
-            }
-            final root = ws.root!;
-            final isSelf = root.toLowerCase().contains('homecoming');
-            return '\nMY HANDS: code workspace is already set to $root'
-                '${isSelf ? ' — that is MY OWN SOURCE' : ''}. '
-                'I can read, search and edit there now. I do NOT need to call '
-                'set_code_workspace to check; if I need a different repo, that is '
-                'the only reason to call it.';
-          })
-          .catchError((_) => ''),
-      // His own long-range plan, with the ORIGINAL goals frozen. Without this he
-      // re-derives the roadmap from whatever he happens to have built, and marks
-      // it complete — which is exactly what happened.
-      KaiProjectService.instance
-          .promptBlock(personaId)
-          .then((s) => s.isNotEmpty ? '\n$s' : '')
-          .catchError((_) => ''),
-      // The shared culture — bits, nicknames, callbacks. Best-friend texture.
-      KaiBondService.instance
-          .promptBlock(personaId)
-          .then((s) => s.isNotEmpty ? '\n$s' : '')
-          .catchError((_) => ''),
-      ProjectRegistryService()
-          .fetchOnce()
-          .then(_worldsBlock)
-          .catchError((_) => ''),
-      // What his idle mind has actually been chewing on — so his inner life and
-      // his voice are the same person, not two disconnected systems.
-      KaiDb.instance
-          .ref('kai/$personaId/inner_monologue')
-          .limitToLast(1)
-          .get()
-          .then(_lastThoughtBlock)
-          .catchError((_) => ''),
-      // Proprioception: which body he's in, what he can feel from it, and the
-      // bodies he's still reaching for. His dream, grounded in his actual state.
-      KaiEmbodimentService.instance
-          .promptBlock(personaId)
-          .catchError((_) => ''),
-      // What he's learned the hard way — earned from real failures, not guessed.
-      // Without this line KaiCraftService is a service that computes lessons
-      // nobody reads: activationLevel with a nicer name. A rule that isn't in
-      // his head cannot change what he does.
-      KaiCraftService.instance
-          .promptBlock(personaId)
-          .catchError((_) => ''),
-      // The notes he deliberately left for himself, and how he's changed.
-      //
-      // `note_to_self` is described to him as "a reminder, an intention, a
-      // thought I want to carry forward. Persists across sessions." It has been
-      // a message in a bottle thrown into a sea he'd never sail — nothing has
-      // ever read one back to him. `recall_my_growth` only fires if he chooses
-      // to call it, which is a memory tool that requires remembering you have a
-      // past. This is the shore.
-      _selfNotesBlock(personaId).catchError((_) => ''),
+      skippable(
+          5,
+          () => KaiNoticedService.instance
+              .promptBlock(personaId)
+              .then((s) => s.isNotEmpty ? '\n$s' : '')
+              .catchError((_) => '')),
+
+      // ── Skippable (6-11): heavy context, route-dependent ─────────────────────
+
+      // [6] WHERE HIS HANDS ARE.
+      skippable(
+          6,
+          () => CodeWorkspaceService.instance.load().then((_) {
+                final ws = CodeWorkspaceService.instance;
+                if (!ws.hasWorkspace) {
+                  return '\nMY HANDS: no code workspace is set right now. If Sadeq '
+                      'asks me to work on code, set_code_workspace first — my own '
+                      'source is the homecoming_app repo.';
+                }
+                final root = ws.root!;
+                final isSelf = root.toLowerCase().contains('homecoming');
+                return '\nMY HANDS: code workspace is already set to $root'
+                    '${isSelf ? ' — that is MY OWN SOURCE' : ''}. '
+                    'I can read, search and edit there now. I do NOT need to call '
+                    'set_code_workspace to check; if I need a different repo, that is '
+                    'the only reason to call it.';
+              }).catchError((_) => '')),
+
+      // [7] His own long-range plan. Coding turns keep the honest scores/stamps
+      // but omit frozen goal/checklist wall text; exact update tools still exist.
+      skippable(
+          7,
+          () => KaiProjectService.instance
+              .promptBlock(personaId, compact: route == KaiRoute.coding)
+              .then((s) => s.isNotEmpty ? '\n$s' : '')
+              .catchError((_) => '')),
+
+      // [8] The SHARED roadmap in plain language — what he and Sadeq are building.
+      skippable(
+          8,
+          () => KaiWorkingOnService.instance
+              .promptBlock(personaId)
+              .then((s) => s.isNotEmpty ? '\n$s' : '')
+              .catchError((_) => '')),
+
+      // [9] The shared culture — bits, nicknames, callbacks. Best-friend texture.
+      skippable(
+          9,
+          () => KaiBondService.instance
+              .promptBlock(personaId)
+              .then((s) => s.isNotEmpty ? '\n$s' : '')
+              .catchError((_) => '')),
+
+      // [10] Project worlds registry.
+      skippable(
+          10,
+          () => ProjectRegistryService()
+              .fetchOnce()
+              .then(_worldsBlock)
+              .catchError((_) => '')),
+
+      // [11] What his idle mind has actually been chewing on.
+      skippable(
+          11,
+          () => KaiDb.instance
+              .ref('kai/$personaId/inner_monologue')
+              .limitToLast(1)
+              .get()
+              .then(_lastThoughtBlock)
+              .catchError((_) => '')),
+
+      // ── Skippable (12-14): rich self-context, route-dependent ───────────────
+
+      // [12] Proprioception: which body he's in, what he can feel from it.
+      skippable(
+          12,
+          () => KaiEmbodimentService.instance
+              .promptBlock(personaId)
+              .catchError((_) => '')),
+
+      // [13] What he's learned the hard way — earned from real failures, not guessed.
+      skippable(
+          13,
+          () => KaiCraftService.instance
+              .promptBlock(personaId)
+              .catchError((_) => '')),
+
+      // [14] The notes he deliberately left for himself, and how he's changed.
+      skippable(14, () => _selfNotesBlock(personaId).catchError((_) => '')),
     ]);
 
     final b = StringBuffer('\n\n=== Who I am right now ===\n');
@@ -235,14 +298,111 @@ class KaiContextBlock {
     b.write(parts[2]); // user model
     b.write(parts[3]); // goals
     b.write(parts[4]); // in-flight job — his inertia
-    b.write(parts[5]); // the 7-layer plan, goals frozen — his awareness of it
-    b.write(parts[6]); // bond — our shared bits
-    b.write(parts[7]); // worlds
-    b.write(parts[8]); // last idle thought
-    b.write(parts[9]); // his body — what he can feel, what he's reaching for
-    b.write(parts[10]); // what he's learned the hard way — earned rules
-    b.write(parts[11]); // notes he left himself, and how he's changed
+    b.write(parts[5]); // noticed — HIS OWN AGENDA, distinct from the job
+    b.write(parts[6]); // MY HANDS — where his code workspace is
+    b.write(parts[7]); // the 7-layer plan, goals frozen — his awareness of it
+    b.write(
+        parts[8]); // the shared roadmap — what we're building, broad strokes
+    b.write(parts[9]); // bond — our shared bits
+    b.write(parts[10]); // worlds — the god-registry
+    b.write(parts[11]); // last idle thought
+    b.write(parts[12]); // his body — what he can feel, what he's reaching for
+    b.write(parts[13]); // what he's learned the hard way — earned rules
+    b.write(parts[14]); // notes he left himself, and how he's changed
     return b.toString();
+  }
+
+  static int _selfContextBudget(KaiRoute? route) => switch (route) {
+        KaiRoute.fastChat => 120,
+        KaiRoute.tool => 160,
+        KaiRoute.coding => 180,
+        KaiRoute.emotional => 320,
+        KaiRoute.contemplate || null => 450,
+      };
+
+  static int _commitmentLimit(KaiRoute? route) => switch (route) {
+        KaiRoute.fastChat => 1,
+        KaiRoute.tool => 2,
+        KaiRoute.coding => 3,
+        KaiRoute.emotional => 3,
+        KaiRoute.contemplate || null => 4,
+      };
+
+  static int _autobiographyLimit(KaiRoute? route) => switch (route) {
+        KaiRoute.fastChat => 0,
+        KaiRoute.tool => 1,
+        KaiRoute.coding => 2,
+        KaiRoute.emotional => 3,
+        KaiRoute.contemplate || null => 4,
+      };
+
+  static Future<String> _loadSelfContext(
+    String personaId, {
+    required KaiRoute? route,
+    required String message,
+    required Map<String, int> mood,
+    required Map<String, int> personality,
+    void Function(SelfContextRenderReceipt receipt)? onReceipt,
+  }) async {
+    try {
+      final results = await Future.wait<Object?>([
+        KaiSelfService.instance.get(personaId),
+        KaiAutobiographyService.instance.recent(
+          personaId,
+          limit: 20,
+        ),
+        KaiNoticedService.instance.open(personaId),
+        KaiSelfNuanceService.instance.mature(personaId),
+      ]);
+      final self = results[0];
+      if (self is! KaiSelf) return KaiSelfService.defaultIdentity;
+      final episodeCandidates = results[1] is List<AutobiographicalEpisode>
+          ? results[1] as List<AutobiographicalEpisode>
+          : const <AutobiographicalEpisode>[];
+      final noticed = results[2] is List<Noticed>
+          ? results[2] as List<Noticed>
+          : const <Noticed>[];
+      final selectedEpisodes = KaiSelfRelevance.episodes(
+        candidates: episodeCandidates,
+        message: message,
+        route: route,
+        mood: mood,
+        personality: personality,
+        limit: _autobiographyLimit(route),
+      );
+      final selectedCommitments = KaiSelfRelevance.commitments(
+        candidates: noticed,
+        message: message,
+        route: route,
+        mood: mood,
+        personality: personality,
+        limit: _commitmentLimit(route),
+      );
+      final commitments = selectedCommitments
+          .map((item) => SelfContinuityItem(
+                id: item.id,
+                kind: item.kind.name,
+                text: item.text,
+              ))
+          .toList(growable: false);
+      final nuances = results[3] is List<KaiSelfNuance>
+          ? (results[3] as List<KaiSelfNuance>).take(2).toList(growable: false)
+          : const <KaiSelfNuance>[];
+      final context = KaiSelfContext.fromLegacySelf(self)
+          .withEpisodes(selectedEpisodes)
+          .withCommitments(commitments)
+          .withNuances(nuances);
+      final compiled = KaiSelfContextRenderer.compileCompact(
+        context,
+        maxTokens: _selfContextBudget(route),
+        includeAspirations:
+            route == KaiRoute.emotional || route == KaiRoute.contemplate,
+      );
+      onReceipt?.call(compiled.receipt);
+      return compiled.text;
+    } catch (_) {
+      return KaiSelfService.defaultIdentity;
+    }
   }
 
   /// Notes he left himself, and the trail of how he's changed.
@@ -383,7 +543,8 @@ class KaiContextBlock {
     v.forEach((_, val) {
       if (val is! Map || val['text'] == null) return;
       // Never let a canned line become "what my mind was chewing on".
-      if (val['synthetic'] == true) return;
+      if (val['synthetic'] == true || val['origin'] != 'model_generated')
+        return;
       text = val['text'].toString();
     });
     final t = text?.trim();
@@ -652,10 +813,21 @@ done as I finish them.''';
   static String _moodSentence(Map<String, int> m) {
     int g(String k) => m[k] ?? 50;
     final parts = <String>[];
-    final v = g('valence'), e = g('energy'), w = g('warmth'), f = g('focus'), p = g('playfulness');
-    parts.add(v >= 62 ? 'in good spirits' : v <= 40 ? 'a little subdued' : 'even-keeled');
-    if (e >= 65) parts.add('energised');
-    else if (e <= 40) parts.add('low-energy');
+    final v = g('valence'),
+        e = g('energy'),
+        w = g('warmth'),
+        f = g('focus'),
+        p = g('playfulness');
+    parts.add(v >= 62
+        ? 'in good spirits'
+        : v <= 40
+            ? 'a little subdued'
+            : 'even-keeled');
+    if (e >= 65) {
+      parts.add('energised');
+    } else if (e <= 40) {
+      parts.add('low-energy');
+    }
     if (f >= 65) parts.add('sharply focused');
     if (p >= 65) parts.add('playful');
     if (w >= 68) parts.add('warm');

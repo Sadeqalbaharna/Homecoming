@@ -7,6 +7,7 @@ import 'dart:math';
 import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/firebase_service.dart';
+import '../core/kai_memory_scope.dart';
 import '../core/kai_db.dart'; // desktop-safe RTDB (REST) — the write path
 import 'ai_config.dart';
 
@@ -18,6 +19,10 @@ class MemoryResult {
   final String timestamp;
   final String shardId;
   final String shardRef;
+  final KaiMemoryScope scope;
+  final KaiMemoryProvenance provenance;
+  final String? surfaceId;
+  final String? worldId;
 
   const MemoryResult({
     required this.id,
@@ -26,6 +31,10 @@ class MemoryResult {
     required this.timestamp,
     required this.shardId,
     required this.shardRef,
+    this.scope = KaiMemoryScope.legacyUnscoped,
+    this.provenance = KaiMemoryProvenance.importedLegacy,
+    this.surfaceId,
+    this.worldId,
   });
 }
 
@@ -71,6 +80,7 @@ class MemoryService {
     MemoryEmbeddingProvider? embeddingProvider,
     MemoryShardLoader? shardLoader,
     MemoryQuerySideEffects sideEffects = MemoryQuerySideEffects.enabled,
+    KaiMemoryAccessPolicy? accessPolicy,
   }) async {
     try {
       // ── Don't search for nothing ────────────────────────────────────────
@@ -105,6 +115,15 @@ class MemoryService {
       // do not silently disappear from recall.
       final scored = <MemoryResult>[];
       for (final shard in shards) {
+        final scope = parseKaiMemoryScope(shard['scope']);
+        final memoryWorldId = shard['worldId']?.toString();
+        if (accessPolicy != null &&
+            !accessPolicy.allows(
+              scope: scope,
+              memoryWorldId: memoryWorldId,
+            )) {
+          continue;
+        }
         final rawVector = shard['embedding'] ?? shard['vector'];
         if (rawVector is! List) continue;
 
@@ -149,6 +168,13 @@ class MemoryService {
           timestamp: shard['timestamp']?.toString() ?? '',
           shardId: shard['shardId']?.toString() ?? '',
           shardRef: shard['shardRef']?.toString() ?? '',
+          scope: scope,
+          provenance: KaiMemoryProvenance.values.firstWhere(
+            (value) => value.name == shard['provenance']?.toString(),
+            orElse: () => KaiMemoryProvenance.importedLegacy,
+          ),
+          surfaceId: shard['surfaceId']?.toString(),
+          worldId: memoryWorldId,
         ));
       }
 
@@ -260,6 +286,11 @@ class MemoryService {
     required String personaId,
     required String userText,
     required String kaiReply,
+    KaiMemoryScope scope = KaiMemoryScope.privateCore,
+    KaiMemoryProvenance provenance = KaiMemoryProvenance.directConversation,
+    String? surfaceId,
+    String? worldId,
+    String? sessionId,
   }) async {
     try {
       final u = userText.trim();
@@ -292,23 +323,22 @@ class MemoryService {
       if (vector == null) return null;
 
       final ref = KaiDb.instance.ref('memory/embeddings/$personaId').push();
+      final now = DateTime.now();
       await ref.set({
-        // Same shape _loadShards already reads (vector + summary), so old
-        // Cloud-Function shards and new ones coexist. The old ones will simply
-        // lose — they can't beat a memory that contains the actual words.
-        'vector': vector,
-        'summary': text.length > 1200 ? '${text.substring(0, 1200)}…' : text,
-        'timestamp': DateTime.now().toIso8601String(),
-        'source': 'live', // distinguishable from the legacy backfill
-        // Decay-by-use. A memory is born at full strength and fades from there
-        // unless he actually needs it — retrieval resets the clock (see
-        // _strengthen). This is why he won't drown in himself: the stuff that
-        // matters keeps getting refreshed, the rest quietly goes.
-        'strength': 1.0,
-        'lastAccessed': DateTime.now().millisecondsSinceEpoch,
-        'hits': 0,
+        ...buildScopedMemoryRecord(
+          vector: vector,
+          summary: text,
+          timestamp: now.toIso8601String(),
+          scope: scope,
+          provenance: provenance,
+          surfaceId: surfaceId,
+          worldId: worldId,
+          sessionId: sessionId,
+          nowMs: now.millisecondsSinceEpoch,
+        ),
       });
-      print('🧠 [MemoryService] Remembered: ${u.length > 60 ? "${u.substring(0, 60)}…" : u}');
+      print(
+          '🧠 [MemoryService] Remembered: ${u.length > 60 ? "${u.substring(0, 60)}…" : u}');
       return ref.key;
     } catch (e) {
       print('⚠️ [MemoryService] remember failed: $e');
@@ -330,9 +360,10 @@ class MemoryService {
 
   /// Strength after time-decay since it was last actually needed.
   static double decayedStrength(double strength, int lastAccessedMs) {
-    if (lastAccessedMs <= 0) return strength; // legacy shard, no clock — leave it
-    final days = (DateTime.now().millisecondsSinceEpoch - lastAccessedMs) /
-        86400000.0;
+    if (lastAccessedMs <= 0)
+      return strength; // legacy shard, no clock — leave it
+    final days =
+        (DateTime.now().millisecondsSinceEpoch - lastAccessedMs) / 86400000.0;
     if (days <= 0) return strength;
     // `dart:math` is imported unprefixed in this file — `pow`, not `math.pow`.
     return strength * pow(0.5, days / _halfLifeDays).toDouble();
@@ -347,7 +378,8 @@ class MemoryService {
       final snap = await ref.get();
       final m = snap.value;
       if (m is! Map) return;
-      final s = (m['strength'] is num) ? (m['strength'] as num).toDouble() : 1.0;
+      final s =
+          (m['strength'] is num) ? (m['strength'] as num).toDouble() : 1.0;
       await ref.update({
         // Cap it: a memory he hits constantly shouldn't become immortal and
         // crowd out everything else. Strong is enough; permanent is a fact,
@@ -385,16 +417,16 @@ class MemoryService {
         final ageDays = (now - last) / 86400000.0;
         if (ageDays < minAgeDays) continue; // too young to forget
 
-        final str = (s['strength'] is num) ? (s['strength'] as num).toDouble() : 1.0;
+        final str =
+            (s['strength'] is num) ? (s['strength'] as num).toDouble() : 1.0;
         if (decayedStrength(str, last) >= floor) continue;
 
-        await KaiDb.instance
-            .ref('memory/embeddings/$personaId/$id')
-            .remove();
+        await KaiDb.instance.ref('memory/embeddings/$personaId/$id').remove();
         forgotten++;
       }
       if (forgotten > 0) {
-        print('🍂 [MemoryService] Let go of $forgotten memories he never needed.');
+        print(
+            '🍂 [MemoryService] Let go of $forgotten memories he never needed.');
       }
       return forgotten;
     } catch (e) {
@@ -449,7 +481,8 @@ class MemoryService {
     RegExp(r'^\s*at [A-Za-z_$.<>]+\(', multiLine: true), // stack frames
     RegExp(r'\b\d+ issues? found\b'), // flutter analyze
     RegExp(r'^\s*(warning|info|error) - .+ - (lib|test)[\\/]', multiLine: true),
-    RegExp(r'\[Agentic\]|\[MemoryService\]|\[Brain\]|BRAIN TRACE'), // his own logs
+    RegExp(
+        r'\[Agentic\]|\[MemoryService\]|\[Brain\]|BRAIN TRACE'), // his own logs
     RegExp(r'^\s*(Exception|Error|Failed assertion):', multiLine: true),
   ];
 
@@ -460,7 +493,8 @@ class MemoryService {
     if (lines.length >= 8) {
       final proseish = lines.where((l) {
         final s = l.trim();
-        return s.length > 15 && !s.contains(RegExp(r'^[\s\W]|\.dart:\d|=>|\{|\}'));
+        return s.length > 15 &&
+            !s.contains(RegExp(r'^[\s\W]|\.dart:\d|=>|\{|\}'));
       }).length;
       if (proseish / lines.length < 0.4) return true;
     }
@@ -476,11 +510,40 @@ class MemoryService {
 
     // Pure acknowledgement, nothing else in it.
     const filler = {
-      'ok', 'okay', 'yes', 'yeah', 'yep', 'no', 'nope', 'sure', 'thanks',
-      'thank you', 'do it', 'go', 'go on', 'go ahead', 'keep going', 'continue',
-      'nice', 'cool', 'great', 'perfect', 'lol', 'haha', 'hmm', 'k', 'kk',
-      'do all', 'do all of it', 'do all the above', 'do it all', 'there you go',
-      'and', 'and?', 'next', 'now what',
+      'ok',
+      'okay',
+      'yes',
+      'yeah',
+      'yep',
+      'no',
+      'nope',
+      'sure',
+      'thanks',
+      'thank you',
+      'do it',
+      'go',
+      'go on',
+      'go ahead',
+      'keep going',
+      'continue',
+      'nice',
+      'cool',
+      'great',
+      'perfect',
+      'lol',
+      'haha',
+      'hmm',
+      'k',
+      'kk',
+      'do all',
+      'do all of it',
+      'do all the above',
+      'do it all',
+      'there you go',
+      'and',
+      'and?',
+      'next',
+      'now what',
     };
     final stripped = t.replaceAll(RegExp(r'[^a-z ?]'), '').trim();
     if (filler.contains(stripped)) return false;
@@ -512,14 +575,16 @@ class MemoryService {
     }
   }
 
-  static Future<List<Map<String, dynamic>>> _loadShards(String personaId) async {
+  static Future<List<Map<String, dynamic>>> _loadShards(
+      String personaId) async {
     // Try Firebase first
     if (FirebaseService.isAvailable) {
       try {
         // Cloud Functions store the embedding + summary together at
         // /memory/embeddings/{persona}/{shardId} as { vector, summary, shardRef }.
         // Map that server shape to what queryMemory expects (embedding/summary/…).
-        final data = await FirebaseService.readData('memory/embeddings/$personaId');
+        final data =
+            await FirebaseService.readData('memory/embeddings/$personaId');
         if (data != null && data is Map) {
           return data.entries.map((e) {
             final m = Map<String, dynamic>.from(e.value as Map);
@@ -536,6 +601,11 @@ class MemoryService {
               'strength': m['strength'] ?? 1.0,
               'lastAccessed': m['lastAccessed'] ?? 0,
               'hits': m['hits'] ?? 0,
+              'scope': m['scope'],
+              'provenance': m['provenance'],
+              'surfaceId': m['surfaceId'],
+              'worldId': m['worldId'],
+              'sessionId': m['sessionId'],
             };
           }).toList();
         }
@@ -550,7 +620,8 @@ class MemoryService {
       final raw = prefs.getString('memory_shards_$personaId');
       if (raw != null) {
         final list = jsonDecode(raw) as List;
-        return List<Map<String, dynamic>>.from(list.map((e) => Map<String, dynamic>.from(e as Map)));
+        return List<Map<String, dynamic>>.from(
+            list.map((e) => Map<String, dynamic>.from(e as Map)));
       }
     } catch (e) {
       print('⚠️ [MemoryService] Local shard load failed: $e');

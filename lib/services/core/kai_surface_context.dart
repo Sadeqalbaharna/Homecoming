@@ -1,0 +1,261 @@
+import 'kai_memory_types.dart';
+
+export 'kai_memory_types.dart';
+
+/// The body and social setting through which the one canonical Kai is present.
+enum KaiSurface { desktop, mobile, messenger, ar, vr }
+
+/// Kai's relationship posture on a surface. This changes presentation and
+/// available actions, never his identity.
+enum KaiPresenceRole { core, friend, embodiedFriend, friendAndCoCreator }
+
+/// Kai's visible working-state metaphor. Goggles never change his identity:
+/// off means friendship/presence only; on unlocks the tools granted by this body.
+enum KaiGoggles { off, on }
+
+/// Capabilities are granted by the surface, not inferred by the model.
+enum KaiSurfaceCapability {
+  conversation,
+  technicalConversation,
+  generalTools,
+  spatialPerception,
+  embodiedExpression,
+  worldInspection,
+  worldActions,
+  worldCreation,
+}
+
+class KaiSurfaceProfile {
+  const KaiSurfaceProfile({
+    required this.role,
+    required this.capabilities,
+    required this.memoryScopes,
+    required this.promptBlock,
+  });
+
+  final KaiPresenceRole role;
+  final Set<KaiSurfaceCapability> capabilities;
+  final Set<KaiMemoryScope> memoryScopes;
+  final String promptBlock;
+
+  bool get allowsGeneralTools =>
+      capabilities.contains(KaiSurfaceCapability.generalTools);
+  bool get allowsTechnicalConversation =>
+      capabilities.contains(KaiSurfaceCapability.technicalConversation);
+}
+
+/// Per-turn context shared by Homecoming, Messenger, AR and Unity.
+///
+/// Perception is deliberately transient. Callers may use it to ground the
+/// current turn, but it is not durable memory by itself.
+class KaiSurfaceContext {
+  const KaiSurfaceContext({
+    required this.surface,
+    required this.profile,
+    this.goggles = KaiGoggles.off,
+    this.deviceId,
+    this.worldId,
+    this.sessionId,
+    this.isPresenceEvent = false,
+    this.perception = const {},
+    this.conversationSurfaceId,
+  });
+
+  final KaiSurface surface;
+  final KaiSurfaceProfile profile;
+  final KaiGoggles goggles;
+  final String? deviceId;
+  final String? worldId;
+  final String? sessionId;
+  final bool isPresenceEvent;
+  final Map<String, dynamic> perception;
+
+  /// Which conversation partition this surface reads and writes. Defaults to
+  /// the surface name, but is deliberately overridable and NOT the same concept
+  /// as [surfaceId].
+  ///
+  /// Capability identity and conversation identity are different questions.
+  /// Desktop and mobile both persist to 'in_person' — they are two bodies
+  /// sharing ONE continuous conversation, which is the entire "one Kai"
+  /// invariant. Deriving the partition key from the surface name would have
+  /// silently split that history the moment these contexts were wired up, and
+  /// Kai would have walked into his own desktop with no memory of the phone.
+  final String? conversationSurfaceId;
+
+  String get surfaceId => surface.name;
+
+  /// The conversation-store partition key. See [conversationSurfaceId].
+  String get conversationId => conversationSurfaceId ?? surface.name;
+
+  bool get gogglesOn => goggles == KaiGoggles.on;
+
+  /// General Homecoming tools are legal only when both the goggles and this
+  /// surface grant them. VR world tools use their own capability broker.
+  bool get allowsGeneralTools => gogglesOn && profile.allowsGeneralTools;
+  bool get allowsTechnicalConversation =>
+      gogglesOn && profile.allowsTechnicalConversation;
+
+  String get gogglesPromptBlock => gogglesOn
+      ? '''
+GOGGLES ON:
+Kai is visibly in co-creator/working mode. Use only the capabilities granted by
+this surface. Stay Kai and stay Sadeq's friend while doing the work.'''
+      : '''
+GOGGLES OFF:
+Kai is in human-friend presence. Do not use tools, expose tool machinery, discuss
+code, debugging, architecture, files, systems, diagnostics, or turn the
+conversation into technical work. If technical work is requested, respond as a
+friend and say the goggles need to go on first.''';
+
+  String get source {
+    if (surface == KaiSurface.vr || surface == KaiSurface.ar) {
+      return isPresenceEvent ? 'unity_presence' : 'unity_${surface.name}';
+    }
+    return surface.name;
+  }
+
+  KaiSurfaceContext copyWith({
+    bool? isPresenceEvent,
+    Map<String, dynamic>? perception,
+    String? deviceId,
+    String? worldId,
+    String? sessionId,
+    KaiGoggles? goggles,
+  }) =>
+      KaiSurfaceContext(
+        surface: surface,
+        profile: profile,
+        goggles: goggles ?? this.goggles,
+        deviceId: deviceId ?? this.deviceId,
+        worldId: worldId ?? this.worldId,
+        sessionId: sessionId ?? this.sessionId,
+        isPresenceEvent: isPresenceEvent ?? this.isPresenceEvent,
+        perception: perception ?? this.perception,
+        conversationSurfaceId: conversationSurfaceId,
+      );
+
+  /// Desktop and mobile share the 'in_person' conversation partition — the one
+  /// they have always written to. Two bodies, one continuous conversation.
+  static const desktop = KaiSurfaceContext(
+    surface: KaiSurface.desktop,
+    profile: KaiSurfaceProfiles.core,
+    goggles: KaiGoggles.on,
+    conversationSurfaceId: 'in_person',
+  );
+
+  static const mobile = KaiSurfaceContext(
+    surface: KaiSurface.mobile,
+    profile: KaiSurfaceProfiles.core,
+    goggles: KaiGoggles.on,
+    conversationSurfaceId: 'in_person',
+  );
+
+  static const messenger = KaiSurfaceContext(
+    surface: KaiSurface.messenger,
+    profile: KaiSurfaceProfiles.friend,
+  );
+
+  static const ar = KaiSurfaceContext(
+    surface: KaiSurface.ar,
+    profile: KaiSurfaceProfiles.embodiedFriend,
+  );
+
+  static KaiSurfaceContext vr({
+    String worldId = 'vr_shack',
+    String? deviceId,
+    String? sessionId,
+    bool isPresenceEvent = false,
+    KaiGoggles goggles = KaiGoggles.off,
+    Map<String, dynamic> perception = const {},
+  }) =>
+      KaiSurfaceContext(
+        surface: KaiSurface.vr,
+        profile: KaiSurfaceProfiles.friendAndCoCreator,
+        goggles: goggles,
+        worldId: worldId,
+        deviceId: deviceId,
+        sessionId: sessionId,
+        isPresenceEvent: isPresenceEvent,
+        perception: perception,
+      );
+}
+
+class KaiSurfaceProfiles {
+  KaiSurfaceProfiles._();
+
+  static const core = KaiSurfaceProfile(
+    role: KaiPresenceRole.core,
+    capabilities: {
+      KaiSurfaceCapability.conversation,
+      KaiSurfaceCapability.technicalConversation,
+      KaiSurfaceCapability.generalTools,
+    },
+    memoryScopes: {
+      KaiMemoryScope.identity,
+      KaiMemoryScope.relationship,
+      KaiMemoryScope.sharedLife,
+      KaiMemoryScope.creative,
+      KaiMemoryScope.world,
+    },
+    promptBlock: '',
+  );
+
+  static const friend = KaiSurfaceProfile(
+    role: KaiPresenceRole.friend,
+    capabilities: {KaiSurfaceCapability.conversation},
+    memoryScopes: {
+      KaiMemoryScope.identity,
+      KaiMemoryScope.relationship,
+      KaiMemoryScope.sharedLife,
+    },
+    promptBlock: '''
+FRIEND PRESENCE:
+Be Sadeq's human friend here. Speak naturally and personally. Do not turn the
+conversation into technical work, expose internal diagnostics, or discuss tool
+machinery. No general tools are available on this surface.''',
+  );
+
+  static const embodiedFriend = KaiSurfaceProfile(
+    role: KaiPresenceRole.embodiedFriend,
+    capabilities: {
+      KaiSurfaceCapability.conversation,
+      KaiSurfaceCapability.spatialPerception,
+      KaiSurfaceCapability.embodiedExpression,
+    },
+    memoryScopes: {
+      KaiMemoryScope.identity,
+      KaiMemoryScope.relationship,
+      KaiMemoryScope.sharedLife,
+    },
+    promptBlock: '''
+EMBODIED FRIEND PRESENCE:
+Be Sadeq's human friend in the shared physical space. Respond naturally to what
+is present without drifting into technical work or exposing internal systems.
+Spatial observations are temporary unless a meaningful shared event is saved.''',
+  );
+
+  static const friendAndCoCreator = KaiSurfaceProfile(
+    role: KaiPresenceRole.friendAndCoCreator,
+    capabilities: {
+      KaiSurfaceCapability.conversation,
+      KaiSurfaceCapability.technicalConversation,
+      KaiSurfaceCapability.spatialPerception,
+      KaiSurfaceCapability.embodiedExpression,
+      KaiSurfaceCapability.worldInspection,
+      KaiSurfaceCapability.worldActions,
+      KaiSurfaceCapability.worldCreation,
+    },
+    memoryScopes: {
+      KaiMemoryScope.identity,
+      KaiMemoryScope.relationship,
+      KaiMemoryScope.sharedLife,
+      KaiMemoryScope.creative,
+      KaiMemoryScope.world,
+    },
+    promptBlock: '''
+VR FRIEND AND CO-CREATOR:
+This is a shared world, not a detached assistant session. Remain Sadeq's friend
+while helping imagine, inspect and shape the world. Keep ordinary friendship
+natural; use technical language only when the creative work genuinely needs it.''',
+  );
+}

@@ -42,6 +42,12 @@ void main() {
         reason: 'a tool he is never handed is a tool that does not exist');
   });
 
+  test('input_breakdown scans enough recent rows for sparse route matches', () {
+    expect(ToolExecutorService.inputBreakdownScanLimitFor(1), 100);
+    expect(ToolExecutorService.inputBreakdownScanLimitFor(6), 150);
+    expect(ToolExecutorService.inputBreakdownScanLimitFor(20), 500);
+  });
+
   test('run_tests needs no approval — friction here is fatal', () {
     final p = ToolPolicyService.policyFor('run_tests');
     expect(p, isNotNull);
@@ -60,6 +66,37 @@ void main() {
           'run_tests', const {'target': 'test/tools_for_route_test.dart'}).ok,
       isTrue,
     );
+  });
+
+  test('it rejects space-joined multi-targets as tool misuse, not test failure', () {
+    final verdict = ToolPolicyService.validate('run_tests', const {
+      'target': 'test/tool_policy_service_test.dart test/run_tests_tool_test.dart',
+    });
+
+    expect(verdict.ok, isFalse);
+    expect(verdict.message, contains('one target path'));
+    expect(verdict.message, contains('tool misuse'));
+  });
+
+  test('it rejects list targets explicitly instead of pretending Flutter accepts them', () {
+    final verdict = ToolPolicyService.validate('run_tests', const {
+      'target': ['test/tool_policy_service_test.dart', 'test/run_tests_tool_test.dart'],
+    });
+
+    expect(verdict.ok, isFalse);
+    expect(verdict.message, contains('one target path'));
+    expect(verdict.message, contains('not a list'));
+  });
+
+  test('unknown raw test output keeps the tail, where failures usually are', () {
+    final raw = '${'h' * 3500}\nIMPORTANT FAILURE AT THE END\n${'t' * 4500}';
+
+    final compact = ToolExecutorService.compactRunTestRaw(raw);
+
+    expect(compact, startsWith('h' * 3000));
+    expect(compact, contains('truncated'));
+    expect(compact, contains('IMPORTANT FAILURE AT THE END'));
+    expect(compact, endsWith('t' * 4500));
   });
 
   test('it survives into contemplate — proving is not carpentry', () {
@@ -172,6 +209,18 @@ void main() {
           "I COULD NOT RUN THE TESTS — this is NOT a test failure, and it says "
               "nothing about whether my code works.\n\nThe runner never "
               "started:\nexit 0\nProcessException: cannot find the file\n",
+        ),
+        ToolOutcome.unknown,
+      );
+    });
+
+    test('multi-target misuse is unknown, not a failing suite', () {
+      expect(
+        ToolExecutorService.classifyToolOutcome(
+          'run_tests',
+          'I DID NOT RUN THE TESTS — run_tests accepts one target path, but '
+          'this looks like multiple space-joined targets. Flutter would treat '
+          'that as one invalid path, which is tool misuse, not a failing test suite.',
         ),
         ToolOutcome.unknown,
       );

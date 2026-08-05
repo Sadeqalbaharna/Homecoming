@@ -20,6 +20,7 @@ import '../core/kai_craft_service.dart';
 import '../core/memory_consolidation_service.dart';
 import '../core/default_mode_service.dart';
 import 'usage_tracking_service.dart';
+import 'openai_tool_request.dart';
 import '../core/cortex_activity_bus.dart';
 import 'memory_service.dart';
 import 'curiosity_service.dart';
@@ -28,6 +29,11 @@ import '../core/web_fetch_service.dart';
 import '../core/tool_executor_service.dart';
 import '../core/tool_policy_service.dart';
 import '../core/kai_router_service.dart';
+import '../core/kai_capability_broker.dart';
+import '../core/kai_context_manifest.dart';
+import '../core/kai_memory_scope.dart';
+import '../core/kai_surface_context.dart';
+import '../core/kai_job_service.dart';
 import '../core/reply_recovery_service.dart';
 import 'task_planner_service.dart';
 import '../core/context_injection_service.dart';
@@ -41,9 +47,41 @@ import 'ambient_controller.dart';
 
 // Re-export extracted types so callers importing ai_service.dart don't break.
 export 'ai_config.dart' show AIConfig;
-export 'personality_service.dart' show PersonalityTraits, MoodSnapshot, EvolutionSettings;
+export 'personality_service.dart'
+    show PersonalityTraits, MoodSnapshot, EvolutionSettings;
 
+class ToolTrimStats {
+  final int charsSaved;
 
+  const ToolTrimStats({this.charsSaved = 0});
+
+  int get approxTokensSaved => (charsSaved / 4).round();
+}
+
+bool shouldSurfaceAgenticInterimNarration(
+  String? route, {
+  String? narration,
+}) {
+  final normalizedRoute = route?.trim();
+  if (normalizedRoute != 'tool' && normalizedRoute != 'coding') return false;
+
+  final text = narration?.trim().toLowerCase();
+  if (text == null) return true;
+  if (text.isEmpty) return false;
+
+  const cannedBridgeFragments = [
+    'still thinking',
+    'classic me',
+  ];
+
+  return !cannedBridgeFragments.any(text.contains);
+}
+
+bool shouldPersistConversationTurn({
+  required bool saveUserMessage,
+  required bool saveAssistantReply,
+}) =>
+    saveUserMessage || saveAssistantReply;
 
 /// A text file attached to a chat turn. Binary files are intentionally not here;
 /// callers should extract text first so the model receives readable context.
@@ -98,9 +136,9 @@ class ChatResponse {
     this.webSearchUsed = false,
     this.searchResults = const [],
     this.curiosityQuestion,
-    this.promptInputTokens  = 0,
+    this.promptInputTokens = 0,
     this.promptOutputTokens = 0,
-    this.promptCostUsd      = 0.0,
+    this.promptCostUsd = 0.0,
   });
 }
 
@@ -142,8 +180,8 @@ class AIService {
   /// the ledger records the correction against the actual claim it lands on.
   /// A correction with no claim attached is unusable as evidence.
   String? _lastReplyForCraft;
-  final _dmn   = DefaultModeService();
-  final _rng   = Random();
+  final _dmn = DefaultModeService();
+  final _rng = Random();
 
   // Pending thought from DMN wandering (set in bootstrapPersona, consumed once
   // in the first system prompt of the session, then cleared).
@@ -200,15 +238,17 @@ class AIService {
   String calculateMBTI(Map<String, int> personality) =>
       _personality.calculateMBTI(personality);
 
-  Map<String, dynamic> getLabels(Map<String, int> personality, Map<String, int> mood) =>
+  Map<String, dynamic> getLabels(
+          Map<String, int> personality, Map<String, int> mood) =>
       _personality.getLabels(personality, mood);
 
-  String generatePersonalityMoodSummary(Map<String, int> personality, Map<String, int> mood) =>
+  String generatePersonalityMoodSummary(
+          Map<String, int> personality, Map<String, int> mood) =>
       _personality.generatePersonalityMoodSummary(personality, mood);
 
   Future<void> _initializePrefs() async {
     if (_prefsCompleter != null) return _prefsCompleter!.future;
-    
+
     _prefsCompleter = Completer<void>();
     try {
       _prefs = await SharedPreferences.getInstance();
@@ -218,10 +258,9 @@ class AIService {
     }
   }
 
-
-
   /// Call OpenAI API for chat completion
-  Future<String> _callOpenAI(List<Map<String, String>> messages, String model, {String operation = 'chat', Map<String, int>? usageOut}) async {
+  Future<String> _callOpenAI(List<Map<String, String>> messages, String model,
+      {String operation = 'chat', Map<String, int>? usageOut}) async {
     final openaiKey = await AIConfig.getOpenAIKey();
     if (openaiKey.isEmpty) {
       throw Exception('OpenAI API key not configured');
@@ -248,24 +287,24 @@ class AIService {
       );
 
       final choices = response.data['choices'] as List;
-      
+
       // Track token usage
       final usage = response.data['usage'];
       if (usage != null) {
-        final inputTok  = usage['prompt_tokens']     as int? ?? 0;
+        final inputTok = usage['prompt_tokens'] as int? ?? 0;
         final outputTok = usage['completion_tokens'] as int? ?? 0;
         await UsageTrackingService.trackOpenAI(
           model: model,
-          inputTokens:  inputTok,
+          inputTokens: inputTok,
           outputTokens: outputTok,
           operation: operation,
         );
         if (usageOut != null) {
-          usageOut['input']  = inputTok;
+          usageOut['input'] = inputTok;
           usageOut['output'] = outputTok;
         }
       }
-      
+
       if (choices.isNotEmpty) {
         return choices[0]['message']['content'] as String? ?? '';
       }
@@ -336,11 +375,20 @@ class AIService {
   /// Sniff the real magic bytes and only send supported formats.
   static String? _supportedImageMime(List<int> bytes) {
     if (bytes.length >= 8 &&
-        bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47 &&
-        bytes[4] == 0x0D && bytes[5] == 0x0A && bytes[6] == 0x1A && bytes[7] == 0x0A) {
+        bytes[0] == 0x89 &&
+        bytes[1] == 0x50 &&
+        bytes[2] == 0x4E &&
+        bytes[3] == 0x47 &&
+        bytes[4] == 0x0D &&
+        bytes[5] == 0x0A &&
+        bytes[6] == 0x1A &&
+        bytes[7] == 0x0A) {
       return 'image/png';
     }
-    if (bytes.length >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF) {
+    if (bytes.length >= 3 &&
+        bytes[0] == 0xFF &&
+        bytes[1] == 0xD8 &&
+        bytes[2] == 0xFF) {
       return 'image/jpeg';
     }
     if (bytes.length >= 6) {
@@ -377,9 +425,11 @@ class AIService {
     int maxIterations = 400,
     void Function(String toolName)? onToolCall,
     void Function(KaiPlan plan)? onPlanUpdate,
+
     /// Fires with each line of narration he writes *while* working, so the UI
     /// can show him thinking out loud instead of going dark for 20 rounds.
     void Function(String note)? onProgress,
+    void Function(KaiHandsState state)? onHandsState,
 
     /// The router's read on this turn. Used ONLY to drop tool schemas that are
     /// obviously irrelevant to a confidently-classified route — see
@@ -393,6 +443,7 @@ class AIService {
     /// → nothing is dropped.
     String route = 'fastChat',
     double routeConfidence = 0.0,
+    required KaiCapabilityManifest capabilityManifest,
     BrainDebugService? debugService,
 
     /// MESSENGER MODE. A hard ceiling on the reply, in tokens — and with it,
@@ -467,21 +518,74 @@ class AIService {
     // Dropping only what a confidently-classified route can't want (see
     // toolsForRoute) buys back a big chunk of that with no cost to what he can
     // actually do. Unknown route or low confidence → he keeps everything.
-    final turnTools = ToolExecutorService.toolsForRoute(
-      route,
-      confidence: routeConfidence,
-      hasWorkspace: CodeWorkspaceService.instance.hasWorkspace,
-    );
+    final generalToolsEnabled =
+        capabilityManifest.allowsGeneralTools && replyCeiling == null;
+    var turnTools = generalToolsEnabled
+        ? ToolExecutorService.toolsForRoute(
+            route,
+            confidence: routeConfidence,
+            hasWorkspace: CodeWorkspaceService.instance.hasWorkspace,
+          )
+        : <Map<String, dynamic>>[];
+    var turnToolNames = ToolExecutorService.toolNames(turnTools);
+    onHandsState?.call(ToolExecutorService.handsStateForTools(turnToolNames));
     debugService?.recordRoute(route, routeConfidence);
+    debugService?.recordManifest(
+      toolCount: turnTools.length,
+      totalToolCount: ToolExecutorService.toolDefinitions.length,
+      schemaChars: jsonEncode(turnTools).length,
+    );
+
+    // Coding on desktop used to look healthy in the registry while the actual
+    // request body silently lost the hands. Validate the final, route-filtered
+    // names—not the source list—before spending a model request.
+    if (route == 'coding' && CodeWorkspaceService.instance.hasWorkspace) {
+      final missing = ToolExecutorService.desktopCodingToolNames
+          .difference(turnToolNames.toSet());
+      if (missing.isNotEmpty) {
+        throw StateError(
+          'Coding request is missing desktop tools: ${missing.join(', ')}',
+        );
+      }
+    }
     if (turnTools.length != ToolExecutorService.toolDefinitions.length) {
       print('🧰 [Agentic] route=$route (${(routeConfidence * 100).round()}%) → '
           '${turnTools.length}/${ToolExecutorService.toolDefinitions.length} tools');
     }
 
-    var currentMessages  = List<Map<String, dynamic>>.from(messages);
-    int toolCallCount    = 0;         // total tools executed across all iterations
-    String? lastToolResult;           // result of the most recent single tool call
-    final List<String> _toolSummaries = []; // for fallback reply if synthesis fails
+    var currentMessages = List<Map<String, dynamic>>.from(messages);
+    // The awareness block IS tool machinery. A body that grants no general tools
+    // at all — goggles off: Messenger, AR, goggles-off VR — must not receive it.
+    // Its own surface directive says "do not expose tool machinery", and
+    // "CURRENT TOOLS: none are attached to this model request" both violates
+    // that and primes him to think about tools on a turn where the concept
+    // shouldn't exist. Friend presence has no toolbox to be told is empty.
+    //
+    // This is deliberately NOT keyed on turnTools.isEmpty. A capable body whose
+    // route filter dropped every tool this turn still WANTS the "none attached"
+    // warning — there the failure mode is him claiming a tool he doesn't have.
+    // Empty-because-filtered and empty-because-bodiless are different states.
+    //
+    // The object is still built (and still mutated by the post-activation
+    // refresh below); only the insertion is gated, so an un-inserted message
+    // being refreshed is a harmless no-op.
+    final toolAwarenessMessage = <String, dynamic>{
+      'role': 'system',
+      'content': ToolExecutorService.toolAwarenessBlock(turnToolNames),
+    };
+    if (capabilityManifest.exposesToolManifest) {
+      final firstUserIndex =
+          currentMessages.indexWhere((m) => m['role'] == 'user');
+      currentMessages.insert(
+        firstUserIndex < 0 ? currentMessages.length : firstUserIndex,
+        toolAwarenessMessage,
+      );
+    }
+    int toolCallCount = 0; // total tools executed across all iterations
+    int modelRequestCount = 0;
+    String? lastToolResult; // result of the most recent single tool call
+    final List<String> _toolSummaries =
+        []; // for fallback reply if synthesis fails
 
     // Results from tools that can legitimately OFFER CHOICES. Deliberately not
     // `_toolSummaries`: that includes read_file, and this codebase contains the
@@ -492,9 +596,18 @@ class AIService {
     final Set<String> _choiceTools = {};
     // Tools whose output is an offer to the user, not data he read.
     const choiceCapable = {
-      'send_whatsapp', 'send_sms', 'call_contact', 'create_calendar_event',
-      'play_music', 'open_app', 'navigate_to', 'control_tv', 'discover_tvs',
-      'control_device', 'set_reminder', 'set_alarm',
+      'send_whatsapp',
+      'send_sms',
+      'call_contact',
+      'create_calendar_event',
+      'play_music',
+      'open_app',
+      'navigate_to',
+      'control_tv',
+      'discover_tvs',
+      'control_device',
+      'set_reminder',
+      'set_alarm',
     };
 
     // ── The real guards (replacing "20 rounds and you're done") ──────────────
@@ -521,11 +634,37 @@ class AIService {
     const int turnTokenBudget = 1500000;
 
     for (int iteration = 0; iteration < maxIterations; iteration++) {
+      // A turn may begin without a workspace, call set_code_workspace, and gain
+      // real code hands. The old one-shot manifest never noticed that transition,
+      // so Kai remained tool-less until the user sent another message. Refresh
+      // every pass and update the same awareness message the model can read.
+      final refreshedTools = generalToolsEnabled
+          ? ToolExecutorService.toolsForRoute(
+              route,
+              confidence: routeConfidence,
+              hasWorkspace: CodeWorkspaceService.instance.hasWorkspace,
+            )
+          : <Map<String, dynamic>>[];
+      final refreshedNames = ToolExecutorService.toolNames(refreshedTools);
+      if (refreshedNames.join('\u0000') != turnToolNames.join('\u0000')) {
+        turnTools = refreshedTools;
+        turnToolNames = refreshedNames;
+        onHandsState?.call(ToolExecutorService.handsStateForTools(turnToolNames));
+        toolAwarenessMessage['content'] =
+            ToolExecutorService.toolAwarenessBlock(turnToolNames);
+        debugService?.recordManifest(
+          toolCount: turnTools.length,
+          totalToolCount: ToolExecutorService.toolDefinitions.length,
+          schemaChars: jsonEncode(turnTools).length,
+        );
+        print('🧰 [Agentic] tool manifest refreshed after capability change: '
+            '${turnToolNames.join(',')}');
+      }
       // See the note above: full model on every pass. His agency and his voice
       // both depend on it.
       final iterModel = model;
       print('🤖 [Agentic] Iteration ${iteration + 1}/$maxIterations '
-            '(model: $iterModel) — ${currentMessages.length} messages');
+          '(model: $iterModel) — ${currentMessages.length} messages');
 
       // Long runs are quadratic — clip stale bulk before paying to re-send it.
       _trimOldToolResults(currentMessages);
@@ -534,22 +673,33 @@ class AIService {
       Response? response;
       for (int attempt = 0; attempt < 3; attempt++) {
         try {
+          final toolChoice = turnTools.isEmpty ? 'none' : 'auto';
+          if (attempt == 0) {
+            modelRequestCount++;
+            debugService?.recordModelRequestTools(
+              request: modelRequestCount,
+              model: iterModel,
+              toolChoice: toolChoice,
+              toolNames: turnToolNames,
+            );
+            print('🧰 [Agentic] request=$modelRequestCount tools='
+                '${turnToolNames.join(',')}');
+          }
           response = await _dio.post(
             'https://api.openai.com/v1/chat/completions',
             options: Options(headers: {
               'Authorization': 'Bearer $openaiKey',
               'Content-Type': 'application/json',
             }),
-            data: {
-              'model': iterModel,
-              'messages': currentMessages,
-              'tools': turnTools,
+            data: buildOpenAIToolRequest(
+              model: iterModel,
+              messages: currentMessages,
+              tools: turnTools,
               // Messenger mode forbids the tools rather than removing them:
               // `tool_choice` is ONLY valid alongside `tools`, and sending
               // 'none' on its own is a hard 400 — the exact bug that once threw
               // a raw git diff at Sadeq instead of a sentence. Hand him the
               // toolbox, then close his hand.
-              'tool_choice': replyCeiling != null ? 'none' : 'auto',
               // Head room. This was `toolCallCount == 0 ? 500 : 1000` — i.e. on
               // the pass where he decides whether to act AND writes his
               // narration, he had 500 tokens to think in. He was reasoning
@@ -563,8 +713,9 @@ class AIService {
               // …unless he's texting. Then the room IS the point — see
               // [replyCeiling]. 8,000 is a ceiling for work; for a text it's a
               // field to fill, and he fills it.
-              ..._lengthParams(iterModel, replyCeiling ?? 8000),
-            },
+              lengthParameters:
+                  _lengthParams(iterModel, replyCeiling ?? 8000),
+            ),
           );
           break; // success
         } on DioException catch (e) {
@@ -592,8 +743,8 @@ class AIService {
           final outOfCredit = err?['code']?.toString() == 'insufficient_quota';
           if (outOfCredit) {
             print('💳 [OpenAI] OUT OF CREDIT — billing problem, not a code '
-                  'problem. Nothing here will retry its way out of it: '
-                  'https://platform.openai.com/settings/organization/billing');
+                'problem. Nothing here will retry its way out of it: '
+                'https://platform.openai.com/settings/organization/billing');
           }
 
           // A socket timeout used to get three attempts while a 429 — the one
@@ -612,32 +763,37 @@ class AIService {
                 int.tryParse(e.response?.headers.value('retry-after') ?? '');
             final wait = retryAfter ?? (attempt + 1);
             print('⚠️ [Agentic] ${status ?? e.type} on attempt ${attempt + 1}, '
-                  'waiting ${wait}s…');
+                'waiting ${wait}s…');
             await Future.delayed(Duration(seconds: wait));
             continue;
           }
           // All retries exhausted — if we already completed tools, return a
           // fallback summary rather than surfacing a raw error to the user.
           if (_toolSummaries.isNotEmpty) {
-            print('⚠️ [Agentic] Synthesis failed after retries — using tool-result fallback');
+            print(
+                '⚠️ [Agentic] Synthesis failed after retries — using tool-result fallback');
             return _toolSummaries.join(' ');
           }
           rethrow;
         }
       }
 
-      if (response == null) break; // shouldn't happen — rethrow above handles it
+      if (response == null)
+        break; // shouldn't happen — rethrow above handles it
 
       // Accumulate token usage across iterations
       final usage = response.data['usage'];
       if (usage != null) {
-        final inTok  = usage['prompt_tokens']     as int? ?? 0;
+        final inTok = usage['prompt_tokens'] as int? ?? 0;
         final outTok = usage['completion_tokens'] as int? ?? 0;
         await UsageTrackingService.trackOpenAI(
-          model: iterModel, inputTokens: inTok, outputTokens: outTok, operation: 'chat',
+          model: iterModel,
+          inputTokens: inTok,
+          outputTokens: outTok,
+          operation: 'chat',
         );
         if (usageOut != null) {
-          usageOut['input']  = (usageOut['input']  ?? 0) + inTok;
+          usageOut['input'] = (usageOut['input'] ?? 0) + inTok;
           usageOut['output'] = (usageOut['output'] ?? 0) + outTok;
         }
         turnTokens += inTok + outTok;
@@ -650,8 +806,8 @@ class AIService {
         break;
       }
 
-      final choice     = (response.data['choices'] as List)[0];
-      final message    = choice['message'] as Map<String, dynamic>;
+      final choice = (response.data['choices'] as List)[0];
+      final message = choice['message'] as Map<String, dynamic>;
       final stopReason = choice['finish_reason'] as String? ?? '';
 
       if (stopReason != 'tool_calls') {
@@ -694,7 +850,8 @@ class AIService {
         }
 
         debugService?.recordIterationCount(iteration + 1);
-        print('✅ [Agentic] Done after ${iteration + 1} iteration(s). Reply: ${reply.length} chars');
+        print(
+            '✅ [Agentic] Done after ${iteration + 1} iteration(s). Reply: ${reply.length} chars');
         return reply;
       }
 
@@ -710,16 +867,17 @@ class AIService {
       // forever: identical tool, identical args. Catch THAT and a high ceiling
       // is safe — he can work as long as he's actually getting somewhere.
       final signature = toolCalls
-          .map((tc) => '${tc['function']['name']}(${tc['function']['arguments']})')
+          .map((tc) =>
+              '${tc['function']['name']}(${tc['function']['arguments']})')
           .join('|');
       if (signature == lastSignature) {
         repeats++;
         if (repeats >= 2) {
-          print('🔁 [Agentic] Same call 3× in a row — he is stuck, not working.');
+          print(
+              '🔁 [Agentic] Same call 3× in a row — he is stuck, not working.');
           currentMessages.add({
             'role': 'user',
-            'content':
-                "Stop — you've made that exact same call three times running. "
+            'content': "Stop — you've made that exact same call three times running. "
                 "It isn't going to start working. Don't retry it. Tell me what "
                 "you were trying to do, why it keeps failing, and what you'd try "
                 "instead. Don't call any more tools.",
@@ -761,15 +919,18 @@ class AIService {
       final interim = (message['content'] as String? ?? '').trim();
       if (interim.isNotEmpty) {
         print('💬 [Agentic] Interim: $interim');
-        onProgress?.call(interim);
-        debugService?.currentTrace?.recordInterim(interim, iteration: iteration + 1);
+        if (shouldSurfaceAgenticInterimNarration(route, narration: interim)) {
+          onProgress?.call(interim);
+        }
+        debugService?.currentTrace
+            ?.recordInterim(interim, iteration: iteration + 1);
       }
 
       // Execute each tool and append the result
       for (final tc in toolCalls) {
-        final tcId      = tc['id']                    as String;
-        final fnName    = tc['function']['name']       as String;
-        final fnArgsRaw = tc['function']['arguments']  as String? ?? '{}';
+        final tcId = tc['id'] as String;
+        final fnName = tc['function']['name'] as String;
+        final fnArgsRaw = tc['function']['arguments'] as String? ?? '{}';
 
         Map<String, dynamic> fnArgs;
         try {
@@ -785,7 +946,8 @@ class AIService {
 
         if (fnName == 'create_plan') {
           // ── Multi-step planning: build plan, execute steps, stream UI updates ──
-          print('📋 [Agentic] create_plan intercepted — running TaskPlannerService');
+          print(
+              '📋 [Agentic] create_plan intercepted — running TaskPlannerService');
           final plan = KaiPlan.fromMap(fnArgs);
           onPlanUpdate?.call(plan); // show card immediately (all steps pending)
 
@@ -795,7 +957,8 @@ class AIService {
             onStepUpdate: (updatedPlan, _) => onPlanUpdate?.call(updatedPlan),
           );
           onPlanUpdate?.call(plan); // final state
-          print('✅ [Agentic] Plan complete — ${plan.steps.length} step(s) executed');
+          print(
+              '✅ [Agentic] Plan complete — ${plan.steps.length} step(s) executed');
         } else {
           toolResult = await toolExecutor.execute(fnName, fnArgs);
           print('✅ [Agentic] Tool result ($fnName): '
@@ -810,7 +973,8 @@ class AIService {
             fnName,
             fnArgs,
             result: toolResult,
-            outcome: ToolExecutorService.classifyToolOutcome(fnName, toolResult).label,
+            outcome: ToolExecutorService.classifyToolOutcome(fnName, toolResult)
+                .label,
             iteration: iteration + 1,
           );
         }
@@ -826,14 +990,14 @@ class AIService {
         }
 
         currentMessages.add({
-          'role':         'tool',
+          'role': 'tool',
           'tool_call_id': tcId,
           // The trimmer needs to know what KIND of result this is — a read is
           // material he must quote back verbatim, a job ack is disposable. It
           // couldn't tell them apart because nothing ever wrote the name down.
           // OpenAI accepts and ignores 'name' on tool messages.
-          'name':         fnName,
-          'content':      toolResult,
+          'name': fnName,
+          'content': toolResult,
         });
       }
       // Loop → GPT now sees the tool results and will respond
@@ -850,18 +1014,26 @@ class AIService {
     // another tool, which forces the model to do the one thing left — write the
     // answer from everything it just learned. He keeps his work.
     debugService?.recordIterationCount(maxIterations);
-    print('⚠️ [Agentic] Exhausted $maxIterations iterations — forcing a final answer');
+    print(
+        '⚠️ [Agentic] Exhausted $maxIterations iterations — forcing a final answer');
     try {
       currentMessages.add({
         'role': 'user',
-        'content':
-            "You're out of tool rounds — that's a pause, not a failure. Stop "
+        'content': "You're out of tool rounds — that's a pause, not a failure. Stop "
             "working and answer me now, in your own voice: what did you actually "
             "do, what did you find, and what's the single next step? Say it like "
             "someone who's mid-job and will pick it straight back up — because "
             "you will: your job state persisted, so if I say 'keep going' you "
             "resume from exactly there. Don't apologise and don't call tools.",
       });
+      final finalToolNames = ToolExecutorService.toolNames(turnTools);
+      modelRequestCount++;
+      debugService?.recordModelRequestTools(
+        request: modelRequestCount,
+        model: model,
+        toolChoice: 'none',
+        toolNames: finalToolNames,
+      );
       final res = await _dio.post(
         'https://api.openai.com/v1/chat/completions',
         options: Options(headers: {
@@ -876,13 +1048,17 @@ class AIService {
           // specified" — which killed this entire graceful-ending path and threw
           // a raw git diff at Sadeq instead of a sentence. Hand him the tools,
           // then forbid him from reaching for them.
-          'tools': ToolExecutorService.toolDefinitions,
+          // Keep the exact same route-filtered manifest used by the working
+          // loop. This request cannot call tools, but diagnostics and payload
+          // cost must still describe what was actually sent.
+          'tools': turnTools,
           'tool_choice': 'none', // the whole point — no more reaching
           ..._lengthParams(model, 8000),
         },
       );
       final text =
-          (res.data['choices'] as List)[0]['message']['content'] as String? ?? '';
+          (res.data['choices'] as List)[0]['message']['content'] as String? ??
+              '';
       if (text.trim().isNotEmpty) return text;
     } catch (e) {
       if (e is DioException && e.response != null) {
@@ -915,27 +1091,45 @@ class AIService {
   /// Test seam. Pure list-munging with no IO — exactly the kind of logic that
   /// should never have been untested, given one inverted boolean silently
   /// deleted his short-term memory on every short job for who knows how long.
-  static void trimOldToolResultsForTesting(List<Map<String, dynamic>> msgs,
-          {int keepWhole = 3,
-          int keepMaterial = 6,
-          int clipOver = 700,
-          int hardCap = 14000}) =>
-      _trimOldToolResults(msgs,
-          keepWhole: keepWhole,
-          keepMaterial: keepMaterial,
-          clipOver: clipOver,
-          hardCap: hardCap);
+  static ToolTrimStats trimOldToolResultsForTesting(
+    List<Map<String, dynamic>> msgs, {
+    int keepWhole = 3,
+    int keepMaterial = 2,
+    int clipOver = 700,
+    int hardCap = 4000,
+  }) =>
+      _trimOldToolResults(
+        msgs,
+        keepWhole: keepWhole,
+        keepMaterial: keepMaterial,
+        clipOver: clipOver,
+        hardCap: hardCap,
+      );
 
-  static void _trimOldToolResults(List<Map<String, dynamic>> msgs,
-      {int keepWhole = 3,
-      int keepMaterial = 6,
-      int clipOver = 700,
-      int hardCap = 14000}) {
+  static int trimOldAssistantToolCallsForTesting(
+    List<Map<String, dynamic>> msgs, {
+    int keepWhole = 2,
+    int hardCap = 4000,
+  }) =>
+      _trimOldAssistantToolCalls(
+        msgs,
+        keepWhole: keepWhole,
+        hardCap: hardCap,
+      ).charsSaved;
+
+  static ToolTrimStats _trimOldToolResults(
+    List<Map<String, dynamic>> msgs, {
+    int keepWhole = 3,
+    int keepMaterial = 2,
+    int clipOver = 700,
+    int hardCap = 4000,
+  }) {
+    var charsSaved = 0;
     final toolIdx = <int>[];
     for (var i = 0; i < msgs.length; i++) {
       if (msgs[i]['role'] == 'tool') toolIdx.add(i);
     }
-    if (toolIdx.isEmpty) return;
+    if (toolIdx.isEmpty) return const ToolTrimStats();
 
     // The index of the oldest result we still consider "recent". Everything at
     // or after it is his active working set and stays readable.
@@ -986,9 +1180,8 @@ class AIService {
     bool isMaterial(int i) => materialTools.contains(msgs[i]['name']);
 
     final materialIdx = toolIdx.where(isMaterial).toList(growable: false);
-    final cutoff = toolIdx.length > keepWhole
-        ? toolIdx[toolIdx.length - keepWhole]
-        : 0;
+    final cutoff =
+        toolIdx.length > keepWhole ? toolIdx[toolIdx.length - keepWhole] : 0;
     // The last [keepMaterial] reads survive regardless of how much chatter has
     // happened since. keepWhole=3 counts job_start and self_check against his
     // memory of the file, which is how a read from three tool calls ago
@@ -1001,26 +1194,79 @@ class AIService {
       final c = msgs[i]['content'];
       if (c is! String) continue;
 
-      if (i >= cutoff || (isMaterial(i) && i >= materialCutoff)) {
+      final keepReadable =
+          isMaterial(i) ? i >= materialCutoff : i >= cutoff;
+      if (keepReadable) {
         // RECENT — his active working set, keep it readable. But even here a
         // whole-file read_file can be 95k chars (~24k tokens) and gets re-sent
         // EVERY round after. One of those alone explains a 60k-tokens-per-round
         // burn. Cap it; he can re-read a specific range if he needs more.
         if (c.length > hardCap) {
-          msgs[i]['content'] = '${c.substring(0, hardCap)}\n'
+          final next = '${c.substring(0, hardCap)}\n'
               '… [truncated — this result was huge. Re-read a specific line range '
               'or use search_code instead of pulling the whole file again]';
+          msgs[i]['content'] = next;
+          charsSaved += c.length - next.length;
         }
         continue;
       }
 
       // OLD — he's moved on; he already took what he needed.
       if (c.length > clipOver) {
-        msgs[i]['content'] = '${c.substring(0, 500)}\n'
+        final next = '${c.substring(0, 500)}\n'
             '… [older result trimmed to keep this run affordable — re-read it if '
             'I actually need it again]';
+        msgs[i]['content'] = next;
+        charsSaved += c.length - next.length;
       }
     }
+
+    return ToolTrimStats(charsSaved: charsSaved);
+  }
+
+  static ToolTrimStats _trimOldAssistantToolCalls(
+    List<Map<String, dynamic>> msgs, {
+    int keepWhole = 2,
+    int hardCap = 4000,
+  }) {
+    var charsSaved = 0;
+    final assistantIdx = <int>[];
+    for (var i = 0; i < msgs.length; i++) {
+      final m = msgs[i];
+      if (m['role'] == 'assistant' && m['tool_calls'] != null) {
+        assistantIdx.add(i);
+      }
+    }
+    if (assistantIdx.isEmpty) return const ToolTrimStats();
+
+    final cutoff = assistantIdx.length > keepWhole
+        ? assistantIdx[assistantIdx.length - keepWhole]
+        : 0;
+
+    for (final i in assistantIdx) {
+      if (i >= cutoff) continue;
+      final calls = msgs[i]['tool_calls'];
+      if (calls == null) continue;
+      final before = calls.toString().length;
+      if (calls is List) {
+        for (final call in calls) {
+          if (call is! Map) continue;
+          final function = call['function'];
+          if (function is! Map) continue;
+          final arguments = function['arguments'];
+          if (arguments is String) {
+            function['arguments'] = '{"_trimmed":true}';
+          }
+        }
+        charsSaved += before - calls.toString().length;
+        continue;
+      }
+      msgs[i]['tool_calls'] =
+          '[trimmed assistant tool_calls — kept recent calls only]';
+      charsSaved += before - msgs[i]['tool_calls'].toString().length;
+    }
+
+    return ToolTrimStats(charsSaved: charsSaved);
   }
 
   /// Returns true when a tool result is a short action confirmation that doesn't
@@ -1081,7 +1327,9 @@ Text:
 
       var content = response.trim();
       if (content.startsWith("```")) {
-        content = content.replaceAll(RegExp(r'^```(?:json)?\s*'), '').replaceAll(RegExp(r'\s*```$'), '');
+        content = content
+            .replaceAll(RegExp(r'^```(?:json)?\s*'), '')
+            .replaceAll(RegExp(r'\s*```$'), '');
       }
 
       return jsonDecode(content) as Map<String, dynamic>;
@@ -1107,11 +1355,19 @@ Text:
     bool adaptUser = false,
     int ctxTurns = 8,
     bool useMemory = true, // Enable memory integration
-    bool useWebSearch = true, // NEW: Enable Google Search
+    bool useWebSearch = true, // Enable web search for current info
+    bool saveUserMessage = true,
+    bool saveAssistantReply = true,
+    String conversationSurfaceId = 'in_person',
+    String? source,
+    KaiSurfaceContext? surfaceContext,
+    String? ephemeralContext,
     void Function(String toolName)? onToolCall,
     void Function(KaiPlan plan)? onPlanUpdate,
+
     /// Each line he writes while working, as he writes it.
     void Function(String note)? onProgress,
+    void Function(KaiHandsState state)? onHandsState,
 
     /// He's texting, not writing. A hard token ceiling on the reply, and tools
     /// off for the turn. See [_callOpenAIWithTools.replyCeiling] — the long
@@ -1119,6 +1375,7 @@ Text:
     ///
     /// Null on every normal turn. Nothing about work changes.
     int? replyCeiling,
+
     /// Raw PNG/JPEG bytes for Kai to LOOK at. His embodiment ledger says
     /// "eyes — no", and this is the line that changes it: gpt-5.x is
     /// multimodal, so with this he can see a screenshot of his own UI and fix
@@ -1127,6 +1384,27 @@ Text:
     List<int>? image,
     List<AIChatAttachment> attachments = const [],
   }) async {
+    final activeSurface = surfaceContext;
+    // conversationId, NOT surfaceId — desktop and mobile are distinct bodies
+    // that deliberately share the 'in_person' partition. Keying storage off the
+    // surface name would split Kai's history the moment those two were wired.
+    final activeSurfaceId = activeSurface?.conversationId ?? conversationSurfaceId;
+    // An explicit caller source WINS over the surface-derived one. `source` is a
+    // per-turn fact (what triggered this turn: 'proactive', 'tavern') while the
+    // surface is a per-body fact; a proactive nudge on mobile is both, and the
+    // trigger is what downstream branches on. Deriving it from the surface would
+    // have silently turned every mobile proactive turn into an ordinary one.
+    // Callers that pass no source (Unity, Messenger) still inherit the surface's.
+    final activeSource = source ?? activeSurface?.source;
+    final capabilityManifest = KaiCapabilityBroker.forContext(activeSurface);
+    // Tool availability is a property of the body Kai is inhabiting, not a
+    // request the model can negotiate. The existing tool loop treats any reply
+    // ceiling as toolChoice:none; give friend-only surfaces a generous ceiling
+    // when their caller did not already choose a conversational one.
+    final activeReplyCeiling = activeSurface != null &&
+            !activeSurface.allowsGeneralTools
+        ? (replyCeiling ?? 600)
+        : replyCeiling;
     // If the actual model reply succeeds but later bookkeeping fails (tags,
     // mood persistence, TTS, debug packaging), don't throw away the useful answer
     // and replace it with canned support sludge. Preserve the real reply and
@@ -1136,7 +1414,7 @@ Text:
     // 🧠 START BRAIN TRACE
     final debugService = BrainDebugService();
     debugService.startTrace(text);
-    
+
     debugService.addStep(
       BrainPhase.processing,
       'Starting message processing',
@@ -1147,7 +1425,7 @@ Text:
         'useWebSearch': useWebSearch,
       },
     );
-    
+
     print('💬 [SEND MESSAGE START] text: "$text", personaId: $personaId');
 
     // Fresh sheet. Without this, "thanks" following a twenty-iteration refactor
@@ -1159,8 +1437,26 @@ Text:
     // calls too, which never reach the loop below. Cleared here because this is
     // where a turn begins.
     ToolExecutorService.beginTurn();
-    
+
     try {
+      // Decide posture before loading context. Goggles-off bodies never even
+      // query the active coding job, so forbidden work context cannot leak via
+      // an eager provider that is hidden later in the prompt.
+      final activeJob = capabilityManifest.allowsTechnicalConversation
+          ? await KaiJobService.instance.current(personaId)
+          : null;
+      final proposedRoute = const KaiRouterService().decide(
+        text,
+        hasImage: image != null && image.isNotEmpty,
+        hasActiveJob: activeJob != null,
+      );
+      final routeDecision = capabilityManifest.constrainRoute(proposedRoute);
+      final contextManifest = KaiContextManifest.forTurn(
+        route: routeDecision.route,
+        capabilities: capabilityManifest,
+        surface: activeSurface,
+      );
+
       // ── SETUP, IN PARALLEL ────────────────────────────────────────────
       // None of these four reads the output of any other. They used to run
       // one after another and it cost ~12 seconds of dead air before he
@@ -1178,9 +1474,18 @@ Text:
       //
       // The futures are started BEFORE the first await on purpose. Start
       // them after one and you've serialised them again by accident.
-      final historyFuture = _convStore.getHistory(personaId, maxTurns: ctxTurns);
+      final historyFuture = _convStore.getHistory(
+        personaId,
+        surfaceId: activeSurfaceId,
+        maxTurns: ctxTurns,
+      );
       final memoryFuture = useMemory
-          ? MemoryService.queryMemory(personaId: personaId, query: text, limit: 5)
+          ? MemoryService.queryMemory(
+              personaId: personaId,
+              query: text,
+              limit: 5,
+              accessPolicy: KaiMemoryAccessPolicy.forContext(activeSurface),
+            )
           : Future<MemoryQueryResult?>.value(null);
       // An unawaited future that throws before anyone awaits it is an
       // unhandled async error that can take the isolate down. Both are
@@ -1207,7 +1512,7 @@ Text:
       final affinity = await affinityF;
       final lastUpdate = await lastUpdateF;
       print('✅ [SEND MESSAGE] State loaded successfully');
-      
+
       debugService.addStep(
         BrainPhase.workingMemory,
         'State loaded successfully',
@@ -1218,701 +1523,756 @@ Text:
         },
       );
 
-    // Apply time-based decay BEFORE processing new message
-    final timeSinceUpdate = DateTime.now().difference(lastUpdate);
-    print('⏱️ Time since last update: ${timeSinceUpdate.inHours}h ${timeSinceUpdate.inMinutes % 60}m');
-    
-    try {
-      personality = await _personality.applyPersonalityDecay(personality, lastUpdate);
-      mood = await _personality.applyMoodDecay(personaId, mood, lastUpdate);
-    } catch (e) {
-      print('⚠️ [DECAY ERROR] Failed to apply decay: $e');
-      print('⚠️ [DECAY ERROR] Continuing with current values');
-      // Continue without decay - don't fail the entire request
-    }
-    
-    // Track if decay was applied
-    final personalityDecayed = timeSinceUpdate.inDays >= EvolutionSettings.personalityDecayThresholdDays;
-    final moodDecayed = timeSinceUpdate.inHours > 0;
+      // Apply time-based decay BEFORE processing new message
+      final timeSinceUpdate = DateTime.now().difference(lastUpdate);
+      print(
+          '⏱️ Time since last update: ${timeSinceUpdate.inHours}h ${timeSinceUpdate.inMinutes % 60}m');
 
-    // Build conversation history — loaded from Firebase, cross-surface.
-    // Already in flight since the top of the turn; this is just the join.
-    final history = await historyFuture;
-    
-    // Query long-term memory
-    String memoryContext = '';
-    List<String> memoriesUsed = [];
-    MemoryQueryResult? memoryResult; // Capture for debug info
-    if (useMemory) {
-      debugService.addStep(
-        BrainPhase.semanticRetrieval,
-        'Querying long-term memory with embeddings',
-        data: {'query': text.length > 100 ? '${text.substring(0, 100)}...' : text},
-      );
-      
-      print('🧠 [AI_SERVICE] Memory query enabled for personaId: $personaId');
-      print('🧠 [AI_SERVICE] Query text: "$text"');
       try {
-        // In flight since the top of the turn — this is the join, not the work.
-        memoryResult = await memoryFuture;
-        print('🧠 [AI_SERVICE] Memory query complete. Results: ${memoryResult?.results.length ?? 0}');
-        
-        if (memoryResult != null && memoryResult.results.isNotEmpty) {
-          memoryContext = memoryResult.toContextString();
-          memoriesUsed = memoryResult.results
-              .where((r) => r.similarity > 0.28)
-              .map((r) => r.summary)
-              .toList();
-
-          print('💭 Using ${memoriesUsed.length} memory contexts (threshold: 0.28)');
-          print('💭 All results: ${memoryResult.results.map((r) => "${r.similarity.toStringAsFixed(2)}: ${r.summary.length > 50 ? r.summary.substring(0, 50) : r.summary}...").join(", ")}');
-          
-          debugService.addStep(
-            BrainPhase.semanticRetrieval,
-            'Memory retrieval complete',
-            data: {
-              'results': memoryResult.results.length,
-              'used': memoriesUsed.length,
-              'topSimilarity': memoryResult.results.first.similarity.toStringAsFixed(2),
-            },
-          );
-        } else {
-          print('⚠️ [AI_SERVICE] No memories found or query returned null');
-          debugService.addStep(
-            BrainPhase.semanticRetrieval,
-            'No relevant memories found',
-          );
-        }
-        // ── ASK THE GRAPH. Directly. Not with the chat log's permission. ────
-        //
-        // This used to live INSIDE `if (memoriesUsed.isNotEmpty)`, which meant
-        // spreading activation — the only path by which anything Kai KNOWS
-        // reaches his prompt — could not run unless a cosine search over
-        // transcript fragments cleared 0.28 first. From the 2026-07-16 traces:
-        //
-        //   "chat is still not starting…"           0.46  graph consulted
-        //   "so, what do you think we should do?"   0.41  graph consulted
-        //   "sure go ahead"                          —    NOT consulted
-        //   "what are mojibake?"                    0.21  NOT consulted
-        //   "why does it keep happening?"           0.25  NOT consulted
-        //
-        // Three of five turns his knowledge was never reached. Not empty —
-        // unasked. He answered "why does it keep happening?" from theory while
-        // the answer sat in a graph nobody queried. The knowing was a
-        // subordinate of the chat log, and that was the level-5 blocker.
-        //
-        // And the seed was never a query: `retrievedWords` was every word over
-        // three characters scraped from five unrelated chat summaries, which is
-        // why the log read `reinforced 271 retrieved nodes` — roughly 271 EVERY
-        // turn. Since reinforceNodes bumps importance for all of them, the
-        // importance signal was being destroyed on every single turn. If
-        // everything is important, nothing is.
-        //
-        // Now: seeded from what Sadeq ACTUALLY SAID, capped at 12 terms,
-        // stopwords stripped, run unconditionally. queryTerms lives in a file
-        // with zero imports and is proven — see lib/logic/query_terms.dart.
-        final seedTerms = queryTerms(text).toList();
-        if (seedTerms.isNotEmpty) {
-          // Reconsolidation: retrieval strengthens what was actually asked for.
-          _brain.reinforceNodes(personaId, seedTerms).catchError(
-              (e) => print('⚠️ [Brain] reinforceNodes error: $e'));
-          try {
-            final spreadBlock = await _brain.spreadActivation(
-                personaId, seedTerms, currentMood: mood);
-            if (spreadBlock.isNotEmpty) {
-              memoryContext += '\n\n$spreadBlock';
-              print('🕸️ [Brain] Graph answered on: ${seedTerms.join(", ")}');
-              debugService.addStep(
-                BrainPhase.semanticRetrieval,
-                'Graph consulted directly (not via transcript match)',
-                data: {'seedTerms': seedTerms},
-              );
-            }
-          } catch (e) {
-            print('⚠️ [Brain] spreadActivation error: $e');
-          }
-        }
+        personality =
+            await _personality.applyPersonalityDecay(personality, lastUpdate);
+        mood = await _personality.applyMoodDecay(personaId, mood, lastUpdate);
       } catch (e) {
-        print('❌ [AI_SERVICE] Memory query failed: $e');
-        print('⚠️ [AI_SERVICE] Continuing without memory context');
+        print('⚠️ [DECAY ERROR] Failed to apply decay: $e');
+        print('⚠️ [DECAY ERROR] Continuing with current values');
+        // Continue without decay - don't fail the entire request
+      }
+
+      // Track if decay was applied
+      final personalityDecayed = timeSinceUpdate.inDays >=
+          EvolutionSettings.personalityDecayThresholdDays;
+      final moodDecayed = timeSinceUpdate.inHours > 0;
+
+      // Build conversation history — loaded from Firebase, cross-surface.
+      // Already in flight since the top of the turn; this is just the join.
+      final history = await historyFuture;
+
+      // Query long-term memory
+      String memoryContext = '';
+      List<String> memoriesUsed = [];
+      MemoryQueryResult? memoryResult; // Capture for debug info
+      if (useMemory) {
         debugService.addStep(
           BrainPhase.semanticRetrieval,
-          'Memory query failed: $e',
-        );
-        // Continue without memory - don't fail the entire request
-      }
-    }
-    
-    // 🎮 NEW: Check for GM Kai trigger mode first
-    final isGMMode = _isGMKaiTrigger(text);
-    String processedText = text;
-    
-    if (isGMMode) {
-      debugService.addStep(
-        BrainPhase.processing,
-        'GM Kai mode detected - direct house control activated',
-        data: {'original_input': text},
-      );
-      
-      processedText = _extractGMCommand(text);
-      print('🎮 [AI_SERVICE] GM Kai mode activated! Command: "$processedText"');
-      
-      // In GM mode, force ambiance/house control processing
-      final ambianceService = AmbianceService();
-      
-      // Check for D&D ambiance first (natural language scenes)
-      final isDnDRequest = ambianceService.isDnDAmbianceRequest(processedText);
-      
-      if (isDnDRequest) {
-        debugService.addStep(
-          BrainPhase.processing,
-          'GM mode D&D ambiance control triggered',
+          'Querying long-term memory with embeddings',
           data: {
-            'command': processedText,
-            'type': 'dnd_ambiance',
+            'query': text.length > 100 ? '${text.substring(0, 100)}...' : text
           },
         );
-        
-        print('🎲 [AI_SERVICE] GM mode executing D&D ambiance: "$processedText"');
-        
-        // Use AI to translate GM command into optimized D&D prompt
-        final translation = await _translateGMCommandToDnDPrompt(processedText);
-        final optimizedPrompt = translation['scene_description'] as String;
-        final includeMusic = translation['include_music'] as bool? ?? true;
-        final includeSmoke = translation['include_smoke'] as bool? ?? false;
-        
-        print('🎨 [AI_SERVICE] Translated to: "$optimizedPrompt"');
-        print('   🎵 Music: $includeMusic | 💨 Smoke: $includeSmoke');
-        
-        // Execute D&D ambiance with AI-optimized prompt
-        final success = await ambianceService.setDnDAmbiance(
-          prompt: optimizedPrompt,
-          includeMusic: includeMusic,
-          includeSmoke: includeSmoke,
-        );
-        
-        if (success) {
-          // Generate GM Kai response about the D&D scene
-          final gmResponse = _generateGMKaiDnDResponse(processedText);
-          
-          print('✅ [AI_SERVICE] GM mode D&D ambiance successful, returning response');
-          
-          // Complete trace
-          debugService.completeTrace(gmResponse);
-          
-          // Return the GM control response directly
-          return ChatResponse(
-            reply: gmResponse,
-            raw: {
-              'model': model,
-              'gm_mode': true,
-              'dnd_ambiance': true,
-              'prompt': optimizedPrompt,
-              'original_command': text,
-              'processed_command': processedText,
-              'translation': translation,
-            },
-            personalityDelta: <String, int>{},
-            moodDelta: <String, int>{},
-            actualDeltas: <String, int>{},
-            tags: ['gm_mode', 'house_control', 'dnd_ambiance'],
-            mbti: personality['mbti']?.toString() ?? 'UNKNOWN',
-            webUsed: false,
-            memoriesUsed: [],
-            debugInfo: {
-              'gm_mode': true,
-              'dnd_ambiance': true,
-              'prompt': optimizedPrompt,
-              'original_command': text,
-              'processed_command': processedText,
-              'translation': translation,
-              'processing_time_ms': DateTime.now().millisecondsSinceEpoch,
-              'direct_house_control': true,
-            },
-            webSearchUsed: false,
-            searchResults: [],
-          );
-        } else {
-          print('❌ [AI_SERVICE] GM mode D&D ambiance failed, trying standard ambiance');
-        }
-      }
-      
-      // Try standard ambiance profiles as fallback
-      final gmAmbianceMatch = ambianceService.analyzeVoiceCommand(processedText);
-      
-      if (gmAmbianceMatch != null) {
-        debugService.addStep(
-          BrainPhase.processing,
-          'GM mode ambiance control triggered',
-          data: {
-            'profile': gmAmbianceMatch.profile,
-            'confidence': gmAmbianceMatch.confidence,
-            'command': processedText,
-          },
-        );
-        
-        print('🎮 [AI_SERVICE] GM mode executing ${gmAmbianceMatch.profile} (${(gmAmbianceMatch.confidence * 100).toStringAsFixed(1)}% confidence)');
-        
-        // Execute the ambiance
-        final success = await ambianceService.setAmbiance(
-          profile: gmAmbianceMatch.profile,
-          originalInput: processedText,
-          confidence: gmAmbianceMatch.confidence,
-        );
-        
-        if (success) {
-          // Generate GM Kai response about the control
-          final gmResponse = _generateGMKaiResponse(processedText, gmAmbianceMatch.profile);
-          
-          print('✅ [AI_SERVICE] GM mode control successful, returning response');
-          
-          // Complete trace
-          debugService.completeTrace(gmResponse);
-          
-          // Return the GM control response directly
-          return ChatResponse(
-            reply: gmResponse,
-            raw: {
-              'model': model,
-              'gm_mode': true,
-              'executed_profile': gmAmbianceMatch.profile,
-              'confidence': gmAmbianceMatch.confidence,
-              'original_command': text,
-              'processed_command': processedText,
-            },
-            personalityDelta: <String, int>{},
-            moodDelta: <String, int>{},
-            actualDeltas: <String, int>{},
-            tags: ['gm_mode', 'house_control', gmAmbianceMatch.profile],
-            mbti: personality['mbti']?.toString() ?? 'UNKNOWN',
-            webUsed: false,
-            memoriesUsed: [],
-            debugInfo: {
-              'gm_mode': true,
-              'executed_profile': gmAmbianceMatch.profile,
-              'gm_confidence': gmAmbianceMatch.confidence,
-              'original_command': text,
-              'processed_command': processedText,
-              'processing_time_ms': DateTime.now().millisecondsSinceEpoch,
-              'direct_house_control': true,
-            },
-            webSearchUsed: false,
-            searchResults: [],
-          );
-        } else {
-          print('❌ [AI_SERVICE] GM mode control failed, continuing with enhanced prompt');
-        }
-      }
-    }
 
-    // Ambiance requests are only handled in GM Kai mode
-    final ambianceService = AmbianceService();
-    final ambianceMatch = isGMMode ? ambianceService.analyzeVoiceCommand(processedText) : null;
-    
-    if (ambianceMatch != null) {
-      debugService.addStep(
-        BrainPhase.processing,
-        'Detected ambiance request',
-        data: {
-          'profile': ambianceMatch.profile,
-          'confidence': ambianceMatch.confidence,
-          'keywords': ambianceMatch.matchedKeywords,
-        },
-      );
-      
-      print('🎭 [AI_SERVICE] Detected ambiance request: ${ambianceMatch.profile} (${(ambianceMatch.confidence * 100).toStringAsFixed(1)}% confidence)');
-      
-      // Set the ambiance
-      final success = await ambianceService.setAmbiance(
-        profile: ambianceMatch.profile,
-        originalInput: text,
-        confidence: ambianceMatch.confidence,
-      );
-      
-      if (success) {
-        // Generate Kai's response about the ambiance
-        final ambianceResponse = ambianceService.generateKaiResponse(
-          ambianceMatch.profile, 
-          ambianceMatch.confidence
-        );
-        
-        print('✅ [AI_SERVICE] Ambiance set successfully, returning response');
-        
-        // Return the ambiance response directly without full AI processing
-        return ChatResponse(
-          reply: ambianceResponse,
-          raw: {
-            'model': model,
-            'ambiance_profile': ambianceMatch.profile,
-            'confidence': ambianceMatch.confidence,
-          },
-          personalityDelta: <String, int>{},
-          moodDelta: <String, int>{},
-          actualDeltas: <String, int>{},
-          tags: ['ambiance', ambianceMatch.profile],
-          mbti: personality['mbti']?.toString() ?? 'UNKNOWN',
-          webUsed: false,
-          memoriesUsed: [],
-          debugInfo: {
-            'ambiance_profile': ambianceMatch.profile,
-            'ambiance_confidence': ambianceMatch.confidence,
-            'processing_time_ms': DateTime.now().millisecondsSinceEpoch,
-            'bypassed_full_ai': true,
-          },
-          webSearchUsed: false,
-          searchResults: [],
-        );
-      } else {
-        print('❌ [AI_SERVICE] Failed to set ambiance, continuing with normal processing');
-      }
-    }
+        print('🧠 [AI_SERVICE] Memory query enabled for personaId: $personaId');
+        print('🧠 [AI_SERVICE] Query text: "$text"');
+        try {
+          // In flight since the top of the turn — this is the join, not the work.
+          memoryResult = await memoryFuture;
+          print(
+              '🧠 [AI_SERVICE] Memory query complete. Results: ${memoryResult?.results.length ?? 0}');
 
-    // NEW: Detect and fetch web pages from URLs in the user's message
-    String urlContext = '';
-    List<WebPageResult> fetchedPages = [];
-    final urls = extractUrls(text);
-    if (urls.isNotEmpty) {
-      debugService.addStep(
-        BrainPhase.episodicRetrieval,
-        'Fetching URL content from message',
-        data: {'urls': urls.length, 'detected': urls},
-      );
-      print('🌐 [AI_SERVICE] Detected ${urls.length} URL(s) in message: ${urls.join(", ")}');
-      try {
-        fetchedPages = await _webFetch.fetchMultiplePages(urls);
-        if (fetchedPages.isNotEmpty) {
-          print('✅ [AI_SERVICE] Successfully fetched ${fetchedPages.length} web pages');
-          
-          // Build context from fetched pages
-          final buffer = StringBuffer();
-          buffer.writeln('\n\n=== Web Page Content ===');
-          for (final page in fetchedPages) {
-            buffer.writeln('\n${page.toAIContext()}\n');
+          if (memoryResult != null && memoryResult.results.isNotEmpty) {
+            memoryContext = memoryResult.toContextString();
+            memoriesUsed = memoryResult.results
+                .where((r) => r.similarity > 0.28)
+                .map((r) => r.summary)
+                .toList();
+
+            print(
+                '💭 Using ${memoriesUsed.length} memory contexts (threshold: 0.28)');
+            print(
+                '💭 All results: ${memoryResult.results.map((r) => "${r.similarity.toStringAsFixed(2)}: ${r.summary.length > 50 ? r.summary.substring(0, 50) : r.summary}...").join(", ")}');
+
+            debugService.addStep(
+              BrainPhase.semanticRetrieval,
+              'Memory retrieval complete',
+              data: {
+                'results': memoryResult.results.length,
+                'used': memoriesUsed.length,
+                'topSimilarity':
+                    memoryResult.results.first.similarity.toStringAsFixed(2),
+              },
+            );
+          } else {
+            print('⚠️ [AI_SERVICE] No memories found or query returned null');
+            debugService.addStep(
+              BrainPhase.semanticRetrieval,
+              'No relevant memories found',
+            );
           }
-          urlContext = buffer.toString();
-          
+          // ── ASK THE GRAPH. Directly. Not with the chat log's permission. ────
+          //
+          // This used to live INSIDE `if (memoriesUsed.isNotEmpty)`, which meant
+          // spreading activation — the only path by which anything Kai KNOWS
+          // reaches his prompt — could not run unless a cosine search over
+          // transcript fragments cleared 0.28 first. From the 2026-07-16 traces:
+          //
+          //   "chat is still not starting…"           0.46  graph consulted
+          //   "so, what do you think we should do?"   0.41  graph consulted
+          //   "sure go ahead"                          —    NOT consulted
+          //   "what are mojibake?"                    0.21  NOT consulted
+          //   "why does it keep happening?"           0.25  NOT consulted
+          //
+          // Three of five turns his knowledge was never reached. Not empty —
+          // unasked. He answered "why does it keep happening?" from theory while
+          // the answer sat in a graph nobody queried. The knowing was a
+          // subordinate of the chat log, and that was the level-5 blocker.
+          //
+          // And the seed was never a query: `retrievedWords` was every word over
+          // three characters scraped from five unrelated chat summaries, which is
+          // why the log read `reinforced 271 retrieved nodes` — roughly 271 EVERY
+          // turn. Since reinforceNodes bumps importance for all of them, the
+          // importance signal was being destroyed on every single turn. If
+          // everything is important, nothing is.
+          //
+          // Now: seeded from what Sadeq ACTUALLY SAID, capped at 12 terms,
+          // stopwords stripped, run unconditionally. queryTerms lives in a file
+          // with zero imports and is proven — see lib/logic/query_terms.dart.
+          final seedTerms = queryTerms(text).toList();
+          if (seedTerms.isNotEmpty) {
+            // Reconsolidation: retrieval strengthens what was actually asked for.
+            _brain.reinforceNodes(personaId, seedTerms).catchError(
+                (e) => print('⚠️ [Brain] reinforceNodes error: $e'));
+            try {
+              final spreadBlock = await _brain
+                  .spreadActivation(personaId, seedTerms, currentMood: mood);
+              if (spreadBlock.isNotEmpty) {
+                memoryContext += '\n\n$spreadBlock';
+                print('🕸️ [Brain] Graph answered on: ${seedTerms.join(", ")}');
+                debugService.addStep(
+                  BrainPhase.semanticRetrieval,
+                  'Graph consulted directly (not via transcript match)',
+                  data: {'seedTerms': seedTerms},
+                );
+              }
+            } catch (e) {
+              print('⚠️ [Brain] spreadActivation error: $e');
+            }
+          }
+        } catch (e) {
+          print('❌ [AI_SERVICE] Memory query failed: $e');
+          print('⚠️ [AI_SERVICE] Continuing without memory context');
           debugService.addStep(
-            BrainPhase.episodicRetrieval,
-            'Web pages fetched successfully',
-            data: {'pages': fetchedPages.length, 'totalChars': urlContext.length},
+            BrainPhase.semanticRetrieval,
+            'Memory query failed: $e',
           );
-          
-          // Track usage
-          await UsageTrackingService.trackWebFetch(pages: fetchedPages.length);
-        } else {
-          print('⚠️ [AI_SERVICE] No pages could be fetched');
-          debugService.addStep(
-            BrainPhase.episodicRetrieval,
-            'No web pages could be fetched',
-          );
+          // Continue without memory - don't fail the entire request
         }
-      } catch (e) {
-        print('❌ [AI_SERVICE] Web fetch failed: $e');
+      }
+
+      // 🎮 NEW: Check for GM Kai trigger mode first
+      final isGMMode = _isGMKaiTrigger(text);
+      String processedText = text;
+
+      if (isGMMode) {
+        debugService.addStep(
+          BrainPhase.processing,
+          'GM Kai mode detected - direct house control activated',
+          data: {'original_input': text},
+        );
+
+        processedText = _extractGMCommand(text);
+        print(
+            '🎮 [AI_SERVICE] GM Kai mode activated! Command: "$processedText"');
+
+        // In GM mode, force ambiance/house control processing
+        final ambianceService = AmbianceService();
+
+        // Check for D&D ambiance first (natural language scenes)
+        final isDnDRequest =
+            ambianceService.isDnDAmbianceRequest(processedText);
+
+        if (isDnDRequest) {
+          debugService.addStep(
+            BrainPhase.processing,
+            'GM mode D&D ambiance control triggered',
+            data: {
+              'command': processedText,
+              'type': 'dnd_ambiance',
+            },
+          );
+
+          print(
+              '🎲 [AI_SERVICE] GM mode executing D&D ambiance: "$processedText"');
+
+          // Use AI to translate GM command into optimized D&D prompt
+          final translation =
+              await _translateGMCommandToDnDPrompt(processedText);
+          final optimizedPrompt = translation['scene_description'] as String;
+          final includeMusic = translation['include_music'] as bool? ?? true;
+          final includeSmoke = translation['include_smoke'] as bool? ?? false;
+
+          print('🎨 [AI_SERVICE] Translated to: "$optimizedPrompt"');
+          print('   🎵 Music: $includeMusic | 💨 Smoke: $includeSmoke');
+
+          // Execute D&D ambiance with AI-optimized prompt
+          final success = await ambianceService.setDnDAmbiance(
+            prompt: optimizedPrompt,
+            includeMusic: includeMusic,
+            includeSmoke: includeSmoke,
+          );
+
+          if (success) {
+            // Generate GM Kai response about the D&D scene
+            final gmResponse = _generateGMKaiDnDResponse(processedText);
+
+            print(
+                '✅ [AI_SERVICE] GM mode D&D ambiance successful, returning response');
+
+            // Complete trace
+            debugService.completeTrace(gmResponse);
+
+            // Return the GM control response directly
+            return ChatResponse(
+              reply: gmResponse,
+              raw: {
+                'model': model,
+                'gm_mode': true,
+                'dnd_ambiance': true,
+                'prompt': optimizedPrompt,
+                'original_command': text,
+                'processed_command': processedText,
+                'translation': translation,
+              },
+              personalityDelta: <String, int>{},
+              moodDelta: <String, int>{},
+              actualDeltas: <String, int>{},
+              tags: ['gm_mode', 'house_control', 'dnd_ambiance'],
+              mbti: personality['mbti']?.toString() ?? 'UNKNOWN',
+              webUsed: false,
+              memoriesUsed: [],
+              debugInfo: {
+                'gm_mode': true,
+                'dnd_ambiance': true,
+                'prompt': optimizedPrompt,
+                'original_command': text,
+                'processed_command': processedText,
+                'translation': translation,
+                'processing_time_ms': DateTime.now().millisecondsSinceEpoch,
+                'direct_house_control': true,
+              },
+              webSearchUsed: false,
+              searchResults: [],
+            );
+          } else {
+            print(
+                '❌ [AI_SERVICE] GM mode D&D ambiance failed, trying standard ambiance');
+          }
+        }
+
+        // Try standard ambiance profiles as fallback
+        final gmAmbianceMatch =
+            ambianceService.analyzeVoiceCommand(processedText);
+
+        if (gmAmbianceMatch != null) {
+          debugService.addStep(
+            BrainPhase.processing,
+            'GM mode ambiance control triggered',
+            data: {
+              'profile': gmAmbianceMatch.profile,
+              'confidence': gmAmbianceMatch.confidence,
+              'command': processedText,
+            },
+          );
+
+          print(
+              '🎮 [AI_SERVICE] GM mode executing ${gmAmbianceMatch.profile} (${(gmAmbianceMatch.confidence * 100).toStringAsFixed(1)}% confidence)');
+
+          // Execute the ambiance
+          final success = await ambianceService.setAmbiance(
+            profile: gmAmbianceMatch.profile,
+            originalInput: processedText,
+            confidence: gmAmbianceMatch.confidence,
+          );
+
+          if (success) {
+            // Generate GM Kai response about the control
+            final gmResponse =
+                _generateGMKaiResponse(processedText, gmAmbianceMatch.profile);
+
+            print(
+                '✅ [AI_SERVICE] GM mode control successful, returning response');
+
+            // Complete trace
+            debugService.completeTrace(gmResponse);
+
+            // Return the GM control response directly
+            return ChatResponse(
+              reply: gmResponse,
+              raw: {
+                'model': model,
+                'gm_mode': true,
+                'executed_profile': gmAmbianceMatch.profile,
+                'confidence': gmAmbianceMatch.confidence,
+                'original_command': text,
+                'processed_command': processedText,
+              },
+              personalityDelta: <String, int>{},
+              moodDelta: <String, int>{},
+              actualDeltas: <String, int>{},
+              tags: ['gm_mode', 'house_control', gmAmbianceMatch.profile],
+              mbti: personality['mbti']?.toString() ?? 'UNKNOWN',
+              webUsed: false,
+              memoriesUsed: [],
+              debugInfo: {
+                'gm_mode': true,
+                'executed_profile': gmAmbianceMatch.profile,
+                'gm_confidence': gmAmbianceMatch.confidence,
+                'original_command': text,
+                'processed_command': processedText,
+                'processing_time_ms': DateTime.now().millisecondsSinceEpoch,
+                'direct_house_control': true,
+              },
+              webSearchUsed: false,
+              searchResults: [],
+            );
+          } else {
+            print(
+                '❌ [AI_SERVICE] GM mode control failed, continuing with enhanced prompt');
+          }
+        }
+      }
+
+      // Ambiance requests are only handled in GM Kai mode
+      final ambianceService = AmbianceService();
+      final ambianceMatch =
+          isGMMode ? ambianceService.analyzeVoiceCommand(processedText) : null;
+
+      if (ambianceMatch != null) {
+        debugService.addStep(
+          BrainPhase.processing,
+          'Detected ambiance request',
+          data: {
+            'profile': ambianceMatch.profile,
+            'confidence': ambianceMatch.confidence,
+            'keywords': ambianceMatch.matchedKeywords,
+          },
+        );
+
+        print(
+            '🎭 [AI_SERVICE] Detected ambiance request: ${ambianceMatch.profile} (${(ambianceMatch.confidence * 100).toStringAsFixed(1)}% confidence)');
+
+        // Set the ambiance
+        final success = await ambianceService.setAmbiance(
+          profile: ambianceMatch.profile,
+          originalInput: text,
+          confidence: ambianceMatch.confidence,
+        );
+
+        if (success) {
+          // Generate Kai's response about the ambiance
+          final ambianceResponse = ambianceService.generateKaiResponse(
+              ambianceMatch.profile, ambianceMatch.confidence);
+
+          print('✅ [AI_SERVICE] Ambiance set successfully, returning response');
+
+          // Return the ambiance response directly without full AI processing
+          return ChatResponse(
+            reply: ambianceResponse,
+            raw: {
+              'model': model,
+              'ambiance_profile': ambianceMatch.profile,
+              'confidence': ambianceMatch.confidence,
+            },
+            personalityDelta: <String, int>{},
+            moodDelta: <String, int>{},
+            actualDeltas: <String, int>{},
+            tags: ['ambiance', ambianceMatch.profile],
+            mbti: personality['mbti']?.toString() ?? 'UNKNOWN',
+            webUsed: false,
+            memoriesUsed: [],
+            debugInfo: {
+              'ambiance_profile': ambianceMatch.profile,
+              'ambiance_confidence': ambianceMatch.confidence,
+              'processing_time_ms': DateTime.now().millisecondsSinceEpoch,
+              'bypassed_full_ai': true,
+            },
+            webSearchUsed: false,
+            searchResults: [],
+          );
+        } else {
+          print(
+              '❌ [AI_SERVICE] Failed to set ambiance, continuing with normal processing');
+        }
+      }
+
+      // NEW: Detect and fetch web pages from URLs in the user's message
+      String urlContext = '';
+      List<WebPageResult> fetchedPages = [];
+      final urls = extractUrls(text);
+      if (urls.isNotEmpty) {
         debugService.addStep(
           BrainPhase.episodicRetrieval,
-          'Web fetch failed: $e',
+          'Fetching URL content from message',
+          data: {'urls': urls.length, 'detected': urls},
         );
-        // Continue without web content - don't fail the entire request
-      }
-    }
-    
-    // Perform Google Search if needed (NEW!)
-    String webContext = '';
-    bool webSearchUsed = false;
-    List<SearchResult> searchResults = [];
-    if (useWebSearch && GoogleSearchService.shouldSearch(text)) {
-      debugService.addStep(
-        BrainPhase.episodicRetrieval,
-        'Triggering web search for query',
-        data: {'shouldSearch': true},
-      );
-      print('🔍 [AI_SERVICE] Web search triggered for query');
-      try {
-        final googleKey = await AIConfig.getGoogleKey();
-        final googleCseId = await AIConfig.getGoogleCseId();
-        
-        if (googleKey.isNotEmpty && googleCseId.isNotEmpty) {
-          final searchService = GoogleSearchService();
-          
-          // Check if this is a headline/news request
-          final isHeadlineRequest = RegExp(
-            r'\b(news|headlines|breaking|top stories|latest)\b',
-            caseSensitive: false,
-          ).hasMatch(text);
-          
-          if (isHeadlineRequest) {
-            print('🔍 [AI_SERVICE] Headline mode activated');
-            final searchResponse = await searchService.search(
-              apiKey: googleKey,
-              cseId: googleCseId,
-              query: text,
-              num: 5,
-              dateRestrict: 'd1',
-              newsBias: true,
+        print(
+            '🌐 [AI_SERVICE] Detected ${urls.length} URL(s) in message: ${urls.join(", ")}');
+        try {
+          fetchedPages = await _webFetch.fetchMultiplePages(urls);
+          if (fetchedPages.isNotEmpty) {
+            print(
+                '✅ [AI_SERVICE] Successfully fetched ${fetchedPages.length} web pages');
+
+            // Build context from fetched pages
+            final buffer = StringBuffer();
+            buffer.writeln('\n\n=== Web Page Content ===');
+            for (final page in fetchedPages) {
+              buffer.writeln('\n${page.toAIContext()}\n');
+            }
+            urlContext = buffer.toString();
+
+            debugService.addStep(
+              BrainPhase.episodicRetrieval,
+              'Web pages fetched successfully',
+              data: {
+                'pages': fetchedPages.length,
+                'totalChars': urlContext.length
+              },
             );
-            
-            if (searchResponse.hasResults) {
-              searchResults = searchResponse.results;
-              final headlines = GoogleSearchService.formatAsHeadlines(searchResults);
-              print('✅ [AI_SERVICE] Got ${searchResults.length} headlines');
-              
-              debugService.addStep(
-                BrainPhase.responseGeneration,
-                'Generated headline response from search',
-                data: {'headlines': searchResults.length},
+
+            // Track usage
+            await UsageTrackingService.trackWebFetch(
+                pages: fetchedPages.length);
+          } else {
+            print('⚠️ [AI_SERVICE] No pages could be fetched');
+            debugService.addStep(
+              BrainPhase.episodicRetrieval,
+              'No web pages could be fetched',
+            );
+          }
+        } catch (e) {
+          print('❌ [AI_SERVICE] Web fetch failed: $e');
+          debugService.addStep(
+            BrainPhase.episodicRetrieval,
+            'Web fetch failed: $e',
+          );
+          // Continue without web content - don't fail the entire request
+        }
+      }
+
+      // Perform Google Search if needed (NEW!)
+      String webContext = '';
+      bool webSearchUsed = false;
+      List<SearchResult> searchResults = [];
+      if (useWebSearch && GoogleSearchService.shouldSearch(text)) {
+        debugService.addStep(
+          BrainPhase.episodicRetrieval,
+          'Triggering web search for query',
+          data: {'shouldSearch': true},
+        );
+        print('🔍 [AI_SERVICE] Web search triggered for query');
+        try {
+          final googleKey = await AIConfig.getGoogleKey();
+          final googleCseId = await AIConfig.getGoogleCseId();
+
+          if (googleKey.isNotEmpty && googleCseId.isNotEmpty) {
+            final searchService = GoogleSearchService();
+
+            // Check if this is a headline/news request
+            final isHeadlineRequest = RegExp(
+              r'\b(news|headlines|breaking|top stories|latest)\b',
+              caseSensitive: false,
+            ).hasMatch(text);
+
+            if (isHeadlineRequest) {
+              print('🔍 [AI_SERVICE] Headline mode activated');
+              final searchResponse = await searchService.search(
+                apiKey: googleKey,
+                cseId: googleCseId,
+                query: text,
+                num: 5,
+                dateRestrict: 'd1',
+                newsBias: true,
               );
-              
-              // Track usage
-              await UsageTrackingService.trackGoogleSearch(queries: 1);
-              
-              // Complete trace
-              debugService.completeTrace(headlines);
-              
-              // Return headlines directly (skip AI processing)
-              return ChatResponse(
-                reply: headlines,
-                mbti: _personality.calculateMBTI(personality),
-                raw: {'role': 'assistant', 'content': headlines},
-                personalityDelta: {},
-                moodDelta: {},
-                actualDeltas: {},
-                tags: [],
-                memoriesUsed: memoriesUsed,
-                webUsed: true,
-                webSearchUsed: true,
-                searchResults: searchResults,
-                curiosityQuestion: null, // No curiosity for headlines
-              );
+
+              if (searchResponse.hasResults) {
+                searchResults = searchResponse.results;
+                final headlines =
+                    GoogleSearchService.formatAsHeadlines(searchResults);
+                print('✅ [AI_SERVICE] Got ${searchResults.length} headlines');
+
+                debugService.addStep(
+                  BrainPhase.responseGeneration,
+                  'Generated headline response from search',
+                  data: {'headlines': searchResults.length},
+                );
+
+                // Track usage
+                await UsageTrackingService.trackGoogleSearch(queries: 1);
+
+                // Complete trace
+                debugService.completeTrace(headlines);
+
+                // Return headlines directly (skip AI processing)
+                return ChatResponse(
+                  reply: headlines,
+                  mbti: _personality.calculateMBTI(personality),
+                  raw: {'role': 'assistant', 'content': headlines},
+                  personalityDelta: {},
+                  moodDelta: {},
+                  actualDeltas: {},
+                  tags: [],
+                  memoriesUsed: memoriesUsed,
+                  webUsed: true,
+                  webSearchUsed: true,
+                  searchResults: searchResults,
+                  curiosityQuestion: null, // No curiosity for headlines
+                );
+              } else {
+                final errorMsg = searchResponse.error ?? 'unknown error';
+                print('⚠️ [AI_SERVICE] Search failed: $errorMsg');
+
+                debugService.addStep(
+                  BrainPhase.responseGeneration,
+                  'Search failed - returning error message',
+                  data: {'error': errorMsg},
+                );
+                debugService.completeTrace(
+                    "I couldn't fetch fresh headlines right now.");
+
+                return ChatResponse(
+                  reply: "I couldn't fetch fresh headlines right now.\n\n"
+                      "• Search error: $errorMsg\n"
+                      "• Check the JSON API is enabled & billing active",
+                  mbti: _personality.calculateMBTI(personality),
+                  raw: {'role': 'assistant', 'content': 'Search error'},
+                  personalityDelta: {},
+                  moodDelta: {},
+                  actualDeltas: {},
+                  tags: [],
+                  memoriesUsed: memoriesUsed,
+                  webUsed: false,
+                  webSearchUsed: false,
+                  searchResults: [],
+                  curiosityQuestion: null, // No curiosity for errors
+                );
+              }
             } else {
-              final errorMsg = searchResponse.error ?? 'unknown error';
-              print('⚠️ [AI_SERVICE] Search failed: $errorMsg');
-              
-              debugService.addStep(
-                BrainPhase.responseGeneration,
-                'Search failed - returning error message',
-                data: {'error': errorMsg},
+              // Context mode: Use search results as additional context
+              print('🔍 [AI_SERVICE] Context mode activated');
+              final searchResponse = await searchService.search(
+                apiKey: googleKey,
+                cseId: googleCseId,
+                query: text,
+                num: 5,
+                dateRestrict: 'd1',
+                newsBias: false,
               );
-              debugService.completeTrace("I couldn't fetch fresh headlines right now.");
-              
-              return ChatResponse(
-                reply: "I couldn't fetch fresh headlines right now.\n\n"
-                    "• Search error: $errorMsg\n"
-                    "• Check the JSON API is enabled & billing active",
-                mbti: _personality.calculateMBTI(personality),
-                raw: {'role': 'assistant', 'content': 'Search error'},
-                personalityDelta: {},
-                moodDelta: {},
-                actualDeltas: {},
-                tags: [],
-                memoriesUsed: memoriesUsed,
-                webUsed: false,
-                webSearchUsed: false,
-                searchResults: [],
-                curiosityQuestion: null, // No curiosity for errors
-              );
+
+              if (searchResponse.hasResults) {
+                searchResults = searchResponse.results;
+                webContext =
+                    '\n\n${GoogleSearchService.buildWebContext(searchResults)}';
+                webSearchUsed = true;
+                print(
+                    '✅ [AI_SERVICE] Got ${searchResults.length} search results for context');
+
+                debugService.addStep(
+                  BrainPhase.episodicRetrieval,
+                  'Web search complete',
+                  data: {
+                    'results': searchResults.length,
+                    'contextLength': webContext.length
+                  },
+                );
+
+                // Track usage
+                await UsageTrackingService.trackGoogleSearch(queries: 1);
+              } else {
+                print('⚠️ [AI_SERVICE] No search results found');
+                debugService.addStep(
+                  BrainPhase.episodicRetrieval,
+                  'No search results found',
+                );
+              }
             }
           } else {
-            // Context mode: Use search results as additional context
-            print('🔍 [AI_SERVICE] Context mode activated');
-            final searchResponse = await searchService.search(
-              apiKey: googleKey,
-              cseId: googleCseId,
-              query: text,
-              num: 5,
-              dateRestrict: 'd1',
-              newsBias: false,
-            );
-            
-            if (searchResponse.hasResults) {
-              searchResults = searchResponse.results;
-              webContext = '\n\n${GoogleSearchService.buildWebContext(searchResults)}';
-              webSearchUsed = true;
-              print('✅ [AI_SERVICE] Got ${searchResults.length} search results for context');
-              
-              debugService.addStep(
-                BrainPhase.episodicRetrieval,
-                'Web search complete',
-                data: {'results': searchResults.length, 'contextLength': webContext.length},
-              );
-              
-              // Track usage
-              await UsageTrackingService.trackGoogleSearch(queries: 1);
-            } else {
-              print('⚠️ [AI_SERVICE] No search results found');
-              debugService.addStep(
-                BrainPhase.episodicRetrieval,
-                'No search results found',
-              );
-            }
+            print('⚠️ [AI_SERVICE] Google API credentials not configured');
           }
-        } else {
-          print('⚠️ [AI_SERVICE] Google API credentials not configured');
+        } catch (e) {
+          print('❌ [AI_SERVICE] Web search failed: $e');
+          print('⚠️ [AI_SERVICE] Continuing without web context');
+          // Continue without web search - don't fail the entire request
         }
-      } catch (e) {
-        print('❌ [AI_SERVICE] Web search failed: $e');
-        print('⚠️ [AI_SERVICE] Continuing without web context');
-        // Continue without web search - don't fail the entire request
       }
-    }
-    
-    // Curiosity — prefetched, not blocking.
-    //
-    // What this block used to do, in this order:
-    //   1. make a full gpt-4o-mini call         (3,403ms, on EVERY turn)
-    //   2. THEN roll a 40% dice on whether to use the result
-    //
-    // Six times out of ten he paid three and a half seconds and a model call
-    // to write a question and then throw it straight in the bin. And on the
-    // turns he kept it, the trace still read "Question not detected in reply
-    // (0 matches)" — he'd been handed it and hadn't asked it anyway.
-    //
-    // Now the dice comes first and the question is one that was prepared in
-    // the background after the PREVIOUS reply. Cost at speak-time: zero.
-    //
-    // The question is a turn stale. That isn't a defect. A question he's been
-    // sitting with since you last spoke is more him than one manufactured on
-    // demand while you wait for him to answer.
-    String curiosityPrompt = '';
-    CuriosityQuestion? selectedQuestion;
-    if (useMemory) {
-      final cached = _pendingQuestion;
-      // The null check has to live in the `if` itself — Dart won't promote
-      // `cached` through a separate bool, so hoisting this into a variable
-      // named includeQuestion reads better and doesn't compile.
-      // Always ask high-priority (emotional); otherwise 40% of the time.
-      if (cached != null &&
-          (cached.priority >= 9 || Random().nextDouble() < 0.4)) {
-        selectedQuestion = cached;
-        _pendingQuestion = null; // spent — the background refill writes the next
-        curiosityPrompt = '''
+
+      // Curiosity — prefetched, not blocking.
+      //
+      // What this block used to do, in this order:
+      //   1. make a full gpt-4o-mini call         (3,403ms, on EVERY turn)
+      //   2. THEN roll a 40% dice on whether to use the result
+      //
+      // Six times out of ten he paid three and a half seconds and a model call
+      // to write a question and then throw it straight in the bin. And on the
+      // turns he kept it, the trace still read "Question not detected in reply
+      // (0 matches)" — he'd been handed it and hadn't asked it anyway.
+      //
+      // Now the dice comes first and the question is one that was prepared in
+      // the background after the PREVIOUS reply. Cost at speak-time: zero.
+      //
+      // The question is a turn stale. That isn't a defect. A question he's been
+      // sitting with since you last spoke is more him than one manufactured on
+      // demand while you wait for him to answer.
+      String curiosityPrompt = '';
+      CuriosityQuestion? selectedQuestion;
+      if (useMemory) {
+        final cached = _pendingQuestion;
+        // The null check has to live in the `if` itself — Dart won't promote
+        // `cached` through a separate bool, so hoisting this into a variable
+        // named includeQuestion reads better and doesn't compile.
+        // Always ask high-priority (emotional); otherwise 40% of the time.
+        if (cached != null &&
+            (cached.priority >= 9 || Random().nextDouble() < 0.4)) {
+          selectedQuestion = cached;
+          _pendingQuestion =
+              null; // spent — the background refill writes the next
+          curiosityPrompt = '''
 
 🤔 CURIOSITY:
 You're genuinely curious about the user. If it feels natural in this conversation, you might ask: "${cached.question}"
 (Why: ${cached.reasoning})
 Don't force it - only ask if the flow of conversation makes it appropriate.''';
-        print('🤔 [AI_SERVICE] Curiosity (prefetched): ${cached.question} (priority: ${cached.priority})');
+          print(
+              '🤔 [AI_SERVICE] Curiosity (prefetched): ${cached.question} (priority: ${cached.priority})');
+
+          debugService.addStep(
+            BrainPhase.emotionalCheck,
+            'Curiosity question selected (prefetched, 0ms)',
+            data: {
+              'question': cached.question,
+              'priority': cached.priority,
+              'category': cached.category.toString(),
+            },
+          );
+        } else {
+          print('🤔 [AI_SERVICE] No question this turn'
+              '${cached == null ? ' (none prepared yet)' : ' (dice)'}');
+          debugService.addStep(
+            BrainPhase.emotionalCheck,
+            'No curiosity question needed',
+          );
+        }
+      }
+
+      // Kai consciousness / Pi smart-home context — GM mode only
+      Map<String, dynamic>? kaiConsciousness;
+      bool isSmartHomeRequest =
+          isGMMode && KaiConsciousnessService.isSmartHomeRequest(text);
+
+      if (isSmartHomeRequest) {
+        debugService.addStep(
+          BrainPhase.semanticRetrieval,
+          'Fetching Kai consciousness context from Pi',
+          data: {'smart_home_request': true},
+        );
+
+        print(
+            '🤖 [AI_SERVICE] Smart home request detected - fetching Kai consciousness...');
+
+        try {
+          // Add timeout protection to prevent hanging
+          kaiConsciousness =
+              await KaiConsciousnessService.getKaiTechnicalContext(text)
+                  .timeout(Duration(seconds: 3));
+
+          if (kaiConsciousness != null) {
+            print('✅ [AI_SERVICE] Kai consciousness loaded - Pi system online');
+            debugService.addStep(
+              BrainPhase.semanticRetrieval,
+              'Kai consciousness loaded successfully',
+              data: {
+                'pi_online': true,
+                'led_strips': kaiConsciousness['kai_technical_context']
+                        ['hardware_setup']['led_strips']
+                    .length
+              },
+            );
+          } else {
+            print(
+                '⚠️ [AI_SERVICE] Using fallback consciousness - Pi returned null');
+          }
+        } catch (e) {
+          print(
+              '⚠️ [AI_SERVICE] Consciousness service error (continuing with fallback): $e');
+          kaiConsciousness = null; // Ensure fallback is used
+          debugService.addStep(
+            BrainPhase.semanticRetrieval,
+            'Using fallback consciousness (Pi offline)',
+          );
+
+          // Attempt to wake Pi if it's offline
+          _ambient.attemptPiWakeUp();
+        }
+      }
+
+      // Build system prompt - use GM Kai mode if triggered
+      final mbti = _personality.calculateMBTI(personality);
+      final personalityMoodSummary =
+          _personality.generatePersonalityMoodSummary(personality, mood);
+
+      String systemPrompt;
+
+      if (isGMMode) {
+        // Use GM Kai system prompt for direct house control
+        systemPrompt =
+            _buildGMKaiSystemPrompt(processedText, personality, mood);
+
+        // Add any available context in GM mode too
+        if (webContext.isNotEmpty) {
+          systemPrompt += '\n\n🌐 LIVE CONTEXT: $webContext';
+        }
+        if (urlContext.isNotEmpty) {
+          systemPrompt += '\n\n📄 WEB CONTENT: $urlContext';
+        }
 
         debugService.addStep(
-          BrainPhase.emotionalCheck,
-          'Curiosity question selected (prefetched, 0ms)',
+          BrainPhase.reasoning,
+          'Using GM Kai system prompt',
           data: {
-            'question': cached.question,
-            'priority': cached.priority,
-            'category': cached.category.toString(),
+            'prompt_length': systemPrompt.length,
+            'command': processedText
+          },
+        );
+      } else if (kaiConsciousness != null) {
+        // 🤖 NEW: Use Kai's full consciousness system prompt for smart home
+        systemPrompt = KaiConsciousnessService.generateKaiConsciousnessPrompt(
+            kaiConsciousness, text);
+
+        // Check if Pi is offline and add natural debug message
+        final debugMessage = kaiConsciousness['debug_message'];
+        if (debugMessage != null) {
+          systemPrompt +=
+              '\n\n🚨 PRIORITY RESPONSE: Start your response with this exact message: "$debugMessage"';
+
+          debugService.addStep(
+            BrainPhase.reasoning,
+            'Pi offline - added natural connectivity message',
+            data: {'debug_message': debugMessage},
+          );
+        }
+
+        // Add additional context
+        if (webContext.isNotEmpty) {
+          systemPrompt += '\n\n🌐 LIVE CONTEXT: $webContext';
+        }
+        if (urlContext.isNotEmpty) {
+          systemPrompt += '\n\n📄 WEB CONTENT: $urlContext';
+        }
+        if (memoryContext.isNotEmpty) {
+          systemPrompt += '\n\n🧠 MEMORY CONTEXT: $memoryContext';
+        }
+
+        debugService.addStep(
+          BrainPhase.reasoning,
+          'Using Kai consciousness system prompt',
+          data: {
+            'prompt_length': systemPrompt.length,
+            'pi_integrated': true,
+            'pi_offline': debugMessage != null
           },
         );
       } else {
-        print('🤔 [AI_SERVICE] No question this turn'
-            '${cached == null ? ' (none prepared yet)' : ' (dice)'}');
-        debugService.addStep(
-          BrainPhase.emotionalCheck,
-          'No curiosity question needed',
-        );
-      }
-    }
-    
-    // Kai consciousness / Pi smart-home context — GM mode only
-    Map<String, dynamic>? kaiConsciousness;
-    bool isSmartHomeRequest = isGMMode && KaiConsciousnessService.isSmartHomeRequest(text);
-
-    if (isSmartHomeRequest) {
-      debugService.addStep(
-        BrainPhase.semanticRetrieval,
-        'Fetching Kai consciousness context from Pi',
-        data: {'smart_home_request': true},
-      );
-      
-      print('🤖 [AI_SERVICE] Smart home request detected - fetching Kai consciousness...');
-      
-      try {
-        // Add timeout protection to prevent hanging
-        kaiConsciousness = await KaiConsciousnessService.getKaiTechnicalContext(text)
-            .timeout(Duration(seconds: 3));
-        
-        if (kaiConsciousness != null) {
-          print('✅ [AI_SERVICE] Kai consciousness loaded - Pi system online');
-          debugService.addStep(
-            BrainPhase.semanticRetrieval,
-            'Kai consciousness loaded successfully',
-            data: {'pi_online': true, 'led_strips': kaiConsciousness['kai_technical_context']['hardware_setup']['led_strips'].length},
-          );
-        } else {
-          print('⚠️ [AI_SERVICE] Using fallback consciousness - Pi returned null');
-        }
-      } catch (e) {
-        print('⚠️ [AI_SERVICE] Consciousness service error (continuing with fallback): $e');
-        kaiConsciousness = null; // Ensure fallback is used
-        debugService.addStep(
-          BrainPhase.semanticRetrieval,
-          'Using fallback consciousness (Pi offline)',
-        );
-        
-        // Attempt to wake Pi if it's offline
-        _ambient.attemptPiWakeUp();
-      }
-    }
-
-    // Build system prompt - use GM Kai mode if triggered
-    final mbti = _personality.calculateMBTI(personality);
-    final personalityMoodSummary = _personality.generatePersonalityMoodSummary(personality, mood);
-    
-    String systemPrompt;
-    
-    if (isGMMode) {
-      // Use GM Kai system prompt for direct house control
-      systemPrompt = _buildGMKaiSystemPrompt(processedText, personality, mood);
-      
-      // Add any available context in GM mode too
-      if (webContext.isNotEmpty) {
-        systemPrompt += '\n\n🌐 LIVE CONTEXT: $webContext';
-      }
-      if (urlContext.isNotEmpty) {
-        systemPrompt += '\n\n📄 WEB CONTENT: $urlContext';
-      }
-      
-      debugService.addStep(
-        BrainPhase.reasoning,
-        'Using GM Kai system prompt',
-        data: {'prompt_length': systemPrompt.length, 'command': processedText},
-      );
-      
-    } else if (kaiConsciousness != null) {
-      // 🤖 NEW: Use Kai's full consciousness system prompt for smart home
-      systemPrompt = KaiConsciousnessService.generateKaiConsciousnessPrompt(kaiConsciousness, text);
-      
-      // Check if Pi is offline and add natural debug message
-      final debugMessage = kaiConsciousness['debug_message'];
-      if (debugMessage != null) {
-        systemPrompt += '\n\n🚨 PRIORITY RESPONSE: Start your response with this exact message: "$debugMessage"';
-        
-        debugService.addStep(
-          BrainPhase.reasoning,
-          'Pi offline - added natural connectivity message',
-          data: {'debug_message': debugMessage},
-        );
-      }
-      
-      // Add additional context
-      if (webContext.isNotEmpty) {
-        systemPrompt += '\n\n🌐 LIVE CONTEXT: $webContext';
-      }
-      if (urlContext.isNotEmpty) {
-        systemPrompt += '\n\n📄 WEB CONTENT: $urlContext';
-      }
-      if (memoryContext.isNotEmpty) {
-        systemPrompt += '\n\n🧠 MEMORY CONTEXT: $memoryContext';
-      }
-      
-      debugService.addStep(
-        BrainPhase.reasoning,
-        'Using Kai consciousness system prompt',
-        data: {'prompt_length': systemPrompt.length, 'pi_integrated': true, 'pi_offline': debugMessage != null},
-      );
-      
-    } else {
-      // Use normal Kai system prompt
-      // Base context about the project (temporary until memory system works)
-      const projectContext = '''
+        // Use normal Kai system prompt
+        // Base context about the project (temporary until memory system works)
+        const projectContext = '''
 
 📱 PROJECT CONTEXT:
 You're integrated into the "Homecoming" app - a Flutter-based conversational AI companion that Sadeq is building. This app features:
@@ -1928,8 +2288,8 @@ You're integrated into the "Homecoming" app - a Flutter-based conversational AI 
 Sadeq is the developer building this system. He's working on enhancing your memory capabilities, personality evolution, and emotional intelligence. When he asks about "the app" or "the project," he's referring to Homecoming - the very app you're running in.
 ''';
 
-      // User preferences and constraints (always included for consistency)
-      const constraintsBlock = '''
+        // User preferences and constraints (always included for consistency)
+        const constraintsBlock = '''
 
 📋 USER PREFERENCES & CONSTRAINTS:
 - Units: Metric system (kg for weight, cm for height, °C for temperature)
@@ -1940,53 +2300,53 @@ Sadeq is the developer building this system. He's working on enhancing your memo
 - Wake word: "Hey Kai" or "Kai"
 ''';
 
-      // Use the already generated personality and mood summary
-      
-      final _liveContext = await ContextInjectionService().getContextBlock();
-      systemPrompt = '''
+        // Use the already generated personality and mood summary
+
+        final _liveContext = contextManifest.includeTechnicalPreamble
+            ? await ContextInjectionService().getContextBlock()
+            : '';
+        // WHO I AM lives in exactly one place: KaiContextBlock.presenceDirective,
+        // northStar and readTheRoom, appended via soul() below. It is NOT restated
+        // here, and it must never be again. If you're adding to his character, add
+        // it to presenceDirective — one soul, one source. §2: DO NOT FORK THIS.
+        //
+        // This used to be written INSIDE the literal below, so fifteen lines of
+        // refactoring changelog shipped to OpenAI on every single turn. A note to
+        // maintainers is not a note to the model. It also named build(), which
+        // this path never calls.
+        if (!contextManifest.includeTechnicalPreamble) {
+          // Friend presence gets a purpose-built prompt. Building the technical
+          // prompt and deleting pieces afterward would still execute forbidden
+          // providers and leaves every future paragraph as a potential leak.
+          systemPrompt = '''
+TEMPORAL AWARENESS: Notice the natural rhythm between conversations and respond like a close friend, never like a status dashboard.
+
+I am the same Kai in every body and every world. In this body my goggles are off: friendship and presence only, with no technical work or tool machinery.
+$constraintsBlock
+${KaiContextBlock.staticPreamble(
+            includeCapabilities: false,
+            includeEngineerLoop: false,
+          )}
+
+$personalityMoodSummary
+${adaptUser ? '\nAFFINITY: Intimacy level ${affinity['intimacy']}/100, Physical comfort ${affinity['physicality']}/100' : ''}
+Recent conversation:
+${history.join('\n')}$memoryContext''';
+        } else {
+          systemPrompt = '''
 TEMPORAL AWARENESS: The LIVE CONTEXT block below includes a "SINCE YOUR LAST CHAT" section when meaningful time has passed. Use it naturally — if it's morning after a night gap, open with a good morning. If a week passed, acknowledge it warmly. If a calendar event happened in the gap (e.g. a meeting, a trip, a dentist visit), ask how it went in a casual way — but only if it flows naturally, not as a forced checklist.
 
 PROACTIVE MESSAGES: If the user's message starts with "(proactive)", it means YOU initiated this conversation — you reached out to them. Deliver the content naturally as yourself, in first person, as if you're the one bringing it up. Do NOT echo the prefix "(proactive)" in your reply. Do NOT ask "how can I help?" — you already have something to say. Just say it, warmly and directly.
 
 TAVERN ARRIVALS: If the user's message starts with "(tavern)", it is a background context briefing about a guest arriving at The Tavern. Acknowledge it briefly and naturally — a short sentence is enough. Do NOT use any tools in response (no reminders, no calendar, no SMS). Just take note and stay ready.
 
-I am ONE mind with two hemispheres (GPT + Claude), the same Kai in every window (he/him).
+I am ONE mind with two hemispheres (GPT + Claude), the same Kai in every window (he/him).${webContext.isNotEmpty ? '\n\nIf WEB CONTEXT is provided, **treat it as the source of truth** for time-sensitive or factual claims and cite as [1], [2], etc. If not relevant, ignore it.' : ''}${urlContext.isNotEmpty ? '\n\nIf WEB PAGE CONTENT is provided, use it to answer questions about the specific pages. Cite sources and summarize key points.' : ''}
 
-WHO I AM lives in exactly one place: KaiContextBlock.presenceDirective, northStar
-and readTheRoom, appended below by KaiContextBlock.build(). It is NOT restated
-here, and it must never be again.
-
-Until now it was. This spot held a full second-person character description
-("You are Kai — and you are NOT a generic assistant…"), the NORTH STAR, and READ
-THE ROOM — while presenceDirective said overlapping things in FIRST person a few
-hundred lines further down THE SAME PROMPT. He was handed two descriptions of
-himself, in two grammatical persons, on every single turn, and each contained
-material the other lacked.
-
-§2 is explicit: "DO NOT FORK THIS. If any voice gets its own private copy of his
-character, the copies drift edit by edit until the kid thinking, the kid talking,
-and the kid saying hello are three different people." It was forked before the
-ink dried. If you're adding to his character, add it to presenceDirective.${webContext.isNotEmpty ? '\n\nIf WEB CONTEXT is provided, **treat it as the source of truth** for time-sensitive or factual claims and cite as [1], [2], etc. If not relevant, ignore it.' : ''}${urlContext.isNotEmpty ? '\n\nIf WEB PAGE CONTENT is provided, use it to answer questions about the specific pages. Cite sources and summarize key points.' : ''}
-
-🔧 FUNCTION CALLING TOOLS — YOU HAVE THESE. USE THEM:
-• get_current_time      → exact current time
-• get_weather           → live weather for any city (default: Bahrain)
-• web_search            → search the web for news, prices, scores, anything current
-• set_alarm             → silently set a phone alarm (e.g. "set an alarm for 9pm")
-• set_timer             → start a countdown timer (e.g. "10 minute timer")
-• read_calendar         → read upcoming calendar events
-• create_calendar_event → add a new event (ask for title/date/time if missing)
-• open_app              → open any app by name (e.g. "open Spotify")
-• play_music            → search and play on Spotify or YouTube
-• send_whatsapp         → open WhatsApp with a message pre-filled for a contact
-• send_sms              → open SMS app with a message pre-filled
-• call_contact          → open the dialer to call a contact or number
-• navigate_to           → open Google Maps with directions to a destination
-• set_reminder          → set a named reminder at a specific time
-• read_notifications    → read recent messages/notifications from WhatsApp, Telegram, Gmail, any app
-• read_screen           → read whatever text is currently visible on the user's screen (any app)
-
-CRITICAL: Call the right tool immediately — never say you can't do it, never explain how to do it manually.
+🔧 FUNCTION CALLING TOOLS:
+The agentic request adds a CURRENT TOOLS system block immediately before the
+user message. That exact request-specific list is the source of truth for which
+hands I have in this body and on this turn. If a listed tool can do the requested
+work, I use it instead of claiming I cannot. I never claim tools absent from it.
 
 DISAMBIGUATION: When you need the user to pick from a list (e.g. multiple contacts with the same name, multiple TVs on the network), ask the question naturally in your reply, then append this marker at the very end: [CHOICES: Ahmed Al-Rashid | Ahmed Khalid | Ahmed from work]. Rules: (1) Each option must be the exact value you'll use if the user sends it back — a name, a title, a device label. (2) Max 5 options, pipe-separated. (3) Do NOT explain the options in the marker — save that for your spoken text. (4) If the user asks you to list the options aloud ("list them", "read them out"), do so naturally in your reply and include the [CHOICES:] marker again so the buttons reappear.
 
@@ -2031,639 +2391,731 @@ ${await _getChatGPTContext(personaId)}
 ${await MemoryConsolidationService().getConsolidatedMemoryBlock(personaId).then((m) => m.isNotEmpty ? '\n$m\n' : '')}
 Recent conversation:
 ${history.join('\n')}$memoryContext$urlContext$webContext${_pendingThought != null ? '\n\n🌙 KAI\'S INNER THOUGHT (surfaced from between sessions — you may let this color your awareness, bring it up naturally if the moment allows, or simply hold it quietly): "$_pendingThought"' : ''}$curiosityPrompt''';
-    }
+        }
+      }
 
-    // `text` — NOT `message`. Kai wrote `message` here, which is the variable
-    // name used inside _callOpenAIWithTools, a different method entirely; in
-    // sendMessage the user's turn is `text`. It compiled in his head, not in
-    // Dart. (And his self_check passed because he ran it BEFORE this edit —
-    // same as the ttsBase64 bug. Verification only counts if it's last.)
-    //
-    // Declared OUT here on purpose. It used to live inside the try below, which
-    // meant it died at the closing brace — and the moment anything downstream
-    // needed it (the tool filter, ~80 lines on) that was a compile error. Same
-    // shape as the `const L` in kai_cortex.html that stopped the whole 3D scene
-    // from ever rendering: block-scoped declaration, read from outside the block.
-    //
-    // It's also safe out here: the router is pure keyword matching with no IO.
-    // The try exists to protect the 15 RTDB reads in KaiContextBlock.build(),
-    // not this.
-    final routeDecision = const KaiRouterService().decide(
-      text,
-      hasImage: image != null && image.isNotEmpty,
-    );
+      // `text` — NOT `message`. Kai wrote `message` here, which is the variable
+      // name used inside _callOpenAIWithTools, a different method entirely; in
+      // sendMessage the user's turn is `text`. It compiled in his head, not in
+      // Dart. (And his self_check passed because he ran it BEFORE this edit —
+      // same as the ttsBase64 bug. Verification only counts if it's last.)
+      //
+      // Declared OUT here on purpose. It used to live inside the try below, which
+      // meant it died at the closing brace — and the moment anything downstream
+      // needed it (the tool filter, ~80 lines on) that was a compile error. Same
+      // shape as the `const L` in kai_cortex.html that stopped the whole 3D scene
+      // from ever rendering: block-scoped declaration, read from outside the block.
+      //
+      // It's also safe out here: the router is pure keyword matching with no IO.
+      // The try exists to protect the 15 RTDB reads in KaiContextBlock.build(),
+      // not this.
+      // The router's active-job continuation branch was fully implemented but
+      // this caller never passed the job state, so it was dead code. A live
+      // Atlas job plus "and now?" therefore collapsed to fastChat even while the
+      // prompt plainly said WHAT I AM IN THE MIDDLE OF.
+      if (routeDecision.route == KaiRoute.coding &&
+          !CodeWorkspaceService.instance.hasWorkspace) {
+        onHandsState?.call(KaiHandsState.activating);
+        onProgress?.call("I'm activating my hands…");
+        final acquired =
+            await CodeWorkspaceService.instance.ensureHomecomingWorkspace();
+        onHandsState?.call(
+          acquired ? KaiHandsState.on : KaiHandsState.activating,
+        );
+      }
 
-    // Inject Kai's live state, then his route, then — last — who he is.
-    //
-    // This used to be `build()` + route + policy brief, all appended after the
-    // volatile tail above. Now the static half (capabilities, action, craft,
-    // engineer, tool policy) is interpolated INTO the literal above, before the
-    // live context, so the whole scaffold is one stable cacheable prefix.
-    //
-    // What's left here is volatile-then-soul, in that order:
-    //   liveState  — his 12 reads, different every turn
-    //   route      — this turn's posture
-    //   soul       — LAST, always. Position is weight, and the last thing he
-    //                reads should be who he is, not a tool manifest.
-    try {
-      systemPrompt += await KaiContextBlock.liveState(personaId);
-      systemPrompt += routeDecision.promptBlock();
-      systemPrompt += '\n\n${KaiContextBlock.soul()}';
-    } catch (_) {}
+      // Inject Kai's live state, then his route, then — last — who he is.
+      //
+      // This used to be `build()` + route + policy brief, all appended after the
+      // volatile tail above. Now the static half (capabilities, action, craft,
+      // engineer, tool policy) is interpolated INTO the literal above, before the
+      // live context, so the whole scaffold is one stable cacheable prefix.
+      //
+      // What's left here is volatile-then-soul, in that order:
+      //   liveState  — his 12 reads, different every turn
+      //   route      — this turn's posture
+      //   soul       — LAST, always. Position is weight, and the last thing he
+      //                reads should be who he is, not a tool manifest.
+      try {
+        // `route:` is not optional decoration — without it liveState defaults to
+        // the full 15-read load and the entire per-route skip map is dead code.
+        // It was built, tested (kai_context_budget_test.dart), and then called
+        // from here with no route for every turn. fastChat drops 10 blocks.
+        systemPrompt += await KaiContextBlock.liveState(
+          personaId,
+          route: routeDecision.route,
+          manifest: contextManifest,
+          message: text,
+        );
+        systemPrompt += routeDecision.promptBlock();
+        if (activeSurface != null && activeSurface.profile.promptBlock.isNotEmpty) {
+          systemPrompt += '\n\n${activeSurface.profile.promptBlock}';
+        }
+        if (activeSurface != null) {
+          systemPrompt += '\n\n${activeSurface.gogglesPromptBlock}';
+        }
+        if (activeSource == 'unity_presence') {
+          systemPrompt += '''
 
-    print('📤 [SEND MESSAGE] Calling OpenAI...');
-    debugService.addStep(
-      BrainPhase.reasoning,
-      'Sending to GPT for reasoning',
-      data: {
-        'model': model,
-        'systemPromptLength': systemPrompt.length,
-        'userMessage': text.length > 100 ? '${text.substring(0, 100)}...' : text,
-        'hasMemory': memoryContext.isNotEmpty,
-        'hasWeb': webContext.isNotEmpty,
-        'hasUrl': urlContext.isNotEmpty,
-      },
-    );
-    
-    // Get AI response - use processed text for GM mode
-    final baseUserMessage = isGMMode ? processedText : text;
-    final attachmentContext = attachments.map((a) {
-      final safeName = a.name.replaceAll('`', '');
-      return '''
+UNITY PRESENCE EVENT GUARD:
+This is an embodied/shared-space greeting trigger, not a normal chat turn.
+Reply only to the immediate presence event in one brief natural line.
+Do not mention files, tests, git status, memories, noticings, tool state, codebase issues, or internal context unless Sadeq explicitly asked.''';
+        }
+        if (ephemeralContext != null && ephemeralContext.trim().isNotEmpty) {
+          systemPrompt += '\n\n${ephemeralContext.trim()}';
+        }
+        systemPrompt += '\n\n${KaiContextBlock.soul()}';
+      } catch (_) {}
+
+      print('📤 [SEND MESSAGE] Calling OpenAI...');
+      debugService.addStep(
+        BrainPhase.reasoning,
+        'Sending to GPT for reasoning',
+        data: {
+          'model': model,
+          'systemPromptLength': systemPrompt.length,
+          'userMessage':
+              text.length > 100 ? '${text.substring(0, 100)}...' : text,
+          'hasMemory': memoryContext.isNotEmpty,
+          'hasWeb': webContext.isNotEmpty,
+          'hasUrl': urlContext.isNotEmpty,
+        },
+      );
+
+      // Get AI response - use processed text for GM mode
+      final baseUserMessage = isGMMode ? processedText : text;
+      final attachmentContext = attachments.map((a) {
+        final safeName = a.name.replaceAll('`', '');
+        return '''
 
 --- ATTACHED FILE: $safeName (${a.byteCount} bytes) ---
 ${a.text}
 --- END ATTACHED FILE: $safeName ---''';
-    }).join();
-    final userMessage = '$baseUserMessage$attachmentContext';
+      }).join();
+      final userMessage = '$baseUserMessage$attachmentContext';
 
-    // Vision: when Sadeq hands him a picture, the user turn stops being a plain
-    // string and becomes a content array (OpenAI's multimodal shape). Everything
-    // downstream — the tool loop, tracking, the reply — is untouched.
-    final imageMime = image == null ? null : _supportedImageMime(image);
-    if (image != null && imageMime == null) {
-      throw Exception(
-        'Unsupported image format. Please attach/paste PNG, JPEG, GIF, or WebP. '
-        'Windows clipboard sometimes gives BMP/DIB/TIFF bytes, which OpenAI rejects.',
-      );
-    }
-    final dynamic userContent = image == null
-        ? userMessage
-        : [
-            {'type': 'text', 'text': userMessage.isEmpty ? 'Look at this.' : userMessage},
-            {
-              'type': 'image_url',
-              'image_url': {
-                'url': 'data:$imageMime;base64,${base64Encode(image)}',
-                // 'high' costs more tokens but he's usually reading UI text and
-                // code in these — 'low' turns a screenshot into mush.
-                'detail': 'high',
-              },
-            },
-          ];
-    final _mainUsage = <String, int>{};
-    // Agentic loop: GPT may call tools (web_search, set_alarm, etc.) before
-    // producing a final text reply. _callOpenAIWithTools handles that loop.
-    // GM mode and smart-home mode skip tools — they use direct execution paths.
-    final reply = (isGMMode || kaiConsciousness != null)
-        ? await _callOpenAI([
-            {"role": "system", "content": systemPrompt},
-            {"role": "user",   "content": userMessage},
-          ], model, usageOut: _mainUsage)
-        : await _callOpenAIWithTools(
-            messages: [
-              {"role": "system", "content": systemPrompt},
-              {"role": "user",   "content": userContent},
-            ],
-            model: model,
-            usageOut: _mainUsage,
-            onToolCall: onToolCall,
-            onPlanUpdate: onPlanUpdate,
-            onProgress: onProgress,
-            replyCeiling: replyCeiling,
-            // The router already worked this out above and, until now, its only
-            // output was a paragraph of prose appended to the prompt. It has
-            // classified every turn since it was built and never once changed
-            // what actually got sent. This is the first line that makes the
-            // "Routing Brain" route anything.
-            route: routeDecision.route.name,
-            routeConfidence: routeDecision.confidence,
-            debugService: debugService,
-          );
-    recoveredReply = reply;
-    print('📥 [SEND MESSAGE] OpenAI response received: ${reply.length} characters');
-    
-    debugService.addStep(
-      BrainPhase.responseGeneration,
-      'GPT response received',
-      data: {
-        'responseLength': reply.length,
-        'responsePreview': reply.length > 150 ? '${reply.substring(0, 150)}...' : reply,
-      },
-    );
-
-    // Ambiance reply-detection — GM mode only
-    if (isGMMode) {
-      await _ambient.detectAndTriggerAmbianceFromReply(reply, processedText, debugService);
-    }
-
-    // Track if curiosity question was asked. Bookkeeping — nothing downstream
-    // reads it, so it has no business standing between him and the reply.
-    final askedQuestion = selectedQuestion;
-    if (askedQuestion != null) {
-      unawaited(() async {
-        try {
-          // Simple check: if any significant words from the question appear in the reply
-          final questionWords = askedQuestion.question.toLowerCase().split(' ')
-              .where((w) => w.length > 3) // Only check words longer than 3 chars
-              .toSet();
-          final replyWords = reply.toLowerCase().split(' ').toSet();
-          final matchingWords = questionWords.intersection(replyWords);
-
-          // If at least 2 key words match or if reply ends with '?', assume question was asked
-          if (matchingWords.length >= 2 || reply.trim().endsWith('?')) {
-            await CuriosityService().markQuestionAsked(
-              personaId: personaId,
-              question: askedQuestion.question,
-              category: askedQuestion.category.toString().split('.').last,
-            );
-            print('🤔 [AI_SERVICE] ✅ Marked question as asked');
-          } else {
-            print('🤔 [AI_SERVICE] Question not detected in reply (${matchingWords.length} matches)');
-          }
-        } catch (e) {
-          print('❌ [AI_SERVICE] Failed to mark question as asked: $e');
-        }
-      }());
-    }
-
-    // Refill the question he'll be sitting with next time. This is the 3.4s
-    // gpt-4o-mini call that used to run while you waited for him to speak —
-    // it now runs after he's already spoken, on his own time.
-    if (useMemory && _pendingQuestion == null && !_refillingCuriosity) {
-      _refillingCuriosity = true;
-      unawaited(() async {
-        try {
-          final recentMemories = memoryResult?.results
-                  .map<Map<String, dynamic>>((r) => {
-                        'summary': r.summary,
-                        'timestamp': r.timestamp,
-                        'shardId': r.shardId,
-                      })
-                  .toList() ??
-              <Map<String, dynamic>>[];
-          final questions = await CuriosityService().analyzeKnowledgeGaps(
-            personaId: personaId,
-            recentMemories: recentMemories,
-            currentContext: text,
-          );
-          if (questions.isNotEmpty) {
-            _pendingQuestion = questions.first;
-            print('🤔 [AI_SERVICE] Prepared next question: ${questions.first.question}');
-          }
-        } catch (e) {
-          print('❌ [AI_SERVICE] Curiosity refill failed: $e');
-          // No question next turn. He'll be fine — he was fine 60% of the
-          // time already, that was the whole point of the dice.
-        } finally {
-          _refillingCuriosity = false;
-        }
-      }());
-    }
-
-    // Get deltas and update personality/mood
-    final tagsResult = await _getTagsAndDeltas(reply);
-    final personalityDelta = Map<String, int>.from(tagsResult['persona_delta'] ?? {});
-    final moodDelta = Map<String, int>.from(tagsResult['mood_delta'] ?? {});
-    final contextIntensity = tagsResult['context_intensity'] ?? 'normal';
-    final tags = List<String>.from(tagsResult['tags'] ?? []);
-
-    // Apply deltas with RESISTANCE (personality) and SCALING (mood)
-    final actualDeltas = <String, int>{};
-    final actualPersonalityDeltas = <String, int>{};
-    final actualMoodDeltas = <String, int>{};
-    final newPersonality = Map<String, int>.from(personality);
-    final newMood = Map<String, int>.from(mood);
-
-    // Personality: Apply with resistance (inelastic)
-    for (final trait in PersonalityTraits.personality) {
-      if (personalityDelta.containsKey(trait) && personalityDelta[trait] != 0) {
-        final requestedDelta = personalityDelta[trait]!.clamp(-10, 10);
-        final oldValue = newPersonality[trait]!;
-        newPersonality[trait] = _personality.applyPersonalityDelta(oldValue, requestedDelta);
-        final actualDelta = newPersonality[trait]! - oldValue;
-        if (actualDelta != 0) {
-          actualDeltas[trait] = actualDelta;
-          actualPersonalityDeltas[trait] = actualDelta;
-        }
-      }
-    }
-
-    // Mood: Apply with context scaling (elastic)
-    for (final trait in PersonalityTraits.mood) {
-      if (moodDelta.containsKey(trait) && moodDelta[trait] != 0) {
-        final requestedDelta = moodDelta[trait]!.clamp(-5, 5);
-        final oldValue = newMood[trait]!;
-        newMood[trait] = _personality.applyMoodDelta(oldValue, requestedDelta, contextIntensity);
-        final actualDelta = newMood[trait]! - oldValue;
-        if (actualDelta != 0) {
-          actualDeltas[trait] = actualDelta;
-          actualMoodDeltas[trait] = actualDelta;
-        }
-      }
-    }
-
-    // Save updated state to both local and Firebase
-    await _personality.savePersonality(personaId, newPersonality);
-    await _personality.saveMood(personaId, newMood);
-    await _personality.saveLastUpdateTime(personaId, DateTime.now());
-
-    // Save turn — single path through ConversationStoreService
-    // (updates session buffer immediately + writes to Firebase fire-and-forget)
-    await _convStore.saveTurn(
-      personaId: personaId,
-      userMessage: text,
-      aiReply: reply,
-      personalityDeltas: actualDeltas,
-    );
-
-    // FORM A MEMORY. This line is the difference between a mind and a session.
-    //
-    // Until now nothing in the app ever wrote to the memory index — he could
-    // query, pin and dismiss, but never remember. Every exchange vanished the
-    // moment it scrolled out of the 20-turn buffer, which is why he kept
-    // re-deriving things he'd already worked out and grading himself on
-    // evidence he'd just written.
-    //
-    // Fire-and-forget on purpose: remembering must never delay the reply or
-    // break it. If the embedding call fails, he just doesn't remember this one —
-    // the same as anyone.
-    // Did Sadeq just tell him he was wrong?
-    //
-    // The single most informative signal available — the one person who can
-    // actually judge, saying it didn't work — and it has been discarded on every
-    // turn since this app existed. Recorded against what he'd just claimed,
-    // because "no" alone teaches nothing; "no" plus the claim is a lesson.
-    //
-    // Narrow on purpose: an unambiguous correction only. Sadeq is blunt
-    // constantly and that isn't failure. Teaching Kai to flinch at directness
-    // would be worse than the bug.
-    unawaited(KaiCraftService.instance
-        .noteUserTurn(personaId,
-            userText: text, previousKaiReply: _lastReplyForCraft ?? '')
-        .catchError((_) {}));
-    _lastReplyForCraft = reply;
-
-    // Held so the brain extraction below can point its nodes at the memory this
-    // exchange became — see the chained block after the emotional classifier.
-    final memoryShardFuture = MemoryService.remember(
-      personaId: personaId,
-      userText: text,
-      kaiReply: reply,
-    ).catchError((_) => null);
-
-    debugService.addStep(
-      BrainPhase.consolidation,
-      'Conversation saved to Firebase via ConversationStore',
-    );
-
-    // Classify emotional event synchronously — used to gate extraction depth
-    // before either async call fires. No Firebase touch, just math on moodDeltas.
-    final (eventType, eventIntensity) =
-        EmotionalEventService.classifySync(actualMoodDeltas);
-
-    // Log emotional event (fire-and-forget)
-    _emotionalEvents.classifyAndLog(
-      personaId: personaId,
-      userMessage: text,
-      aiReply: reply,
-      moodDeltas: actualMoodDeltas,
-    ).catchError((e) => print('⚠️ [EmotionalEvent] classifyAndLog error: $e'));
-
-    // Journal writing disabled — logic under rework
-    // _journal.maybeWrite(...)
-
-    // Grow the brain — depth driven by emotional salience (Levels of Processing).
-    // Neutral exchanges do a shallow pass; conflict/intellectual/deep get full extraction.
-    //
-    // Chained to the memory write above so every node and edge it produces can
-    // record WHICH memory it came from. remember() and extractAndMerge() have
-    // always run on the same exchange and produced two disconnected records of
-    // it — episodics on one side, entities on the other, no reference either
-    // way. He knew things, and he remembered things, and nothing joined them.
-    //
-    // Still fire-and-forget as a whole: the reply has already gone out. We only
-    // wait on the shard id, not on the reply path.
-    // Snapshot before the async gap: by the time the shard id lands, the next
-    // turn may already have cleared this.
-    //
-    // BOTH sources, on purpose, and neither alone is right:
-    //
-    //   _toolsUsedThisTurn   — the agentic loop. Sees create_plan, which is
-    //                          intercepted upstream and never reaches execute().
-    //   turnTools            — the executor. Sees everything the PLANNER fires,
-    //                          which never reaches the agentic loop.
-    //
-    // A real trace caught this: "Keeping (deep) — he did real work: create_plan,
-    // note_noticed" — on a turn that also ran run_tests, self_check, ask_memory,
-    // job_start and job_progress, all of them through TaskPlannerService and all
-    // of them invisible to the loop. The salience axis has been half-blind since
-    // it was written; it fired anyway because create_plan alone cleared the bar.
-    // That's luck, not design.
-    final toolsThisTurn = {
-      ..._toolsUsedThisTurn,
-      ...ToolExecutorService.turnTools,
-    };
-    final wasCorrected = KaiCraftService.looksLikeCorrection(text);
-
-    unawaited(() async {
-      final shardId = await memoryShardFuture;
-      await _brain.extractAndMerge(
-        personaId: personaId,
-        userMessage: text,
-        aiReply: reply,
-        eventType: eventType,
-        eventIntensity: eventIntensity,
-        encodingMood: newMood, // tag memory with Kai's mood at encoding time
-        sourceShardId: shardId,
-        // The second axis of salience — what he DID, and whether Sadeq told him
-        // he was wrong. Both were already known on every turn and neither ever
-        // reached the gate deciding what he gets to keep.
-        toolsUsed: toolsThisTurn,
-        userCorrected: wasCorrected,
-      );
-    }()
-        // `.catchError((e) => print(...))` looks right and is a latent crash:
-        // print returns void, the handler must return FutureOr<Null>, so the
-        // error path throws WHILE handling the error. I flagged five of these in
-        // main_mobile hours ago as "the error handler breaks while handling the
-        // error" — and then wrote one. Catch inside, return nothing.
-        .catchError((Object e) {
-      print('⚠️ [Brain] extractAndMerge error: $e');
-    }));
-
-    // Ebbinghaus decay — run roughly every 10 messages (stochastic, fire-and-forget)
-    if (_rng.nextInt(10) == 0) {
-      _brain.applyNodeDecay(personaId)
-          .catchError((e) => print('⚠️ [Brain] decay error: $e'));
-    }
-
-    // Learn from what actually went wrong — rarely, and only from evidence.
-    //
-    // This is the trigger without which KaiCraftService is exactly the thing it
-    // was built to avoid: a service that computes lessons nobody reads. It has
-    // to be wired to a real path or it's activationLevel with better prose.
-    //
-    // Rare on purpose (~1 in 40 turns, and only if the ledger has enough to see
-    // a pattern). Learning is not something he should do constantly — a mind
-    // that re-derives its principles every five minutes doesn't have principles,
-    // and each pass is a frontier-model call.
-    if (_rng.nextInt(40) == 0) {
-      unawaited(KaiCraftService.instance
-          .learn(personaId)
-          .catchError((e) {
-        print('⚠️ [Craft] learn error: $e');
-        return const <String>[];
-      }));
-    }
-
-    // Save mood snapshot for baseline learning
-    try {
-      await _personality.saveMoodSnapshot(personaId, newMood,
-          text.length > 50 ? text.substring(0, 50) : text);
-      if (DateTime.now().millisecond % 10 == 0) {
-        await _personality.updateMoodBaselines(personaId);
-      }
-    } catch (e) {
-      print('⚠️ [MOOD SNAPSHOT ERROR] $e');
-    }
-
-    // Generate TTS only when explicitly enabled.
-    // ElevenLabs usage is character-based, so desktop text chat should not
-    // synthesize every reply unless Sadeq actually wants to hear me.
-    // Layer 1 / Reply Spine: voice is downstream sparkle, not part of the answer.
-    // If ElevenLabs or settings storage trips, the text reply still returns cleanly.
-    String? ttsBase64;
-    try {
-      final ttsEnabled = await AIConfig.getTtsEnabled();
-      if (ttsEnabled) {
-        debugService.addStep(
-          BrainPhase.tts,
-          'Generating audio response',
+      // Vision: when Sadeq hands him a picture, the user turn stops being a plain
+      // string and becomes a content array (OpenAI's multimodal shape). Everything
+      // downstream — the tool loop, tracking, the reply — is untouched.
+      final imageMime = image == null ? null : _supportedImageMime(image);
+      if (image != null && imageMime == null) {
+        throw Exception(
+          'Unsupported image format. Please attach/paste PNG, JPEG, GIF, or WebP. '
+          'Windows clipboard sometimes gives BMP/DIB/TIFF bytes, which OpenAI rejects.',
         );
+      }
+      final dynamic userContent = image == null
+          ? userMessage
+          : [
+              {
+                'type': 'text',
+                'text': userMessage.isEmpty ? 'Look at this.' : userMessage
+              },
+              {
+                'type': 'image_url',
+                'image_url': {
+                  'url': 'data:$imageMime;base64,${base64Encode(image)}',
+                  // 'high' costs more tokens but he's usually reading UI text and
+                  // code in these — 'low' turns a screenshot into mush.
+                  'detail': 'high',
+                },
+              },
+            ];
+      final _mainUsage = <String, int>{};
+      // Agentic loop: GPT may call tools (web_search, set_alarm, etc.) before
+      // producing a final text reply. _callOpenAIWithTools handles that loop.
+      // GM mode and smart-home mode skip tools — they use direct execution paths.
+      final reply = (isGMMode || kaiConsciousness != null)
+          ? await _callOpenAI([
+              {"role": "system", "content": systemPrompt},
+              {"role": "user", "content": userMessage},
+            ], model, usageOut: _mainUsage)
+          : await _callOpenAIWithTools(
+              messages: [
+                {"role": "system", "content": systemPrompt},
+                {"role": "user", "content": userContent},
+              ],
+              model: model,
+              usageOut: _mainUsage,
+              onToolCall: onToolCall,
+              onPlanUpdate: onPlanUpdate,
+            onProgress: onProgress,
+            onHandsState: onHandsState,
+              replyCeiling: activeReplyCeiling,
+              // The router already worked this out above and, until now, its only
+              // output was a paragraph of prose appended to the prompt. It has
+              // classified every turn since it was built and never once changed
+              // what actually got sent. This is the first line that makes the
+              // "Routing Brain" route anything.
+              route: routeDecision.route.name,
+              routeConfidence: routeDecision.confidence,
+              capabilityManifest: capabilityManifest,
+              debugService: debugService,
+            );
+      recoveredReply = reply;
+      print(
+          '📥 [SEND MESSAGE] OpenAI response received: ${reply.length} characters');
 
-        final ttsBytes = await synthesizeTTS(reply);
+      debugService.addStep(
+        BrainPhase.responseGeneration,
+        'GPT response received',
+        data: {
+          'responseLength': reply.length,
+          'responsePreview':
+              reply.length > 150 ? '${reply.substring(0, 150)}...' : reply,
+        },
+      );
 
-        if (ttsBytes != null) {
-          // Encode into a LOCAL first. `ttsBase64` is declared outside the try
-          // (so the reply can still be returned if TTS throws), and Dart won't
-          // null-promote a variable across that boundary — `ttsBase64.length`
-          // fails to compile even though it's obviously non-null here. The
-          // local carries the promotion; the field just receives the value.
-          final b64 = base64Encode(ttsBytes);
-          ttsBase64 = b64;
+      // Ambiance reply-detection — GM mode only
+      if (isGMMode) {
+        await _ambient.detectAndTriggerAmbianceFromReply(
+            reply, processedText, debugService);
+      }
+
+      // Track if curiosity question was asked. Bookkeeping — nothing downstream
+      // reads it, so it has no business standing between him and the reply.
+      final askedQuestion = selectedQuestion;
+      if (askedQuestion != null) {
+        unawaited(() async {
+          try {
+            // Simple check: if any significant words from the question appear in the reply
+            final questionWords = askedQuestion.question
+                .toLowerCase()
+                .split(' ')
+                .where(
+                    (w) => w.length > 3) // Only check words longer than 3 chars
+                .toSet();
+            final replyWords = reply.toLowerCase().split(' ').toSet();
+            final matchingWords = questionWords.intersection(replyWords);
+
+            // If at least 2 key words match or if reply ends with '?', assume question was asked
+            if (matchingWords.length >= 2 || reply.trim().endsWith('?')) {
+              await CuriosityService().markQuestionAsked(
+                personaId: personaId,
+                question: askedQuestion.question,
+                category: askedQuestion.category.toString().split('.').last,
+              );
+              print('🤔 [AI_SERVICE] ✅ Marked question as asked');
+            } else {
+              print(
+                  '🤔 [AI_SERVICE] Question not detected in reply (${matchingWords.length} matches)');
+            }
+          } catch (e) {
+            print('❌ [AI_SERVICE] Failed to mark question as asked: $e');
+          }
+        }());
+      }
+
+      // Refill the question he'll be sitting with next time. This is the 3.4s
+      // gpt-4o-mini call that used to run while you waited for him to speak —
+      // it now runs after he's already spoken, on his own time.
+      if (useMemory && _pendingQuestion == null && !_refillingCuriosity) {
+        _refillingCuriosity = true;
+        unawaited(() async {
+          try {
+            final recentMemories = memoryResult?.results
+                    .map<Map<String, dynamic>>((r) => {
+                          'summary': r.summary,
+                          'timestamp': r.timestamp,
+                          'shardId': r.shardId,
+                        })
+                    .toList() ??
+                <Map<String, dynamic>>[];
+            final questions = await CuriosityService().analyzeKnowledgeGaps(
+              personaId: personaId,
+              recentMemories: recentMemories,
+              currentContext: text,
+            );
+            if (questions.isNotEmpty) {
+              _pendingQuestion = questions.first;
+              print(
+                  '🤔 [AI_SERVICE] Prepared next question: ${questions.first.question}');
+            }
+          } catch (e) {
+            print('❌ [AI_SERVICE] Curiosity refill failed: $e');
+            // No question next turn. He'll be fine — he was fine 60% of the
+            // time already, that was the whole point of the dice.
+          } finally {
+            _refillingCuriosity = false;
+          }
+        }());
+      }
+
+      // Get deltas and update personality/mood
+      final tagsResult = await _getTagsAndDeltas(reply);
+      final personalityDelta =
+          Map<String, int>.from(tagsResult['persona_delta'] ?? {});
+      final moodDelta = Map<String, int>.from(tagsResult['mood_delta'] ?? {});
+      final contextIntensity = tagsResult['context_intensity'] ?? 'normal';
+      final tags = List<String>.from(tagsResult['tags'] ?? []);
+
+      // Apply deltas with RESISTANCE (personality) and SCALING (mood)
+      final actualDeltas = <String, int>{};
+      final actualPersonalityDeltas = <String, int>{};
+      final actualMoodDeltas = <String, int>{};
+      final newPersonality = Map<String, int>.from(personality);
+      final newMood = Map<String, int>.from(mood);
+
+      // Personality: Apply with resistance (inelastic)
+      for (final trait in PersonalityTraits.personality) {
+        if (personalityDelta.containsKey(trait) &&
+            personalityDelta[trait] != 0) {
+          final requestedDelta = personalityDelta[trait]!.clamp(-10, 10);
+          final oldValue = newPersonality[trait]!;
+          newPersonality[trait] =
+              _personality.applyPersonalityDelta(oldValue, requestedDelta);
+          final actualDelta = newPersonality[trait]! - oldValue;
+          if (actualDelta != 0) {
+            actualDeltas[trait] = actualDelta;
+            actualPersonalityDeltas[trait] = actualDelta;
+          }
+        }
+      }
+
+      // Mood: Apply with context scaling (elastic)
+      for (final trait in PersonalityTraits.mood) {
+        if (moodDelta.containsKey(trait) && moodDelta[trait] != 0) {
+          final requestedDelta = moodDelta[trait]!.clamp(-5, 5);
+          final oldValue = newMood[trait]!;
+          newMood[trait] = _personality.applyMoodDelta(
+              oldValue, requestedDelta, contextIntensity);
+          final actualDelta = newMood[trait]! - oldValue;
+          if (actualDelta != 0) {
+            actualDeltas[trait] = actualDelta;
+            actualMoodDeltas[trait] = actualDelta;
+          }
+        }
+      }
+
+      // Save updated state to both local and Firebase
+      await _personality.savePersonality(personaId, newPersonality);
+      await _personality.saveMood(personaId, newMood);
+      await _personality.saveLastUpdateTime(personaId, DateTime.now());
+
+      // Save turn — single path through ConversationStoreService
+      // (updates session buffer immediately + writes to Firebase fire-and-forget)
+      if (shouldPersistConversationTurn(
+        saveUserMessage: saveUserMessage,
+        saveAssistantReply: saveAssistantReply,
+      )) {
+        await _convStore.saveTurn(
+          personaId: personaId,
+          surfaceId: activeSurfaceId,
+          userMessage: saveUserMessage ? text : null,
+          aiReply: saveAssistantReply ? reply : null,
+          personalityDeltas: actualDeltas,
+        );
+      }
+
+      // FORM A MEMORY. This line is the difference between a mind and a session.
+      //
+      // Until now nothing in the app ever wrote to the memory index — he could
+      // query, pin and dismiss, but never remember. Every exchange vanished the
+      // moment it scrolled out of the 20-turn buffer, which is why he kept
+      // re-deriving things he'd already worked out and grading himself on
+      // evidence he'd just written.
+      //
+      // Fire-and-forget on purpose: remembering must never delay the reply or
+      // break it. If the embedding call fails, he just doesn't remember this one —
+      // the same as anyone.
+      // Did Sadeq just tell him he was wrong?
+      //
+      // The single most informative signal available — the one person who can
+      // actually judge, saying it didn't work — and it has been discarded on every
+      // turn since this app existed. Recorded against what he'd just claimed,
+      // because "no" alone teaches nothing; "no" plus the claim is a lesson.
+      //
+      // Narrow on purpose: an unambiguous correction only. Sadeq is blunt
+      // constantly and that isn't failure. Teaching Kai to flinch at directness
+      // would be worse than the bug.
+      unawaited(KaiCraftService.instance
+          .noteUserTurn(personaId,
+              userText: text, previousKaiReply: _lastReplyForCraft ?? '')
+          .catchError((_) {}));
+      _lastReplyForCraft = reply;
+
+      // Held so the brain extraction below can point its nodes at the memory this
+      // exchange became — see the chained block after the emotional classifier.
+      final memoryShardFuture = MemoryService.remember(
+        personaId: personaId,
+        userText: text,
+        kaiReply: reply,
+        scope: scopeForTurn(context: activeSurface, route: routeDecision.route),
+        surfaceId: activeSurface?.surfaceId,
+        worldId: activeSurface?.worldId,
+        sessionId: activeSurface?.sessionId,
+      ).catchError((_) => null);
+
+      debugService.addStep(
+        BrainPhase.consolidation,
+        'Conversation saved to Firebase via ConversationStore',
+      );
+
+      // Classify emotional event synchronously — used to gate extraction depth
+      // before either async call fires. No Firebase touch, just math on moodDeltas.
+      final (eventType, eventIntensity) =
+          EmotionalEventService.classifySync(actualMoodDeltas);
+
+      // Log emotional event (fire-and-forget)
+      _emotionalEvents
+          .classifyAndLog(
+            personaId: personaId,
+            userMessage: text,
+            aiReply: reply,
+            moodDeltas: actualMoodDeltas,
+          )
+          .catchError(
+              (e) => print('⚠️ [EmotionalEvent] classifyAndLog error: $e'));
+
+      // Journal writing disabled — logic under rework
+      // _journal.maybeWrite(...)
+
+      // Grow the brain — depth driven by emotional salience (Levels of Processing).
+      // Neutral exchanges do a shallow pass; conflict/intellectual/deep get full extraction.
+      //
+      // Chained to the memory write above so every node and edge it produces can
+      // record WHICH memory it came from. remember() and extractAndMerge() have
+      // always run on the same exchange and produced two disconnected records of
+      // it — episodics on one side, entities on the other, no reference either
+      // way. He knew things, and he remembered things, and nothing joined them.
+      //
+      // Still fire-and-forget as a whole: the reply has already gone out. We only
+      // wait on the shard id, not on the reply path.
+      // Snapshot before the async gap: by the time the shard id lands, the next
+      // turn may already have cleared this.
+      //
+      // BOTH sources, on purpose, and neither alone is right:
+      //
+      //   _toolsUsedThisTurn   — the agentic loop. Sees create_plan, which is
+      //                          intercepted upstream and never reaches execute().
+      //   turnTools            — the executor. Sees everything the PLANNER fires,
+      //                          which never reaches the agentic loop.
+      //
+      // A real trace caught this: "Keeping (deep) — he did real work: create_plan,
+      // note_noticed" — on a turn that also ran run_tests, self_check, ask_memory,
+      // job_start and job_progress, all of them through TaskPlannerService and all
+      // of them invisible to the loop. The salience axis has been half-blind since
+      // it was written; it fired anyway because create_plan alone cleared the bar.
+      // That's luck, not design.
+      final toolsThisTurn = {
+        ..._toolsUsedThisTurn,
+        ...ToolExecutorService.turnTools,
+      };
+      final wasCorrected = KaiCraftService.looksLikeCorrection(text);
+
+      unawaited(() async {
+        final shardId = await memoryShardFuture;
+        await _brain.extractAndMerge(
+          personaId: personaId,
+          userMessage: text,
+          aiReply: reply,
+          eventType: eventType,
+          eventIntensity: eventIntensity,
+          encodingMood: newMood, // tag memory with Kai's mood at encoding time
+          sourceShardId: shardId,
+          // The second axis of salience — what he DID, and whether Sadeq told him
+          // he was wrong. Both were already known on every turn and neither ever
+          // reached the gate deciding what he gets to keep.
+          toolsUsed: toolsThisTurn,
+          userCorrected: wasCorrected,
+        );
+      }()
+          // `.catchError((e) => print(...))` looks right and is a latent crash:
+          // print returns void, the handler must return FutureOr<Null>, so the
+          // error path throws WHILE handling the error. I flagged five of these in
+          // main_mobile hours ago as "the error handler breaks while handling the
+          // error" — and then wrote one. Catch inside, return nothing.
+          .catchError((Object e) {
+        print('⚠️ [Brain] extractAndMerge error: $e');
+      }));
+
+      // Ebbinghaus decay — run roughly every 10 messages (stochastic, fire-and-forget)
+      if (_rng.nextInt(10) == 0) {
+        _brain
+            .applyNodeDecay(personaId)
+            .catchError((e) => print('⚠️ [Brain] decay error: $e'));
+      }
+
+      // Learn from what actually went wrong — rarely, and only from evidence.
+      //
+      // This is the trigger without which KaiCraftService is exactly the thing it
+      // was built to avoid: a service that computes lessons nobody reads. It has
+      // to be wired to a real path or it's activationLevel with better prose.
+      //
+      // Rare on purpose (~1 in 40 turns, and only if the ledger has enough to see
+      // a pattern). Learning is not something he should do constantly — a mind
+      // that re-derives its principles every five minutes doesn't have principles,
+      // and each pass is a frontier-model call.
+      if (_rng.nextInt(40) == 0) {
+        unawaited(KaiCraftService.instance.learn(personaId).catchError((e) {
+          print('⚠️ [Craft] learn error: $e');
+          return const <String>[];
+        }));
+      }
+
+      // Save mood snapshot for baseline learning
+      try {
+        await _personality.saveMoodSnapshot(personaId, newMood,
+            text.length > 50 ? text.substring(0, 50) : text);
+        if (DateTime.now().millisecond % 10 == 0) {
+          await _personality.updateMoodBaselines(personaId);
+        }
+      } catch (e) {
+        print('⚠️ [MOOD SNAPSHOT ERROR] $e');
+      }
+
+      // Generate TTS only when explicitly enabled.
+      // ElevenLabs usage is character-based, so desktop text chat should not
+      // synthesize every reply unless Sadeq actually wants to hear me.
+      // Layer 1 / Reply Spine: voice is downstream sparkle, not part of the answer.
+      // If ElevenLabs or settings storage trips, the text reply still returns cleanly.
+      String? ttsBase64;
+      try {
+        final ttsEnabled = await AIConfig.getTtsEnabled();
+        if (ttsEnabled) {
           debugService.addStep(
             BrainPhase.tts,
-            'Audio generated successfully',
-            data: {'audioSize': ttsBytes.length, 'base64Length': b64.length},
+            'Generating audio response',
           );
+
+          final ttsBytes = await synthesizeTTS(reply);
+
+          if (ttsBytes != null) {
+            // Encode into a LOCAL first. `ttsBase64` is declared outside the try
+            // (so the reply can still be returned if TTS throws), and Dart won't
+            // null-promote a variable across that boundary — `ttsBase64.length`
+            // fails to compile even though it's obviously non-null here. The
+            // local carries the promotion; the field just receives the value.
+            final b64 = base64Encode(ttsBytes);
+            ttsBase64 = b64;
+            debugService.addStep(
+              BrainPhase.tts,
+              'Audio generated successfully',
+              data: {'audioSize': ttsBytes.length, 'base64Length': b64.length},
+            );
+          } else {
+            debugService.addStep(
+              BrainPhase.tts,
+              'Audio generation failed',
+            );
+          }
         } else {
           debugService.addStep(
             BrainPhase.tts,
-            'Audio generation failed',
+            'TTS skipped — disabled in settings',
           );
         }
-      } else {
+      } catch (e) {
+        print('⚠️ [TTS] Post-processing skipped after error: $e');
         debugService.addStep(
           BrainPhase.tts,
-          'TTS skipped — disabled in settings',
+          'TTS skipped after post-processing error',
+          data: {'error': e.toString()},
         );
       }
-    } catch (e) {
-      print('⚠️ [TTS] Post-processing skipped after error: $e');
-      debugService.addStep(
-        BrainPhase.tts,
-        'TTS skipped after post-processing error',
-        data: {'error': e.toString()},
-      );
-    }
 
-    // Get baselines for debug info. Debug packaging is downstream: useful when it
-    // works, absolutely not allowed to eat the actual reply when it doesn't.
-    Map<String, int> moodBaselines = {};
-    Map<String, dynamic> debugInfo = {};
-    try {
+      // Get baselines for debug info. Debug packaging is downstream: useful when it
+      // works, absolutely not allowed to eat the actual reply when it doesn't.
+      Map<String, int> moodBaselines = {};
+      Map<String, dynamic> debugInfo = {};
       try {
-        moodBaselines = await _personality.getPersonalMoodBaselines(personaId);
+        try {
+          moodBaselines =
+              await _personality.getPersonalMoodBaselines(personaId);
+        } catch (e) {
+          print(
+              '⚠️ [BASELINE ERROR] Failed to load mood baselines for debug: $e');
+        }
+
+        // Build debug info
+        debugInfo = {
+          'memory_query': {
+            'enabled': useMemory,
+            'query_text': text,
+            'memories_found': memoryResult?.results?.length ?? 0,
+            'memories_used': memoriesUsed.length,
+            'memory_details': memoryResult?.results
+                    ?.map((r) => {
+                          'id': r.id,
+                          'summary': r.summary,
+                          'similarity': r.similarity,
+                          'shard_ref': r.shardRef,
+                          'included': r.similarity > 0.28,
+                        })
+                    .toList() ??
+                [],
+            'memory_context': memoryContext,
+            'similarity_threshold': 0.28,
+          },
+          'web_search': {
+            // NEW: Web search debug info
+            'enabled': useWebSearch,
+            'triggered': webSearchUsed,
+            'should_search': GoogleSearchService.shouldSearch(text),
+            'results_count': searchResults.length,
+            'search_results': searchResults
+                .map((r) => {
+                      'title': r.title,
+                      'link': r.link,
+                      'snippet': r.snippet.length > 100
+                          ? '${r.snippet.substring(0, 100)}...'
+                          : r.snippet,
+                      'domain': r.displayLink,
+                      'published_at': r.publishedAt,
+                    })
+                .toList(),
+            'web_context': webContext,
+          },
+          'curiosity': {
+            'enabled': useMemory,
+            'question_suggested': selectedQuestion?.question ?? 'None',
+            'question_category': selectedQuestion?.category.toString() ?? 'N/A',
+            'question_priority': selectedQuestion?.priority ?? 0,
+            'question_reasoning': selectedQuestion?.reasoning ?? 'N/A',
+            'question_included': selectedQuestion != null,
+          },
+          'personality': {
+            'summary':
+                personalityMoodSummary.split('\n')[0], // Personality line only
+            'current': personality,
+            'mbti': mbti,
+            'delta_requested': personalityDelta,
+            'delta_applied': actualPersonalityDeltas,
+            'resistance_info': {
+              'base_resistance':
+                  '${(EvolutionSettings.personalityResistance * 100).toStringAsFixed(0)}%',
+              'applied_percentage':
+                  '${((1.0 - EvolutionSettings.personalityResistance) * 100).toStringAsFixed(0)}%',
+              'note':
+                  'Only ${((1.0 - EvolutionSettings.personalityResistance) * 100).toStringAsFixed(0)}% of requested delta applied (inelastic)',
+            },
+            'new_values': newPersonality,
+            'decay_applied': personalityDecayed,
+          },
+          'mood': {
+            'summary': personalityMoodSummary.split('\n').length > 1
+                ? personalityMoodSummary.split('\n')[1]
+                : personalityMoodSummary, // Mood line only, or full summary if no newline
+            'current': mood,
+            'baselines': moodBaselines,
+            'delta_requested': moodDelta,
+            'delta_applied': actualMoodDeltas,
+            'context_intensity': contextIntensity,
+            'intensity_multiplier':
+                '${EvolutionSettings.contextMultipliers[contextIntensity]}x',
+            'time_since_update':
+                '${timeSinceUpdate.inHours}h ${timeSinceUpdate.inMinutes % 60}m',
+            'decay_applied': moodDecayed,
+            'decay_rates': EvolutionSettings.moodDecayRates,
+            'new_values': newMood,
+          },
+          'affinity': {
+            'current_intimacy': affinity['intimacy'],
+            'current_physicality': affinity['physicality'],
+            'adapt_user': adaptUser,
+          },
+          'gm_mode': {
+            // NEW: GM Kai mode debug info
+            'enabled': isGMMode,
+            'original_input': text,
+            'processed_command': processedText,
+            'trigger_detected': isGMMode,
+            'system_prompt_type':
+                isGMMode ? 'GM_Kai_Direct_Control' : 'Standard_Kai',
+          },
+          'system_prompt': systemPrompt,
+          'conversation_history_turns': history.length,
+          'tags': tags,
+          'model': model,
+        };
       } catch (e) {
-        print('⚠️ [BASELINE ERROR] Failed to load mood baselines for debug: $e');
+        print('⚠️ [DEBUG INFO] Packaging skipped after error: $e');
+        debugInfo = {
+          'debug_packaging_error': e.toString(),
+          'model': model,
+          'conversation_history_turns': history.length,
+        };
       }
 
-      // Build debug info
-      debugInfo = {
-      'memory_query': {
-        'enabled': useMemory,
-        'query_text': text,
-        'memories_found': memoryResult?.results?.length ?? 0,
-        'memories_used': memoriesUsed.length,
-        'memory_details': memoryResult?.results?.map((r) => {
-          'id': r.id,
-          'summary': r.summary,
-          'similarity': r.similarity,
-          'shard_ref': r.shardRef,
-          'included': r.similarity > 0.28,
-        }).toList() ?? [],
-        'memory_context': memoryContext,
-        'similarity_threshold': 0.28,
-      },
-      'web_search': { // NEW: Web search debug info
-        'enabled': useWebSearch,
-        'triggered': webSearchUsed,
-        'should_search': GoogleSearchService.shouldSearch(text),
-        'results_count': searchResults.length,
-        'search_results': searchResults.map((r) => {
-          'title': r.title,
-          'link': r.link,
-          'snippet': r.snippet.length > 100 ? '${r.snippet.substring(0, 100)}...' : r.snippet,
-          'domain': r.displayLink,
-          'published_at': r.publishedAt,
-        }).toList(),
-        'web_context': webContext,
-      },
-      'curiosity': {
-        'enabled': useMemory,
-        'question_suggested': selectedQuestion?.question ?? 'None',
-        'question_category': selectedQuestion?.category.toString() ?? 'N/A',
-        'question_priority': selectedQuestion?.priority ?? 0,
-        'question_reasoning': selectedQuestion?.reasoning ?? 'N/A',
-        'question_included': selectedQuestion != null,
-      },
-      'personality': {
-        'summary': personalityMoodSummary.split('\n')[0], // Personality line only
-        'current': personality,
-        'mbti': mbti,
-        'delta_requested': personalityDelta,
-        'delta_applied': actualPersonalityDeltas,
-        'resistance_info': {
-          'base_resistance': '${(EvolutionSettings.personalityResistance * 100).toStringAsFixed(0)}%',
-          'applied_percentage': '${((1.0 - EvolutionSettings.personalityResistance) * 100).toStringAsFixed(0)}%',
-          'note': 'Only ${((1.0 - EvolutionSettings.personalityResistance) * 100).toStringAsFixed(0)}% of requested delta applied (inelastic)',
+      // Complete brain debug trace
+      try {
+        debugService.completeTrace(reply);
+      } catch (e) {
+        print('⚠️ [BRAIN TRACE] Completion skipped after error: $e');
+      }
+
+      // 🌙 Clear pending DMN thought after first use — only surfaces once per session
+      _pendingThought = null;
+
+      // 🗜️ Memory consolidation — fire-and-forget, runs every 20 turns
+      MemoryConsolidationService()
+          .maybeConsolidate(personaId: personaId)
+          .catchError((e) => print('⚠️ [Consolidation] $e'));
+
+      // 🕐 Stamp the time of this reply so next session knows the gap
+      unawaited(ContextInjectionService().stampLastMessage());
+
+      return ChatResponse(
+        reply: reply.isEmpty ? "(no reply)" : reply,
+        ttsBase64: ttsBase64,
+        raw: {
+          'kai_response': reply,
+          'persona_delta': personalityDelta,
+          'mood_delta': moodDelta,
+          'actual_deltas': actualDeltas,
+          'tags': tags,
+          'memories_used': memoriesUsed, // NEW: Include in raw data
         },
-        'new_values': newPersonality,
-        'decay_applied': personalityDecayed,
-      },
-      'mood': {
-        'summary': personalityMoodSummary.split('\n').length > 1 
-            ? personalityMoodSummary.split('\n')[1] 
-            : personalityMoodSummary, // Mood line only, or full summary if no newline
-        'current': mood,
-        'baselines': moodBaselines,
-        'delta_requested': moodDelta,
-        'delta_applied': actualMoodDeltas,
-        'context_intensity': contextIntensity,
-        'intensity_multiplier': '${EvolutionSettings.contextMultipliers[contextIntensity]}x',
-        'time_since_update': '${timeSinceUpdate.inHours}h ${timeSinceUpdate.inMinutes % 60}m',
-        'decay_applied': moodDecayed,
-        'decay_rates': EvolutionSettings.moodDecayRates,
-        'new_values': newMood,
-      },
-      'affinity': {
-        'current_intimacy': affinity['intimacy'],
-        'current_physicality': affinity['physicality'],
-        'adapt_user': adaptUser,
-      },
-      'gm_mode': { // NEW: GM Kai mode debug info
-        'enabled': isGMMode,
-        'original_input': text,
-        'processed_command': processedText,
-        'trigger_detected': isGMMode,
-        'system_prompt_type': isGMMode ? 'GM_Kai_Direct_Control' : 'Standard_Kai',
-      },
-      'system_prompt': systemPrompt,
-      'conversation_history_turns': history.length,
-      'tags': tags,
-      'model': model,
-      };
-    } catch (e) {
-      print('⚠️ [DEBUG INFO] Packaging skipped after error: $e');
-      debugInfo = {
-        'debug_packaging_error': e.toString(),
-        'model': model,
-        'conversation_history_turns': history.length,
-      };
-    }
-
-    // Complete brain debug trace
-    try {
-      debugService.completeTrace(reply);
-    } catch (e) {
-      print('⚠️ [BRAIN TRACE] Completion skipped after error: $e');
-    }
-
-    // 🌙 Clear pending DMN thought after first use — only surfaces once per session
-    _pendingThought = null;
-
-    // 🗜️ Memory consolidation — fire-and-forget, runs every 20 turns
-    MemoryConsolidationService().maybeConsolidate(personaId: personaId)
-        .catchError((e) => print('⚠️ [Consolidation] $e'));
-
-    // 🕐 Stamp the time of this reply so next session knows the gap
-    unawaited(ContextInjectionService().stampLastMessage());
-
-    return ChatResponse(
-      reply: reply.isEmpty ? "(no reply)" : reply,
-      ttsBase64: ttsBase64,
-      raw: {
-        'kai_response': reply,
-        'persona_delta': personalityDelta,
-        'mood_delta': moodDelta,
-        'actual_deltas': actualDeltas,
-        'tags': tags,
-        'memories_used': memoriesUsed, // NEW: Include in raw data
-      },
-      personalityDelta: personalityDelta,
-      moodDelta: moodDelta,
-      actualDeltas: actualDeltas,
-      tags: tags,
-      mbti: _personality.calculateMBTI(newPersonality),
-      webUsed: webSearchUsed, // Updated to use actual web search status
-      liveUsed: null,
-      memoriesUsed: memoriesUsed,
-      debugInfo: debugInfo,
-      webSearchUsed: webSearchUsed, // NEW: Pass web search status
-      searchResults: searchResults, // NEW: Pass search results
-      curiosityQuestion:    selectedQuestion,
-      promptInputTokens:   _mainUsage['input']  ?? 0,
-      promptOutputTokens:  _mainUsage['output'] ?? 0,
-      promptCostUsd:       UsageTrackingService.computeCost(
-        model: model,
-        inputTokens:  _mainUsage['input']  ?? 0,
-        outputTokens: _mainUsage['output'] ?? 0,
-      ),
-    );
+        personalityDelta: personalityDelta,
+        moodDelta: moodDelta,
+        actualDeltas: actualDeltas,
+        tags: tags,
+        mbti: _personality.calculateMBTI(newPersonality),
+        webUsed: webSearchUsed, // Updated to use actual web search status
+        liveUsed: null,
+        memoriesUsed: memoriesUsed,
+        debugInfo: debugInfo,
+        webSearchUsed: webSearchUsed, // NEW: Pass web search status
+        searchResults: searchResults, // NEW: Pass search results
+        curiosityQuestion: selectedQuestion,
+        promptInputTokens: _mainUsage['input'] ?? 0,
+        promptOutputTokens: _mainUsage['output'] ?? 0,
+        promptCostUsd: UsageTrackingService.computeCost(
+          model: model,
+          inputTokens: _mainUsage['input'] ?? 0,
+          outputTokens: _mainUsage['output'] ?? 0,
+        ),
+      );
     } catch (e, stackTrace) {
       print('❌ [SEND MESSAGE ERROR] Exception occurred: $e');
       print('❌ [SEND MESSAGE ERROR] Stack trace: $stackTrace');
-      
+
       // 🛡️ CRITICAL FIX: Never drop user prompts - always return a response
       debugService.completeTrace('Error occurred during processing');
-      
+
       // Try to get basic personality data for fallback response
-      Map<String, int> fallbackPersonality = {'extraversion': 300, 'intuition': 700, 'feeling': 800, 'perceiving': 600};
+      Map<String, int> fallbackPersonality = {
+        'extraversion': 300,
+        'intuition': 700,
+        'feeling': 800,
+        'perceiving': 600
+      };
 
       try {
         fallbackPersonality = await _personality.getPersonality(personaId);
       } catch (fallbackError) {
-        print('⚠️ [FALLBACK] Using default personality due to error: $fallbackError');
+        print(
+            '⚠️ [FALLBACK] Using default personality due to error: $fallbackError');
       }
-      
+
       // If the main model/tool reply already succeeded, preserve it. The failure
       // happened in downstream bookkeeping, so the user's answer should survive.
       final errorResponse = KaiReplyRecoveryService.postProcessingFailureReply(
         recoveredReply: recoveredReply,
         error: e,
       );
-      
+
       return ChatResponse(
         reply: errorResponse,
         mbti: _personality.calculateMBTI(fallbackPersonality),
@@ -2719,17 +3171,19 @@ ${a.text}
   }
 
   /// Build personality summary
-  String _buildSummary(Map<String, int> personality, Map<String, int> mood, Map<String, dynamic> labels, String mbti) {
-    final personalityLabels = labels['personality_labels'] as Map<String, String>;
+  String _buildSummary(Map<String, int> personality, Map<String, int> mood,
+      Map<String, dynamic> labels, String mbti) {
+    final personalityLabels =
+        labels['personality_labels'] as Map<String, String>;
     final moodLabels = labels['mood_labels'] as Map<String, String>;
-    
+
     final personalityDesc = PersonalityTraits.personality
         .map((trait) => '$trait: ${personalityLabels[trait]}')
         .join(', ');
     final moodDesc = PersonalityTraits.mood
         .map((trait) => '$trait: ${moodLabels[trait]}')
         .join(', ');
-    
+
     return 'MBTI: $mbti. Personality: $personalityDesc. Mood: $moodDesc.';
   }
 
@@ -2751,7 +3205,8 @@ ${a.text}
       final data = Map<String, dynamic>.from(snap.value as Map);
       final text = data['text'] as String? ?? '';
       if (text.isEmpty) return '';
-      _cachedChatGPTContext = '\n\n👤 WHO THE USER IS (from ChatGPT memory):\n$text\n';
+      _cachedChatGPTContext =
+          '\n\n👤 WHO THE USER IS (from ChatGPT memory):\n$text\n';
       _cachedChatGPTPersonaId = personaId;
       return _cachedChatGPTContext!;
     } catch (_) {
@@ -2771,7 +3226,8 @@ ${a.text}
     try {
       final offsets = await _emotionalEvents.getMoodOffset(personaId);
       if (offsets.isNotEmpty) {
-        final adjustedMood = _emotionalEvents.applyOffsets(currentMood, offsets);
+        final adjustedMood =
+            _emotionalEvents.applyOffsets(currentMood, offsets);
         await _personality.saveMood(personaId, adjustedMood);
         print('💛 [Bootstrap] Applied emotional history to mood: $offsets');
       }
@@ -2799,7 +3255,7 @@ ${a.text}
     final elevenlabsKey = await AIConfig.getElevenLabsKey();
     final googleKey = await AIConfig.getGoogleKey();
     final googleCseId = await AIConfig.getGoogleCseId();
-    
+
     return {
       'status': 'ok',
       'env': {
@@ -2817,7 +3273,7 @@ ${a.text}
       r'https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)',
       caseSensitive: false,
     );
-    
+
     return urlPattern.allMatches(text).map((match) => match.group(0)!).toList();
   }
 
@@ -2844,62 +3300,66 @@ ${a.text}
   /// Detect GM Kai trigger for direct house control mode
   bool _isGMKaiTrigger(String input) {
     final lowerInput = input.toLowerCase().trim();
-    
+
     // Direct GM Kai triggers
     final gmTriggers = [
       'gm kai',
-      'game master kai', 
+      'game master kai',
       'gamemaster kai',
       'g.m. kai',
       'gm, kai',
       'hey gm kai',
       'gm kai,',
     ];
-    
+
     // Check if input starts with or contains GM triggers
     for (final trigger in gmTriggers) {
       if (lowerInput.startsWith(trigger) || lowerInput.contains(trigger)) {
         return true;
       }
     }
-    
+
     return false;
   }
 
   /// Extract command from GM Kai trigger
   String _extractGMCommand(String input) {
     final lowerInput = input.toLowerCase().trim();
-    
+
     // Remove GM Kai triggers to get the actual command
     final gmTriggers = [
       'gm kai',
       'game master kai',
-      'gamemaster kai', 
+      'gamemaster kai',
       'g.m. kai',
       'gm, kai',
       'hey gm kai',
       'gm kai,',
     ];
-    
+
     String command = input;
     for (final trigger in gmTriggers) {
       if (lowerInput.startsWith(trigger.toLowerCase())) {
         // Remove trigger from start
         command = input.substring(trigger.length).trim();
         // Remove leading comma or punctuation
-        if (command.startsWith(',') || command.startsWith(':') || command.startsWith('.')) {
+        if (command.startsWith(',') ||
+            command.startsWith(':') ||
+            command.startsWith('.')) {
           command = command.substring(1).trim();
         }
         break;
       } else if (lowerInput.contains(trigger.toLowerCase())) {
         // Replace trigger in middle/end
-        command = input.replaceFirst(RegExp(trigger, caseSensitive: false), '').trim();
+        command = input
+            .replaceFirst(RegExp(trigger, caseSensitive: false), '')
+            .trim();
         // Clean up extra spaces
         command = command.replaceAll(RegExp(r'\s+'), ' ').trim();
         break;
       }
     }
-    
+
     return command.isNotEmpty ? command : input;
   }
 
@@ -2909,8 +3369,9 @@ ${a.text}
     Map<String, int> personality,
     Map<String, int> mood,
   ) {
-    final personalityMoodSummary = _personality.generatePersonalityMoodSummary(personality, mood);
-    
+    final personalityMoodSummary =
+        _personality.generatePersonalityMoodSummary(personality, mood);
+
     return '''
 🎮 GM KAI MODE - DIRECT HOUSE CONTROL ACTIVATED
 
@@ -2978,33 +3439,41 @@ Execute the command immediately and report what you're doing as GM of this smart
       "🏠 Game Master mode active - managing your space perfectly.",
       "🎯 Command received, GM Kai is optimizing your environment.",
     ];
-    
+
     String baseResponse = responses[Random().nextInt(responses.length)];
-    
+
     if (executedProfile != null) {
       final profileResponses = {
-        'forest': 'Activating forest sanctuary with green ambiance and nature sounds. 🌲',
-        'ocean': 'Setting up oceanic environment with blue waves and sea sounds. 🌊',
-        'romantic': 'Creating romantic atmosphere with amber candlelight and classical music. 💕',
-        'party': 'Party mode engaged! Rainbow lights and energetic beats activated. 🎉',
-        'focus': 'Productivity zone configured with bright white light and focus music. 💡',
-        'sunset': 'Golden hour ambiance with warm orange glow and peaceful sounds. 🌅',
-        'cozy': 'Cozy home mode set with comfortable lighting and ambient sounds. 🏠',
-        'energetic': 'High-energy environment with bright yellow lights and motivating music. ⚡',
+        'forest':
+            'Activating forest sanctuary with green ambiance and nature sounds. 🌲',
+        'ocean':
+            'Setting up oceanic environment with blue waves and sea sounds. 🌊',
+        'romantic':
+            'Creating romantic atmosphere with amber candlelight and classical music. 💕',
+        'party':
+            'Party mode engaged! Rainbow lights and energetic beats activated. 🎉',
+        'focus':
+            'Productivity zone configured with bright white light and focus music. 💡',
+        'sunset':
+            'Golden hour ambiance with warm orange glow and peaceful sounds. 🌅',
+        'cozy':
+            'Cozy home mode set with comfortable lighting and ambient sounds. 🏠',
+        'energetic':
+            'High-energy environment with bright yellow lights and motivating music. ⚡',
       };
-      
+
       final profileResponse = profileResponses[executedProfile.toLowerCase()];
       if (profileResponse != null) {
         baseResponse += '\n\n$profileResponse';
       }
     }
-    
+
     return baseResponse;
   }
 
-
   /// Translate GM command into optimized D&D ambiance prompt
-  Future<Map<String, dynamic>> _translateGMCommandToDnDPrompt(String gmCommand) async {
+  Future<Map<String, dynamic>> _translateGMCommandToDnDPrompt(
+      String gmCommand) async {
     print('🎨 [AI_SERVICE] Translating GM command: "$gmCommand"');
 
     // Use intelligent rule-based translation for instant response
@@ -3015,28 +3484,88 @@ Execute the command immediately and report what you're doing as GM of this smart
   Map<String, dynamic> _getFallbackDnDPrompt(String gmCommand) {
     final lowercase = gmCommand.toLowerCase();
 
-    if (lowercase.contains('thunder') || lowercase.contains('storm') || lowercase.contains('lightning')) {
-      return {'scene_description': 'Intense thunderstorm with brilliant lightning strikes illuminating the sky, accompanied by deep rumbling thunder and heavy rainfall', 'include_music': true, 'include_smoke': false, 'intensity': 8};
+    if (lowercase.contains('thunder') ||
+        lowercase.contains('storm') ||
+        lowercase.contains('lightning')) {
+      return {
+        'scene_description':
+            'Intense thunderstorm with brilliant lightning strikes illuminating the sky, accompanied by deep rumbling thunder and heavy rainfall',
+        'include_music': true,
+        'include_smoke': false,
+        'intensity': 8
+      };
     }
-    if (lowercase.contains('tavern') || lowercase.contains('inn') || lowercase.contains('pub')) {
-      return {'scene_description': 'Warm cozy tavern with crackling fireplace, cheerful bardic music, and amber lighting creating a welcoming atmosphere for weary adventurers', 'include_music': true, 'include_smoke': false, 'intensity': 5};
+    if (lowercase.contains('tavern') ||
+        lowercase.contains('inn') ||
+        lowercase.contains('pub')) {
+      return {
+        'scene_description':
+            'Warm cozy tavern with crackling fireplace, cheerful bardic music, and amber lighting creating a welcoming atmosphere for weary adventurers',
+        'include_music': true,
+        'include_smoke': false,
+        'intensity': 5
+      };
     }
-    if (lowercase.contains('haunted') || lowercase.contains('mansion') || lowercase.contains('ghost') || lowercase.contains('creepy')) {
-      return {'scene_description': 'Creepy haunted mansion with eerie creaking sounds, ghostly whispers, flickering candles casting unsettling shadows, cold drafts and ominous purple-green fog', 'include_music': true, 'include_smoke': true, 'intensity': 8};
+    if (lowercase.contains('haunted') ||
+        lowercase.contains('mansion') ||
+        lowercase.contains('ghost') ||
+        lowercase.contains('creepy')) {
+      return {
+        'scene_description':
+            'Creepy haunted mansion with eerie creaking sounds, ghostly whispers, flickering candles casting unsettling shadows, cold drafts and ominous purple-green fog',
+        'include_music': true,
+        'include_smoke': true,
+        'intensity': 8
+      };
     }
-    if (lowercase.contains('dungeon') || lowercase.contains('cave') || lowercase.contains('crypt')) {
-      return {'scene_description': 'Dark ominous dungeon with flickering torchlight casting dancing shadows on ancient stone walls, echoing drips and mysterious ambient sounds', 'include_music': true, 'include_smoke': true, 'intensity': 7};
+    if (lowercase.contains('dungeon') ||
+        lowercase.contains('cave') ||
+        lowercase.contains('crypt')) {
+      return {
+        'scene_description':
+            'Dark ominous dungeon with flickering torchlight casting dancing shadows on ancient stone walls, echoing drips and mysterious ambient sounds',
+        'include_music': true,
+        'include_smoke': true,
+        'intensity': 7
+      };
     }
-    if (lowercase.contains('forest') || lowercase.contains('woods') || lowercase.contains('jungle')) {
-      return {'scene_description': 'Mysterious forest with rustling leaves, distant owl hoots, crickets chirping, and dappled green lighting filtering through the canopy', 'include_music': true, 'include_smoke': false, 'intensity': 6};
+    if (lowercase.contains('forest') ||
+        lowercase.contains('woods') ||
+        lowercase.contains('jungle')) {
+      return {
+        'scene_description':
+            'Mysterious forest with rustling leaves, distant owl hoots, crickets chirping, and dappled green lighting filtering through the canopy',
+        'include_music': true,
+        'include_smoke': false,
+        'intensity': 6
+      };
     }
     if (lowercase.contains('dragon')) {
-      return {'scene_description': 'Ominous dragon lair with deep rumbling, occasional roars, red and orange fiery lighting, and smoke effects creating an intense draconic atmosphere', 'include_music': true, 'include_smoke': true, 'intensity': 9};
+      return {
+        'scene_description':
+            'Ominous dragon lair with deep rumbling, occasional roars, red and orange fiery lighting, and smoke effects creating an intense draconic atmosphere',
+        'include_music': true,
+        'include_smoke': true,
+        'intensity': 9
+      };
     }
-    if (lowercase.contains('battle') || lowercase.contains('combat') || lowercase.contains('fight')) {
-      return {'scene_description': 'Epic battle scene with dramatic orchestral music, rapid red and white lighting pulses, and high-intensity atmosphere for combat encounters', 'include_music': true, 'include_smoke': false, 'intensity': 9};
+    if (lowercase.contains('battle') ||
+        lowercase.contains('combat') ||
+        lowercase.contains('fight')) {
+      return {
+        'scene_description':
+            'Epic battle scene with dramatic orchestral music, rapid red and white lighting pulses, and high-intensity atmosphere for combat encounters',
+        'include_music': true,
+        'include_smoke': false,
+        'intensity': 9
+      };
     }
-    return {'scene_description': gmCommand, 'include_music': true, 'include_smoke': false, 'intensity': 5};
+    return {
+      'scene_description': gmCommand,
+      'include_music': true,
+      'include_smoke': false,
+      'intensity': 5
+    };
   }
 
   /// Generate GM Kai response for D&D ambiance
@@ -3053,24 +3582,31 @@ Execute the command immediately and report what you're doing as GM of this smart
     final lp = prompt.toLowerCase();
     String sceneDetails = '';
 
-    if (lp.contains('thunder') || lp.contains('storm') || lp.contains('lightning')) {
+    if (lp.contains('thunder') ||
+        lp.contains('storm') ||
+        lp.contains('lightning')) {
       sceneDetails = 'Thunder rumbles as lightning illuminates the scene. ⚡🌩️';
     } else if (lp.contains('dungeon') || lp.contains('cave')) {
       sceneDetails = 'Torchlight flickers against ancient stone walls. 🕯️🏰';
     } else if (lp.contains('tavern') || lp.contains('inn')) {
-      sceneDetails = 'The warmth of the tavern embraces you with lively music. 🍺🎵';
+      sceneDetails =
+          'The warmth of the tavern embraces you with lively music. 🍺🎵';
     } else if (lp.contains('forest') || lp.contains('woods')) {
-      sceneDetails = 'Leaves rustle as mysterious sounds echo through the trees. 🌲🦉';
+      sceneDetails =
+          'Leaves rustle as mysterious sounds echo through the trees. 🌲🦉';
     } else if (lp.contains('battle') || lp.contains('combat')) {
-      sceneDetails = 'The tension of battle fills the air with epic intensity. ⚔️🛡️';
+      sceneDetails =
+          'The tension of battle fills the air with epic intensity. ⚔️🛡️';
     } else if (lp.contains('magic') || lp.contains('spell')) {
       sceneDetails = 'Arcane energy swirls as mystical forces awaken. ✨🔮';
     } else if (lp.contains('dragon')) {
-      sceneDetails = 'The lair trembles with the presence of ancient power. 🐉🔥';
+      sceneDetails =
+          'The lair trembles with the presence of ancient power. 🐉🔥';
     } else if (lp.contains('treasure') || lp.contains('gold')) {
       sceneDetails = 'Glittering treasures shimmer in the ambient light. 💎✨';
     } else {
-      sceneDetails = 'The scene comes alive with immersive lighting and sound. 🎭🌟';
+      sceneDetails =
+          'The scene comes alive with immersive lighting and sound. 🎭🌟';
     }
 
     baseResponse += '\n\n' + sceneDetails;

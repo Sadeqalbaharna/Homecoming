@@ -1,16 +1,16 @@
 // KaiPresence — a compact, glanceable status ribbon for Kai.
 //
 // Shows, in one mono line: a live "awake" dot, his mood rendered as a single
-// word, energy %, the local time, and (faintly) his latest inner thought. It
-// streams from KaiStateService + the inner-monologue node, and carries a
-// Semantics label so screen readers announce his whole state in a sentence.
+// word, energy %, and the local time. Inner thoughts deliberately live in the
+// ambient background now, not inside this mood/presence strip.
+// It streams from KaiStateService and carries a Semantics label so screen readers
+// announce his whole state in a sentence.
 //
 // Wire-up:  KaiPresence(personaId: 'truekai')  — e.g. in the chat header row.
 library;
 
 import 'dart:async';
 import 'package:flutter/material.dart';
-import '../services/core/kai_db.dart';
 import '../services/core/kai_state_service.dart';
 
 const _gpt = Color(0xFFFF9D2F);
@@ -27,13 +27,11 @@ class KaiPresence extends StatefulWidget {
 class _KaiPresenceState extends State<KaiPresence> {
   final _state = KaiStateService();
   Map<String, int> _mood = const {};
-  String _thought = '';
   Timer? _clock;
   DateTime _now = DateTime.now();
-  // Held so they can be cancelled — an uncancelled stream keeps this State (and
-  // its RTDB listener) alive after the widget is gone.
+  // Held so it can be cancelled — an uncancelled stream keeps this State alive
+  // after the widget is gone.
   StreamSubscription<Map<String, int>>? _moodSub;
-  StreamSubscription<KaiEvent>? _thoughtSub;
 
   @override
   void initState() {
@@ -44,17 +42,6 @@ class _KaiPresenceState extends State<KaiPresence> {
     _state.getMood(widget.personaId).then((m) {
       if (mounted && m != null && m.isNotEmpty && _mood.isEmpty) setState(() => _mood = m);
     });
-    _thoughtSub = KaiDb.instance
-        .ref('kai/${widget.personaId}/inner_monologue')
-        .limitToLast(1)
-        .onValue
-        .listen((event) {
-      final v = event.snapshot.value;
-      if (v is Map && v.isNotEmpty) {
-        final last = v.values.last;
-        if (last is Map && mounted) setState(() => _thought = (last['text'] ?? '').toString());
-      }
-    });
     _clock = Timer.periodic(const Duration(seconds: 20), (_) {
       if (mounted) setState(() => _now = DateTime.now());
     });
@@ -63,7 +50,6 @@ class _KaiPresenceState extends State<KaiPresence> {
   @override
   void dispose() {
     _moodSub?.cancel();
-    _thoughtSub?.cancel();
     _clock?.cancel();
     super.dispose();
   }
@@ -100,8 +86,7 @@ class _KaiPresenceState extends State<KaiPresence> {
     final hh = t.hour.toString().padLeft(2, '0');
     final mm = t.minute.toString().padLeft(2, '0');
     final semantic =
-        'Kai is present. Mood ${_moodWord.toLowerCase()}, energy ${_m('energy')} percent.'
-        '${_thought.isNotEmpty ? ' Currently thinking: $_thought' : ''}';
+        'Kai is present. Mood ${_moodWord.toLowerCase()}, energy ${_m('energy')} percent.';
 
     return Semantics(
       label: semantic,
@@ -120,16 +105,6 @@ class _KaiPresenceState extends State<KaiPresence> {
             Text('⚡${_m('energy')}', style: const TextStyle(color: Color(0xFF9FB6C8))),
             _sep(),
             Text('$hh:$mm', style: const TextStyle(color: Color(0xFF6B8194))),
-            if (_thought.isNotEmpty) ...[
-              _sep(),
-              Flexible(
-                child: Text('“$_thought”',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                        color: Colors.white.withOpacity(0.32), fontStyle: FontStyle.italic)),
-              ),
-            ],
           ],
         ),
       ),
