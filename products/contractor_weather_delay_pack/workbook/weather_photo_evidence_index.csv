@@ -1,0 +1,2 @@
+Photo/Video ID,Delay Event ID,Filename or Link,Date Captured,Time Captured,Captured By,Location/Area,What It Shows,Why It Matters,Weather Visible?,Safety Hazard Visible?,Work Stoppage Visible?,Stored Where?,Backed Up?,Notes
+PHOTO-001,WD-001,filename.jpg,YYYY-MM-DD,HH:MM,Name,"e.g. north elevation / access road","Standing water blocking access","Supports weather delay log entry",Yes/No,Yes/No,Yes/No,"Phone folder / drive link",Yes/No,Free notes
