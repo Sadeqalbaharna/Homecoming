@@ -13,6 +13,33 @@ enum KaiPresenceRole { core, friend, embodiedFriend, friendAndCoCreator }
 /// off means friendship/presence only; on unlocks the tools granted by this body.
 enum KaiGoggles { off, on }
 
+/// What a guest agreed to when they first signed up on the AR app.
+///
+/// This is a GATE, not a preference Kai is asked to respect. A guest at [none]
+/// does not resolve to a known guest at all — see [KaiSurfaceContext.arPublic].
+/// Kai meets them fresh, because "has the record but has been told not to use
+/// it" is one prompt away from using it.
+///
+/// Withdrawal has to reach the record itself. That is the practical reason
+/// guest data is structured in the Tavern store rather than embedded: it can
+/// actually be deleted, exported, and shown to the person it describes.
+enum KaiGuestConsent {
+  /// No record, no recall. A stranger every visit, by their choice.
+  none,
+
+  /// Service facts: allergies, dietary needs, usual order. The things that
+  /// make hospitality work rather than the things that make it personal.
+  ///
+  /// Allergy data is health data and carries its own legal weight. It should
+  /// be its own explicit line at signup, not folded into a general agreement —
+  /// and someone may well want it known while wanting nothing else remembered.
+  service,
+
+  /// Personal continuity: last visit, what they were celebrating, who they
+  /// came with. The version that feels like being known.
+  personal,
+}
+
 /// WHO is addressing Kai this turn.
 ///
 /// ── Why this exists ─────────────────────────────────────────────────────────
@@ -114,6 +141,7 @@ class KaiSurfaceContext {
     this.conversationSurfaceId,
     this.speaker = KaiSpeaker.sadeq,
     this.guestId,
+    this.guestConsent = KaiGuestConsent.none,
   });
 
   final KaiSurface surface;
@@ -143,9 +171,23 @@ class KaiSurfaceContext {
 
   /// Which guest, when [speaker] is a known guest. Scopes their record lookup
   /// to themselves — a guest reaches their own history and nobody else's.
+  ///
+  /// Null whenever consent is absent, so there is no identifier lying around
+  /// for a later change to read.
   final String? guestId;
 
+  /// What this guest agreed to. Gates [guestId] itself — see [arPublic].
+  final KaiGuestConsent guestConsent;
+
   bool get isSadeq => speaker == KaiSpeaker.sadeq;
+
+  /// May Kai reach this guest's service facts — allergies, dietary needs,
+  /// usual order?
+  bool get mayRecallService => guestConsent != KaiGuestConsent.none;
+
+  /// May Kai reach the personal continuity — last visit, what they were
+  /// celebrating, who they came with?
+  bool get mayRecallPersonal => guestConsent == KaiGuestConsent.personal;
 
   String get surfaceId => surface.name;
 
@@ -201,6 +243,7 @@ friend and say the goggles need to go on first.''';
         conversationSurfaceId: conversationSurfaceId,
         speaker: speaker ?? this.speaker,
         guestId: guestId ?? this.guestId,
+        guestConsent: guestConsent,
       );
 
   /// PUBLIC AR — the Tavern floor, where guests can address Kai directly.
@@ -219,20 +262,26 @@ friend and say the goggles need to go on first.''';
   /// making that a separate profile keeps the broker honest.
   static KaiSurfaceContext arPublic({
     String? guestId,
+    KaiGuestConsent consent = KaiGuestConsent.none,
     String? deviceId,
     String? sessionId,
     Map<String, dynamic> perception = const {},
-  }) =>
-      KaiSurfaceContext(
-        surface: KaiSurface.ar,
-        profile: KaiSurfaceProfiles.host,
-        deviceId: deviceId,
-        sessionId: sessionId,
-        perception: perception,
-        speaker:
-            guestId == null ? KaiSpeaker.unknownPerson : KaiSpeaker.knownGuest,
-        guestId: guestId,
-      );
+  }) {
+    // Consent gates identity itself. Without it there is no known guest here —
+    // not a known guest whose record Kai has been asked not to open. An NFC tag
+    // identifies a person; it does not grant permission to remember them.
+    final identified = guestId != null && consent != KaiGuestConsent.none;
+    return KaiSurfaceContext(
+      surface: KaiSurface.ar,
+      profile: KaiSurfaceProfiles.host,
+      deviceId: deviceId,
+      sessionId: sessionId,
+      perception: perception,
+      speaker: identified ? KaiSpeaker.knownGuest : KaiSpeaker.unknownPerson,
+      guestId: identified ? guestId : null,
+      guestConsent: consent,
+    );
+  }
 
   /// Desktop and mobile share the 'in_person' conversation partition — the one
   /// they have always written to. Two bodies, one continuous conversation.

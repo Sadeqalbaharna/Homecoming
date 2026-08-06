@@ -238,6 +238,46 @@ void main() {
       }
     });
 
+    test('consent gates identity, not just recall', () {
+      // An NFC tag identifies a person. It does not grant permission to
+      // remember them. Without consent there is no known guest here — not a
+      // known guest whose record Kai has been asked politely not to open,
+      // which is one prompt away from opening it.
+      final optedOut = KaiSurfaceContext.arPublic(guestId: 'guest-7');
+      expect(optedOut.speaker, KaiSpeaker.unknownPerson);
+      expect(optedOut.guestId, isNull,
+          reason: 'no identifier left lying around for a later change to read');
+      expect(optedOut.mayRecallService, isFalse);
+
+      final serviceOnly = KaiSurfaceContext.arPublic(
+        guestId: 'guest-7',
+        consent: KaiGuestConsent.service,
+      );
+      expect(serviceOnly.speaker, KaiSpeaker.knownGuest);
+      expect(serviceOnly.guestId, 'guest-7');
+      expect(serviceOnly.mayRecallService, isTrue);
+      expect(serviceOnly.mayRecallPersonal, isFalse,
+          reason: 'allergies known, last visit not');
+
+      final full = KaiSurfaceContext.arPublic(
+        guestId: 'guest-7',
+        consent: KaiGuestConsent.personal,
+      );
+      expect(full.mayRecallPersonal, isTrue);
+    });
+
+    test('consent never reaches Sadeq\'s memory either way', () {
+      // Even at the fullest tier, a guest is still not Sadeq.
+      final policy = KaiMemoryAccessPolicy.forContext(
+        KaiSurfaceContext.arPublic(
+          guestId: 'guest-7',
+          consent: KaiGuestConsent.personal,
+        ),
+      );
+      expect(policy.allows(scope: KaiMemoryScope.relationship), isFalse);
+      expect(policy.allows(scope: KaiMemoryScope.sharedLife), isFalse);
+    });
+
     test('an unregistered person gets even less', () {
       final policy = KaiMemoryAccessPolicy.forContext(
         KaiSurfaceContext.arPublic(),
