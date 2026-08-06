@@ -201,19 +201,37 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
   @override
   void initState() {
     super.initState();
-    _embodimentGateway
-        .start(
-      ai: _ai,
-      model: _kModel,
-      channelSurface: KaiSurface.vr,
-      // Explicit development exception: this server binds to loopback.
-      // Any future remote channel must provide a token instead.
-      allowUnauthenticatedLoopback: true,
-    )
-        .catchError((Object error) {
-      // The desktop UI remains usable if the optional Unity bridge port is busy.
-      print('[EmbodimentGateway] failed to start: $error');
-    });
+    // Two bodies, two channels. The Quest and the AR glasses are different
+    // devices and connect separately, so each gets its own port with its
+    // surface pinned — the payload never picks which body it is.
+    //
+    // Explicit development exception on both: these bind to loopback. Any
+    // future remote channel must provide a token instead.
+    for (final channel in <(KaiEmbodimentGatewayService, KaiSurface, int)>[
+      (
+        KaiEmbodimentGatewayService.vr,
+        KaiSurface.vr,
+        KaiEmbodimentGatewayService.defaultPort
+      ),
+      (
+        KaiEmbodimentGatewayService.ar,
+        KaiSurface.ar,
+        KaiEmbodimentGatewayService.defaultArPort
+      ),
+    ]) {
+      channel.$1
+          .start(
+        ai: _ai,
+        model: _kModel,
+        channelSurface: channel.$2,
+        port: channel.$3,
+        allowUnauthenticatedLoopback: true,
+      )
+          .catchError((Object error) {
+        // The desktop UI remains usable if a Unity bridge port is busy.
+        print('[EmbodimentGateway] ${channel.$2.name} failed to start: $error');
+      });
+    }
     CodeWorkspaceService.instance.load().then((_) {
       if (!mounted) return;
       setState(() => _handsState = CodeWorkspaceService.instance.hasWorkspace

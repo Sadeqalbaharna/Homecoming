@@ -184,6 +184,39 @@ void main() {
     );
   });
 
+  test('the AR channel accepts AR, including the legacy Unity body', () {
+    // The mismatch check is tested above from the ATTACK direction (a VR
+    // payload on an AR channel). This is the legitimate direction, and it is
+    // the one that silently broke: with a single VR-pinned gateway, every AR
+    // request became surface_channel_mismatch. AR is the Tavern surface, so
+    // that is a real capability, not a parked one.
+    final modern = KaiContinuityTurnRequest.fromJson(
+      {'surface': 'ar', 'utterance': 'who just walked in'},
+      allowedSurfaces: kEmbodimentSurfaces,
+      authoritativeSurface: KaiSurface.ar,
+    );
+    expect(modern.surfaceContext.surface, KaiSurface.ar);
+
+    // Legacy Unity clients send `mode`, not `surface`.
+    final legacy = KaiContinuityTurnRequest.fromJson(
+      {'mode': 'ar', 'utterance': 'who just walked in'},
+      allowedSurfaces: kEmbodimentSurfaces,
+      authoritativeSurface: KaiSurface.ar,
+    );
+    expect(legacy.surfaceContext.surface, KaiSurface.ar);
+
+    // And AR is a friend body: goggles-off presence, no general tools, even
+    // though the payload asked for them.
+    final caps = availableCapabilitiesFor(
+      KaiContinuityTurnRequest.fromJson(
+        {'surface': 'ar', 'utterance': 'hi', 'gogglesOn': true},
+        authoritativeSurface: KaiSurface.ar,
+      ).surfaceContext,
+    );
+    expect(caps, contains('spatialPerception'));
+    expect(caps, isNot(contains('generalTools')));
+  });
+
   test('an unrecognised surface is refused rather than defaulted to VR', () {
     expect(
       () => KaiContinuityTurnRequest.fromJson({

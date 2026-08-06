@@ -16,16 +16,41 @@ import '../voice/voice_service.dart';
 class KaiEmbodimentGatewayService {
   KaiEmbodimentGatewayService._();
 
-  static final KaiEmbodimentGatewayService instance =
-      KaiEmbodimentGatewayService._();
+  // ── One channel per body ───────────────────────────────────────────────────
+  //
+  // A channel is a listening endpoint bound to exactly ONE surface, because the
+  // surface is the permission set — a transport that hosts two bodies has to
+  // let the payload pick between them, which is the thing authoritativeSurface
+  // exists to stop.
+  //
+  // That is not a limitation here, it is the shape of the hardware: the Quest
+  // and the AR glasses are different devices that connect separately. Two
+  // devices, two channels, two ports, two pinned surfaces. When per-device
+  // enrolment lands, each channel gets its own credential and this becomes the
+  // natural place to hang it.
+
+  /// The VR channel — the Shack.
+  static final KaiEmbodimentGatewayService vr = KaiEmbodimentGatewayService._();
+
+  /// The AR channel — the Tavern, and anywhere else Kai is in the room.
+  static final KaiEmbodimentGatewayService ar = KaiEmbodimentGatewayService._();
+
+  /// Alias kept for callers written when there was one VR-only gateway.
+  static KaiEmbodimentGatewayService get instance => vr;
 
   static const protocolVersion = '1';
   static const canonicalPersona = 'truekai';
   static const defaultPort = 8787;
+  static const defaultArPort = 8788;
+
+  /// SHARED across channels on purpose. Kai is one person: he does not take a
+  /// turn from the Shack and a turn from the Tavern at the same moment. Per
+  /// instance, two bodies could drive concurrent sendMessage calls and
+  /// interleave his mood updates and memory writes.
+  static bool _busy = false;
 
   HttpServer? _server;
   AIService? _ai;
-  bool _busy = false;
   String _model = 'gpt-5.5';
   KaiSurface _channelSurface = KaiSurface.vr;
   bool _allowUnauthenticatedLoopback = false;
@@ -77,8 +102,9 @@ class KaiEmbodimentGatewayService {
       cancelOnError: false,
     );
 
-    print('[EmbodimentGateway] listening at $endpoint '
-        '(loopback only, auth=${_token.isEmpty ? 'local-only' : 'required'})');
+    print('[EmbodimentGateway] ${_channelSurface.name} channel listening at '
+        '$endpoint (loopback only, '
+        'auth=${_token.isEmpty ? 'local-only' : 'required'})');
   }
 
   Future<void> stop() async {
