@@ -22,6 +22,19 @@ class KaiMemoryAccessPolicy {
   }
 
   static KaiMemoryAccessPolicy forContext(KaiSurfaceContext? context) {
+    // Someone other than Sadeq is talking. His memory is not narrowed here, it
+    // is ABSENT — there is no amount of relationship or shared-life context
+    // that is safe to have loaded while a customer is in the conversation. One
+    // retrieval of "he was stressed about the launch last week" said warmly to
+    // the wrong person is not recoverable.
+    //
+    // Checked before the surface, so no profile can widen it by accident.
+    if (context != null && !context.isSadeq) {
+      return const KaiMemoryAccessPolicy(
+        allowedScopes: {KaiMemoryScope.identity},
+      );
+    }
+
     // Migration compatibility for existing untyped, trusted core call sites.
     if (context == null) {
       return const KaiMemoryAccessPolicy(
@@ -85,6 +98,12 @@ KaiMemoryScope scopeForTurn({
   required KaiRoute route,
 }) {
   if (context == null) return KaiMemoryScope.privateCore;
+
+  // A guest conversation is not Kai's life. It is never relationship material,
+  // however warm it was — that record belongs to the guest, in the Tavern
+  // store, not in the history of his friendship with Sadeq. Checked first so
+  // the emotional rule below cannot promote a stranger's turn.
+  if (!context.isSadeq) return KaiMemoryScope.ephemeral;
 
   // A genuine emotional moment is relationship material in any body, including
   // AR. Checked first so the rule below cannot swallow it.

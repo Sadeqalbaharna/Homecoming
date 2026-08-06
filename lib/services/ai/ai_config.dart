@@ -155,11 +155,20 @@ class AIConfig {
 
   static Future<String> getSelectedVoiceId() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString('selected_voice_id') ?? elevenlabsVoiceId;
+    // The setup screen historically allowed an empty optional Voice ID to be
+    // saved. `??` does not treat that empty string as absent, so synthesis was
+    // sent to `/text-to-speech/` with no voice and Unity received text only.
+    final storedVoiceId = prefs.getString('selected_voice_id')?.trim() ?? '';
+    return storedVoiceId.isEmpty ? elevenlabsVoiceId : storedVoiceId;
   }
 
   static Future<void> setSelectedVoiceId(String voiceId) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('selected_voice_id', voiceId);
+    final normalizedVoiceId = voiceId.trim();
+    if (normalizedVoiceId.isEmpty) {
+      await prefs.remove('selected_voice_id');
+    } else {
+      await prefs.setString('selected_voice_id', normalizedVoiceId);
+    }
   }
 }

@@ -2465,7 +2465,13 @@ Do not mention files, tests, git status, memories, noticings, tool state, codeba
         if (ephemeralContext != null && ephemeralContext.trim().isNotEmpty) {
           systemPrompt += '\n\n${ephemeralContext.trim()}';
         }
-        systemPrompt += '\n\n${KaiContextBlock.soul()}';
+        // Soul last, always — and when someone other than Sadeq can hear him,
+        // the host register goes after it. presenceDirective licenses swearing
+        // and crude play because it is written for his oldest friend; on the
+        // Tavern floor that lands on a stranger who came in for dinner.
+        systemPrompt += '\n\n${KaiContextBlock.soul(
+          hostRegister: activeSurface != null && !activeSurface.isSadeq,
+        )}';
       } catch (_) {}
 
       print('📤 [SEND MESSAGE] Calling OpenAI...');

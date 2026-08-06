@@ -192,6 +192,68 @@ void main() {
     }
   });
 
+  group('public AR — a guest is not Sadeq', () {
+    test('a guest cannot reach one word of Sadeq\'s life', () async {
+      final policy = KaiMemoryAccessPolicy.forContext(
+        KaiSurfaceContext.arPublic(guestId: 'guest-7'),
+      );
+
+      // Not narrowed — absent. There is no amount of relationship context that
+      // is safe to have loaded while a customer is talking to him.
+      for (final scope in KaiMemoryScope.values) {
+        expect(
+          policy.allows(scope: scope),
+          scope == KaiMemoryScope.identity,
+          reason: '$scope must not be reachable by a guest',
+        );
+      }
+
+      final result = await MemoryService.queryMemory(
+        personaId: 'truekai',
+        query: 'how has Sadeq been lately',
+        embeddingProvider: (_) async => embed,
+        shardLoader: (_) async => [
+          shard('his_hard_week', KaiMemoryScope.relationship),
+          shard('their_life', KaiMemoryScope.sharedLife),
+          shard('the_refactor', KaiMemoryScope.privateCore),
+        ],
+        accessPolicy: policy,
+        sideEffects: MemoryQuerySideEffects.disabled,
+      );
+      expect(result!.results, isEmpty);
+    });
+
+    test('a guest conversation never becomes Kai\'s own memory', () {
+      // However warm it was. That record belongs to the guest, in the Tavern
+      // store — not in the history of his friendship with Sadeq.
+      for (final route in [KaiRoute.fastChat, KaiRoute.emotional]) {
+        expect(
+          scopeForTurn(
+            context: KaiSurfaceContext.arPublic(guestId: 'guest-7'),
+            route: route,
+          ),
+          KaiMemoryScope.ephemeral,
+          reason: '$route',
+        );
+      }
+    });
+
+    test('an unregistered person gets even less', () {
+      final policy = KaiMemoryAccessPolicy.forContext(
+        KaiSurfaceContext.arPublic(),
+      );
+      expect(KaiSurfaceContext.arPublic().speaker, KaiSpeaker.unknownPerson);
+      expect(policy.allows(scope: KaiMemoryScope.relationship), isFalse);
+    });
+
+    test('PRIVATE AR is untouched — his full Kai, only for him', () {
+      final policy = KaiMemoryAccessPolicy.forContext(KaiSurfaceContext.ar);
+      expect(KaiSurfaceContext.ar.isSadeq, isTrue);
+      expect(policy.allows(scope: KaiMemoryScope.relationship), isTrue);
+      expect(policy.allows(scope: KaiMemoryScope.sharedLife), isTrue);
+    });
+  });
+
   test('a real moment with Sadeq in AR is still his to keep', () {
     // The other half: AR being transient must not cost him a genuine one.
     expect(
