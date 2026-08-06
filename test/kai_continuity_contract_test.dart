@@ -167,6 +167,23 @@ void main() {
     );
   });
 
+  test('authenticated channel identity overrides client surface authority', () {
+    final vr = KaiContinuityTurnRequest.fromJson(
+      {'utterance': 'hello', 'gogglesOn': true},
+      authoritativeSurface: KaiSurface.vr,
+    );
+    expect(vr.surfaceContext.surface, KaiSurface.vr);
+
+    expect(
+      () => KaiContinuityTurnRequest.fromJson(
+        {'surface': 'vr', 'utterance': 'hello', 'gogglesOn': true},
+        authoritativeSurface: KaiSurface.ar,
+      ),
+      throwsFormatException,
+      reason: 'an AR channel cannot self-promote into goggles-on VR',
+    );
+  });
+
   test('an unrecognised surface is refused rather than defaulted to VR', () {
     expect(
       () => KaiContinuityTurnRequest.fromJson({

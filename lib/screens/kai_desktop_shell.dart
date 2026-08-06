@@ -201,7 +201,16 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
   @override
   void initState() {
     super.initState();
-    _embodimentGateway.start(ai: _ai, model: _kModel).catchError((Object error) {
+    _embodimentGateway
+        .start(
+      ai: _ai,
+      model: _kModel,
+      channelSurface: KaiSurface.vr,
+      // Explicit development exception: this server binds to loopback.
+      // Any future remote channel must provide a token instead.
+      allowUnauthenticatedLoopback: true,
+    )
+        .catchError((Object error) {
       // The desktop UI remains usable if the optional Unity bridge port is busy.
       print('[EmbodimentGateway] failed to start: $error');
     });
@@ -288,8 +297,8 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
     // The cortex now lives in KaiCortexView, which owns its own WebView, its own
     // graph sync and its own CortexActivityBus subscription. The shell used to
     // build a WebViewController here and never mount it — see _cortexPane.
-    _msgs.add(_ChatMsg(false,
-        "Ayy, you're back. Gimme a sec — booting up the rest of me…"));
+    _msgs.add(_ChatMsg(
+        false, "Ayy, you're back. Gimme a sec — booting up the rest of me…"));
   }
 
   /// Swap the placeholder for a real continuity greeting once the self-model
@@ -310,8 +319,8 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
 
     if (!mounted || hello == null) return;
     setState(() {
-      final bootIndex = _msgs.indexWhere((m) =>
-          !m.user && m.text.contains('booting up the rest of me'));
+      final bootIndex = _msgs.indexWhere(
+          (m) => !m.user && m.text.contains('booting up the rest of me'));
       final greeting = _ChatMsg(false, hello!);
       if (bootIndex != -1 && _msgs.length == 1) {
         _msgs[bootIndex] = greeting;
@@ -546,7 +555,8 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
             await KaiProactiveService.instance.nudgeNow(personaId: _kPersona);
         if (!mounted) return;
         if (nudge == null) {
-          setState(() => _msgs.add(_ChatMsg(false,
+          setState(() => _msgs.add(_ChatMsg(
+              false,
               'Nothing to reach out about — no noticed items, no open goals, '
               'nothing on my mind. That is an honest empty, not a failure.',
               interim: true)));
@@ -653,12 +663,14 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
       );
       if (!_isStaleGeneration(generation)) {
         await _addAssistantReplyUnfolding(resp.reply, generation);
-        final breakworthy = RegExp(r'^BREAKWORTHY_ALERT:\s*(.+)$', multiLine: true)
-            .firstMatch(resp.reply)
-            ?.group(1)
-            ?.trim();
+        final breakworthy =
+            RegExp(r'^BREAKWORTHY_ALERT:\s*(.+)$', multiLine: true)
+                .firstMatch(resp.reply)
+                ?.group(1)
+                ?.trim();
         if (_churnModeOn && breakworthy != null && breakworthy.isNotEmpty) {
-          await _sendBreakworthyPhoneAlert('Kai hit a break-worthy churn-mode stop: $breakworthy');
+          await _sendBreakworthyPhoneAlert(
+              'Kai hit a break-worthy churn-mode stop: $breakworthy');
           final prefs = await SharedPreferences.getInstance();
           await prefs.setBool('kai_churn_until_breakworthy', false);
           if (mounted) setState(() => _churnModeOn = false);
@@ -691,7 +703,9 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
           await _workRequests.completeRequest(
             _kPersona,
             workRequest.id,
-            summary: summary.length > 500 ? '${summary.substring(0, 500)}…' : summary,
+            summary: summary.length > 500
+                ? '${summary.substring(0, 500)}…'
+                : summary,
             evidence: _toolLog.isEmpty
                 ? const ['desktop AI path completed']
                 : _toolLog.map((t) => 'tool/progress: $t').toList(),
@@ -715,8 +729,8 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
           await prefs.setBool('kai_churn_until_breakworthy', false);
           if (mounted) setState(() => _churnModeOn = false);
         }
-        setState(() =>
-            _msgs.add(_ChatMsg(false, '⚠️ Something went wrong: $e')));
+        setState(
+            () => _msgs.add(_ChatMsg(false, '⚠️ Something went wrong: $e')));
       }
     } finally {
       final followUp = _queuedFollowUp;
@@ -909,7 +923,6 @@ FACTORY_NEXT: continue
 
   List<String> _replyChunks(String text) => _replyChunker.chunks(text);
 
-
   Future<void> _addAssistantReplyUnfolding(String reply, int generation) async {
     final chunks = _replyChunks(reply);
     if (_isStaleGeneration(generation)) return;
@@ -921,7 +934,8 @@ FACTORY_NEXT: continue
     for (var i = 1; i < chunks.length; i++) {
       await Future<void>.delayed(Duration(milliseconds: i < 3 ? 260 : 160));
       if (_isStaleGeneration(generation) || index >= _msgs.length) return;
-      setState(() => _msgs[index].text = '${_msgs[index].text.trimRight()}\n\n${chunks[i]}');
+      setState(() => _msgs[index].text =
+          '${_msgs[index].text.trimRight()}\n\n${chunks[i]}');
       _autoscroll();
     }
 
@@ -1103,10 +1117,12 @@ FACTORY_NEXT: continue
       // standing in, IS the eyes milestone. Log it once, honestly, from the real
       // event rather than from an intention.
       unawaited(KaiEmbodimentService.instance
-          .logProgress('truekai', 'eyes',
+          .logProgress(
+              'truekai',
+              'eyes',
               'Sadeq pasted an image straight into the desktop window and I saw '
-              'it — no file picker, no hunting on disk. He showed me something '
-              'the way you show a person.')
+                  'it — no file picker, no hunting on disk. He showed me something '
+                  'the way you show a person.')
           .catchError((_) {}));
       return true;
     } catch (e) {
@@ -1256,8 +1272,8 @@ FACTORY_NEXT: continue
         // collision itself: image first, otherwise text paste.
         //
         // Ctrl/⌘+Shift+V stays as explicit image paste / paste-special.
-        const SingleActivator(LogicalKeyboardKey.keyV, control: true, shift: true):
-            _pasteImage,
+        const SingleActivator(LogicalKeyboardKey.keyV,
+            control: true, shift: true): _pasteImage,
         const SingleActivator(LogicalKeyboardKey.keyV, meta: true, shift: true):
             _pasteImage,
       },
@@ -1565,7 +1581,9 @@ FACTORY_NEXT: continue
       child: Row(
         children: [
           Icon(
-            _factoryModeOn ? Icons.precision_manufacturing : Icons.factory_outlined,
+            _factoryModeOn
+                ? Icons.precision_manufacturing
+                : Icons.factory_outlined,
             size: 14,
             color: _factoryModeOn
                 ? const Color(0xFFFFE7B0)
@@ -1847,7 +1865,8 @@ FACTORY_NEXT: continue
         children: [
           Row(
             children: [
-              const Icon(Icons.phone_iphone, size: 13, color: Color(0xFF9FD0E8)),
+              const Icon(Icons.phone_iphone,
+                  size: 13, color: Color(0xFF9FD0E8)),
               const SizedBox(width: 6),
               const Expanded(
                 child: Text(
@@ -1899,7 +1918,9 @@ FACTORY_NEXT: continue
             Text(
               isRunning ? 'running' : 'queued',
               style: TextStyle(
-                color: isRunning ? const Color(0xFFB8FFCF) : const Color(0xFFFFE7B0),
+                color: isRunning
+                    ? const Color(0xFFB8FFCF)
+                    : const Color(0xFFFFE7B0),
                 fontSize: 9,
                 fontFamily: 'monospace',
               ),
@@ -1923,11 +1944,13 @@ FACTORY_NEXT: continue
               height: 28,
               child: OutlinedButton.icon(
                 onPressed: _sending ? null : () => _startWorkRequest(next),
-                icon: Icon(isRunning ? Icons.play_arrow : Icons.download_done, size: 13),
+                icon: Icon(isRunning ? Icons.play_arrow : Icons.download_done,
+                    size: 13),
                 label: Text(isRunning ? 'RESUME' : 'START'),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: const Color(0xFFB7D7FF),
-                  side: BorderSide(color: const Color(0xFF7FB4FF).withOpacity(0.35)),
+                  side: BorderSide(
+                      color: const Color(0xFF7FB4FF).withOpacity(0.35)),
                   padding: EdgeInsets.zero,
                   textStyle: const TextStyle(
                     fontSize: 10,
@@ -2039,11 +2062,8 @@ FACTORY_NEXT: continue
             itemBuilder: (c, i) {
               if (i >= _msgs.length) {
                 return _bubble(
-                    _ChatMsg(
-                        false,
-                        _activeTool != null
-                            ? '…$_activeTool'
-                            : 'thinking…'),
+                    _ChatMsg(false,
+                        _activeTool != null ? '…$_activeTool' : 'thinking…'),
                     dim: true);
               }
               // Mid-work narration renders dim; his real answer lands full.
@@ -2249,7 +2269,6 @@ FACTORY_NEXT: continue
     );
   }
 
-
   /// What he's about to be shown. You should always be able to see exactly what
   /// he'll see before you send it.
   Widget _imagePreview() {
@@ -2387,10 +2406,10 @@ FACTORY_NEXT: continue
                 Expanded(
                   child: CallbackShortcuts(
                     bindings: <ShortcutActivator, VoidCallback>{
-                      const SingleActivator(LogicalKeyboardKey.keyV, control: true):
-                          () => unawaited(_pasteIntoComposer()),
-                      const SingleActivator(LogicalKeyboardKey.keyV, meta: true):
-                          () => unawaited(_pasteIntoComposer()),
+                      const SingleActivator(LogicalKeyboardKey.keyV,
+                          control: true): () => unawaited(_pasteIntoComposer()),
+                      const SingleActivator(LogicalKeyboardKey.keyV,
+                          meta: true): () => unawaited(_pasteIntoComposer()),
                       const SingleActivator(LogicalKeyboardKey.enter): () =>
                           _send(),
                       const SingleActivator(LogicalKeyboardKey.numpadEnter):
@@ -2459,7 +2478,8 @@ FACTORY_NEXT: continue
               action: TextButton(
                 style: TextButton.styleFrom(
                   foregroundColor: kClaude.withOpacity(0.92),
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                   minimumSize: Size.zero,
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   textStyle: const TextStyle(
@@ -2553,7 +2573,6 @@ FACTORY_NEXT: continue
   }
 
   // Live project progress is rendered by KaiProjectCard; keep this shell free of hardcoded layer state.
-
 }
 
 class _HandsLight extends StatelessWidget {
@@ -2589,9 +2608,8 @@ class _HandsLight extends StatelessWidget {
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: color,
-              boxShadow: live
-                  ? [BoxShadow(color: color, blurRadius: 8)]
-                  : const [],
+              boxShadow:
+                  live ? [BoxShadow(color: color, blurRadius: 8)] : const [],
             ),
           ),
           const SizedBox(width: 7),

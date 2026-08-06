@@ -10,6 +10,7 @@ import 'dart:typed_data';
 
 import '../ai/ai_service.dart';
 import '../core/kai_continuity_contract.dart';
+import '../core/kai_surface_context.dart';
 import '../voice/voice_service.dart';
 
 class KaiEmbodimentGatewayService {
@@ -26,6 +27,8 @@ class KaiEmbodimentGatewayService {
   AIService? _ai;
   bool _busy = false;
   String _model = 'gpt-5.5';
+  KaiSurface _channelSurface = KaiSurface.vr;
+  bool _allowUnauthenticatedLoopback = false;
   String _token = const String.fromEnvironment(
     'KAI_EMBODIMENT_TOKEN',
     defaultValue: '',
@@ -38,15 +41,26 @@ class KaiEmbodimentGatewayService {
 
   Future<void> start({
     required AIService ai,
+    required KaiSurface channelSurface,
     int port = defaultPort,
     String model = 'gpt-5.5',
     String? token,
+    bool allowUnauthenticatedLoopback = false,
   }) async {
     if (_server != null) return;
 
     _ai = ai;
     _model = model;
+    _channelSurface = channelSurface;
+    _allowUnauthenticatedLoopback = allowUnauthenticatedLoopback;
     if (token != null) _token = token;
+    if (_token.isEmpty && !_allowUnauthenticatedLoopback) {
+      _ai = null;
+      throw StateError(
+        'KAI_EMBODIMENT_TOKEN is required unless unauthenticated loopback '
+        'development is explicitly enabled.',
+      );
+    }
 
     // Milestone one is Editor-on-the-same-PC only. Loopback ensures an empty
     // development token can never expose Kai's brain to the local network.
@@ -94,6 +108,8 @@ class KaiEmbodimentGatewayService {
         'continuityVersion': KaiContinuityContract.version,
         'personaId': canonicalPersona,
         'authRequired': _token.isNotEmpty,
+        'channelSurface': _channelSurface.name,
+        'loopbackDevelopment': _token.isEmpty && _allowUnauthenticatedLoopback,
         'capabilities': [
           'text_turn',
           'elevenlabs_tts',
@@ -163,6 +179,7 @@ class KaiEmbodimentGatewayService {
         body,
         defaultPersona: canonicalPersona,
         allowedSurfaces: kEmbodimentSurfaces,
+        authoritativeSurface: _channelSurface,
       );
       final personaId = turn.personaId;
       final utterance = turn.utterance;
@@ -260,7 +277,10 @@ class KaiEmbodimentGatewayService {
   }
 
   bool _authorized(HttpRequest request) {
-    if (_token.isEmpty) return true;
+    if (_token.isEmpty) {
+      return _allowUnauthenticatedLoopback &&
+          request.connectionInfo?.remoteAddress.isLoopback == true;
+    }
     final header = request.headers.value(HttpHeaders.authorizationHeader) ?? '';
     return header == 'Bearer $_token';
   }

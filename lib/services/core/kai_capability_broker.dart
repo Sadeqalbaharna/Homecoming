@@ -3,9 +3,8 @@ import 'kai_surface_context.dart';
 
 /// The authoritative capabilities for one turn.
 ///
-/// A null surface context is legacy Homecoming behavior and remains fully
-/// capable during migration. Typed surfaces fail closed according to their
-/// goggles and profile.
+/// A missing surface context has no authority. Trusted core callers must name
+/// their desktop/mobile body explicitly; authority is never inferred from null.
 class KaiCapabilityManifest {
   const KaiCapabilityManifest({
     required this.allowsGeneralTools,
@@ -69,8 +68,8 @@ class KaiCapabilityBroker {
   static KaiCapabilityManifest forContext(KaiSurfaceContext? context) {
     if (context == null) {
       return const KaiCapabilityManifest(
-        allowsGeneralTools: true,
-        allowsTechnicalConversation: true,
+        allowsGeneralTools: false,
+        allowsTechnicalConversation: false,
         worldCapabilities: {},
       );
     }

@@ -9,11 +9,11 @@ void main() {
   const router = KaiRouterService();
 
   group('KaiCapabilityBroker', () {
-    test('legacy callers retain their current capabilities during migration',
-        () {
+    test('missing surface authority fails closed', () {
       final manifest = KaiCapabilityBroker.forContext(null);
-      expect(manifest.allowsGeneralTools, isTrue);
-      expect(manifest.allowsTechnicalConversation, isTrue);
+      expect(manifest.allowsGeneralTools, isFalse);
+      expect(manifest.allowsTechnicalConversation, isFalse);
+      expect(manifest.allowsWorldTools, isFalse);
     });
 
     test('goggles-off friend surfaces fail closed', () {
@@ -113,7 +113,7 @@ void main() {
       );
       expect(
         KaiCapabilityBroker.forContext(null).exposesToolManifest,
-        isTrue,
+        isFalse,
       );
     });
   });
@@ -159,8 +159,8 @@ void main() {
     final normalized = source.replaceAll(RegExp(r'\s+'), ' ');
 
     test('the route is constrained before the workspace can activate', () {
-      final constrainAt =
-          normalized.indexOf('capabilityManifest.constrainRoute(proposedRoute)');
+      final constrainAt = normalized
+          .indexOf('capabilityManifest.constrainRoute(proposedRoute)');
       final activateAt = normalized.indexOf('ensureHomecomingWorkspace()');
       expect(constrainAt, greaterThan(-1));
       expect(activateAt, greaterThan(-1));

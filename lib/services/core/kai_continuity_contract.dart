@@ -167,6 +167,7 @@ class KaiContinuityTurnRequest {
     Map<String, dynamic> body, {
     String defaultPersona = 'truekai',
     Set<KaiSurface>? allowedSurfaces,
+    KaiSurface? authoritativeSurface,
   }) {
     final declaredVersion = body['continuityVersion'];
     if (declaredVersion != null &&
@@ -184,7 +185,12 @@ class KaiContinuityTurnRequest {
     if (declaredSurface != null && parsedSurface == null) {
       throw const FormatException('unknown_surface');
     }
-    final surface = parsedSurface ?? KaiSurface.vr;
+    if (authoritativeSurface != null &&
+        parsedSurface != null &&
+        parsedSurface != authoritativeSurface) {
+      throw const FormatException('surface_channel_mismatch');
+    }
+    final surface = authoritativeSurface ?? parsedSurface ?? KaiSurface.vr;
 
     if (allowedSurfaces != null && !allowedSurfaces.contains(surface)) {
       throw const FormatException('surface_not_permitted_on_this_transport');

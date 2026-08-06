@@ -39,6 +39,8 @@ void main() {
     // payload choose its own tools. Behaviour is covered for real in
     // kai_continuity_contract_test.dart; this only guards the wiring.
     expect(source, contains('allowedSurfaces: kEmbodimentSurfaces'));
+    expect(source, contains('authoritativeSurface: _channelSurface'));
+    expect(source, contains('allowUnauthenticatedLoopback = false'));
   });
 
   test(
