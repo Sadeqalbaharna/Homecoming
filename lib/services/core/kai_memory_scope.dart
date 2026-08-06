@@ -85,9 +85,24 @@ KaiMemoryScope scopeForTurn({
   required KaiRoute route,
 }) {
   if (context == null) return KaiMemoryScope.privateCore;
-  if (!context.gogglesOn || route == KaiRoute.emotional) {
-    return KaiMemoryScope.relationship;
-  }
+
+  // A genuine emotional moment is relationship material in any body, including
+  // AR. Checked first so the rule below cannot swallow it.
+  if (route == KaiRoute.emotional) return KaiMemoryScope.relationship;
+
+  // AR narrates a room that contains OTHER PEOPLE. Left as relationship — which
+  // is what goggles-off produced — "that's Ahmed, third visit, walnut allergy"
+  // became Kai's durable personal memory and surfaced on Messenger as though it
+  // were something from his own life. Third-party data does not belong in the
+  // record of his friendship with Sadeq.
+  //
+  // Guest facts live per-guest in the Tavern store and are reached by lookup,
+  // not by recall. The conversation around them is transient by design — which
+  // is what the embodiedFriend profile already promises: "spatial observations
+  // are temporary unless a meaningful shared event is saved."
+  if (context.surface == KaiSurface.ar) return KaiMemoryScope.ephemeral;
+
+  if (!context.gogglesOn) return KaiMemoryScope.relationship;
   if (context.surface == KaiSurface.vr) {
     // The shared EXPERIENCE travels with him; the work of building does not.
     // A VR session is both — "we built the loft and he lost it at the crooked

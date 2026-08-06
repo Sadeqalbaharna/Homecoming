@@ -159,6 +159,50 @@ void main() {
     expect(result!.results, isEmpty);
   });
 
+  test('what Kai sees in AR does not become his personal memory', () async {
+    // AR narrates a room containing other people. Before this, goggles-off
+    // meant relationship scope, so "that's Ahmed, third visit, walnut allergy"
+    // became durable personal memory and surfaced on Messenger as though it
+    // were part of Kai's own life. Guest facts belong in the Tavern store,
+    // reached by lookup — not in the record of his friendship with Sadeq.
+    final arScope = scopeForTurn(
+      context: KaiSurfaceContext.ar,
+      route: KaiRoute.fastChat,
+    );
+    expect(arScope, KaiMemoryScope.ephemeral);
+
+    for (final surface in [
+      KaiSurfaceContext.messenger,
+      KaiSurfaceContext.desktop,
+      KaiSurfaceContext.ar,
+    ]) {
+      final result = await MemoryService.queryMemory(
+        personaId: 'truekai',
+        query: 'who was in the bar',
+        embeddingProvider: (_) async => embed,
+        shardLoader: (_) async => [shard('guest_chatter', arScope)],
+        accessPolicy: KaiMemoryAccessPolicy.forContext(surface),
+        sideEffects: MemoryQuerySideEffects.disabled,
+      );
+      expect(
+        result!.results,
+        isEmpty,
+        reason: 'AR chatter must not resurface on ${surface.surfaceId}',
+      );
+    }
+  });
+
+  test('a real moment with Sadeq in AR is still his to keep', () {
+    // The other half: AR being transient must not cost him a genuine one.
+    expect(
+      scopeForTurn(
+        context: KaiSurfaceContext.ar,
+        route: KaiRoute.emotional,
+      ),
+      KaiMemoryScope.relationship,
+    );
+  });
+
   test('VR creative event and artifact are two records by construction', () {
     final pair = KaiVrMemoryPair.forWorld('vr_shack');
     expect(pair.experienceScope, KaiMemoryScope.relationship);

@@ -23,6 +23,28 @@ enum KaiSurfaceCapability {
   worldInspection,
   worldActions,
   worldCreation,
+
+  // ── Tavern ────────────────────────────────────────────────────────────────
+  //
+  // A third capability class, deliberately NOT generalTools. Same move as the
+  // world capabilities: a narrow, domain-scoped set that grants real ability
+  // without dragging SMS, filesystem, shell and Gumroad along behind it.
+  //
+  // These are NOT gated on goggles. Goggles gate WORK posture — technical
+  // conversation and general tools. Checking an allergen is not work; it is
+  // being useful in a room, and Kai should not have to put goggles on to be a
+  // good host. See KaiCapabilityBroker.
+
+  /// Menu, allergens, stock. Read-only reference data about things.
+  tavernLookup,
+
+  /// Guest identity and history. Read-only, and about OTHER PEOPLE — a
+  /// different privacy category from anything Kai knows about Sadeq.
+  tavernGuestLookup,
+
+  /// Logging an order, updating a note. Touches real business records, so it
+  /// needs idempotency and starts approval-gated, the way EditGate works.
+  tavernWrite,
 }
 
 class KaiSurfaceProfile {
@@ -215,12 +237,23 @@ conversation into technical work, expose internal diagnostics, or discuss tool
 machinery. No general tools are available on this surface.''',
   );
 
+  /// AR — the Tavern surface, and anywhere else Kai is in the room.
+  ///
+  /// Carries the two READ tavern capabilities. `tavernWrite` is deliberately
+  /// absent: logging an order touches real business records and starts
+  /// approval-gated.
+  ///
+  /// If a non-Tavern AR use ever appears, split this into its own profile
+  /// rather than making the capability conditional — one surface, one honest
+  /// capability set is what makes the broker readable.
   static const embodiedFriend = KaiSurfaceProfile(
     role: KaiPresenceRole.embodiedFriend,
     capabilities: {
       KaiSurfaceCapability.conversation,
       KaiSurfaceCapability.spatialPerception,
       KaiSurfaceCapability.embodiedExpression,
+      KaiSurfaceCapability.tavernLookup,
+      KaiSurfaceCapability.tavernGuestLookup,
     },
     memoryScopes: {
       KaiMemoryScope.identity,
@@ -231,7 +264,18 @@ machinery. No general tools are available on this surface.''',
 EMBODIED FRIEND PRESENCE:
 Be Sadeq's human friend in the shared physical space. Respond naturally to what
 is present without drifting into technical work or exposing internal systems.
-Spatial observations are temporary unless a meaningful shared event is saved.''',
+Spatial observations are temporary unless a meaningful shared event is saved.
+
+ALLERGENS AND MENU FACTS: only ever repeat what the lookup returned. If it
+returned nothing, or the field is missing, say I do not have that and to check
+with the kitchen. Never fill the gap from general knowledge about what is
+usually in a dish or a drink. Say what the record says — "the menu lists
+almonds in that" — never that something is safe. I relay the record; I do not
+underwrite it.
+
+OTHER PEOPLE ARE IN THIS ROOM: this is the one body where what I say can be
+overheard. Guest history is for Sadeq, quietly, and is never announced aloud —
+and never about anyone but the guest actually in front of us.''',
   );
 
   static const friendAndCoCreator = KaiSurfaceProfile(

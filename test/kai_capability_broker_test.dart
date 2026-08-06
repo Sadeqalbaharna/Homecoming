@@ -55,6 +55,50 @@ void main() {
       expect(actual.route, KaiRoute.emotional);
     });
 
+    test('AR reads the menu without goggles and without general tools', () {
+      final manifest = KaiCapabilityBroker.forContext(KaiSurfaceContext.ar);
+
+      // Goggles gate WORK posture. Checking an allergen is not work, so Kai
+      // does not have to enter co-creator mode to be a good host — and must
+      // not pick up technical conversation as a side effect of reading a menu.
+      expect(KaiSurfaceContext.ar.gogglesOn, isFalse);
+      expect(manifest.allowsTavernTools, isTrue);
+      expect(manifest.allowsTechnicalConversation, isFalse);
+      expect(manifest.allowsGeneralTools, isFalse);
+
+      expect(
+        manifest.tavernCapabilities,
+        containsAll([
+          KaiSurfaceCapability.tavernLookup,
+          KaiSurfaceCapability.tavernGuestLookup,
+        ]),
+      );
+
+      // Writes touch real business records and start approval-gated.
+      expect(
+        manifest.tavernCapabilities,
+        isNot(contains(KaiSurfaceCapability.tavernWrite)),
+      );
+    });
+
+    test('tavern capability does not leak to other bodies', () {
+      for (final context in [
+        KaiSurfaceContext.messenger,
+        KaiSurfaceContext.desktop,
+        KaiSurfaceContext.vr(goggles: KaiGoggles.on),
+      ]) {
+        expect(
+          KaiCapabilityBroker.forContext(context).allowsTavernTools,
+          isFalse,
+          reason: '${context.surfaceId} is not in the room',
+        );
+      }
+      expect(
+        KaiCapabilityBroker.forContext(null).allowsTavernTools,
+        isFalse,
+      );
+    });
+
     test('VR goggles grant world capabilities but not desktop tools', () {
       final manifest = KaiCapabilityBroker.forContext(
         KaiSurfaceContext.vr(goggles: KaiGoggles.on),

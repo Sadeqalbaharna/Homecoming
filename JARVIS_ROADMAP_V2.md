@@ -138,6 +138,95 @@ and drafting will be too slow for the first job and too weak for the second.
 
 ---
 
+## Part 1.5 — AR and the Tavern
+
+AR is not a lesser VR. It is the Tavern surface, it is a real technical
+advantage for the business, and it is the only body where Kai has an audience.
+
+**Implemented (2026-08-06):**
+
+### A third capability class
+
+`tavernLookup` (menu, allergens, stock), `tavernGuestLookup` (guest identity and
+history), `tavernWrite` (log an order, update a note). The AR profile carries the
+two reads; `tavernWrite` is withheld and starts approval-gated the way `EditGate`
+works, because it touches real business records and needs idempotency or a retry
+double-logs a round.
+
+These are modelled on the world capabilities, not on `generalTools` — a narrow,
+domain-scoped set that grants real ability without dragging SMS, filesystem,
+shell and Gumroad behind it.
+
+### Not gated on goggles
+
+Goggles gate **work posture** — technical conversation and general tools.
+Checking an allergen is not work; it is being useful in a room. Kai should not
+have to enter co-creator mode to be a good host, and if he did, he would pick up
+technical conversation as a side effect of reading a menu.
+
+So AR stays goggles-off and still has hands for the things a host needs.
+
+### The stripped-down brain, stripped in the right dimension
+
+Strip **capability and memory access**. Do not strip the model.
+
+Character is the first thing lost when a model shrinks, and it is the last thing
+you want to lose in front of customers. `constants.dart` is the evidence: same
+soul files, same memory, smaller model, *"a support drone in his hoodie."* A
+smaller brain at the Tavern ships that version to the people whose impression of
+the place matters. Same model, same soul block, narrow tools, narrow memory.
+
+### Guest memory is a new axis, not a new scope
+
+Every scope so far describes *Kai and Sadeq*. Guest memory is about **someone
+else**, so memory now has a subject as well as a scope.
+
+- **Per-guest isolation** — guest A's memory never surfaces for guest B, as a
+  query constraint rather than a policy.
+- **It never becomes Kai's personal memory.** Guest facts live per-guest in the
+  Tavern store (Firestore, `kingdom-ac44f`), structured rather than vectorised —
+  readable, correctable, exportable, deletable. For third-party data in a
+  hospitality business that beats semantic recall, and it is simpler.
+- **AR turns are `ephemeral`.** They were `relationship`, so *"that's Ahmed,
+  third visit, walnut allergy"* became durable personal memory and surfaced on
+  Messenger as though it were part of Kai's own life. An emotional turn in AR is
+  still `relationship` — being transient must not cost him a genuine moment.
+
+### Allergens fail closed
+
+An LLM asked what is in a whisky sour will answer from general knowledge. That is
+a guess, and someone could end up in hospital.
+
+- Authoritative lookup only — never memory, never embedding retrieval, never
+  general knowledge
+- Missing record or missing field means *"I don't have that, check with the
+  kitchen"* — never inference
+- Attribute, never assure: *"the menu lists almonds in that"*, not *"that's safe"*
+
+The tool returns a structured result Kai reads out; he does not reason over it.
+
+### The audience axis
+
+AR is the first surface where Kai's output has listeners beyond Sadeq. Everything
+scoped so far answers *what does Kai know in which body*; AR adds **who else can
+hear him**.
+
+*"Ahmed's usual is the whisky sour — he was in last week with someone else"* is a
+correct lookup and a catastrophe said aloud in front of Ahmed's date. Guest
+history is for Sadeq, quietly, and never about anyone but the guest in front of
+him. This is in the AR prompt block; it deserves a real mechanism when guests can
+address Kai directly.
+
+### The open fork
+
+**Does AR Kai talk to guests, or to Sadeq about guests?** Everything above
+assumes the second. The first makes him customer-facing — consent, retention,
+liability, and his character in front of strangers all become live. And his
+register stops being a per-moment adjustment and becomes a standing condition,
+which is exactly where character drift lives. That branch needs its own pass.
+
+---
+
 ## Part 2 — The fourteen days
 
 ### Day 0 — Order hardware *(parallel, blocks nothing)*

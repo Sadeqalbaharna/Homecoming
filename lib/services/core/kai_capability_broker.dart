@@ -10,13 +10,23 @@ class KaiCapabilityManifest {
     required this.allowsGeneralTools,
     required this.allowsTechnicalConversation,
     required this.worldCapabilities,
+    this.tavernCapabilities = const {},
   });
 
   final bool allowsGeneralTools;
   final bool allowsTechnicalConversation;
   final Set<KaiSurfaceCapability> worldCapabilities;
 
+  /// Tavern capabilities granted this turn.
+  ///
+  /// Unlike [worldCapabilities], these are NOT gated on goggles. Goggles gate
+  /// work posture; looking up an allergen is not work. Kai should not have to
+  /// enter co-creator mode to be a good host, and doing so would hand him
+  /// technical conversation as a side effect of checking a menu.
+  final Set<KaiSurfaceCapability> tavernCapabilities;
+
   bool get allowsWorldTools => worldCapabilities.isNotEmpty;
+  bool get allowsTavernTools => tavernCapabilities.isNotEmpty;
 
   /// Whether this turn may carry the tool-awareness system block.
   ///
@@ -83,10 +93,20 @@ class KaiCapabilityBroker {
             .toSet()
         : <KaiSurfaceCapability>{};
 
+    // Tavern capabilities come from the profile directly — no goggles check.
+    // A body that is trusted to be in the room is trusted to read the menu.
+    final tavernCapabilities = context.profile.capabilities
+        .where((capability) =>
+            capability == KaiSurfaceCapability.tavernLookup ||
+            capability == KaiSurfaceCapability.tavernGuestLookup ||
+            capability == KaiSurfaceCapability.tavernWrite)
+        .toSet();
+
     return KaiCapabilityManifest(
       allowsGeneralTools: context.allowsGeneralTools,
       allowsTechnicalConversation: context.allowsTechnicalConversation,
       worldCapabilities: worldCapabilities,
+      tavernCapabilities: tavernCapabilities,
     );
   }
 }
