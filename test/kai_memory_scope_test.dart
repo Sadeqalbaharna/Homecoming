@@ -22,6 +22,43 @@ Map<String, dynamic> shard(
 void main() {
   const embed = <double>[1, 0];
 
+  test('a missing surface has no memory authority', () async {
+    // This branch used to grant EVERY scope plus allowTechnicalContent, which
+    // made it the most permissive policy in the system — while its sibling
+    // KaiCapabilityBroker.forContext(null) had already been inverted to fail
+    // closed. So a caller with no context got no tools and his entire private
+    // memory. Backwards: memory is the more sensitive of the two, and a leak
+    // there cannot be taken back.
+    final policy = KaiMemoryAccessPolicy.forContext(null);
+    for (final scope in KaiMemoryScope.values) {
+      expect(policy.allows(scope: scope), isFalse, reason: '$scope');
+    }
+
+    final result = await MemoryService.queryMemory(
+      personaId: 'truekai',
+      query: 'anything at all',
+      embeddingProvider: (_) async => embed,
+      shardLoader: (_) async => [
+        shard('his_private_work', KaiMemoryScope.privateCore),
+        shard('their_life', KaiMemoryScope.sharedLife),
+      ],
+      accessPolicy: policy,
+      sideEffects: MemoryQuerySideEffects.disabled,
+    );
+    expect(result!.results, isEmpty);
+  });
+
+  test('wanting everything has to be said out loud', () {
+    // The old fail-open path meant "I forgot to pass a context" and "I
+    // deliberately want everything" were the same expression. Now the second
+    // one has a name, and the name says where it may be used.
+    expect(
+      KaiMemoryAccessPolicy.trustedCore.allows(scope: KaiMemoryScope.privateCore),
+      isTrue,
+    );
+    expect(KaiMemoryAccessPolicy.trustedCore.allowTechnicalContent, isTrue);
+  });
+
   test('missing and unknown scopes fail closed as legacyUnscoped', () {
     expect(parseKaiMemoryScope(null), KaiMemoryScope.legacyUnscoped);
     expect(parseKaiMemoryScope(''), KaiMemoryScope.legacyUnscoped);

@@ -80,7 +80,20 @@ class MemoryService {
     MemoryEmbeddingProvider? embeddingProvider,
     MemoryShardLoader? shardLoader,
     MemoryQuerySideEffects sideEffects = MemoryQuerySideEffects.enabled,
-    KaiMemoryAccessPolicy? accessPolicy,
+
+    /// REQUIRED, and deliberately not nullable.
+    ///
+    /// It was optional, and the filter below reads `accessPolicy != null &&
+    /// …` — so a caller who simply forgot it did not get a narrow result, it
+    /// got NO filtering at all. Every scope, every world, private core
+    /// included. The one path that cannot be allowed to fail open was the one
+    /// path a typo could switch off.
+    ///
+    /// This is the same reason `capabilityManifest` is required on the tool
+    /// path: a boundary you can omit is a boundary that will eventually be
+    /// omitted. Pass `KaiMemoryAccessPolicy.forContext(surface)` — and if there
+    /// is no surface, that now correctly returns nothing.
+    required KaiMemoryAccessPolicy accessPolicy,
   }) async {
     try {
       // ── Don't search for nothing ────────────────────────────────────────
@@ -118,12 +131,11 @@ class MemoryService {
         final scope = parseKaiMemoryScope(shard['scope']);
         final memoryWorldId = shard['worldId']?.toString();
         final summary = shard['summary']?.toString() ?? '';
-        if (accessPolicy != null &&
-            (!accessPolicy.allows(
-                  scope: scope,
-                  memoryWorldId: memoryWorldId,
-                ) ||
-                !accessPolicy.allowsContent(summary))) {
+        if (!accessPolicy.allows(
+              scope: scope,
+              memoryWorldId: memoryWorldId,
+            ) ||
+            !accessPolicy.allowsContent(summary)) {
           continue;
         }
         final rawVector = shard['embedding'] ?? shard['vector'];

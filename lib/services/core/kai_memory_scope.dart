@@ -37,6 +37,30 @@ class KaiMemoryAccessPolicy {
               .toLowerCase()
               .contains('goggles off, friend. i’m keeping the work talk'));
 
+  /// Full access, for offline tests and local tooling that has no surface.
+  ///
+  /// Named rather than reachable by omission. The old fail-open path was the
+  /// `null` branch of [forContext], which meant "I forgot to pass a context"
+  /// and "I deliberately want everything" were the same expression. Now the
+  /// second one has to be typed out, and it says so.
+  ///
+  /// Never use this on a request path. A request has a body; the body decides.
+  static const trustedCore = KaiMemoryAccessPolicy(
+    allowAllWorlds: true,
+    allowTechnicalContent: true,
+    allowedScopes: {
+      KaiMemoryScope.identity,
+      KaiMemoryScope.relationship,
+      KaiMemoryScope.sharedLife,
+      KaiMemoryScope.creative,
+      KaiMemoryScope.world,
+      KaiMemoryScope.episodic,
+      KaiMemoryScope.ephemeral,
+      KaiMemoryScope.privateCore,
+      KaiMemoryScope.legacyUnscoped,
+    },
+  );
+
   static KaiMemoryAccessPolicy forContext(KaiSurfaceContext? context) {
     // Someone other than Sadeq is talking. His memory is not narrowed here, it
     // is ABSENT — there is no amount of relationship or shared-life context
@@ -51,23 +75,20 @@ class KaiMemoryAccessPolicy {
       );
     }
 
-    // Migration compatibility for existing untyped, trusted core call sites.
+    // A missing surface has no authority — the same rule KaiCapabilityBroker
+    // now applies, and these two were disagreeing.
+    //
+    // This branch used to grant EVERY scope plus allowTechnicalContent, which
+    // made it the most permissive policy in the system. Its sibling one file
+    // over had already been inverted to fail closed, so a caller with no
+    // context got no tools and his entire private memory. Backwards: the memory
+    // is the more sensitive of the two, and a leak there is not recoverable.
+    //
+    // Nothing in lib/ relies on it. The one production caller passes a real
+    // surface, and no background service queries memory at all. If a future
+    // caller needs recall, it names the body it is speaking from.
     if (context == null) {
-      return const KaiMemoryAccessPolicy(
-        allowAllWorlds: true,
-        allowTechnicalContent: true,
-        allowedScopes: {
-          KaiMemoryScope.identity,
-          KaiMemoryScope.relationship,
-          KaiMemoryScope.sharedLife,
-          KaiMemoryScope.creative,
-          KaiMemoryScope.world,
-          KaiMemoryScope.episodic,
-          KaiMemoryScope.ephemeral,
-          KaiMemoryScope.privateCore,
-          KaiMemoryScope.legacyUnscoped,
-        },
-      );
+      return const KaiMemoryAccessPolicy(allowedScopes: {});
     }
 
     if (context.surface == KaiSurface.desktop ||

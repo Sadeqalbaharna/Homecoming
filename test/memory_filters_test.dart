@@ -2,22 +2,23 @@
 //
 // Every case here came off a real trace, not my imagination:
 //
-//   "okay that worked"  →  6,795ms of retrieval — 27% of a 25-second reply —
+//   "okay that worked"  â†’  6,795ms of retrieval â€” 27% of a 25-second reply â€”
 //                          which returned "I dont think that worked" (the exact
 //                          opposite) and a pasted PowerShell prompt.
 //
 //   "Sadeq said: PS C:\code\homecoming_app> Get-Process..."
-//   "Sadeq said: 🧠 [MemoryService] Remembered: wow, ye..."
-//                       →  two of five recalled "memories" were terminal output
+//   "Sadeq said: ðŸ§  [MemoryService] Remembered: wow, ye..."
+//                       â†’  two of five recalled "memories" were terminal output
 //                          he pasted. He never said those. He showed them.
 //
-// These are heuristics, and a wrong heuristic is worse than none — it silently
+// These are heuristics, and a wrong heuristic is worse than none â€” it silently
 // eats real memories. So the tests lean hard on the false-positive side: the
 // things that MUST still be remembered and searched matter more than the things
 // that get dropped.
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:homecoming_app/services/ai/memory_service.dart';
+import 'package:homecoming_app/services/core/kai_memory_scope.dart';
 
 Future<List<double>?> _fakeEmbedding(String _) async => [1.0, 0.0, 0.0];
 Future<List<Map<String, dynamic>>> _fakeShards(String _) async => [
@@ -37,6 +38,7 @@ void main() {
     // buffer. Long-term memory cannot answer "okay that worked".
     Future<int> hits(String q) async {
       final r = await MemoryService.queryMemory(
+        accessPolicy: KaiMemoryAccessPolicy.trustedCore,
         personaId: 'truekai',
         query: q,
         embeddingProvider: _fakeEmbedding,
@@ -83,6 +85,7 @@ void main() {
       // null means "something broke". Empty means "nothing to find". The caller
       // treats those differently and conflating them hides real failures.
       final r = await MemoryService.queryMemory(
+        accessPolicy: KaiMemoryAccessPolicy.trustedCore,
         personaId: 'truekai',
         query: 'ok',
         embeddingProvider: _fakeEmbedding,
@@ -100,12 +103,12 @@ void main() {
     test('the actual junk found in his memory', () {
       const pasted = [
         r'PS C:\code\homecoming_app> Get-Process | Where-Object {$_.Name -eq "flutter"}',
-        '🧠 [MemoryService] Remembered: wow, yeah that tracks\n🧠 [Brain] Skipped low-salience exchange',
+        'ðŸ§  [MemoryService] Remembered: wow, yeah that tracks\nðŸ§  [Brain] Skipped low-salience exchange',
         'Traceback (most recent call last)\n  File "x.py", line 3\n    boom',
         '168 issues found. (ran in 23.9s)',
         'warning - Unused import: x - lib/services/ai/ai_service.dart:10:8 - unused_import',
       ];
-      // Every one of these was stored as "Sadeq said: …" and then recalled at
+      // Every one of these was stored as "Sadeq said: â€¦" and then recalled at
       // him later as something he'd told Kai.
       for (final p in pasted) {
         expect(p.isNotEmpty, isTrue);

@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:homecoming_app/services/ai/memory_service.dart';
+import 'package:homecoming_app/services/core/kai_memory_scope.dart';
 
 Future<List<double>?> fakeEmbedding(String text) async {
   final lower = text.toLowerCase();
@@ -18,7 +19,7 @@ Future<List<double>?> fakeEmbedding(String text) async {
 Future<List<Map<String, dynamic>>> fakeShards(String personaId) async => [
       {
         'id': 'lionheart',
-        'summary': 'Project Lionheart is Sadeq’s fitness and strength arc.',
+        'summary': 'Project Lionheart is Sadeqâ€™s fitness and strength arc.',
         'vector': [1.0, 0.0, 0.0],
         'timestamp': '2026-07-15T10:00:00.000Z',
         'shardId': 'lionheart-shard',
@@ -27,7 +28,7 @@ Future<List<Map<String, dynamic>>> fakeShards(String personaId) async => [
       {
         'id': 'tavern',
         'summary':
-            'The Tavern is Sadeq’s fantasy-themed brunch venue in Bahrain.',
+            'The Tavern is Sadeqâ€™s fantasy-themed brunch venue in Bahrain.',
         'embedding': [0.0, 1.0, 0.0],
         'timestamp': '2026-07-15T11:00:00.000Z',
         'shardId': 'tavern-shard',
@@ -49,6 +50,7 @@ void main() {
     test('ranks deterministic fake shards without OpenAI or Firebase',
         () async {
       final result = await MemoryService.queryMemory(
+        accessPolicy: KaiMemoryAccessPolicy.trustedCore,
         personaId: 'truekai',
         query: 'How is Project Lionheart fitness going?',
         embeddingProvider: fakeEmbedding,
@@ -64,6 +66,7 @@ void main() {
 
     test('accepts both vector and embedding fields', () async {
       final tavern = await MemoryService.queryMemory(
+        accessPolicy: KaiMemoryAccessPolicy.trustedCore,
         personaId: 'truekai',
         query: 'What do we remember about Tavern brunch?',
         embeddingProvider: fakeEmbedding,
@@ -71,6 +74,7 @@ void main() {
         sideEffects: MemoryQuerySideEffects.disabled,
       );
       final homecoming = await MemoryService.queryMemory(
+        accessPolicy: KaiMemoryAccessPolicy.trustedCore,
         personaId: 'truekai',
         query: 'What do we remember about Homecoming memory?',
         embeddingProvider: fakeEmbedding,
@@ -85,6 +89,7 @@ void main() {
     test('empty fake shard list returns an empty result instead of null',
         () async {
       final result = await MemoryService.queryMemory(
+        accessPolicy: KaiMemoryAccessPolicy.trustedCore,
         personaId: 'truekai',
         query: 'anything',
         embeddingProvider: (_) async => [1.0, 0.0, 0.0],
@@ -100,6 +105,7 @@ void main() {
         () async {
       final now = DateTime.now().toUtc();
       final result = await MemoryService.queryMemory(
+        accessPolicy: KaiMemoryAccessPolicy.trustedCore,
         personaId: 'truekai',
         query: 'What was I telling you about just before I came in here?',
         embeddingProvider: (_) async => [0.0, 0.0, 1.0],
@@ -130,6 +136,7 @@ void main() {
     test('ordinary semantic questions are not overridden by recency', () async {
       final now = DateTime.now().toUtc();
       final result = await MemoryService.queryMemory(
+        accessPolicy: KaiMemoryAccessPolicy.trustedCore,
         personaId: 'truekai',
         query: 'What do you remember about Homecoming memory?',
         embeddingProvider: (_) async => [0.0, 0.0, 1.0],

@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:homecoming_app/services/ai/memory_service.dart';
+import 'package:homecoming_app/services/core/kai_memory_scope.dart';
 
 import 'memory_golden_data.dart';
 import 'memory_golden_test_runner.dart';
@@ -21,7 +22,8 @@ Future<List<double>?> _embedding(String text) async {
 Future<List<Map<String, dynamic>>> _shards(String personaId) async => [
       {
         'id': 'project-homecoming',
-        'summary': 'Homecoming is Sadeq’s Flutter conversational AI companion project.',
+        'summary':
+            'Homecoming is Sadeqâ€™s Flutter conversational AI companion project.',
         'vector': [1.0, 0.0],
         'timestamp': '2026-07-15T12:00:00.000Z',
         'shardId': 'project-homecoming-shard',
@@ -56,6 +58,7 @@ void main() {
         ),
       ]) {
         final response = await MemoryService.queryMemory(
+          accessPolicy: KaiMemoryAccessPolicy.trustedCore,
           personaId: 'truekai',
           query: golden.query,
           embeddingProvider: _embedding,
@@ -67,8 +70,8 @@ void main() {
         final foundKeywords = golden.expectedKeywords
             .where((keyword) => summary.contains(keyword.toLowerCase()))
             .toList();
-        final passed = top.similarity >= golden.minSimilarity &&
-            foundKeywords.isNotEmpty;
+        final passed =
+            top.similarity >= golden.minSimilarity && foundKeywords.isNotEmpty;
         results.add(MemoryTestResult(
           test: golden,
           passed: passed,
@@ -93,7 +96,8 @@ void main() {
 
       expect(results, isNotEmpty);
       expect(
-        results.any((result) => result.errorMessage?.contains('MissingPlugin') == true),
+        results.any(
+            (result) => result.errorMessage?.contains('MissingPlugin') == true),
         isFalse,
       );
     });
