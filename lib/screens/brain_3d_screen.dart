@@ -1105,6 +1105,7 @@ class _MemoryAtlasViewState extends State<_MemoryAtlasView> {
           )
           .toList(growable: false),
       links: widget.data.links,
+      bounds: widget.data.bounds,
     );
   }
 

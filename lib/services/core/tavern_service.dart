@@ -91,14 +91,28 @@ class TavernService {
     onGuestArrival = onArrival;
 
     final db  = FirebaseDatabase.instanceFor(app: Firebase.app('tavern'));
-    _tablesSub = db.ref('tables').onValue.listen((event) {
-      final snap = event.snapshot;
-      if (!snap.exists || snap.value == null) return;
-      final tables = Map<String, dynamic>.from(snap.value as Map);
-      for (final entry in tables.entries) {
-        _handleTableChange(entry.key, Map<String, dynamic>.from(entry.value as Map));
-      }
-    });
+    _tablesSub = db.ref('tables').onValue.listen(
+      (event) {
+        final snap = event.snapshot;
+        if (!snap.exists || snap.value == null) return;
+        final tables = Map<String, dynamic>.from(snap.value as Map);
+        for (final entry in tables.entries) {
+          _handleTableChange(
+            entry.key,
+            Map<String, dynamic>.from(entry.value as Map),
+          );
+        }
+      },
+      onError: (Object error, StackTrace stackTrace) {
+        // The Tavern is an optional external body. A signed-in Homecoming user
+        // may legitimately have no access to its Kingdom database; that must
+        // never become an unhandled app-level stream error.
+        print('⚠️ [Tavern] Arrival watch unavailable: $error');
+        _tablesSub = null;
+        _watching = false;
+      },
+      cancelOnError: true,
+    );
 
     print('🍺 [Tavern] Watching RTDB tables for arrivals…');
   }

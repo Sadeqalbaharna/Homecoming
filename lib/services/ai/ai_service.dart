@@ -115,6 +115,7 @@ class ChatResponse {
   final bool webSearchUsed;
   final List<SearchResult> searchResults;
   final CuriosityQuestion? curiosityQuestion;
+  final bool suppressVisibleReply;
   final int promptInputTokens;
   final int promptOutputTokens;
   final double promptCostUsd;
@@ -136,6 +137,7 @@ class ChatResponse {
     this.webSearchUsed = false,
     this.searchResults = const [],
     this.curiosityQuestion,
+    this.suppressVisibleReply = false,
     this.promptInputTokens = 0,
     this.promptOutputTokens = 0,
     this.promptCostUsd = 0.0,
@@ -539,7 +541,9 @@ class AIService {
     // Coding on desktop used to look healthy in the registry while the actual
     // request body silently lost the hands. Validate the final, route-filtered
     // names—not the source list—before spending a model request.
-    if (route == 'coding' && CodeWorkspaceService.instance.hasWorkspace) {
+    if (route == 'coding' &&
+        capabilityManifest.allowsGeneralTools &&
+        CodeWorkspaceService.instance.hasWorkspace) {
       final missing = ToolExecutorService.desktopCodingToolNames
           .difference(turnToolNames.toSet());
       if (missing.isNotEmpty) {
@@ -649,7 +653,8 @@ class AIService {
       if (refreshedNames.join('\u0000') != turnToolNames.join('\u0000')) {
         turnTools = refreshedTools;
         turnToolNames = refreshedNames;
-        onHandsState?.call(ToolExecutorService.handsStateForTools(turnToolNames));
+        onHandsState
+            ?.call(ToolExecutorService.handsStateForTools(turnToolNames));
         toolAwarenessMessage['content'] =
             ToolExecutorService.toolAwarenessBlock(turnToolNames);
         debugService?.recordManifest(
@@ -713,8 +718,7 @@ class AIService {
               // …unless he's texting. Then the room IS the point — see
               // [replyCeiling]. 8,000 is a ceiling for work; for a text it's a
               // field to fill, and he fills it.
-              lengthParameters:
-                  _lengthParams(iterModel, replyCeiling ?? 8000),
+              lengthParameters: _lengthParams(iterModel, replyCeiling ?? 8000),
             ),
           );
           break; // success
@@ -1194,8 +1198,7 @@ class AIService {
       final c = msgs[i]['content'];
       if (c is! String) continue;
 
-      final keepReadable =
-          isMaterial(i) ? i >= materialCutoff : i >= cutoff;
+      final keepReadable = isMaterial(i) ? i >= materialCutoff : i >= cutoff;
       if (keepReadable) {
         // RECENT — his active working set, keep it readable. But even here a
         // whole-file read_file can be 95k chars (~24k tokens) and gets re-sent
@@ -1388,7 +1391,8 @@ Text:
     // conversationId, NOT surfaceId — desktop and mobile are distinct bodies
     // that deliberately share the 'in_person' partition. Keying storage off the
     // surface name would split Kai's history the moment those two were wired.
-    final activeSurfaceId = activeSurface?.conversationId ?? conversationSurfaceId;
+    final activeSurfaceId =
+        activeSurface?.conversationId ?? conversationSurfaceId;
     // An explicit caller source WINS over the surface-derived one. `source` is a
     // per-turn fact (what triggered this turn: 'proactive', 'tavern') while the
     // surface is a per-body fact; a proactive nudge on mobile is both, and the
@@ -1401,10 +1405,10 @@ Text:
     // request the model can negotiate. The existing tool loop treats any reply
     // ceiling as toolChoice:none; give friend-only surfaces a generous ceiling
     // when their caller did not already choose a conversational one.
-    final activeReplyCeiling = activeSurface != null &&
-            !activeSurface.allowsGeneralTools
-        ? (replyCeiling ?? 600)
-        : replyCeiling;
+    final activeReplyCeiling =
+        activeSurface != null && !activeSurface.allowsGeneralTools
+            ? (replyCeiling ?? 600)
+            : replyCeiling;
     // If the actual model reply succeeds but later bookkeeping fails (tags,
     // mood persistence, TTS, debug packaging), don't throw away the useful answer
     // and replace it with canned support sludge. Preserve the real reply and
@@ -1479,12 +1483,14 @@ Text:
         surfaceId: activeSurfaceId,
         maxTurns: ctxTurns,
       );
+      final memoryAccessPolicy =
+          KaiMemoryAccessPolicy.forContext(activeSurface);
       final memoryFuture = useMemory
           ? MemoryService.queryMemory(
               personaId: personaId,
               query: text,
               limit: 5,
-              accessPolicy: KaiMemoryAccessPolicy.forContext(activeSurface),
+              accessPolicy: memoryAccessPolicy,
             )
           : Future<MemoryQueryResult?>.value(null);
       // An unawaited future that throws before anyone awaits it is an
@@ -1545,7 +1551,10 @@ Text:
 
       // Build conversation history — loaded from Firebase, cross-surface.
       // Already in flight since the top of the turn; this is just the join.
-      final history = await historyFuture;
+      final rawHistory = await historyFuture;
+      final history = rawHistory
+          .where(memoryAccessPolicy.allowsContent)
+          .toList(growable: false);
 
       // Query long-term memory
       String memoryContext = '';
@@ -1633,7 +1642,11 @@ Text:
             try {
               final spreadBlock = await _brain
                   .spreadActivation(personaId, seedTerms, currentMood: mood);
-              if (spreadBlock.isNotEmpty) {
+              // Graph activation is another memory source. Scope-filtering the
+              // vector results but appending an unfiltered graph block reopened
+              // the same goggles-off leak through a side door.
+              if (spreadBlock.isNotEmpty &&
+                  memoryAccessPolicy.allowsContent(spreadBlock)) {
                 memoryContext += '\n\n$spreadBlock';
                 print('🕸️ [Brain] Graph answered on: ${seedTerms.join(", ")}');
                 debugService.addStep(
@@ -2448,7 +2461,8 @@ ${history.join('\n')}$memoryContext$urlContext$webContext${_pendingThought != nu
           message: text,
         );
         systemPrompt += routeDecision.promptBlock();
-        if (activeSurface != null && activeSurface.profile.promptBlock.isNotEmpty) {
+        if (activeSurface != null &&
+            activeSurface.profile.promptBlock.isNotEmpty) {
           systemPrompt += '\n\n${activeSurface.profile.promptBlock}';
         }
         if (activeSurface != null) {
@@ -2532,7 +2546,7 @@ ${a.text}
       // Agentic loop: GPT may call tools (web_search, set_alarm, etc.) before
       // producing a final text reply. _callOpenAIWithTools handles that loop.
       // GM mode and smart-home mode skip tools — they use direct execution paths.
-      final reply = (isGMMode || kaiConsciousness != null)
+      final rawReply = (isGMMode || kaiConsciousness != null)
           ? await _callOpenAI([
               {"role": "system", "content": systemPrompt},
               {"role": "user", "content": userMessage},
@@ -2546,8 +2560,8 @@ ${a.text}
               usageOut: _mainUsage,
               onToolCall: onToolCall,
               onPlanUpdate: onPlanUpdate,
-            onProgress: onProgress,
-            onHandsState: onHandsState,
+              onProgress: onProgress,
+              onHandsState: onHandsState,
               replyCeiling: activeReplyCeiling,
               // The router already worked this out above and, until now, its only
               // output was a paragraph of prose appended to the prompt. It has
@@ -2559,6 +2573,14 @@ ${a.text}
               capabilityManifest: capabilityManifest,
               debugService: debugService,
             );
+      final requestedWork = proposedRoute.route == KaiRoute.coding ||
+          proposedRoute.route == KaiRoute.tool ||
+          looksLikeTechnicalContent(text);
+      final reply = capabilityManifest.allowsTechnicalConversation
+          ? rawReply
+          : requestedWork
+              ? kaiGogglesOffWorkBoundary
+              : sanitizeGogglesOffReply(rawReply, userText: text);
       recoveredReply = reply;
       print(
           '📥 [SEND MESSAGE] OpenAI response received: ${reply.length} characters');
@@ -2694,9 +2716,19 @@ ${a.text}
         }
       }
 
-      // Save updated state to both local and Firebase
-      await _personality.savePersonality(personaId, newPersonality);
-      await _personality.saveMood(personaId, newMood);
+      // Apply the DELTAS, not the absolute maps.
+      //
+      // newPersonality/newMood were computed from state read at the top of this
+      // turn. Writing them whole is a read-modify-write, and the moment two
+      // bodies can talk to Kai at once the later write silently discards the
+      // earlier one — Messenger cheers him up, desktop lands a beat later, and
+      // the cheering up never happened. No error, nothing to trace.
+      //
+      // The deltas are right here and were being thrown away. Applied as
+      // server-side increments, both bodies' turns land in either order.
+      await _personality.applyPersonalityDeltas(
+          personaId, actualPersonalityDeltas);
+      await _personality.applyMoodDeltas(personaId, actualMoodDeltas);
       await _personality.saveLastUpdateTime(personaId, DateTime.now());
 
       // Save turn — single path through ConversationStoreService
@@ -2743,15 +2775,32 @@ ${a.text}
 
       // Held so the brain extraction below can point its nodes at the memory this
       // exchange became — see the chained block after the emotional classifier.
-      final memoryShardFuture = MemoryService.remember(
-        personaId: personaId,
+      // A presence event is transport choreography, not an experience Sadeq
+      // chose to remember. The gateway already avoids saving the user seed,
+      // but remember() used to run independently and persisted "Sadeq entered
+      // our shared space" as relationship memory anyway.
+      final turnMemoryScope = scopeForTurn(
+        context: activeSurface,
+        route: routeDecision.route,
+        requestedRoute: proposedRoute.route,
         userText: text,
         kaiReply: reply,
-        scope: scopeForTurn(context: activeSurface, route: routeDecision.route),
-        surfaceId: activeSurface?.surfaceId,
-        worldId: activeSurface?.worldId,
-        sessionId: activeSurface?.sessionId,
-      ).catchError((_) => null);
+      );
+      final Future<String?> memoryShardFuture = !shouldFormMemoryForTurn(
+              activeSurface)
+          ? Future<String?>.value(null)
+          : MemoryService.remember(
+              personaId: personaId,
+              userText: text,
+              kaiReply: reply,
+              scope: turnMemoryScope,
+              surfaceId: activeSurface?.surfaceId,
+              worldId: activeSurface?.worldId,
+              sessionId: activeSurface?.sessionId,
+            ).catchError((error) {
+              print('Memory write failed for ${activeSurface?.source}: $error');
+              return null;
+            });
 
       debugService.addStep(
         BrainPhase.consolidation,
@@ -2810,31 +2859,38 @@ ${a.text}
       };
       final wasCorrected = KaiCraftService.looksLikeCorrection(text);
 
-      unawaited(() async {
-        final shardId = await memoryShardFuture;
-        await _brain.extractAndMerge(
-          personaId: personaId,
-          userMessage: text,
-          aiReply: reply,
-          eventType: eventType,
-          eventIntensity: eventIntensity,
-          encodingMood: newMood, // tag memory with Kai's mood at encoding time
-          sourceShardId: shardId,
-          // The second axis of salience — what he DID, and whether Sadeq told him
-          // he was wrong. Both were already known on every turn and neither ever
-          // reached the gate deciding what he gets to keep.
-          toolsUsed: toolsThisTurn,
-          userCorrected: wasCorrected,
-        );
-      }()
-          // `.catchError((e) => print(...))` looks right and is a latent crash:
-          // print returns void, the handler must return FutureOr<Null>, so the
-          // error path throws WHILE handling the error. I flagged five of these in
-          // main_mobile hours ago as "the error handler breaks while handling the
-          // error" — and then wrote one. Catch inside, return nothing.
-          .catchError((Object e) {
-        print('⚠️ [Brain] extractAndMerge error: $e');
-      }));
+      if (shouldExtractIntoSharedKnowledgeGraph(
+        scope: turnMemoryScope,
+        userText: text,
+        kaiReply: reply,
+      )) {
+        unawaited(() async {
+          final shardId = await memoryShardFuture;
+          await _brain.extractAndMerge(
+            personaId: personaId,
+            userMessage: text,
+            aiReply: reply,
+            eventType: eventType,
+            eventIntensity: eventIntensity,
+            encodingMood:
+                newMood, // tag memory with Kai's mood at encoding time
+            sourceShardId: shardId,
+            // The second axis of salience — what he DID, and whether Sadeq told him
+            // he was wrong. Both were already known on every turn and neither ever
+            // reached the gate deciding what he gets to keep.
+            toolsUsed: toolsThisTurn,
+            userCorrected: wasCorrected,
+          );
+        }()
+            // `.catchError((e) => print(...))` looks right and is a latent crash:
+            // print returns void, the handler must return FutureOr<Null>, so the
+            // error path throws WHILE handling the error. I flagged five of these in
+            // main_mobile hours ago as "the error handler breaks while handling the
+            // error" — and then wrote one. Catch inside, return nothing.
+            .catchError((Object e) {
+          print('⚠️ [Brain] extractAndMerge error: $e');
+        }));
+      }
 
       // Ebbinghaus decay — run roughly every 10 messages (stochastic, fire-and-forget)
       if (_rng.nextInt(10) == 0) {
@@ -3117,15 +3173,27 @@ ${a.text}
 
       // If the main model/tool reply already succeeded, preserve it. The failure
       // happened in downstream bookkeeping, so the user's answer should survive.
-      final errorResponse = KaiReplyRecoveryService.postProcessingFailureReply(
+      final suppressVisibleReply =
+          KaiReplyRecoveryService.shouldSuppressVisibleFailureReply(
         recoveredReply: recoveredReply,
         error: e,
       );
+      final errorResponse = suppressVisibleReply
+          ? ''
+          : KaiReplyRecoveryService.postProcessingFailureReply(
+              recoveredReply: recoveredReply,
+              error: e,
+            );
 
       return ChatResponse(
         reply: errorResponse,
         mbti: _personality.calculateMBTI(fallbackPersonality),
-        raw: {'error': e.toString(), 'fallback_response': true},
+        raw: {
+          'error': e.toString(),
+          'fallback_response': true,
+          'suppress_visible_reply': suppressVisibleReply,
+        },
+        suppressVisibleReply: suppressVisibleReply,
         personalityDelta: {},
         moodDelta: {},
         actualDeltas: {},

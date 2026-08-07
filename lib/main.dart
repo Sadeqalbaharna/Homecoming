@@ -8,4 +8,4 @@ import 'main_mobile.dart' as app;
 // Dart VM includes it in the build (tree-shaking would otherwise drop it).
 import 'flame_overlay_main.dart'; // ignore: unused_import
 
-Future<void> main() => app.main();
+Future<void> main(List<String> args) => app.main(args);

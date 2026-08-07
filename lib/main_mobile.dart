@@ -18,6 +18,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 
 import 'services/ai/ai_service.dart';
 import 'services/core/firebase_service.dart';
+import 'services/core/kai_global_presence_service.dart';
 import 'services/core/memory_consolidation_service.dart';
 import 'services/core/brain_extraction_service.dart';
 import 'services/core/kai_working_on_service.dart';
@@ -61,6 +62,7 @@ import 'screens/tavern_link_screen.dart';
 import 'widgets/plan_card.dart';
 import 'constants.dart';
 import 'services/core/kai_surface_context.dart';
+import 'services/core/kai_headless_coordinator.dart';
 
 /// ===== Layout / Window =====
 /// Local to this file on purpose — nothing else lays out the avatar. These used
@@ -72,15 +74,15 @@ const double kSpriteSize = 170;
 const double kRingPadding = 48;
 
 /// ===== Avatar assets + timings =====
-const String kAvatarIdleFrameDir      = 'assets/avatar/idle_frames/';
+const String kAvatarIdleFrameDir = 'assets/avatar/idle_frames/';
 const String kAvatarAttentionFrameDir = 'assets/avatar/attention_frames/';
-const String kAvatarThinkingFrameDir  = 'assets/avatar/thinking_frames/';
-const String kAvatarSpeakingFrameDir  = 'assets/avatar/speaking_frames/';
-const String kAvatarFallback          = 'assets/avatar/images/mage.png';
-const int kIdleFrameCount      = 121;
+const String kAvatarThinkingFrameDir = 'assets/avatar/thinking_frames/';
+const String kAvatarSpeakingFrameDir = 'assets/avatar/speaking_frames/';
+const String kAvatarFallback = 'assets/avatar/images/mage.png';
+const int kIdleFrameCount = 121;
 const int kAttentionFrameCount = 121;
-const int kThinkingFrameCount  = 241;
-const int kSpeakingFrameCount  = 121;
+const int kThinkingFrameCount = 241;
+const int kSpeakingFrameCount = 121;
 
 const Duration kAttentionPulse = Duration(seconds: 2);
 
@@ -89,29 +91,34 @@ const Duration kAttentionPulse = Duration(seconds: 2);
 /// Global AI service instance
 final aiService = AIService();
 
-Future<void> main() async {
+Future<void> main([List<String> args = const []]) async {
   WidgetsFlutterBinding.ensureInitialized();
-  
+
+  final coordinatorMode = args.contains('--coordinator-worker');
+  final recoveredCoordinator = args.contains('--recovered');
+
   // Show loading state while initializing
-  runApp(const MaterialApp(
-    home: Scaffold(
-      backgroundColor: Color(0xFF0D0A07),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            CircularProgressIndicator(color: Color(0xFFFFE7B0)),
-            SizedBox(height: 20),
-            Text(
-              'Initializing Kai...',
-              style: TextStyle(color: Colors.white, fontSize: 18),
-            ),
-          ],
+  if (!coordinatorMode) {
+    runApp(const MaterialApp(
+      home: Scaffold(
+        backgroundColor: Color(0xFF0D0A07),
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircularProgressIndicator(color: Color(0xFFFFE7B0)),
+              SizedBox(height: 20),
+              Text(
+                'Initializing Kai...',
+                style: TextStyle(color: Colors.white, fontSize: 18),
+              ),
+            ],
+          ),
         ),
       ),
-    ),
-  ));
-  
+    ));
+  }
+
   // Initialize Firebase with error handling
   bool firebaseInitialized = false;
   try {
@@ -134,25 +141,37 @@ Future<void> main() async {
     } catch (e) {
       print('⚠️ [Auth] main() sign-in failed: $e');
     }
-    // Pre-warm Tavern caches (non-blocking)
-    TavernMenuService().prime().catchError((_) {});
-    TavernStatusService().getStatusBlock().then<void>((_) {}).catchError((Object e) {
-      print('[TavernStatus] getStatusBlock prewarm failed: $e');
-    });
+    if (!coordinatorMode) {
+      // Pre-warm Tavern caches (non-blocking)
+      TavernMenuService().prime().catchError((_) {});
+      TavernStatusService()
+          .getStatusBlock()
+          .then<void>((_) {})
+          .catchError((Object e) {
+        print('[TavernStatus] getStatusBlock prewarm failed: $e');
+      });
+    }
   } catch (e) {
     print('⚠️ Firebase initialization failed: $e');
     print('📱 App will continue with local storage only');
   }
-  
+
+  if (coordinatorMode) {
+    await KaiHeadlessCoordinator.instance.start(
+      recovered: recoveredCoordinator,
+    );
+    return;
+  }
+
   // Run the actual app
   runApp(KaiMobileApp(firebaseInitialized: firebaseInitialized));
 }
 
 class KaiMobileApp extends StatelessWidget {
   final bool firebaseInitialized;
-  
+
   const KaiMobileApp({super.key, required this.firebaseInitialized});
-  
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -180,9 +199,9 @@ class KaiMobileApp extends StatelessWidget {
 
 class _MobileKai extends StatefulWidget {
   final bool firebaseInitialized;
-  
+
   const _MobileKai({required this.firebaseInitialized});
-  
+
   @override
   State<_MobileKai> createState() => _MobileKaiState();
 }
@@ -228,8 +247,9 @@ class _MobileKaiState extends State<_MobileKai>
   // Drag-guard for hold-to-speak: recording only starts after a still hold.
   // If the finger moves > _kDragThreshold px before the timer fires, it's a
   // drag and recording is suppressed entirely.
-  static const double _kDragThreshold = 10.0;  // px of movement = drag intent
-  static const Duration _kHoldDelay = Duration(milliseconds: 400); // must be still this long to activate mic
+  static const double _kDragThreshold = 10.0; // px of movement = drag intent
+  static const Duration _kHoldDelay =
+      Duration(milliseconds: 400); // must be still this long to activate mic
   Offset? _pressOrigin;
   bool _pressWasDrag = false;
   Timer? _holdTimer;
@@ -254,8 +274,8 @@ class _MobileKaiState extends State<_MobileKai>
   List<String>? _choices;
   bool _sending = false;
   String? _activeToolName; // tool currently running in agentic loop
-  KaiPlan? _activePlan;   // multi-step plan being executed (null = no plan)
-  bool    _planExpanded = true;
+  KaiPlan? _activePlan; // multi-step plan being executed (null = no plan)
+  bool _planExpanded = true;
 
   // Proactive attention
   aiProactive.ProactiveEvent? _pendingProactiveEvent;
@@ -383,11 +403,11 @@ class _MobileKaiState extends State<_MobileKai>
 
       // 1 — avatar frames (kick off async, don't block showing the UI)
       _setStep('Loading avatar…');
-      _precacheAnimation(kAvatarIdleFrameDir, kIdleFrameCount)
-          .then((_) { if (mounted) _switchToAnimation('idle'); })
-          .catchError((Object e) {
-            print('⚠️ [Init] Frame precache: $e');
-          });
+      _precacheAnimation(kAvatarIdleFrameDir, kIdleFrameCount).then((_) {
+        if (mounted) _switchToAnimation('idle');
+      }).catchError((Object e) {
+        print('⚠️ [Init] Frame precache: $e');
+      });
 
       // 1b — sign in anonymously so Firebase rules accept our reads/writes
       _setStep('Connecting…');
@@ -405,19 +425,24 @@ class _MobileKaiState extends State<_MobileKai>
 
       // 2 — warm up the AI persona (3s max — Firebase permission errors fail fast anyway)
       _setStep('Waking Kai…');
-      await aiService.bootstrapPersona(_personaId)
+      await aiService
+          .bootstrapPersona(_personaId)
           .timeout(const Duration(seconds: 3), onTimeout: () {})
           .catchError((e) => print('⚠️ [Bootstrap] $e'));
 
       // 3 — check for a message Kai left while we were away (3s max)
       _setStep('Checking messages…');
-      await ProactiveService().initialize(_personaId)
+      await ProactiveService()
+          .initialize(_personaId)
           .timeout(const Duration(seconds: 3), onTimeout: () {})
           .catchError((e) => print('⚠️ [Proactive] $e'));
       final pending = await ProactiveService()
           .checkPendingMessage(_personaId)
           .timeout(const Duration(seconds: 3), onTimeout: () => null)
-          .catchError((e) { print('⚠️ [Proactive] $e'); return null; });
+          .catchError((e) {
+        print('⚠️ [Proactive] $e');
+        return null;
+      });
       if (pending != null && mounted) {
         await ProactiveService().markDelivered(_personaId, pending.id);
         setState(() => _reply = pending.message);
@@ -432,27 +457,33 @@ class _MobileKaiState extends State<_MobileKai>
       }
 
       // 4 — wake word detection
-      unawaited(VoiceActivationService().initialize()
+      unawaited(VoiceActivationService()
+          .initialize()
           .catchError((e) => print('⚠️ [WakeWord] $e')));
 
       // 4b — pre-generate / load Kai quick-response clips (yes?, hmm?, etc.)
-      unawaited(KaiQuickResponses.instance.initialize()
+      unawaited(KaiQuickResponses.instance
+          .initialize()
           .catchError((e) => print('⚠️ [QuickResponses] $e')));
 
       // 5 — proactive Kai (attention sounds + contextual messages)
-      unawaited(AttentionSoundService().prime()
+      unawaited(AttentionSoundService()
+          .prime()
           .catchError((e) => print('⚠️ [AttentionSound] $e')));
       final proactiveSvc = aiProactive.ProactiveService();
       proactiveSvc.onProactiveEvent = _onProactiveEvent;
-      unawaited(proactiveSvc.initialize(_personaId)
+      unawaited(proactiveSvc
+          .initialize(_personaId)
           .catchError((e) => print('⚠️ [Proactive] $e')));
 
       // Done — show UI immediately, other animations load on first use
       if (mounted) setState(() => _isLoading = false);
-      MemoryReflectionService().maybeReflect(personaId: _personaId)
+      MemoryReflectionService()
+          .maybeReflect(personaId: _personaId)
           .catchError((e) => print('⚠️ [Reflection] $e'));
       KaiReflectionWorker.instance.start(_personaId);
-      PersonalityDriftService().maybeDrift(personaId: _personaId)
+      PersonalityDriftService()
+          .maybeDrift(personaId: _personaId)
           .catchError((e) => print('⚠️ [Drift] $e'));
       // Look at the shape of his own memory and park anything genuinely odd —
       // a contradiction he holds, a belief he revised, a preference whose reason
@@ -547,19 +578,27 @@ class _MobileKaiState extends State<_MobileKai>
 
   int _getFrameCount(String animType) {
     switch (animType) {
-      case 'attention': return kAttentionFrameCount;
-      case 'thinking':  return kThinkingFrameCount;
-      case 'speaking':  return kSpeakingFrameCount;
-      default:          return kIdleFrameCount;
+      case 'attention':
+        return kAttentionFrameCount;
+      case 'thinking':
+        return kThinkingFrameCount;
+      case 'speaking':
+        return kSpeakingFrameCount;
+      default:
+        return kIdleFrameCount;
     }
   }
 
   String _getFrameDir(String animType) {
     switch (animType) {
-      case 'attention': return kAvatarAttentionFrameDir;
-      case 'thinking':  return kAvatarThinkingFrameDir;
-      case 'speaking':  return kAvatarSpeakingFrameDir;
-      default:          return kAvatarIdleFrameDir;
+      case 'attention':
+        return kAvatarAttentionFrameDir;
+      case 'thinking':
+        return kAvatarThinkingFrameDir;
+      case 'speaking':
+        return kAvatarSpeakingFrameDir;
+      default:
+        return kAvatarIdleFrameDir;
     }
   }
 
@@ -619,12 +658,14 @@ class _MobileKaiState extends State<_MobileKai>
     return AnimatedBuilder(
       animation: ctrl,
       builder: (_, __) {
-        final frame = (ctrl.value * frameCount).floor().clamp(0, frameCount - 1);
+        final frame =
+            (ctrl.value * frameCount).floor().clamp(0, frameCount - 1);
         final framePath = '${dir}frame_${frame.toString().padLeft(4, '0')}.png';
         return Image.asset(
           framePath,
           fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => Image.asset(kAvatarFallback, fit: BoxFit.cover),
+          errorBuilder: (_, __, ___) =>
+              Image.asset(kAvatarFallback, fit: BoxFit.cover),
         );
       },
     );
@@ -633,12 +674,20 @@ class _MobileKaiState extends State<_MobileKai>
   @override
   void initState() {
     super.initState();
+    unawaited(KaiGlobalPresenceService.instance
+        .startBody(
+      surface: 'messenger',
+      canBootstrapOwner: false,
+    )
+        .catchError((Object error) {
+      print('[KaiPresence] mobile registry failed to start: $error');
+    }));
     WidgetsBinding.instance.addObserver(this);
     KaiStateService().setSurface('mobile');
     EmotionalEventService().setSurface('mobile');
-    _glowCtrl =
-        AnimationController(vsync: this, duration: const Duration(milliseconds: 1400))
-          ..repeat(reverse: true);
+    _glowCtrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 1400))
+      ..repeat(reverse: true);
     _glow = Tween(begin: 0.35, end: 1.0)
         .chain(CurveTween(curve: Curves.easeInOut))
         .animate(_glowCtrl);
@@ -657,13 +706,15 @@ class _MobileKaiState extends State<_MobileKai>
         _switchToAnimation('idle');
         // Don't resume VAS if hold-to-speak is active — the mic belongs to the recorder
         if (!_isHoldingToSpeak) {
-          print('🔊 [MAIN_MOBILE] Audio stopped/completed - RESUMING voice activation');
+          print(
+              '🔊 [MAIN_MOBILE] Audio stopped/completed - RESUMING voice activation');
           VoiceActivationService().resume();
         } else {
-          print('🔊 [MAIN_MOBILE] Audio stopped/completed - hold-to-speak active, skipping VAS resume');
+          print(
+              '🔊 [MAIN_MOBILE] Audio stopped/completed - hold-to-speak active, skipping VAS resume');
         }
       }
-      
+
       if (mounted) setState(() {});
     });
 
@@ -674,7 +725,8 @@ class _MobileKaiState extends State<_MobileKai>
     _lifecycleListener = AppLifecycleListener(
       onResume: () {
         if (_isSleeping && !_inBackgroundTransition) {
-          print('🔵 [BackgroundMode] Lifecycle resume — triggering _exitBackground fallback');
+          print(
+              '🔵 [BackgroundMode] Lifecycle resume — triggering _exitBackground fallback');
           _exitBackground();
         }
       },
@@ -710,7 +762,8 @@ class _MobileKaiState extends State<_MobileKai>
         final path = await VoiceService().stopRecording();
         VoiceActivationService().resume();
         if (path == null) {
-          print('⚠️ [HoldToSpeak-flame] No audio file — treating as tap → expand');
+          print(
+              '⚠️ [HoldToSpeak-flame] No audio file — treating as tap → expand');
           _exitBackground();
         } else {
           final fileSize = await File(path).length().catchError((Object e) {
@@ -719,7 +772,8 @@ class _MobileKaiState extends State<_MobileKai>
           });
           if (fileSize < 8000) {
             // Too short (~<0.7s) → quick tap, not a voice message → expand
-            print('⚠️ [HoldToSpeak-flame] File too small ($fileSize B) → tap → expand');
+            print(
+                '⚠️ [HoldToSpeak-flame] File too small ($fileSize B) → tap → expand');
             await File(path).delete().then<void>((_) {}).catchError((Object e) {
               print('⚠️ [HoldToSpeak-flame] temp delete failed: $e');
             });
@@ -754,7 +808,8 @@ class _MobileKaiState extends State<_MobileKai>
     });
 
     // Subscribe to wake-word events (VoiceActivationService singleton)
-    _wakeWordSub = VoiceActivationService().onWakeWordDetected.listen((transcript) {
+    _wakeWordSub =
+        VoiceActivationService().onWakeWordDetected.listen((transcript) {
       if (!mounted) return;
       // VAS always emits 'hey kai' — it's the raw wake trigger.
       _exitBackground();
@@ -781,6 +836,7 @@ class _MobileKaiState extends State<_MobileKai>
     _idleBackgroundTimer?.cancel();
     _silenceTimer?.cancel();
     _player.dispose();
+    unawaited(KaiGlobalPresenceService.instance.stop());
     for (final f in _floaters) {
       f.ctrl.dispose();
     }
@@ -841,10 +897,12 @@ class _MobileKaiState extends State<_MobileKai>
         );
         await Future.delayed(const Duration(milliseconds: 600));
         if (await FlutterOverlayWindow.isActive()) {
-          print('🔵 [BackgroundMode] Overlay confirmed active (attempt $attempt)');
+          print(
+              '🔵 [BackgroundMode] Overlay confirmed active (attempt $attempt)');
           break;
         }
-        print('⚠️ [BackgroundMode] Overlay not active after attempt $attempt — retrying');
+        print(
+            '⚠️ [BackgroundMode] Overlay not active after attempt $attempt — retrying');
       }
 
       _isSleeping = true;
@@ -883,7 +941,8 @@ class _MobileKaiState extends State<_MobileKai>
 
   Future<void> _exitBackground({String? initialMessage}) async {
     if (_inBackgroundTransition) return;
-    _isSleeping = false; // clear immediately — lifecycle listener won't re-trigger
+    _isSleeping =
+        false; // clear immediately — lifecycle listener won't re-trigger
     _inBackgroundTransition = true;
     // Safety timeout
     Future.delayed(const Duration(seconds: 5), () {
@@ -974,15 +1033,16 @@ class _MobileKaiState extends State<_MobileKai>
     // MediaRecorder amplitude is a 0-32767 peak-since-last-call meter.
     // Anything below ~500 is background noise / silence.
     const int kSilenceThreshold = 500;
-    const int kPollMs          = 300;   // poll every 300 ms
+    const int kPollMs = 300; // poll every 300 ms
     const int kSilenceDurationMs = 3000; // 3 s of silence → stop
-    const int kMinRecordMs     = 800;   // don't cut off immediately
+    const int kMinRecordMs = 800; // don't cut off immediately
 
-    int silentMs  = 0;
+    int silentMs = 0;
     int elapsedMs = 0;
 
     _silenceTimer?.cancel();
-    _silenceTimer = Timer.periodic(const Duration(milliseconds: kPollMs), (timer) async {
+    _silenceTimer =
+        Timer.periodic(const Duration(milliseconds: kPollMs), (timer) async {
       if (!mounted || !_isHoldingToSpeak) {
         timer.cancel();
         return;
@@ -1173,7 +1233,8 @@ class _MobileKaiState extends State<_MobileKai>
       // DMN: trigger Kai's mind-wandering when the app backgrounds.
       // Fire-and-forget — never blocks the UI. Stores a thought in Firebase
       // that gets consumed naturally at the next session start.
-      DefaultModeService().runWandering(_personaId)
+      DefaultModeService()
+          .runWandering(_personaId)
           .catchError((e) => print('⚠️ [DMN] $e'));
     }
   }
@@ -1184,12 +1245,12 @@ class _MobileKaiState extends State<_MobileKai>
       const ch = MethodChannel('com.homecoming.app/activity');
       final raw = await ch.invokeMethod<Map>('consumePendingProactive');
       if (raw == null || !mounted) return;
-      final mood    = raw['mood'] as String? ?? 'curious';
+      final mood = raw['mood'] as String? ?? 'curious';
       final message = raw['message'] as String? ?? '';
       final trigger = raw['trigger'] as String? ?? 'worker';
       if (message.isEmpty) return;
       _onProactiveEvent(aiProactive.ProactiveEvent(
-        mood:    mood == 'worried' ? AttentionMood.worried : AttentionMood.curious,
+        mood: mood == 'worried' ? AttentionMood.worried : AttentionMood.curious,
         message: message,
         trigger: trigger,
       ));
@@ -1203,7 +1264,7 @@ class _MobileKaiState extends State<_MobileKai>
     if (!mounted) return;
     AttentionSoundService().play(AttentionMood.curious);
     setState(() {
-      _tavernGuest    = guest;
+      _tavernGuest = guest;
       _tavernBriefing = briefing;
     });
     _pulseAttention();
@@ -1228,12 +1289,25 @@ class _MobileKaiState extends State<_MobileKai>
     ChatResponse resp, {
     required String activityUserMessage,
   }) async {
+    if (resp.suppressVisibleReply) {
+      setState(() {
+        _choices = null;
+        _memoriesUsed = resp.memoriesUsed;
+        _debugInfo = resp.debugInfo;
+        if (_activePlan != null) _planExpanded = false;
+      });
+      print('🫥 [KaiResponse] Suppressed internal recovery reply');
+      return;
+    }
+
     setState(() {
       // Parse and strip [CHOICES: A | B | C] from the reply
       final rawReply = resp.reply.isEmpty ? "(no reply)" : resp.reply;
-      final choiceMatch = RegExp(r'\[CHOICES:\s*([^\]]+)\]').firstMatch(rawReply);
+      final choiceMatch =
+          RegExp(r'\[CHOICES:\s*([^\]]+)\]').firstMatch(rawReply);
       if (choiceMatch != null) {
-        _choices = choiceMatch.group(1)!
+        _choices = choiceMatch
+            .group(1)!
             .split('|')
             .map((s) => s.trim())
             .where((s) => s.isNotEmpty)
@@ -1247,7 +1321,8 @@ class _MobileKaiState extends State<_MobileKai>
       _debugInfo = resp.debugInfo; // NEW: Track debug info
       // Collapse plan card once Kai's reply is ready; keep it visible
       if (_activePlan != null) _planExpanded = false;
-      print('🔍 [DEBUG] debugInfo captured: ${_debugInfo != null ? "YES" : "NO"}');
+      print(
+          '🔍 [DEBUG] debugInfo captured: ${_debugInfo != null ? "YES" : "NO"}');
       if (_debugInfo != null) {
         print('🔍 [DEBUG] debugInfo keys: ${_debugInfo!.keys.join(", ")}');
       }
@@ -1255,21 +1330,23 @@ class _MobileKaiState extends State<_MobileKai>
     _spawnDeltas(resp.actualDeltas);
 
     // 🃏 Save activity card (fire-and-forget)
-    ActivityCardService().saveCard(
-      personaId:         _personaId,
-      userMessage:       activityUserMessage,
-      kaiReply:          resp.reply,
-      personalityDelta:  resp.personalityDelta,
-      moodDelta:         resp.moodDelta,
-      tags:              resp.tags,
-      mbti:              resp.mbti,
-      memoriesUsed:      resp.memoriesUsed,
-      webSearchUsed:     resp.webSearchUsed,
-      curiosityQuestion: resp.curiosityQuestion?.question,
-      inputTokens:       resp.promptInputTokens,
-      outputTokens:      resp.promptOutputTokens,
-      costUsd:           resp.promptCostUsd,
-    ).catchError((e) => print('⚠️ [ActivityCard] $e'));
+    ActivityCardService()
+        .saveCard(
+          personaId: _personaId,
+          userMessage: activityUserMessage,
+          kaiReply: resp.reply,
+          personalityDelta: resp.personalityDelta,
+          moodDelta: resp.moodDelta,
+          tags: resp.tags,
+          mbti: resp.mbti,
+          memoriesUsed: resp.memoriesUsed,
+          webSearchUsed: resp.webSearchUsed,
+          curiosityQuestion: resp.curiosityQuestion?.question,
+          inputTokens: resp.promptInputTokens,
+          outputTokens: resp.promptOutputTokens,
+          costUsd: resp.promptCostUsd,
+        )
+        .catchError((e) => print('⚠️ [ActivityCard] $e'));
 
     if (resp.ttsBase64 != null) {
       final mp3Path = await _writeTempMp3(base64Decode(resp.ttsBase64!));
@@ -1336,7 +1413,8 @@ class _MobileKaiState extends State<_MobileKai>
 
   Future<String> _writeTempMp3(Uint8List bytes) async {
     final dir = await getTemporaryDirectory();
-    final file = File('${dir.path}/kai_reply_${DateTime.now().millisecondsSinceEpoch}.mp3');
+    final file = File(
+        '${dir.path}/kai_reply_${DateTime.now().millisecondsSinceEpoch}.mp3');
     await file.writeAsBytes(bytes, flush: true);
     return file.path;
   }
@@ -1399,15 +1477,18 @@ class _MobileKaiState extends State<_MobileKai>
         'raspberry_pi_home',
         'led_1',
       );
-      
+
       // Send audio feedback request to Pi via Firebase
       if (success) {
-        await _sendAudioFeedback('I\'ve toggled the living room light for you! The LED strip should now be responding.');
+        await _sendAudioFeedback(
+            'I\'ve toggled the living room light for you! The LED strip should now be responding.');
       }
-      
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(success ? '💡 Living Room light toggled! 🔊 Audio sent' : '❌ Light control failed'),
+          content: Text(success
+              ? '💡 Living Room light toggled! 🔊 Audio sent'
+              : '❌ Light control failed'),
           duration: const Duration(seconds: 2),
           backgroundColor: success ? Colors.green : Colors.red,
         ),
@@ -1432,10 +1513,10 @@ class _MobileKaiState extends State<_MobileKai>
           backgroundColor: Colors.orange,
         ),
       );
-      
+
       final wakeService = WakeOnLanService();
       final success = await wakeService.wakeAndWaitForListener();
-      
+
       if (success) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -1444,13 +1525,15 @@ class _MobileKaiState extends State<_MobileKai>
             backgroundColor: Colors.green,
           ),
         );
-        
+
         // Test connection to consciousness API
-        await _sendAudioFeedback('Good morning! I\'m now online and ready to help.');
+        await _sendAudioFeedback(
+            'Good morning! I\'m now online and ready to help.');
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('📱 Pi needs manual power-on (WoL not supported on this model)'),
+            content: Text(
+                '📱 Pi needs manual power-on (WoL not supported on this model)'),
             duration: Duration(seconds: 5),
             backgroundColor: Colors.orange,
           ),
@@ -1497,15 +1580,18 @@ class _MobileKaiState extends State<_MobileKai>
         action: 'rainbow',
         params: {'duration': 10},
       );
-      
+
       // Send audio feedback
       if (success) {
-        await _sendAudioFeedback('Rainbow mode activated! Enjoy the beautiful cascade of colors flowing across your LED strip.');
+        await _sendAudioFeedback(
+            'Rainbow mode activated! Enjoy the beautiful cascade of colors flowing across your LED strip.');
       }
-      
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(success ? '🌈 Rainbow effect started! 🔊 Audio sent' : '❌ Rainbow failed'),
+          content: Text(success
+              ? '🌈 Rainbow effect started! 🔊 Audio sent'
+              : '❌ Rainbow failed'),
           duration: const Duration(seconds: 2),
           backgroundColor: success ? Colors.green : Colors.red,
         ),
@@ -1531,15 +1617,18 @@ class _MobileKaiState extends State<_MobileKai>
         action: 'pulse',
         params: {'color': 'blue', 'duration': 5},
       );
-      
+
       // Send audio feedback
       if (success) {
-        await _sendAudioFeedback('Blue pulse effect activated! Watch as the gentle blue waves flow through your lighting system.');
+        await _sendAudioFeedback(
+            'Blue pulse effect activated! Watch as the gentle blue waves flow through your lighting system.');
       }
-      
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(success ? '💙 Blue pulse started! 🔊 Audio sent' : '❌ Pulse failed'),
+          content: Text(success
+              ? '💙 Blue pulse started! 🔊 Audio sent'
+              : '❌ Pulse failed'),
           duration: const Duration(seconds: 2),
           backgroundColor: success ? Colors.green : Colors.red,
         ),
@@ -1577,16 +1666,20 @@ class _MobileKaiState extends State<_MobileKai>
                 style: TextStyle(fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 16),
-              
+
               // Individual Songs
-              const Text('🎶 Individual Songs:', style: TextStyle(color: Colors.blue, fontWeight: FontWeight.w600)),
+              const Text('🎶 Individual Songs:',
+                  style: TextStyle(
+                      color: Colors.blue, fontWeight: FontWeight.w600)),
               const SizedBox(height: 8),
               ..._buildSongList(),
-              
+
               const SizedBox(height: 16),
-              
-              // Mood Playlists  
-              const Text('🎭 Mood Playlists:', style: TextStyle(color: Colors.green, fontWeight: FontWeight.w600)),
+
+              // Mood Playlists
+              const Text('🎭 Mood Playlists:',
+                  style: TextStyle(
+                      color: Colors.green, fontWeight: FontWeight.w600)),
               const SizedBox(height: 8),
               ..._buildMoodList(),
             ],
@@ -1611,92 +1704,174 @@ class _MobileKaiState extends State<_MobileKai>
 
   List<Widget> _buildSongList() {
     final songs = [
-      {'name': 'Electronic Beat', 'genre': 'Electronic', 'duration': '3:00', 'id': 'electronic_beat'},
-      {'name': 'Synthwave Nights', 'genre': 'Synthwave', 'duration': '4:00', 'id': 'synthwave_nights'},
-      {'name': 'Ambient Space', 'genre': 'Ambient', 'duration': '5:00', 'id': 'ambient_space'},
-      {'name': 'Nature Sounds', 'genre': 'Nature', 'duration': '10:00', 'id': 'nature_sounds'},
-      {'name': 'Piano Meditation', 'genre': 'Classical', 'duration': '4:40', 'id': 'piano_meditation'},
-      {'name': 'Lo-Fi Study', 'genre': 'Lo-Fi', 'duration': '3:20', 'id': 'lofi_study'},
-      {'name': 'Chiptune Adventure', 'genre': '8-Bit', 'duration': '2:30', 'id': 'chiptune_adventure'},
+      {
+        'name': 'Electronic Beat',
+        'genre': 'Electronic',
+        'duration': '3:00',
+        'id': 'electronic_beat'
+      },
+      {
+        'name': 'Synthwave Nights',
+        'genre': 'Synthwave',
+        'duration': '4:00',
+        'id': 'synthwave_nights'
+      },
+      {
+        'name': 'Ambient Space',
+        'genre': 'Ambient',
+        'duration': '5:00',
+        'id': 'ambient_space'
+      },
+      {
+        'name': 'Nature Sounds',
+        'genre': 'Nature',
+        'duration': '10:00',
+        'id': 'nature_sounds'
+      },
+      {
+        'name': 'Piano Meditation',
+        'genre': 'Classical',
+        'duration': '4:40',
+        'id': 'piano_meditation'
+      },
+      {
+        'name': 'Lo-Fi Study',
+        'genre': 'Lo-Fi',
+        'duration': '3:20',
+        'id': 'lofi_study'
+      },
+      {
+        'name': 'Chiptune Adventure',
+        'genre': '8-Bit',
+        'duration': '2:30',
+        'id': 'chiptune_adventure'
+      },
     ];
 
-    return songs.map((song) => Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: InkWell(
-        onTap: () {
-          Navigator.of(context).pop();
-          _playSpecificSong(song['id']!);
-        },
-        child: Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: Colors.grey[100],
-            borderRadius: BorderRadius.circular(6),
-          ),
-          child: Row(
-            children: [
-              const Icon(Icons.play_circle_outline, size: 20, color: Colors.purple),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(song['name']!, style: const TextStyle(fontWeight: FontWeight.w500)),
-                    Text('${song['genre']} • ${song['duration']}', 
-                         style: TextStyle(fontSize: 12, color: Colors.grey[600])),
-                  ],
+    return songs
+        .map((song) => Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: InkWell(
+                onTap: () {
+                  Navigator.of(context).pop();
+                  _playSpecificSong(song['id']!);
+                },
+                child: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[100],
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.play_circle_outline,
+                          size: 20, color: Colors.purple),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(song['name']!,
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.w500)),
+                            Text('${song['genre']} • ${song['duration']}',
+                                style: TextStyle(
+                                    fontSize: 12, color: Colors.grey[600])),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ],
-          ),
-        ),
-      ),
-    )).toList();
+            ))
+        .toList();
   }
 
   List<Widget> _buildMoodList() {
     final moods = [
-      {'name': 'Energetic', 'desc': 'Upbeat & electronic', 'id': 'energetic', 'icon': '⚡'},
-      {'name': 'Relaxing', 'desc': 'Ambient & peaceful', 'id': 'relaxing', 'icon': '🧘'},
-      {'name': 'Focused', 'desc': 'Lo-fi & concentration', 'id': 'focused', 'icon': '🎯'},
-      {'name': 'Party', 'desc': 'High-energy dance', 'id': 'party', 'icon': '🎉'},
-      {'name': 'Meditation', 'desc': 'Calm & mindful', 'id': 'meditation', 'icon': '🕉️'},
-      {'name': 'Work', 'desc': 'Background productivity', 'id': 'work', 'icon': '💼'},
-      {'name': 'Sleep', 'desc': 'Gentle lullabies', 'id': 'sleep', 'icon': '😴'},
+      {
+        'name': 'Energetic',
+        'desc': 'Upbeat & electronic',
+        'id': 'energetic',
+        'icon': '⚡'
+      },
+      {
+        'name': 'Relaxing',
+        'desc': 'Ambient & peaceful',
+        'id': 'relaxing',
+        'icon': '🧘'
+      },
+      {
+        'name': 'Focused',
+        'desc': 'Lo-fi & concentration',
+        'id': 'focused',
+        'icon': '🎯'
+      },
+      {
+        'name': 'Party',
+        'desc': 'High-energy dance',
+        'id': 'party',
+        'icon': '🎉'
+      },
+      {
+        'name': 'Meditation',
+        'desc': 'Calm & mindful',
+        'id': 'meditation',
+        'icon': '🕉️'
+      },
+      {
+        'name': 'Work',
+        'desc': 'Background productivity',
+        'id': 'work',
+        'icon': '💼'
+      },
+      {
+        'name': 'Sleep',
+        'desc': 'Gentle lullabies',
+        'id': 'sleep',
+        'icon': '😴'
+      },
     ];
 
-    return moods.map((mood) => Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: InkWell(
-        onTap: () {
-          Navigator.of(context).pop();
-          _playMoodPlaylist(mood['id']!);
-        },
-        child: Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: Colors.blue[50],
-            borderRadius: BorderRadius.circular(6),
-          ),
-          child: Row(
-            children: [
-              Text(mood['icon']!, style: const TextStyle(fontSize: 20)),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(mood['name']!, style: const TextStyle(fontWeight: FontWeight.w500)),
-                    Text(mood['desc']!, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
-                  ],
+    return moods
+        .map((mood) => Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: InkWell(
+                onTap: () {
+                  Navigator.of(context).pop();
+                  _playMoodPlaylist(mood['id']!);
+                },
+                child: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.blue[50],
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Row(
+                    children: [
+                      Text(mood['icon']!, style: const TextStyle(fontSize: 20)),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(mood['name']!,
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.w500)),
+                            Text(mood['desc']!,
+                                style: TextStyle(
+                                    fontSize: 12, color: Colors.grey[600])),
+                          ],
+                        ),
+                      ),
+                      const Icon(Icons.playlist_play, color: Colors.blue),
+                    ],
+                  ),
                 ),
               ),
-              const Icon(Icons.playlist_play, color: Colors.blue),
-            ],
-          ),
-        ),
-      ),
-    )).toList();
+            ))
+        .toList();
   }
 
   Future<void> _playSpecificSong(String songId) async {
@@ -1708,14 +1883,16 @@ class _MobileKaiState extends State<_MobileKai>
         action: 'play_song',
         params: {'song': songId},
       );
-      
+
       if (success) {
-        await _sendAudioFeedback('Now playing your selected song through Bluetooth speaker!');
+        await _sendAudioFeedback(
+            'Now playing your selected song through Bluetooth speaker!');
       }
-      
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(success ? '🎵 Song started! 🔊' : '❌ Song command failed'),
+          content:
+              Text(success ? '🎵 Song started! 🔊' : '❌ Song command failed'),
           duration: const Duration(seconds: 2),
           backgroundColor: success ? Colors.green : Colors.red,
         ),
@@ -1740,14 +1917,17 @@ class _MobileKaiState extends State<_MobileKai>
         action: 'play_mood',
         params: {'mood': mood, 'shuffle': true},
       );
-      
+
       if (success) {
-        await _sendAudioFeedback('Starting $mood music playlist! Perfect choice for your current mood.');
+        await _sendAudioFeedback(
+            'Starting $mood music playlist! Perfect choice for your current mood.');
       }
-      
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(success ? '🎭 $mood playlist started! 🔊' : '❌ Playlist command failed'),
+          content: Text(success
+              ? '🎭 $mood playlist started! 🔊'
+              : '❌ Playlist command failed'),
           duration: const Duration(seconds: 2),
           backgroundColor: success ? Colors.green : Colors.red,
         ),
@@ -1773,18 +1953,23 @@ class _MobileKaiState extends State<_MobileKai>
         params: {'mood': 'energetic', 'shuffle': true},
       );
       if (success) {
-        await _sendAudioFeedback('Starting energetic music playlist! Get ready for some great tunes through your Bluetooth speaker.');
+        await _sendAudioFeedback(
+            'Starting energetic music playlist! Get ready for some great tunes through your Bluetooth speaker.');
       }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(success ? '🎵 Music started!' : '❌ Music command failed'),
+          content:
+              Text(success ? '🎵 Music started!' : '❌ Music command failed'),
           duration: const Duration(seconds: 2),
           backgroundColor: success ? Colors.green : Colors.red,
         ),
       );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('❌ Music error: $e'), duration: const Duration(seconds: 2), backgroundColor: Colors.red),
+        SnackBar(
+            content: Text('❌ Music error: $e'),
+            duration: const Duration(seconds: 2),
+            backgroundColor: Colors.red),
       );
     }
   }
@@ -1850,12 +2035,12 @@ class _MobileKaiState extends State<_MobileKai>
         Navigator.of(context).pop();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Failed to load persona: $e')),
-      );
+        );
+      }
     }
   }
 
-
-}  /// Open home remote control interface
+  /// Open home remote control interface
   void _openHomeRemote(BuildContext context) {
     showDialog(
       context: context,
@@ -1927,7 +2112,8 @@ class _MobileKaiState extends State<_MobileKai>
               width: 160,
               child: LinearProgressIndicator(
                 backgroundColor: const Color(0x22FFE7B0),
-                valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF3D9BFF)),
+                valueColor:
+                    const AlwaysStoppedAnimation<Color>(Color(0xFF3D9BFF)),
                 minHeight: 2,
               ),
             ),
@@ -2004,7 +2190,8 @@ class _MobileKaiState extends State<_MobileKai>
             onPressed: () => Navigator.push(
               context,
               MaterialPageRoute(
-                builder: (_) => ApiKeySetupScreen(onComplete: () => Navigator.pop(context)),
+                builder: (_) =>
+                    ApiKeySetupScreen(onComplete: () => Navigator.pop(context)),
               ),
             ),
             icon: const Icon(Icons.key, color: Colors.white70),
@@ -2020,21 +2207,27 @@ class _MobileKaiState extends State<_MobileKai>
               if (_tavernGuest != null)
                 GestureDetector(
                   onTap: () {
-                    final guest    = _tavernGuest!;
+                    final guest = _tavernGuest!;
                     final briefing = _tavernBriefing ?? '';
-                    setState(() { _tavernGuest = null; _tavernBriefing = null; });
+                    setState(() {
+                      _tavernGuest = null;
+                      _tavernBriefing = null;
+                    });
                     // Feed briefing into the chat so Kai can discuss the guest
-                    _controller.text = '(tavern) ${guest.name} just arrived — visit #${guest.visitCount}. $briefing';
+                    _controller.text =
+                        '(tavern) ${guest.name} just arrived — visit #${guest.visitCount}. $briefing';
                     _setBubble(true);
                     _send();
                   },
                   child: Container(
                     margin: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 10),
                     decoration: BoxDecoration(
                       color: const Color(0xFF3D1A00).withOpacity(0.9),
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: const Color(0xFFD4AF37).withOpacity(0.6)),
+                      border: Border.all(
+                          color: const Color(0xFFD4AF37).withOpacity(0.6)),
                     ),
                     child: Row(
                       children: [
@@ -2052,17 +2245,20 @@ class _MobileKaiState extends State<_MobileKai>
                                   fontSize: 13,
                                 ),
                               ),
-                              if (_tavernBriefing != null && _tavernBriefing!.isNotEmpty)
+                              if (_tavernBriefing != null &&
+                                  _tavernBriefing!.isNotEmpty)
                                 Text(
                                   _tavernBriefing!,
-                                  style: const TextStyle(color: Color(0x99FFE7B0), fontSize: 11),
+                                  style: const TextStyle(
+                                      color: Color(0x99FFE7B0), fontSize: 11),
                                   maxLines: 2,
                                   overflow: TextOverflow.ellipsis,
                                 ),
                             ],
                           ),
                         ),
-                        const Icon(Icons.chevron_right, color: Color(0xFFD4AF37), size: 18),
+                        const Icon(Icons.chevron_right,
+                            color: Color(0xFFD4AF37), size: 18),
                       ],
                     ),
                   ),
@@ -2080,7 +2276,8 @@ class _MobileKaiState extends State<_MobileKai>
                     child: Row(
                       children: [
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 5),
                           decoration: BoxDecoration(
                             color: const Color(0xFFFFE7B0).withOpacity(0.08),
                             borderRadius: BorderRadius.circular(20),
@@ -2119,221 +2316,254 @@ class _MobileKaiState extends State<_MobileKai>
                 child: Stack(
                   alignment: Alignment.center,
                   children: [
-                  Center(
-                  child: Listener(
-                    // ── Raw pointer events ─────────────────────────────────
-                    // Using Listener (not GestureDetector callbacks) so we get
-                    // every move event before the gesture arena resolves anything.
-                    // This lets us kill the hold-timer the instant the finger
-                    // drifts, guaranteeing a drag never activates the mic.
+                    Center(
+                      child: Listener(
+                        // ── Raw pointer events ─────────────────────────────────
+                        // Using Listener (not GestureDetector callbacks) so we get
+                        // every move event before the gesture arena resolves anything.
+                        // This lets us kill the hold-timer the instant the finger
+                        // drifts, guaranteeing a drag never activates the mic.
 
-                    onPointerDown: (e) {
-                      _holdTimer?.cancel();
-                      _pressOrigin   = e.localPosition;
-                      _pressWasDrag  = false;
+                        onPointerDown: (e) {
+                          _holdTimer?.cancel();
+                          _pressOrigin = e.localPosition;
+                          _pressWasDrag = false;
 
-                      // Wait _kHoldDelay before starting the mic — gives the
-                      // gesture arena time to detect a drag intent first.
-                      _holdTimer = Timer(_kHoldDelay, () async {
-                        if (_pressWasDrag || !mounted) return;
-                        _markInteraction();
-                        _switchToAnimation('attention');
-                        HapticFeedback.mediumImpact();
-                        await VoiceActivationService().pause();
-                        final started = await VoiceService().startRecording();
-                        if (started && mounted) {
-                          setState(() => _isHoldingToSpeak = true);
-                          print('🎤 [HoldToSpeak] Recording started');
-                        } else if (mounted) {
-                          _switchToAnimation('idle');
+                          // Wait _kHoldDelay before starting the mic — gives the
+                          // gesture arena time to detect a drag intent first.
+                          _holdTimer = Timer(_kHoldDelay, () async {
+                            if (_pressWasDrag || !mounted) return;
+                            _markInteraction();
+                            _switchToAnimation('attention');
+                            HapticFeedback.mediumImpact();
+                            await VoiceActivationService().pause();
+                            final started =
+                                await VoiceService().startRecording();
+                            if (started && mounted) {
+                              setState(() => _isHoldingToSpeak = true);
+                              print('🎤 [HoldToSpeak] Recording started');
+                            } else if (mounted) {
+                              _switchToAnimation('idle');
+                              VoiceActivationService().resume();
+                            }
+                          });
+                        },
+
+                        onPointerMove: (e) {
+                          if (_pressOrigin == null || _pressWasDrag) return;
+                          final dist =
+                              (e.localPosition - _pressOrigin!).distance;
+                          if (dist > _kDragThreshold) {
+                            // Finger moved — this is a drag, not a hold-to-speak
+                            _pressWasDrag = true;
+                            _holdTimer?.cancel();
+                            if (_isHoldingToSpeak) {
+                              // Recording already started — cancel it silently
+                              setState(() => _isHoldingToSpeak = false);
+                              VoiceService().cancelRecording();
+                              VoiceActivationService().resume();
+                              _switchToAnimation('idle');
+                              print(
+                                  '⚠️ [HoldToSpeak] Cancelled — drag detected');
+                            }
+                          }
+                        },
+
+                        onPointerUp: (_) async {
+                          _holdTimer?.cancel();
+                          if (!_isHoldingToSpeak)
+                            return; // tap handled by onTap below
+                          HapticFeedback.lightImpact();
+                          setState(() => _isHoldingToSpeak = false);
+                          print(
+                              '🎤 [HoldToSpeak] Stopping recording on release…');
+                          final path = await VoiceService().stopRecording();
                           VoiceActivationService().resume();
-                        }
-                      });
-                    },
+                          if (!mounted) return;
+                          if (path == null) {
+                            _switchToAnimation('idle');
+                            return;
+                          }
+                          final fileSize =
+                              await File(path).length().catchError((Object e) {
+                            print('⚠️ [HoldToSpeak] file length failed: $e');
+                            return 0;
+                          });
+                          if (fileSize < 8000) {
+                            print(
+                                '⚠️ [HoldToSpeak] Too short ($fileSize bytes) — ignoring');
+                            await File(path)
+                                .delete()
+                                .then<void>((_) {})
+                                .catchError((Object e) {
+                              print('⚠️ [HoldToSpeak] temp delete failed: $e');
+                            });
+                            _switchToAnimation('idle');
+                            return;
+                          }
+                          _switchToAnimation('thinking');
+                          final transcript =
+                              await VoiceService().transcribeAudio(path);
+                          if (transcript != null &&
+                              transcript.trim().isNotEmpty &&
+                              mounted) {
+                            print('🎤 [HoldToSpeak] Transcript: "$transcript"');
+                            setState(
+                                () => _controller.text = transcript.trim());
+                            _setBubble(true);
+                            _send();
+                          } else {
+                            print('⚠️ [HoldToSpeak] Empty transcript');
+                            _switchToAnimation('idle');
+                          }
+                        },
 
-                    onPointerMove: (e) {
-                      if (_pressOrigin == null || _pressWasDrag) return;
-                      final dist = (e.localPosition - _pressOrigin!).distance;
-                      if (dist > _kDragThreshold) {
-                        // Finger moved — this is a drag, not a hold-to-speak
-                        _pressWasDrag = true;
-                        _holdTimer?.cancel();
-                        if (_isHoldingToSpeak) {
-                          // Recording already started — cancel it silently
+                        onPointerCancel: (_) {
+                          _holdTimer?.cancel();
+                          if (!_isHoldingToSpeak) return;
                           setState(() => _isHoldingToSpeak = false);
                           VoiceService().cancelRecording();
                           VoiceActivationService().resume();
                           _switchToAnimation('idle');
-                          print('⚠️ [HoldToSpeak] Cancelled — drag detected');
-                        }
-                      }
-                    },
+                          print('⚠️ [HoldToSpeak] Cancelled (pointer cancel)');
+                        },
 
-                    onPointerUp: (_) async {
-                      _holdTimer?.cancel();
-                      if (!_isHoldingToSpeak) return; // tap handled by onTap below
-                      HapticFeedback.lightImpact();
-                      setState(() => _isHoldingToSpeak = false);
-                      print('🎤 [HoldToSpeak] Stopping recording on release…');
-                      final path = await VoiceService().stopRecording();
-                      VoiceActivationService().resume();
-                      if (!mounted) return;
-                      if (path == null) {
-                        _switchToAnimation('idle');
-                        return;
-                      }
-                      final fileSize = await File(path).length().catchError((Object e) {
-                        print('⚠️ [HoldToSpeak] file length failed: $e');
-                        return 0;
-                      });
-                      if (fileSize < 8000) {
-                        print('⚠️ [HoldToSpeak] Too short ($fileSize bytes) — ignoring');
-                        await File(path).delete().then<void>((_) {}).catchError((Object e) {
-                          print('⚠️ [HoldToSpeak] temp delete failed: $e');
-                        });
-                        _switchToAnimation('idle');
-                        return;
-                      }
-                      _switchToAnimation('thinking');
-                      final transcript = await VoiceService().transcribeAudio(path);
-                      if (transcript != null && transcript.trim().isNotEmpty && mounted) {
-                        print('🎤 [HoldToSpeak] Transcript: "$transcript"');
-                        setState(() => _controller.text = transcript.trim());
-                        _setBubble(true);
-                        _send();
-                      } else {
-                        print('⚠️ [HoldToSpeak] Empty transcript');
-                        _switchToAnimation('idle');
-                      }
-                    },
-
-                    onPointerCancel: (_) {
-                      _holdTimer?.cancel();
-                      if (!_isHoldingToSpeak) return;
-                      setState(() => _isHoldingToSpeak = false);
-                      VoiceService().cancelRecording();
-                      VoiceActivationService().resume();
-                      _switchToAnimation('idle');
-                      print('⚠️ [HoldToSpeak] Cancelled (pointer cancel)');
-                    },
-
-                    child: GestureDetector(
-                    // Tap (quick press+release, no mic involved) → toggle bubble
-                    onTap: () {
-                      if (_isHoldingToSpeak) return;
-                      _markInteraction();
-                      // Kai is seeking attention — deliver his pending message on tap
-                      if (_isAttentionSeeking && _pendingProactiveEvent != null) {
-                        _deliverPendingProactive();
-                        return;
-                      }
-                      _pulseAttention();
-                      _setBubble(!_showBubble);
-                    },
-                    child: AnimatedBuilder(
-                      animation: _glow,
-                      builder: (context, _) {
-                        return Stack(
-                          alignment: Alignment.center,
-                          children: [
-                            // Glow effect
-                            // Amber pulse when Kai wants attention, normal glow otherwise
-                            Container(
-                              width: kSpriteSize + kRingPadding * 2,
-                              height: kSpriteSize + kRingPadding * 2,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: _isAttentionSeeking
-                                        ? Colors.amber.withOpacity(0.55 + 0.35 * _glow.value)
-                                        : stroke.withOpacity(0.3 * _glow.value),
-                                    blurRadius: _isAttentionSeeking ? 28 : 20,
-                                    spreadRadius: _isAttentionSeeking ? 8 : 5,
-                                  ),
-                                ],
-                              ),
-                            ),
-                            // Avatar
-                            Container(
-                              width: kSpriteSize,
-                              height: kSpriteSize,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                  color: stroke.withOpacity(0.7),
-                                  width: 2,
-                                ),
-                              ),
-                              child: ClipOval(
-                                child: _buildAvatarWidget(),
-                              ),
-                            ),
-                            // Floating deltas
-                            ..._floaters.map((f) {
-                              final anim = CurvedAnimation(
-                                  parent: f.ctrl, curve: Curves.easeOutCubic);
-                              return Positioned(
-                                left: cos(f.angle) * (kSpriteSize * 0.7) * (1 + anim.value * 0.3),
-                                top: sin(f.angle) * (kSpriteSize * 0.7) * (1 + anim.value * 0.3) - anim.value * 20,
-                                child: Opacity(
-                                  opacity: (1.0 - anim.value).clamp(0.0, 1.0),
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 8, vertical: 4),
+                        child: GestureDetector(
+                          // Tap (quick press+release, no mic involved) → toggle bubble
+                          onTap: () {
+                            if (_isHoldingToSpeak) return;
+                            _markInteraction();
+                            // Kai is seeking attention — deliver his pending message on tap
+                            if (_isAttentionSeeking &&
+                                _pendingProactiveEvent != null) {
+                              _deliverPendingProactive();
+                              return;
+                            }
+                            _pulseAttention();
+                            _setBubble(!_showBubble);
+                          },
+                          child: AnimatedBuilder(
+                            animation: _glow,
+                            builder: (context, _) {
+                              return Stack(
+                                alignment: Alignment.center,
+                                children: [
+                                  // Glow effect
+                                  // Amber pulse when Kai wants attention, normal glow otherwise
+                                  Container(
+                                    width: kSpriteSize + kRingPadding * 2,
+                                    height: kSpriteSize + kRingPadding * 2,
                                     decoration: BoxDecoration(
-                                      color: Colors.black.withOpacity(0.6),
-                                      borderRadius: BorderRadius.circular(12),
-                                      border: Border.all(color: f.color),
-                                    ),
-                                    child: Text(
-                                      f.text,
-                                      style: TextStyle(
-                                          color: f.color, fontSize: 12),
+                                      shape: BoxShape.circle,
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: _isAttentionSeeking
+                                              ? Colors.amber.withOpacity(
+                                                  0.55 + 0.35 * _glow.value)
+                                              : stroke.withOpacity(
+                                                  0.3 * _glow.value),
+                                          blurRadius:
+                                              _isAttentionSeeking ? 28 : 20,
+                                          spreadRadius:
+                                              _isAttentionSeeking ? 8 : 5,
+                                        ),
+                                      ],
                                     ),
                                   ),
-                                ),
+                                  // Avatar
+                                  Container(
+                                    width: kSpriteSize,
+                                    height: kSpriteSize,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      border: Border.all(
+                                        color: stroke.withOpacity(0.7),
+                                        width: 2,
+                                      ),
+                                    ),
+                                    child: ClipOval(
+                                      child: _buildAvatarWidget(),
+                                    ),
+                                  ),
+                                  // Floating deltas
+                                  ..._floaters.map((f) {
+                                    final anim = CurvedAnimation(
+                                        parent: f.ctrl,
+                                        curve: Curves.easeOutCubic);
+                                    return Positioned(
+                                      left: cos(f.angle) *
+                                          (kSpriteSize * 0.7) *
+                                          (1 + anim.value * 0.3),
+                                      top: sin(f.angle) *
+                                              (kSpriteSize * 0.7) *
+                                              (1 + anim.value * 0.3) -
+                                          anim.value * 20,
+                                      child: Opacity(
+                                        opacity:
+                                            (1.0 - anim.value).clamp(0.0, 1.0),
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 8, vertical: 4),
+                                          decoration: BoxDecoration(
+                                            color:
+                                                Colors.black.withOpacity(0.6),
+                                            borderRadius:
+                                                BorderRadius.circular(12),
+                                            border: Border.all(color: f.color),
+                                          ),
+                                          child: Text(
+                                            f.text,
+                                            style: TextStyle(
+                                                color: f.color, fontSize: 12),
+                                          ),
+                                        ),
+                                      ),
+                                    );
+                                  }),
+                                ],
                               );
-                            }),
-                          ],
-                        );
-                      },
-                    ),        // closes AnimatedBuilder
-                  ),          // closes GestureDetector
-                  ),          // closes Listener
-                ),            // closes Center — item in outer Stack.children
+                            },
+                          ), // closes AnimatedBuilder
+                        ), // closes GestureDetector
+                      ), // closes Listener
+                    ), // closes Center — item in outer Stack.children
 
-              // ── Hold-to-speak listening indicator ───────────────────────────
-              if (_isHoldingToSpeak)
-                Positioned(
-                  bottom: 4,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF1A1A2E).withOpacity(0.85),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: const Color(0xFF3D9BFF), width: 1.5),
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.mic, color: Color(0xFF3D9BFF), size: 16),
-                        SizedBox(width: 6),
-                        Text(
-                          'Listening… release to send',
-                          style: TextStyle(color: Color(0xFF3D9BFF), fontSize: 12),
+                    // ── Hold-to-speak listening indicator ───────────────────────────
+                    if (_isHoldingToSpeak)
+                      Positioned(
+                        bottom: 4,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF1A1A2E).withOpacity(0.85),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(
+                                color: const Color(0xFF3D9BFF), width: 1.5),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.mic,
+                                  color: Color(0xFF3D9BFF), size: 16),
+                              SizedBox(width: 6),
+                              Text(
+                                'Listening… release to send',
+                                style: TextStyle(
+                                    color: Color(0xFF3D9BFF), fontSize: 12),
+                              ),
+                            ],
+                          ),
                         ),
-                      ],
-                    ),
-                  ),
-                ),
-            ], // closes outer Stack children
-          ), // closes outer Stack
-          ), // closes SizedBox
+                      ),
+                  ], // closes outer Stack children
+                ), // closes outer Stack
+              ), // closes SizedBox
 
               // Name badge
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 decoration: BoxDecoration(
                   color: Colors.black.withOpacity(0.5),
                   borderRadius: BorderRadius.circular(20),
@@ -2366,10 +2596,10 @@ class _MobileKaiState extends State<_MobileKai>
                     onTap: _toggleVoice,
                   ),
                   _MobileButton(
-                      icon: _adaptToUser ? Icons.favorite : Icons.favorite_border,
-                      label: 'Adapt',
-                      onTap: () => setState(() => _adaptToUser = !_adaptToUser),
-                    ),
+                    icon: _adaptToUser ? Icons.favorite : Icons.favorite_border,
+                    label: 'Adapt',
+                    onTap: () => setState(() => _adaptToUser = !_adaptToUser),
+                  ),
                   _MobileButton(
                     icon: Icons.person,
                     label: 'Persona',
@@ -2388,7 +2618,8 @@ class _MobileKaiState extends State<_MobileKai>
                     onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) => ChaosJournalScreen(personaId: _personaId),
+                        builder: (_) =>
+                            ChaosJournalScreen(personaId: _personaId),
                       ),
                     ),
                   ),
@@ -2414,7 +2645,8 @@ class _MobileKaiState extends State<_MobileKai>
                     onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) => ActivityFeedScreen(personaId: _personaId),
+                        builder: (_) =>
+                            ActivityFeedScreen(personaId: _personaId),
                       ),
                     ),
                   ),
@@ -2440,7 +2672,8 @@ class _MobileKaiState extends State<_MobileKai>
                   child: PlanCard(
                     plan: _activePlan!,
                     isExpanded: _planExpanded,
-                    onToggle: () => setState(() => _planExpanded = !_planExpanded),
+                    onToggle: () =>
+                        setState(() => _planExpanded = !_planExpanded),
                   ),
                 ),
 
@@ -2565,7 +2798,8 @@ class _ChoiceButtons extends StatelessWidget {
               return GestureDetector(
                 onTap: () => onChoiceTap(choice),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
                   decoration: BoxDecoration(
                     color: stroke.withOpacity(0.10),
                     borderRadius: BorderRadius.circular(20),
@@ -2624,7 +2858,8 @@ class _MobileButton extends StatelessWidget {
             const SizedBox(width: 8),
             Text(
               label,
-              style: const TextStyle(color: stroke, fontWeight: FontWeight.w600),
+              style:
+                  const TextStyle(color: stroke, fontWeight: FontWeight.w600),
             ),
           ],
         ),
@@ -2660,22 +2895,22 @@ class _MobileChatBubble extends StatelessWidget {
   final String personaId;
 
   static const _toolLabels = {
-    'get_current_time':      '🕐 Checking time…',
-    'web_search':            '🔍 Searching the web…',
-    'get_weather':           '🌤 Checking weather…',
-    'set_alarm':             '⏰ Setting alarm…',
-    'set_timer':             '⏱ Starting timer…',
-    'read_calendar':         '📅 Reading calendar…',
-    'open_app':              '📱 Opening app…',
-    'send_whatsapp':         '💬 Sending WhatsApp…',
+    'get_current_time': '🕐 Checking time…',
+    'web_search': '🔍 Searching the web…',
+    'get_weather': '🌤 Checking weather…',
+    'set_alarm': '⏰ Setting alarm…',
+    'set_timer': '⏱ Starting timer…',
+    'read_calendar': '📅 Reading calendar…',
+    'open_app': '📱 Opening app…',
+    'send_whatsapp': '💬 Sending WhatsApp…',
     'create_calendar_event': '📅 Creating event…',
-    'call_contact':          '📞 Dialling…',
-    'play_music':            '🎵 Starting music…',
-    'navigate_to':           '🗺 Opening navigation…',
-    'send_sms':              '💬 Opening SMS…',
-    'set_reminder':          '🔔 Setting reminder…',
-    'read_notifications':    '📲 Reading notifications…',
-    'read_screen':           '👁 Reading screen…',
+    'call_contact': '📞 Dialling…',
+    'play_music': '🎵 Starting music…',
+    'navigate_to': '🗺 Opening navigation…',
+    'send_sms': '💬 Opening SMS…',
+    'set_reminder': '🔔 Setting reminder…',
+    'read_notifications': '📲 Reading notifications…',
+    'read_screen': '👁 Reading screen…',
   };
 
   const _MobileChatBubble({
@@ -2816,7 +3051,8 @@ class _MobileChatBubble extends StatelessWidget {
               duration: const Duration(milliseconds: 300),
               child: Container(
                 key: ValueKey(activeToolName),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
                   color: const Color(0xFFFFE7B0).withOpacity(0.12),
                   borderRadius: BorderRadius.circular(20),
@@ -2879,12 +3115,14 @@ class _MobileChatBubble extends StatelessWidget {
                   // Memory indicator (NEW!)
                   if (memoriesUsed.isNotEmpty) ...[
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
                       margin: const EdgeInsets.only(bottom: 8),
                       decoration: BoxDecoration(
                         color: Colors.purple.withOpacity(0.2),
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.purple.withOpacity(0.5), width: 1),
+                        border: Border.all(
+                            color: Colors.purple.withOpacity(0.5), width: 1),
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
@@ -2918,7 +3156,8 @@ class _MobileChatBubble extends StatelessWidget {
                     children: [
                       const Text(
                         'Voice:',
-                        style: TextStyle(color: stroke, fontWeight: FontWeight.w600),
+                        style: TextStyle(
+                            color: stroke, fontWeight: FontWeight.w600),
                       ),
                       const SizedBox(width: 8),
                       ElevatedButton.icon(
@@ -2933,13 +3172,16 @@ class _MobileChatBubble extends StatelessWidget {
                             ? const SizedBox(
                                 width: 16,
                                 height: 16,
-                                child: CircularProgressIndicator(strokeWidth: 2),
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
                               )
                             : StreamBuilder<PlayerState>(
                                 stream: playingStream,
                                 builder: (context, snap) {
-                                  final playing = snap.data == PlayerState.playing;
-                                  return Icon(playing ? Icons.pause : Icons.play_arrow);
+                                  final playing =
+                                      snap.data == PlayerState.playing;
+                                  return Icon(
+                                      playing ? Icons.pause : Icons.play_arrow);
                                 },
                               ),
                         label: const Text('Play/Pause'),
@@ -2988,15 +3230,18 @@ class _MobileChatBubble extends StatelessWidget {
                       const SizedBox(height: 8),
                       Text(
                         'OpenAI: ${env['OPENAI_API_KEY_set'] ?? false ? 'configured' : 'missing'}',
-                        style: const TextStyle(color: Colors.amber, fontSize: 12),
+                        style:
+                            const TextStyle(color: Colors.amber, fontSize: 12),
                       ),
                       Text(
                         'ElevenLabs: ${env['ELEVENLABS_API_KEY_set'] ?? false ? 'configured' : 'missing'}',
-                        style: const TextStyle(color: Colors.amber, fontSize: 12),
+                        style:
+                            const TextStyle(color: Colors.amber, fontSize: 12),
                       ),
                       Text(
                         'Google: ${env['GOOGLE_API_KEY_set'] ?? false ? 'configured' : 'missing'}',
-                        style: const TextStyle(color: Colors.amber, fontSize: 12),
+                        style:
+                            const TextStyle(color: Colors.amber, fontSize: 12),
                       ),
                       const SizedBox(height: 8),
                       const Text(
@@ -3020,8 +3265,7 @@ class PersonaDialog extends StatefulWidget {
   final AgentState initial;
   final String personaId;
   final Future<void> Function(
-          Map<String, num> pc, Map<String, num> mc, Map<String, num> ac)
-      onSave;
+      Map<String, num> pc, Map<String, num> mc, Map<String, num> ac) onSave;
   const PersonaDialog({
     super.key,
     required this.initial,
@@ -3042,10 +3286,9 @@ class _PersonaDialogState extends State<PersonaDialog> {
     super.initState();
     _pc = widget.initial.personalityCurrent
         .map((k, v) => MapEntry(k, v.toDouble()));
-    _mc = widget.initial.moodCurrent
-        .map((k, v) => MapEntry(k, v.toDouble()));
-    _ac = widget.initial.affinityCurrent
-        .map((k, v) => MapEntry(k, v.toDouble()));
+    _mc = widget.initial.moodCurrent.map((k, v) => MapEntry(k, v.toDouble()));
+    _ac =
+        widget.initial.affinityCurrent.map((k, v) => MapEntry(k, v.toDouble()));
   }
 
   @override
@@ -3069,8 +3312,7 @@ class _PersonaDialogState extends State<PersonaDialog> {
             if (label != null) ...[
               const SizedBox(width: 8),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
                   color: faint,
                   borderRadius: BorderRadius.circular(12),
@@ -3147,17 +3389,19 @@ class _PersonaDialogState extends State<PersonaDialog> {
 
                 if ((widget.initial.summary ?? '').isNotEmpty) ...[
                   Text(widget.initial.summary!,
-                      style: const TextStyle(
-                          color: Colors.white70, height: 1.25)),
+                      style:
+                          const TextStyle(color: Colors.white70, height: 1.25)),
                   const SizedBox(height: 12),
                 ],
 
                 // Developmental drift portrait
                 FutureBuilder<DriftSummary?>(
-                  future: PersonalityDriftService.getDriftSummary(widget.personaId),
+                  future:
+                      PersonalityDriftService.getDriftSummary(widget.personaId),
                   builder: (context, snap) {
                     final drift = snap.data;
-                    if (drift == null || drift.narrativeArc.isEmpty) return const SizedBox.shrink();
+                    if (drift == null || drift.narrativeArc.isEmpty)
+                      return const SizedBox.shrink();
                     final p = drift.portrait;
                     return Container(
                       margin: const EdgeInsets.only(bottom: 12),
@@ -3180,14 +3424,18 @@ class _PersonaDialogState extends State<PersonaDialog> {
                                     letterSpacing: 0.8)),
                             const Spacer(),
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 2),
                               decoration: BoxDecoration(
                                 color: const Color(0x22B8A9FF),
                                 borderRadius: BorderRadius.circular(6),
                               ),
                               child: Text(
                                 drift.confidence.toUpperCase(),
-                                style: const TextStyle(color: Color(0x88B8A9FF), fontSize: 9, letterSpacing: 0.8),
+                                style: const TextStyle(
+                                    color: Color(0x88B8A9FF),
+                                    fontSize: 9,
+                                    letterSpacing: 0.8),
                               ),
                             ),
                           ]),
@@ -3195,7 +3443,9 @@ class _PersonaDialogState extends State<PersonaDialog> {
                           // Narrative arc
                           Text(drift.narrativeArc,
                               style: const TextStyle(
-                                  color: Colors.white, fontSize: 12, height: 1.4,
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  height: 1.4,
                                   fontStyle: FontStyle.italic)),
                           if (p != null) ...[
                             const SizedBox(height: 10),
@@ -3208,11 +3458,14 @@ class _PersonaDialogState extends State<PersonaDialog> {
                             if (p.integrationAssessment.isNotEmpty)
                               _DriftRow('Integration', p.integrationAssessment),
                           ],
-                          if (drift.cumulativeDescription != 'No significant drift yet') ...[
+                          if (drift.cumulativeDescription !=
+                              'No significant drift yet') ...[
                             const SizedBox(height: 8),
                             Text(drift.cumulativeDescription,
                                 style: const TextStyle(
-                                    color: Color(0x66B8A9FF), fontSize: 10, letterSpacing: 0.3)),
+                                    color: Color(0x66B8A9FF),
+                                    fontSize: 10,
+                                    letterSpacing: 0.3)),
                           ],
                         ],
                       ),
@@ -3226,24 +3479,28 @@ class _PersonaDialogState extends State<PersonaDialog> {
                   decoration: BoxDecoration(
                     color: const Color(0xFF2A2119),
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: stroke.withOpacity(0.6), width: 1),
+                    border:
+                        Border.all(color: stroke.withOpacity(0.6), width: 1),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('Personality', style: TextStyle(fontWeight: FontWeight.w600)),
+                      const Text('Personality',
+                          style: TextStyle(fontWeight: FontWeight.w600)),
                       const SizedBox(height: 8),
                       sliderRow(
                           title: 'Extraversion',
                           max: 1000,
                           value: _pc['extraversion'] ?? 0,
-                          onChanged: (v) => setState(() => _pc['extraversion'] = v),
+                          onChanged: (v) =>
+                              setState(() => _pc['extraversion'] = v),
                           label: (pl['extraversion'] ?? '—').toString()),
                       sliderRow(
                           title: 'Intuition',
                           max: 1000,
                           value: _pc['intuition'] ?? 0,
-                          onChanged: (v) => setState(() => _pc['intuition'] = v),
+                          onChanged: (v) =>
+                              setState(() => _pc['intuition'] = v),
                           label: (pl['intuition'] ?? '—').toString()),
                       sliderRow(
                           title: 'Feeling',
@@ -3255,7 +3512,8 @@ class _PersonaDialogState extends State<PersonaDialog> {
                           title: 'Perceiving',
                           max: 1000,
                           value: _pc['perceiving'] ?? 0,
-                          onChanged: (v) => setState(() => _pc['perceiving'] = v),
+                          onChanged: (v) =>
+                              setState(() => _pc['perceiving'] = v),
                           label: (pl['perceiving'] ?? '—').toString()),
                     ],
                   ),
@@ -3268,12 +3526,14 @@ class _PersonaDialogState extends State<PersonaDialog> {
                   decoration: BoxDecoration(
                     color: const Color(0xFF2A2119),
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: stroke.withOpacity(0.6), width: 1),
+                    border:
+                        Border.all(color: stroke.withOpacity(0.6), width: 1),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('Mood', style: TextStyle(fontWeight: FontWeight.w600)),
+                      const Text('Mood',
+                          style: TextStyle(fontWeight: FontWeight.w600)),
                       const SizedBox(height: 8),
                       sliderRow(
                           title: 'Valence',
@@ -3297,13 +3557,15 @@ class _PersonaDialogState extends State<PersonaDialog> {
                           title: 'Confidence',
                           max: 100,
                           value: _mc['confidence'] ?? 0,
-                          onChanged: (v) => setState(() => _mc['confidence'] = v),
+                          onChanged: (v) =>
+                              setState(() => _mc['confidence'] = v),
                           label: (ml['confidence'] ?? '—').toString()),
                       sliderRow(
                           title: 'Playfulness',
                           max: 100,
                           value: _mc['playfulness'] ?? 0,
-                          onChanged: (v) => setState(() => _mc['playfulness'] = v),
+                          onChanged: (v) =>
+                              setState(() => _mc['playfulness'] = v),
                           label: (ml['playfulness'] ?? '—').toString()),
                       sliderRow(
                           title: 'Focus',
@@ -3318,30 +3580,34 @@ class _PersonaDialogState extends State<PersonaDialog> {
 
                 // Affinity section
                 Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF2A2119),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: stroke.withOpacity(0.6), width: 1),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('Affinity', style: TextStyle(fontWeight: FontWeight.w600)),
-                        const SizedBox(height: 8),
-                        sliderRow(
-                            title: 'Intimacy',
-                            max: 100,
-                            value: _ac['intimacy'] ?? 50,
-                            onChanged: (v) => setState(() => _ac['intimacy'] = v)),
-                        sliderRow(
-                            title: 'Physicality',
-                            max: 100,
-                            value: _ac['physicality'] ?? 50,
-                            onChanged: (v) => setState(() => _ac['physicality'] = v)),
-                      ],
-                    ),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF2A2119),
+                    borderRadius: BorderRadius.circular(12),
+                    border:
+                        Border.all(color: stroke.withOpacity(0.6), width: 1),
                   ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Affinity',
+                          style: TextStyle(fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 8),
+                      sliderRow(
+                          title: 'Intimacy',
+                          max: 100,
+                          value: _ac['intimacy'] ?? 50,
+                          onChanged: (v) =>
+                              setState(() => _ac['intimacy'] = v)),
+                      sliderRow(
+                          title: 'Physicality',
+                          max: 100,
+                          value: _ac['physicality'] ?? 50,
+                          onChanged: (v) =>
+                              setState(() => _ac['physicality'] = v)),
+                    ],
+                  ),
+                ),
                 const SizedBox(height: 12),
 
                 // Buttons
@@ -3355,7 +3621,8 @@ class _PersonaDialogState extends State<PersonaDialog> {
                             if (context.mounted) {
                               Navigator.of(context).pop();
                               ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('Saved locally')));
+                                  const SnackBar(
+                                      content: Text('Saved locally')));
                             }
                           } catch (e) {
                             if (context.mounted) {
@@ -3414,8 +3681,10 @@ class _DriftRow extends StatelessWidget {
             width: 72,
             child: Text(label,
                 style: const TextStyle(
-                    color: Color(0x88B8A9FF), fontSize: 10,
-                    fontWeight: FontWeight.w600, letterSpacing: 0.5)),
+                    color: Color(0x88B8A9FF),
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.5)),
           ),
           Expanded(
             child: Text(value,
@@ -3499,13 +3768,16 @@ class _GmKaiSheet extends StatelessWidget {
   });
 
   static void _musicCmd(String action, [Map<String, dynamic>? params]) {
-    HomeAutomationService().sendCommand(
-      personaId: 'truekai',
-      deviceId: 'raspberry_pi_home',
-      target: 'music',
-      action: action,
-      params: params ?? {},
-    ).then<void>((_) {}).catchError((Object e) {
+    HomeAutomationService()
+        .sendCommand(
+          personaId: 'truekai',
+          deviceId: 'raspberry_pi_home',
+          target: 'music',
+          action: action,
+          params: params ?? {},
+        )
+        .then<void>((_) {})
+        .catchError((Object e) {
       print('GM music $action error: $e');
     });
   }
@@ -3517,7 +3789,7 @@ class _GmKaiSheet extends StatelessWidget {
 
     // Helper: large action tile
     Widget tile(String emoji, String label, VoidCallback fn,
-        {Color borderColor = const Color(0x33FFE7B0)}) =>
+            {Color borderColor = const Color(0x33FFE7B0)}) =>
         GestureDetector(
           onTap: fn,
           child: Container(
@@ -3535,7 +3807,9 @@ class _GmKaiSheet extends StatelessWidget {
                 Text(label,
                     textAlign: TextAlign.center,
                     style: const TextStyle(
-                        color: stroke, fontSize: 12, fontWeight: FontWeight.w600)),
+                        color: stroke,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600)),
               ],
             ),
           ),
@@ -3564,8 +3838,12 @@ class _GmKaiSheet extends StatelessWidget {
         );
 
     final moods = [
-      ('⚡', 'Energetic'), ('🧘', 'Relaxing'), ('🎯', 'Focused'),
-      ('🎉', 'Party'),     ('😴', 'Sleep'),    ('💼', 'Work'),
+      ('⚡', 'Energetic'),
+      ('🧘', 'Relaxing'),
+      ('🎯', 'Focused'),
+      ('🎉', 'Party'),
+      ('😴', 'Sleep'),
+      ('💼', 'Work'),
     ];
 
     return DraggableScrollableSheet(
@@ -3580,7 +3858,8 @@ class _GmKaiSheet extends StatelessWidget {
           // Handle
           Center(
             child: Container(
-              width: 36, height: 4,
+              width: 36,
+              height: 4,
               margin: const EdgeInsets.only(bottom: 16),
               decoration: BoxDecoration(
                 color: stroke.withOpacity(0.25),
@@ -3596,7 +3875,9 @@ class _GmKaiSheet extends StatelessWidget {
               SizedBox(width: 10),
               Text('GM Kai',
                   style: TextStyle(
-                      color: stroke, fontSize: 18, fontWeight: FontWeight.w700)),
+                      color: stroke,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700)),
             ],
           ),
 
@@ -3607,7 +3888,8 @@ class _GmKaiSheet extends StatelessWidget {
           const SizedBox(height: 20),
 
           // ── Pi & Environment ──────────────────────────────────────────────
-          const Text('ENVIRONMENT', style: TextStyle(color: dim, fontSize: 11, letterSpacing: 1.2)),
+          const Text('ENVIRONMENT',
+              style: TextStyle(color: dim, fontSize: 11, letterSpacing: 1.2)),
           const SizedBox(height: 10),
           GridView.count(
             crossAxisCount: 4,
@@ -3626,19 +3908,20 @@ class _GmKaiSheet extends StatelessWidget {
           const SizedBox(height: 20),
 
           // ── Music ─────────────────────────────────────────────────────────
-          const Text('MUSIC', style: TextStyle(color: dim, fontSize: 11, letterSpacing: 1.2)),
+          const Text('MUSIC',
+              style: TextStyle(color: dim, fontSize: 11, letterSpacing: 1.2)),
           const SizedBox(height: 12),
 
           // Transport row
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
-              transport(Icons.skip_previous, 'Prev',  () => _musicCmd('prev')),
-              transport(Icons.play_arrow,    'Play',  () => _musicCmd('play')),
-              transport(Icons.pause,         'Pause', () => _musicCmd('pause')),
-              transport(Icons.stop,          'Stop',  () => _musicCmd('stop')),
-              transport(Icons.skip_next,     'Next',  () => _musicCmd('next')),
-              transport(Icons.shuffle,       'Shuffle',() => _musicCmd('shuffle')),
+              transport(Icons.skip_previous, 'Prev', () => _musicCmd('prev')),
+              transport(Icons.play_arrow, 'Play', () => _musicCmd('play')),
+              transport(Icons.pause, 'Pause', () => _musicCmd('pause')),
+              transport(Icons.stop, 'Stop', () => _musicCmd('stop')),
+              transport(Icons.skip_next, 'Next', () => _musicCmd('next')),
+              transport(Icons.shuffle, 'Shuffle', () => _musicCmd('shuffle')),
             ],
           ),
 
@@ -3648,23 +3931,28 @@ class _GmKaiSheet extends StatelessWidget {
           Wrap(
             spacing: 8,
             runSpacing: 8,
-            children: moods.map((m) => GestureDetector(
-              onTap: () => _musicCmd('play_mood',
-                  {'mood': m.$2.toLowerCase(), 'shuffle': true}),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.05),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: const Color(0x33FFE7B0)),
-                ),
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  Text(m.$1, style: const TextStyle(fontSize: 14)),
-                  const SizedBox(width: 5),
-                  Text(m.$2, style: const TextStyle(color: stroke, fontSize: 12)),
-                ]),
-              ),
-            )).toList(),
+            children: moods
+                .map((m) => GestureDetector(
+                      onTap: () => _musicCmd('play_mood',
+                          {'mood': m.$2.toLowerCase(), 'shuffle': true}),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.05),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: const Color(0x33FFE7B0)),
+                        ),
+                        child: Row(mainAxisSize: MainAxisSize.min, children: [
+                          Text(m.$1, style: const TextStyle(fontSize: 14)),
+                          const SizedBox(width: 5),
+                          Text(m.$2,
+                              style:
+                                  const TextStyle(color: stroke, fontSize: 12)),
+                        ]),
+                      ),
+                    ))
+                .toList(),
           ),
 
           const SizedBox(height: 10),
@@ -3685,7 +3973,8 @@ class _GmKaiSheet extends StatelessWidget {
                   children: [
                     Icon(Icons.library_music_outlined, color: stroke, size: 18),
                     SizedBox(width: 8),
-                    Text('Full Song Library', style: TextStyle(color: stroke, fontSize: 13)),
+                    Text('Full Song Library',
+                        style: TextStyle(color: stroke, fontSize: 13)),
                   ],
                 ),
               ),
@@ -3695,7 +3984,8 @@ class _GmKaiSheet extends StatelessWidget {
           const SizedBox(height: 20),
 
           // ── Remote ───────────────────────────────────────────────────────
-          const Text('REMOTE', style: TextStyle(color: dim, fontSize: 11, letterSpacing: 1.2)),
+          const Text('REMOTE',
+              style: TextStyle(color: dim, fontSize: 11, letterSpacing: 1.2)),
           const SizedBox(height: 10),
           GestureDetector(
             onTap: onOpenRemote,
@@ -3714,7 +4004,9 @@ class _GmKaiSheet extends StatelessWidget {
                     SizedBox(width: 10),
                     Text('Home Remote Control',
                         style: TextStyle(
-                            color: stroke, fontSize: 14, fontWeight: FontWeight.w600)),
+                            color: stroke,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600)),
                   ],
                 ),
               ),
@@ -3723,21 +4015,25 @@ class _GmKaiSheet extends StatelessWidget {
 
           // ── Tavern ───────────────────────────────────────────────────────
           const SizedBox(height: 20),
-          const Text('TAVERN', style: TextStyle(color: dim, fontSize: 11, letterSpacing: 1.2)),
+          const Text('TAVERN',
+              style: TextStyle(color: dim, fontSize: 11, letterSpacing: 1.2)),
           const SizedBox(height: 10),
           GestureDetector(
             onTap: () {
               Navigator.pop(context);
-              Navigator.push(context, MaterialPageRoute(
-                builder: (_) => const TavernRegisterScreen(),
-              ));
+              Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const TavernRegisterScreen(),
+                  ));
             },
             child: Container(
               padding: const EdgeInsets.symmetric(vertical: 16),
               decoration: BoxDecoration(
                 color: const Color(0xFF3D1A00).withOpacity(0.4),
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: const Color(0xFFD4AF37).withOpacity(0.5)),
+                border:
+                    Border.all(color: const Color(0xFFD4AF37).withOpacity(0.5)),
               ),
               child: const Center(
                 child: Row(
@@ -3758,48 +4054,62 @@ class _GmKaiSheet extends StatelessWidget {
 
           // ── Debug ─────────────────────────────────────────────────────────
           const SizedBox(height: 20),
-          const Text('DEBUG', style: TextStyle(color: dim, fontSize: 11, letterSpacing: 1.2)),
+          const Text('DEBUG',
+              style: TextStyle(color: dim, fontSize: 11, letterSpacing: 1.2)),
           const SizedBox(height: 10),
-          Builder(builder: (ctx) => GestureDetector(
-            onTap: () async {
-              ScaffoldMessenger.of(ctx).showSnackBar(
-                const SnackBar(content: Text('🗜️ Running memory consolidation…'), duration: Duration(seconds: 2)),
-              );
-              try {
-                await MemoryConsolidationService().forceConsolidate(personaId: personaId);
-                if (ctx.mounted) {
-                  ScaffoldMessenger.of(ctx).showSnackBar(
-                    const SnackBar(content: Text('✅ Consolidation done — check Firebase'), duration: Duration(seconds: 3)),
-                  );
-                }
-              } catch (e) {
-                if (ctx.mounted) {
-                  ScaffoldMessenger.of(ctx).showSnackBar(
-                    SnackBar(content: Text('❌ $e'), duration: const Duration(seconds: 4)),
-                  );
-                }
-              }
-            },
-            child: Container(
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.03),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: Colors.white.withOpacity(0.15)),
-              ),
-              child: const Center(
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text('🗜️', style: TextStyle(fontSize: 18)),
-                    SizedBox(width: 10),
-                    Text('Force Memory Consolidation',
-                        style: TextStyle(color: dim, fontSize: 13, fontWeight: FontWeight.w500)),
-                  ],
-                ),
-              ),
-            ),
-          )),
+          Builder(
+              builder: (ctx) => GestureDetector(
+                    onTap: () async {
+                      ScaffoldMessenger.of(ctx).showSnackBar(
+                        const SnackBar(
+                            content: Text('🗜️ Running memory consolidation…'),
+                            duration: Duration(seconds: 2)),
+                      );
+                      try {
+                        await MemoryConsolidationService()
+                            .forceConsolidate(personaId: personaId);
+                        if (ctx.mounted) {
+                          ScaffoldMessenger.of(ctx).showSnackBar(
+                            const SnackBar(
+                                content: Text(
+                                    '✅ Consolidation done — check Firebase'),
+                                duration: Duration(seconds: 3)),
+                          );
+                        }
+                      } catch (e) {
+                        if (ctx.mounted) {
+                          ScaffoldMessenger.of(ctx).showSnackBar(
+                            SnackBar(
+                                content: Text('❌ $e'),
+                                duration: const Duration(seconds: 4)),
+                          );
+                        }
+                      }
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.03),
+                        borderRadius: BorderRadius.circular(14),
+                        border:
+                            Border.all(color: Colors.white.withOpacity(0.15)),
+                      ),
+                      child: const Center(
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text('🗜️', style: TextStyle(fontSize: 18)),
+                            SizedBox(width: 10),
+                            Text('Force Memory Consolidation',
+                                style: TextStyle(
+                                    color: dim,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w500)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  )),
         ],
       ),
     );

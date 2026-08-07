@@ -48,6 +48,12 @@ class KaiMemoryCandidate {
       };
 }
 
+/// Carries optional thread continuity to another body.
+///
+/// The legacy "handoff" name is retained on the wire for compatibility. It
+/// never means Kai left [fromSurface] or moved exclusively to [toSurface]; both
+/// bodies may remain active. Only this compact summary is delivered, never the
+/// source body's raw transcript.
 class KaiSurfaceHandoff {
   const KaiSurfaceHandoff({
     required this.handoffId,
@@ -67,6 +73,7 @@ class KaiSurfaceHandoff {
 
   Map<String, Object?> toJson() => {
         'handoffId': handoffId,
+        'purpose': 'thread_continuation',
         'fromSurface': fromSurface.name,
         'toSurface': toSurface.name,
         'conversationId': conversationId,

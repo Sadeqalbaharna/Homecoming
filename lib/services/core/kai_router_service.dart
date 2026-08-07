@@ -32,7 +32,8 @@ class KaiRouteDecision {
 
   String promptBlock() {
     final pct = (confidence * 100).round();
-    final why = reasons.isEmpty ? 'no strong deterministic signal' : reasons.join('; ');
+    final why =
+        reasons.isEmpty ? 'no strong deterministic signal' : reasons.join('; ');
     return '''
 \n=== Kai Routing Brain ===
 Route: $label ($pct% confidence)
@@ -75,23 +76,27 @@ class KaiRouterService {
     }
 
     if (hasImage) {
-      pick(KaiRoute.fastChat, 0.55, 'message includes an image; answer in visual context unless another route is stronger');
+      pick(KaiRoute.fastChat, 0.55,
+          'message includes an image; answer in visual context unless another route is stronger');
     }
 
     if (_containsAny(lower, _codingSignals) || _looksLikeFilePath(lower)) {
       pick(KaiRoute.coding, 0.86, 'coding/build/debugging signal detected');
     }
 
-    if (_containsAny(lower, _toolSignals)) {
+    if (_containsAny(lower, _toolSignals) ||
+        _looksLikePhoneCallRequest(lower)) {
       pick(KaiRoute.tool, 0.84, 'explicit action/tool request detected');
     }
 
     if (_containsAny(lower, _emotionalSignals)) {
-      pick(KaiRoute.emotional, 0.82, 'emotional support / vulnerable-state signal detected');
+      pick(KaiRoute.emotional, 0.82,
+          'emotional support / vulnerable-state signal detected');
     }
 
     if (_containsAny(lower, _contemplateSignals)) {
-      pick(KaiRoute.contemplate, 0.78, 'deep design/strategy/thinking signal detected');
+      pick(KaiRoute.contemplate, 0.78,
+          'deep design/strategy/thinking signal detected');
     }
 
     // Trust mode / "go ahead" during an already-open job should keep momentum in
@@ -124,6 +129,19 @@ class KaiRouterService {
       lower.contains('test/') ||
       lower.contains('c:\\') ||
       lower.contains('stack trace');
+
+  /// A phone call is an action only when the sentence actually asks for one.
+  ///
+  /// The old tool list contained the raw substring `call `. That classified
+  /// "let's call this corner the Wobble Nook" as a device action and stranded
+  /// a relationship moment inside VR-only creative memory. Naming something is
+  /// not telephony. Keep this deliberately narrow; uncertain language should
+  /// remain conversation rather than gaining a tool posture.
+  static bool _looksLikePhoneCallRequest(String lower) =>
+      RegExp(r'^(?:please\s+)?call\s+(?!this\b|that\b|it\b|the\b)')
+          .hasMatch(lower) ||
+      RegExp(r'\b(?:can|could|would|will) you call\s+').hasMatch(lower) ||
+      RegExp(r'^phone\s+').hasMatch(lower);
 
   static const _codingSignals = <String>[
     'code',
@@ -159,7 +177,6 @@ class KaiRouterService {
     'message ',
     'whatsapp',
     'sms',
-    'call ',
     'open ',
     'navigate',
     'directions',
@@ -190,6 +207,7 @@ class KaiRouterService {
     'hurt',
     'rough day',
     'comfort me',
+    'makes me happy',
   ];
 
   static const _contemplateSignals = <String>[

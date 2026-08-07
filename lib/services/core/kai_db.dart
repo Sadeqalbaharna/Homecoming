@@ -24,6 +24,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart' as fdb;
 import 'package:http/http.dart' as http;
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 /// True when the firebase_database plugin is unavailable and we must use REST.
 bool get kaiDbUsesRest =>
@@ -34,10 +35,27 @@ bool get kaiDbUsesRest =>
 class KaiDb {
   KaiDb._();
   static final KaiDb instance = KaiDb._();
+  static const FlutterSecureStorage _secureStorage = FlutterSecureStorage();
+  static _RestAuthSession? _restAuthSession;
+  static Future<_RestAuthSession>? _restAuthInFlight;
+
+  /// Stable Firebase identity for desktop REST calls.
+  ///
+  /// The Windows Firebase Auth shim does not persist anonymous users. RTDB
+  /// owner/enrollment rules need a UID that survives process restarts, so REST
+  /// uses Firebase Auth's refresh-token flow and keeps that refresh token in the
+  /// OS credential store.
+  Future<String> stableRestUid() async => (await _ensureRestAuth()).uid;
 
   KaiRef ref(String path) => kaiDbUsesRest
       ? _RestRef(_normalize(path))
       : _PluginRef(fdb.FirebaseDatabase.instance.ref(path));
+
+  /// A one-shot RTDB reference that never touches the native Firebase cache.
+  ///
+  /// Large payloads such as embedding vectors can otherwise be retained and
+  /// duplicated by the Android SDK. Keep ordinary realtime data on [ref].
+  KaiRef uncachedRef(String path) => _RestRef(_normalize(path));
 
   /// No-op on desktop (REST has no local persistence); forwards on mobile.
   void setPersistenceEnabled(bool enabled) {
@@ -49,6 +67,110 @@ class KaiDb {
   }
 
   static String _normalize(String p) => p.replaceAll(RegExp(r'^/+|/+$'), '');
+
+  static Future<_RestAuthSession> _ensureRestAuth() async {
+    final cached = _restAuthSession;
+    if (cached != null &&
+        cached.expiresAt.isAfter(DateTime.now().toUtc().add(
+              const Duration(minutes: 2),
+            ))) {
+      return cached;
+    }
+    final inFlight = _restAuthInFlight;
+    if (inFlight != null) return inFlight;
+    final future = _loadOrCreateRestAuth();
+    _restAuthInFlight = future;
+    try {
+      final session = await future;
+      _restAuthSession = session;
+      return session;
+    } finally {
+      _restAuthInFlight = null;
+    }
+  }
+
+  static Future<_RestAuthSession> _loadOrCreateRestAuth() async {
+    final apiKey = Firebase.app().options.apiKey;
+    final savedRefresh =
+        await _secureStorage.read(key: 'kai_desktop_firebase_refresh_token');
+    if (savedRefresh != null && savedRefresh.isNotEmpty) {
+      final response = await http.post(
+        Uri.parse('https://securetoken.googleapis.com/v1/token?key=$apiKey'),
+        headers: const {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: {
+          'grant_type': 'refresh_token',
+          'refresh_token': savedRefresh,
+        },
+      );
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        final data =
+            Map<String, dynamic>.from(jsonDecode(response.body) as Map);
+        return _storeRestAuth(
+          uid: data['user_id'].toString(),
+          idToken: data['id_token'].toString(),
+          refreshToken: data['refresh_token'].toString(),
+          expiresIn: int.tryParse(data['expires_in'].toString()) ?? 3600,
+        );
+      }
+      throw StateError(
+        'Persistent desktop Firebase identity could not be refreshed '
+        '(${response.statusCode})',
+      );
+    }
+
+    final response = await http.post(
+      Uri.parse(
+        'https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=$apiKey',
+      ),
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({'returnSecureToken': true}),
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw StateError(
+        'Persistent desktop Firebase identity could not be created '
+        '(${response.statusCode})',
+      );
+    }
+    final data = Map<String, dynamic>.from(jsonDecode(response.body) as Map);
+    return _storeRestAuth(
+      uid: data['localId'].toString(),
+      idToken: data['idToken'].toString(),
+      refreshToken: data['refreshToken'].toString(),
+      expiresIn: int.tryParse(data['expiresIn'].toString()) ?? 3600,
+    );
+  }
+
+  static Future<_RestAuthSession> _storeRestAuth({
+    required String uid,
+    required String idToken,
+    required String refreshToken,
+    required int expiresIn,
+  }) async {
+    await _secureStorage.write(
+      key: 'kai_desktop_firebase_refresh_token',
+      value: refreshToken,
+    );
+    return _RestAuthSession(
+      uid: uid,
+      idToken: idToken,
+      refreshToken: refreshToken,
+      expiresAt: DateTime.now().toUtc().add(Duration(seconds: expiresIn)),
+    );
+  }
+}
+
+class _RestAuthSession {
+  const _RestAuthSession({
+    required this.uid,
+    required this.idToken,
+    required this.refreshToken,
+    required this.expiresAt,
+  });
+
+  final String uid;
+  final String idToken;
+  final String refreshToken;
+  final DateTime expiresAt;
 }
 
 // ── Shared value types ──────────────────────────────────────────────────────
@@ -78,8 +200,7 @@ class KaiSnapshot {
   Iterable<KaiSnapshot> get children {
     final v = value;
     if (v is Map) {
-      return v.entries
-          .map((e) => KaiSnapshot(e.value, key: e.key.toString()));
+      return v.entries.map((e) => KaiSnapshot(e.value, key: e.key.toString()));
     }
     if (v is List) {
       final out = <KaiSnapshot>[];
@@ -144,8 +265,8 @@ class _PluginQuery implements KaiQuery {
   }
 
   @override
-  Stream<KaiEvent> get onValue =>
-      _q.onValue.map((e) => KaiEvent(KaiSnapshot(e.snapshot.value, key: e.snapshot.key)));
+  Stream<KaiEvent> get onValue => _q.onValue
+      .map((e) => KaiEvent(KaiSnapshot(e.snapshot.value, key: e.snapshot.key)));
 }
 
 class _PluginRef extends _PluginQuery implements KaiRef {
@@ -178,7 +299,8 @@ class _RestRef implements KaiRef {
     _baseCache ??= () {
       try {
         final url = Firebase.app().options.databaseURL;
-        if (url != null && url.isNotEmpty) return url.replaceAll(RegExp(r'/+$'), '');
+        if (url != null && url.isNotEmpty)
+          return url.replaceAll(RegExp(r'/+$'), '');
       } catch (_) {}
       // Fallback to Homecoming's RTDB.
       return 'https://homecoming-74f73-default-rtdb.europe-west1.firebasedatabase.app';
@@ -188,13 +310,21 @@ class _RestRef implements KaiRef {
 
   Future<Uri> _uri() async {
     final params = <String, String>{..._params};
-    final user = FirebaseAuth.instance.currentUser;
-    if (user != null) {
+    if (kaiDbUsesRest) {
+      final session = await KaiDb._ensureRestAuth();
+      params['auth'] = session.idToken;
+    } else {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return _buildUri(params);
       try {
         final t = await user.getIdToken();
         if (t != null && t.isNotEmpty) params['auth'] = t;
       } catch (_) {}
     }
+    return _buildUri(params);
+  }
+
+  Uri _buildUri(Map<String, String> params) {
     if (!params.containsKey('orderBy') &&
         (params.containsKey('limitToLast') ||
             params.containsKey('limitToFirst') ||
@@ -203,8 +333,8 @@ class _RestRef implements KaiRef {
             params.containsKey('endAt'))) {
       params['orderBy'] = '"\$key"';
     }
-    return Uri.parse('$_base/$_path.json').replace(
-        queryParameters: params.isEmpty ? null : params);
+    return Uri.parse('$_base/$_path.json')
+        .replace(queryParameters: params.isEmpty ? null : params);
   }
 
   _RestRef _withParam(String k, String v) =>
@@ -241,10 +371,44 @@ class _RestRef implements KaiRef {
     if (res.statusCode >= 400) {
       throw Exception('KaiDb GET $_path failed: ${res.statusCode} ${res.body}');
     }
-    final decoded = (res.body.isEmpty || res.body == 'null')
-        ? null
-        : jsonDecode(res.body);
+    final decoded =
+        (res.body.isEmpty || res.body == 'null') ? null : jsonDecode(res.body);
     return KaiSnapshot(decoded, key: key);
+  }
+
+  @override
+  Stream<KaiEvent> get onValue {
+    late StreamController<KaiEvent> controller;
+    Timer? timer;
+    String? lastPayload;
+
+    Future<void> emitIfChanged() async {
+      try {
+        final snap = await get();
+        final payload = jsonEncode(snap.value);
+        if (payload == lastPayload) return;
+        lastPayload = payload;
+        if (!controller.isClosed) controller.add(KaiEvent(snap));
+      } catch (e, st) {
+        if (!controller.isClosed) controller.addError(e, st);
+      }
+    }
+
+    controller = StreamController<KaiEvent>.broadcast(
+      onListen: () {
+        unawaited(emitIfChanged());
+        timer = Timer.periodic(
+          const Duration(seconds: 2),
+          (_) => unawaited(emitIfChanged()),
+        );
+      },
+      onCancel: () {
+        timer?.cancel();
+        timer = null;
+      },
+    );
+
+    return controller.stream;
   }
 
   @override
@@ -259,7 +423,8 @@ class _RestRef implements KaiRef {
   Future<void> update(Map<String, Object?> value) async {
     final res = await http.patch(await _uri(), body: jsonEncode(value));
     if (res.statusCode >= 400) {
-      throw Exception('KaiDb UPDATE $_path failed: ${res.statusCode} ${res.body}');
+      throw Exception(
+          'KaiDb UPDATE $_path failed: ${res.statusCode} ${res.body}');
     }
   }
 
@@ -267,38 +432,9 @@ class _RestRef implements KaiRef {
   Future<void> remove() async {
     final res = await http.delete(await _uri());
     if (res.statusCode >= 400) {
-      throw Exception('KaiDb REMOVE $_path failed: ${res.statusCode} ${res.body}');
+      throw Exception(
+          'KaiDb REMOVE $_path failed: ${res.statusCode} ${res.body}');
     }
-  }
-
-  @override
-  Stream<KaiEvent> get onValue {
-    // No SSE on desktop — poll and emit on change. Fine for Kai's cadence.
-    late StreamController<KaiEvent> ctrl;
-    Timer? timer;
-    String? last;
-
-    Future<void> tick() async {
-      try {
-        final snap = await get();
-        final enc = jsonEncode(snap.value);
-        if (enc != last) {
-          last = enc;
-          if (!ctrl.isClosed) ctrl.add(KaiEvent(snap));
-        }
-      } catch (_) {/* keep polling */}
-    }
-
-    ctrl = StreamController<KaiEvent>(
-      onListen: () {
-        tick();
-        timer = Timer.periodic(const Duration(seconds: 4), (_) => tick());
-      },
-      onCancel: () {
-        timer?.cancel();
-      },
-    );
-    return ctrl.stream;
   }
 
   // Firebase push-id algorithm (time-ordered, 20 chars).

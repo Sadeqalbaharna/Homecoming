@@ -206,8 +206,19 @@ class VoiceActivationService {
           .receiveBroadcastStream()
           .listen(
             (data) => _onAudioChunk(data as List<int>),
-            onError: (e) => print('❌  [VAS] Mic stream error: $e'),
-            cancelOnError: false,
+            onError: (Object error, StackTrace stackTrace) {
+              // AudioRecord can be unavailable even with permission. Keep the
+              // app healthy and expose the true listening state instead of
+              // leaving a dead subscription marked active.
+              print('⚠️  [VAS] Wake-word mic unavailable: $error');
+              _isActive = false;
+              _micSub = null;
+            },
+            onDone: () {
+              _isActive = false;
+              _micSub = null;
+            },
+            cancelOnError: true,
           );
 
       print('🎙️  [VAS] Mic stream started — listening for "Hey Kai"');

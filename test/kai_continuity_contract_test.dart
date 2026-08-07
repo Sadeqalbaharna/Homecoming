@@ -86,6 +86,7 @@ void main() {
     });
     expect(handoff, isNotNull);
     expect(handoff!.toSurface, KaiSurface.messenger);
+    expect(handoff.toJson()['purpose'], 'thread_continuation');
 
     expect(
       KaiSurfaceHandoff.tryParse({

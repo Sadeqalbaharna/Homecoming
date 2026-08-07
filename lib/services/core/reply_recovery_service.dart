@@ -69,6 +69,9 @@ class KaiReplyRecoveryService {
         e.contains('billing')) {
       return FailureKind.outOfCredit;
     }
+    if (e.contains('coding request is missing desktop tools')) {
+      return FailureKind.badRequest;
+    }
     if (e.contains('rate_limit') ||
         e.contains('429') ||
         e.contains('timeout') ||
@@ -100,6 +103,20 @@ class KaiReplyRecoveryService {
   /// True when trying again could plausibly work. Nothing else may promise it.
   static bool isRetryable(FailureKind k) =>
       k == FailureKind.transient || k == FailureKind.unknown;
+
+  /// Internal body/routing mismatches are useful diagnostics, not Kai speech.
+  /// If there is no recovered model text, the UI should log them silently rather
+  /// than printing a scary canned paragraph into the conversation.
+  static bool shouldSuppressVisibleFailureReply({
+    required String? recoveredReply,
+    required Object error,
+  }) {
+    final preserved = recoveredReply?.trim();
+    if (preserved != null && preserved.isNotEmpty) return false;
+
+    final e = error.toString().toLowerCase();
+    return e.contains('coding request is missing desktop tools');
+  }
 
   static String postProcessingFailureReply({
     required String? recoveredReply,

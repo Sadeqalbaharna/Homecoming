@@ -19,9 +19,11 @@
       "$personaId": {
         ".read": "auth != null",
         ".write": "auth != null",
-        ".indexOn": ["timestamp"],
-        "$conversationId": {
-          ".validate": "newData.hasChildren(['userMessage', 'aiResponse', 'timestamp'])"
+        "$surfaceId": {
+          ".indexOn": ["timestamp"],
+          "$turnId": {
+            ".validate": "newData.hasChildren(['userMessage', 'aiResponse', 'timestamp'])"
+          }
         }
       }
     },
@@ -43,7 +45,13 @@
     "memory": {
       "buffers":    { "$personaId": { ".read": "auth != null", ".write": "auth != null" } },
       "shards":     { "$personaId": { ".read": "auth != null", ".write": "auth != null" } },
-      "embeddings": { "$personaId": { ".read": "auth != null", ".write": "auth != null" } },
+      "embeddings": {
+        "$personaId": {
+          ".read": "auth != null",
+          ".write": "auth != null",
+          ".indexOn": ["timestamp"]
+        }
+      },
       "facts":      { "$personaId": { ".read": "auth != null", ".write": "auth != null" } },
       "daily":      { "$personaId": { ".read": "auth != null", ".write": "auth != null" } }
     },
@@ -59,6 +67,60 @@
     },
     "home_automation": {
       "$personaId": { ".read": "auth != null", ".write": "auth != null" }
+    },
+    "kai_core": {
+      "owner": {
+        "$personaId": {
+          ".read": "auth != null",
+          ".write": "auth != null && ((!data.exists() && newData.val() == auth.uid) || (data.val() == auth.uid && newData.val() == auth.uid))"
+        }
+      },
+      "pairings": {
+        "$personaId": {
+          ".read": "auth != null && root.child('kai_core/owner').child($personaId).val() == auth.uid",
+          "$pairingId": {
+            ".write": "auth != null && (root.child('kai_core/owner').child($personaId).val() == auth.uid || (data.exists() && !data.child('claimedBy').exists() && data.child('expiresAt').val() >= now && newData.child('creatorUid').val() == data.child('creatorUid').val() && newData.child('expiresAt').val() == data.child('expiresAt').val() && newData.child('claimedBy').val() == auth.uid))",
+            ".validate": "newData.hasChildren(['creatorUid', 'createdAt', 'expiresAt'])"
+          }
+        }
+      },
+      "coordinator": {
+        "$personaId": {
+          ".read": "auth != null",
+          ".write": "auth != null && root.child('kai_core/owner').child($personaId).val() == auth.uid && newData.child('ownerUid').val() == auth.uid",
+          ".validate": "newData.hasChildren(['ownerUid', 'role', 'lastHeartbeatAt', 'leaseExpiresAt']) && newData.child('role').val() == 'central_core' && newData.child('leaseExpiresAt').isNumber() && newData.child('leaseExpiresAt').val() <= now + 120000"
+        }
+      },
+      "enrollments": {
+        "$personaId": {
+          "$deviceId": {
+            ".read": "auth != null",
+            ".write": "auth != null && ((root.child('kai_core/owner').child($personaId).val() == auth.uid && newData.child('ownerUid').val() == auth.uid) || (newData.child('ownerUid').val() == auth.uid && newData.child('pairingId').isString() && root.child('kai_core/pairings').child($personaId).child(newData.child('pairingId').val()).child('claimedBy').val() == auth.uid && root.child('kai_core/pairings').child($personaId).child(newData.child('pairingId').val()).child('claimedDeviceId').val() == $deviceId && root.child('kai_core/pairings').child($personaId).child(newData.child('pairingId').val()).child('claimedSurface').val() == newData.child('surface').val() && root.child('kai_core/pairings').child($personaId).child(newData.child('pairingId').val()).child('expiresAt').val() >= now))",
+            ".validate": "newData.hasChildren(['ownerUid', 'surface', 'pairingId', 'approvedAt'])"
+          }
+        }
+      },
+      "bodies": {
+        "$personaId": {
+          ".read": "auth != null",
+          ".indexOn": ["leaseExpiresAt"],
+          "$bodyId": {
+            ".write": "auth != null && newData.child('deviceId').isString() && newData.child('ownerUid').val() == auth.uid && ((root.child('kai_core/owner').child($personaId).val() == auth.uid && (newData.child('surface').val() == 'vr' || newData.child('surface').val() == 'ar')) || (root.child('kai_core/enrollments').child($personaId).child(newData.child('deviceId').val()).child('ownerUid').val() == auth.uid && newData.child('surface').val() == root.child('kai_core/enrollments').child($personaId).child(newData.child('deviceId').val()).child('surface').val()))",
+            ".validate": "newData.hasChildren(['ownerUid', 'bodyId', 'deviceId', 'surface', 'sessionId', 'status', 'foreground', 'gogglesOn', 'lastHeartbeatAt', 'leaseExpiresAt']) && newData.child('bodyId').val() == $bodyId && newData.child('foreground').isBoolean() && newData.child('gogglesOn').isBoolean() && newData.child('leaseExpiresAt').isNumber() && newData.child('leaseExpiresAt').val() <= now + 120000"
+          }
+        }
+      },
+      "conversation_requests": {
+        "$personaId": {
+          ".read": "auth != null && root.child('kai_core/owner').child($personaId).val() == auth.uid",
+          ".indexOn": ["createdAt"],
+          "$requestId": {
+            ".read": "auth != null && (root.child('kai_core/owner').child($personaId).val() == auth.uid || (data.exists() && root.child('kai_core/enrollments').child($personaId).child(data.child('deviceId').val()).child('ownerUid').val() == auth.uid))",
+            ".write": "auth != null && (root.child('kai_core/owner').child($personaId).val() == auth.uid || (!data.exists() && newData.child('deviceId').isString() && root.child('kai_core/enrollments').child($personaId).child(newData.child('deviceId').val()).child('ownerUid').val() == auth.uid && root.child('kai_core/enrollments').child($personaId).child(newData.child('deviceId').val()).child('surface').val() == newData.child('sourceSurface').val() && newData.child('sourceSurface').val() == 'messenger' && newData.child('conversationId').val() == 'messenger' && newData.child('status').val() == 'queued'))",
+            ".validate": "newData.hasChildren(['text', 'status', 'sourceSurface', 'conversationId', 'deviceId', 'model', 'replyCeiling', 'createdAt', 'updatedAt'])"
+          }
+        }
+      }
     },
     "devices":   { ".read": "auth != null", ".write": "auth != null" },
     "usage":     { ".read": "auth != null", ".write": "auth != null" },

@@ -36,6 +36,8 @@ import '../widgets/kai_brain_panel.dart';
 import '../widgets/kai_cortex_view.dart';
 import '../widgets/kai_hud_overlay.dart';
 import '../widgets/kai_presence.dart';
+import '../widgets/kai_core_heartbeat.dart';
+import '../widgets/kai_body_constellation.dart';
 import '../widgets/kai_presence_card.dart';
 import '../widgets/kai_inner_monologue.dart';
 import '../widgets/kai_command_palette.dart';
@@ -60,6 +62,10 @@ import '../services/core/kai_proactive_service.dart';
 import '../services/core/proactive_service.dart';
 import '../services/core/kai_work_request_service.dart';
 import '../services/core/conversation_store_service.dart';
+import '../services/core/kai_conversation_request_service.dart';
+import '../services/core/kai_core_client.dart';
+import '../services/core/kai_taskbar_heartbeat.dart';
+import '../services/core/kai_global_presence_service.dart';
 import '../services/embodiment/kai_embodiment_gateway_service.dart';
 
 // Must match main_mobile's persona so it's the same Kai (memory/personality).
@@ -130,7 +136,10 @@ class _ChatMsg {
     this.unfolding = false,
     this.image,
     this.attachments = const [],
+    this.persistedAt,
   });
+
+  final int? persistedAt;
 }
 
 class KaiDesktopShell extends StatefulWidget {
@@ -141,8 +150,21 @@ class KaiDesktopShell extends StatefulWidget {
 
 class _KaiDesktopShellState extends State<KaiDesktopShell> {
   final AIService _ai = AIService();
+  final AIService _centralConversationAi = AIService();
   final KaiEmbodimentGatewayService _embodimentGateway =
       KaiEmbodimentGatewayService.instance;
+  final KaiCoreSidecarManager _coreSidecar = KaiCoreSidecarManager();
+  KaiCorePresenceHeartbeat? _coreHeartbeat;
+  StreamSubscription<KaiGlobalPresenceSnapshot>? _globalPresenceSub;
+  StreamSubscription<List<ConversationLine>>? _desktopHistorySub;
+  int _lastDesktopHistoryMillis = 0;
+  int _globalBodyCount = 0;
+  List<KaiGlobalBody> _globalBodies = const [];
+  KaiCoreHeartbeatStatus _coreHeartbeatStatus = const KaiCoreHeartbeatStatus(
+    phase: KaiCoreHeartbeatPhase.connecting,
+  );
+  KaiCoreHandoffInbox? _coreHandoffInbox;
+  Map<String, dynamic>? _coreHandoff;
   final CodeWorkspaceService _ws = CodeWorkspaceService.instance;
   final ReplyChunkerService _replyChunker = const ReplyChunkerService();
   final _inp = TextEditingController();
@@ -165,12 +187,20 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
   StreamSubscription<KaiNudge>? _proSub;
   StreamSubscription<List<KaiWorkRequest>>? _workRequestSub;
   final KaiWorkRequestService _workRequests = KaiWorkRequestService.instance;
+  final KaiConversationRequestService _conversationRequests =
+      KaiConversationRequestService.instance;
   List<KaiWorkRequest> _desktopRequests = const [];
   String? _workRequestError;
+  StreamSubscription<List<KaiConversationRequest>>? _conversationRequestSub;
+  List<KaiConversationRequest> _centralConversationQueue = const [];
+  bool _centralConversationBusy = false;
   EngineerStatus _status = const EngineerStatus(label: 'idle');
   bool _trust = EditGate.instance.trustSession;
+  bool _gogglesOn = false;
   bool _paletteOpen = false;
   bool _terminalExpanded = false;
+  bool _showMessengerSurface = false;
+  String? _historyRestoreNote;
   bool _churnModeOn = false;
   int _churnPassesThisRun = 0;
   bool _factoryModeOn = false;
@@ -201,37 +231,11 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
   @override
   void initState() {
     super.initState();
-    // Two bodies, two channels. The Quest and the AR glasses are different
-    // devices and connect separately, so each gets its own port with its
-    // surface pinned — the payload never picks which body it is.
-    //
-    // Explicit development exception on both: these bind to loopback. Any
-    // future remote channel must provide a token instead.
-    for (final channel in <(KaiEmbodimentGatewayService, KaiSurface, int)>[
-      (
-        KaiEmbodimentGatewayService.vr,
-        KaiSurface.vr,
-        KaiEmbodimentGatewayService.defaultPort
-      ),
-      (
-        KaiEmbodimentGatewayService.ar,
-        KaiSurface.ar,
-        KaiEmbodimentGatewayService.defaultArPort
-      ),
-    ]) {
-      channel.$1
-          .start(
-        ai: _ai,
-        model: _kModel,
-        channelSurface: channel.$2,
-        port: channel.$3,
-        allowUnauthenticatedLoopback: true,
-      )
-          .catchError((Object error) {
-        // The desktop UI remains usable if a Unity bridge port is busy.
-        print('[EmbodimentGateway] ${channel.$2.name} failed to start: $error');
-      });
-    }
+    unawaited(_loadGogglesState());
+    unawaited(_startGlobalPresence());
+    unawaited(_startCorePresence());
+    // VR/AR gateways and Messenger turns belong to the hidden coordinator.
+    // This room is now only a client of Central Kai and can close freely.
     CodeWorkspaceService.instance.load().then((_) {
       if (!mounted) return;
       setState(() => _handsState = CodeWorkspaceService.instance.hasWorkspace
@@ -283,9 +287,8 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
     // Severed-nerve check: shout if he's offered any tool with no policy. This
     // is what silently ate job_start / set_layer_progress — visible at boot now.
     ToolPolicyService.auditAgainstSchemas(ToolExecutorService.toolDefinitions);
-    // Ghost-friend presence: Kai may reach out on his own when Sadeq's quiet.
-    KaiProactiveService.instance.start(_kPersona);
-    _proSub = KaiProactiveService.instance.nudges.listen(_onNudge);
+    // Ghost-friend presence runs in the hidden coordinator, so closing this
+    // room cannot silence it and a second UI cannot emit duplicate nudges.
     _ws.load().then((_) {
       if (mounted) setState(() {});
     });
@@ -312,6 +315,7 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
         setState(() => _workRequestError = error.toString());
       },
     );
+    // The headless coordinator exclusively owns the durable Messenger queue.
     // The cortex now lives in KaiCortexView, which owns its own WebView, its own
     // graph sync and its own CortexActivityBus subscription. The shell used to
     // build a WebViewController here and never mount it — see _cortexPane.
@@ -326,6 +330,134 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
   /// Restore recent history first, then place the fresh greeting as the newest
   /// bubble at the bottom. The old order made Kai greet first and then shove the
   /// archive underneath him, which felt like the window opened in the wrong era.
+  Future<void> _startCorePresence() async {
+    final available = await _coreSidecar.ensureAvailable();
+    if (!mounted) return;
+    if (!available) {
+      print('[KaiCore] local coordination sidecar unavailable');
+      return;
+    }
+    final heartbeat = KaiCorePresenceHeartbeat(
+      client: _coreSidecar.client,
+      deviceId: 'desktop-${Platform.localHostname}',
+      surface: 'desktop',
+      sessionId: 'desktop-$pid-${DateTime.now().microsecondsSinceEpoch}',
+      onStatus: (_) {},
+    );
+    _coreHeartbeat = heartbeat;
+    heartbeat.start();
+    final inbox = KaiCoreHandoffInbox(
+      client: _coreSidecar.client,
+      surface: 'desktop',
+      onHandoff: (handoff) async {
+        if (!mounted) return false;
+        setState(() => _coreHandoff = handoff);
+        return true;
+      },
+    );
+    _coreHandoffInbox = inbox;
+    inbox.start();
+    print('[KaiCore] desktop presence heartbeat online');
+  }
+
+  Future<void> _startGlobalPresence() async {
+    final presence = KaiGlobalPresenceService.instance;
+    _globalPresenceSub = presence.snapshots.listen(_applyGlobalPresence);
+    try {
+      await presence.startBody(
+        surface: 'desktop',
+        canBootstrapOwner: true,
+        sessionId: 'desktop-ui-$pid-${DateTime.now().microsecondsSinceEpoch}',
+        foreground: true,
+        gogglesOn: _gogglesOn,
+      );
+      _applyGlobalPresence(presence.latest);
+    } catch (error) {
+      print('[KaiPresence] central registry failed to start: $error');
+      _applyGlobalPresence(const KaiGlobalPresenceSnapshot.connecting());
+    }
+  }
+
+  KaiSurfaceContext get _desktopSurfaceContext => KaiSurfaceContext.desktop
+      .copyWith(goggles: _gogglesOn ? KaiGoggles.on : KaiGoggles.off);
+
+  Future<void> _loadGogglesState() async {
+    final prefs = await SharedPreferences.getInstance();
+    final value = prefs.getBool('kai_desktop_goggles_on') ?? false;
+    if (!mounted) return;
+    setState(() => _gogglesOn = value);
+    unawaited(KaiGlobalPresenceService.instance.updateBodyState(
+      gogglesOn: value,
+    ));
+  }
+
+  Future<void> _setGoggles(bool value) async {
+    setState(() => _gogglesOn = value);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('kai_desktop_goggles_on', value);
+    await KaiGlobalPresenceService.instance.updateBodyState(
+      gogglesOn: value,
+      status: 'idle',
+      userActive: true,
+    );
+  }
+
+  void _applyGlobalPresence(KaiGlobalPresenceSnapshot snapshot) {
+    if (!mounted) return;
+    final phase = !snapshot.connected
+        ? KaiCoreHeartbeatPhase.reconnecting
+        : snapshot.isAwake
+            ? KaiCoreHeartbeatPhase.healthy
+            : KaiCoreHeartbeatPhase.offline;
+    final status = KaiCoreHeartbeatStatus(
+      phase: phase,
+      lastSuccessAt: snapshot.observedAt,
+    );
+    setState(() {
+      _globalBodyCount = snapshot.bodyCount;
+      _globalBodies = snapshot.bodies;
+      _coreHeartbeatStatus = status;
+    });
+    unawaited(KaiTaskbarHeartbeat.setStatus(status));
+  }
+
+  Future<void> _showPairingCode() async {
+    String? code;
+    Object? error;
+    try {
+      code = await KaiGlobalPresenceService.instance.createPairingCode();
+    } catch (caught) {
+      error = caught;
+    }
+    if (!mounted) return;
+    final displayCode = code == null
+        ? null
+        : '${code.substring(0, 4)}-${code.substring(4, 8)}-${code.substring(8)}';
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF07121D),
+        title: const Text('PAIR A KAI BODY'),
+        content: displayCode == null
+            ? Text('Could not create a pairing code.\n$error')
+            : SelectableText(
+                '$displayCode\n\nOn the phone, tap its heart and enter this code. It expires in 10 minutes and works once.',
+                style: const TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 16,
+                  height: 1.5,
+                ),
+              ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('DONE'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _loadGreeting() async {
     String? hello;
     try {
@@ -334,6 +466,7 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
     } catch (_) {}
 
     await _loadHistory();
+    _watchDesktopHistory();
 
     if (!mounted || hello == null) return;
     setState(() {
@@ -368,12 +501,30 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
   ///   • A single setState batches the whole restore — no per-message rebuilds.
   ///   • _autoscroll() is called afterwards so the view lands at the newest
   ///     restored message until the fresh greeting is appended.
-  Future<void> _loadHistory() async {
+  Future<void> _loadHistory({int attempt = 0}) async {
     if (!mounted) return;
     try {
-      final lines = await ConversationStoreService()
-          .getHistory(_kPersona, maxTurns: _kHistoryTurns);
-      if (!mounted || lines.isEmpty) return;
+      final lines = await ConversationStoreService().getHistory(
+        _kPersona,
+        surfaceId: 'in_person',
+        maxTurns: _kHistoryTurns,
+      );
+      if (!mounted) return;
+      if (lines.isEmpty) {
+        if (attempt < 2) {
+          Future<void>.delayed(const Duration(milliseconds: 900), () {
+            if (mounted && _msgs.isEmpty) {
+              unawaited(_loadHistory(attempt: attempt + 1));
+            }
+          });
+          setState(() =>
+              _historyRestoreNote = 'Looking for saved in-person history…');
+          return;
+        }
+        setState(() => _historyRestoreNote =
+            'No saved in-person history found for this desktop surface.');
+        return;
+      }
 
       // Regex: '[<digits>] User: <text>' or '[<digits>] Kai: <text>'.
       // dotAll matters: restored Kai replies are often multi-line, and the old
@@ -390,12 +541,26 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
         final speaker = m.group(2)!; // 'User' or 'Kai'
         final text = m.group(3)!.trim();
         if (text.isEmpty) continue;
-        history.add(_ChatMsg(speaker == 'User', text));
+        final timestamp = int.tryParse(m.group(1)!) ?? 0;
+        history.add(_ChatMsg(
+          speaker == 'User',
+          text,
+          persistedAt: timestamp,
+        ));
+        if (timestamp > _lastDesktopHistoryMillis) {
+          _lastDesktopHistoryMillis = timestamp;
+        }
       }
 
-      if (history.isEmpty || !mounted) return;
+      if (!mounted) return;
+      if (history.isEmpty) {
+        setState(() => _historyRestoreNote =
+            'Saved history came back, but none of it matched the desktop transcript format.');
+        return;
+      }
 
       setState(() {
+        _historyRestoreNote = 'Restored ${history.length} in-person messages.';
         // History is the transcript, not something shoved under the greeting.
         // Replace the boot placeholder so startup reads:
         //   oldest restored turn → newest restored turn → fresh greeting.
@@ -407,17 +572,55 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
       // Scroll to bottom so the user sees the most-recent restored messages,
       // not the oldest ones that just filled the top of the list.
       _autoscroll();
-    } catch (_) {
+    } catch (error) {
+      if (mounted) {
+        setState(() => _historyRestoreNote = 'History restore failed: $error');
+      }
       // History is cosmetic — a load failure must never surface as an error.
     }
   }
 
+  void _watchDesktopHistory() {
+    if (_desktopHistorySub != null) return;
+    _desktopHistorySub = ConversationStoreService()
+        .watchHistory(
+      _kPersona,
+      surfaceId: 'in_person',
+      maxTurns: _kHistoryTurns,
+    )
+        .listen((lines) {
+      if (!mounted || lines.isEmpty) return;
+      final fresh = lines
+          .where((line) => line.timestampMillis > _lastDesktopHistoryMillis)
+          .map((line) => _ChatMsg(
+                !line.fromKai,
+                line.text,
+                persistedAt: line.timestampMillis,
+              ))
+          .toList();
+      if (fresh.isEmpty) return;
+      _lastDesktopHistoryMillis = lines
+          .map((line) => line.timestampMillis)
+          .reduce((a, b) => a > b ? a : b);
+      setState(() => _msgs.addAll(fresh));
+      _autoscroll();
+    }, onError: (_) {});
+  }
+
   @override
   void dispose() {
-    unawaited(_embodimentGateway.stop());
+    _coreHeartbeat?.stop();
+    _globalPresenceSub?.cancel();
+    _desktopHistorySub?.cancel();
+    // This window owns the desktop body lease. The independent coordinator has
+    // its own central-core lease, so closing this body does not stop Kai's heart.
+    unawaited(KaiGlobalPresenceService.instance.stop());
+    _coreHandoffInbox?.stop();
+    _coreSidecar.client.close();
     _engSub?.cancel();
     _proSub?.cancel();
     _workRequestSub?.cancel();
+    _conversationRequestSub?.cancel();
     _ambientCheckInTimer?.cancel();
     _pointer.dispose();
     _inp.dispose();
@@ -455,7 +658,8 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
         text: nudge.seed,
         personaId: _kPersona,
         model: _kModel,
-        surfaceContext: KaiSurfaceContext.desktop,
+        conversationSurfaceId: 'in_person',
+        surfaceContext: _desktopSurfaceContext,
         // A text gets a ceiling and no tools. A job gets everything — the
         // trusted-goal seed sends him to edit real code, and a cap there would
         // truncate an edit_file argument mid-JSON and kill the only unattended
@@ -545,6 +749,7 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
     String? preset,
     bool echoUser = true,
     KaiWorkRequest? workRequest,
+    String? runtimeTaskId,
   ]) async {
     final text = (preset ?? _inp.text).trim();
     final hasPayload = text.isNotEmpty ||
@@ -636,12 +841,34 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
       _toolLog.clear(); // fresh readout per turn
     });
     _autoscroll();
+    if (workRequest == null && runtimeTaskId == null) {
+      runtimeTaskId = await _claimRuntimeConversationTask(text, generation);
+      if (runtimeTaskId == null) {
+        setState(() {
+          _sending = false;
+          _msgs.add(_ChatMsg(
+            false,
+            'My central conversation lanes are busy or offline. I kept this '
+            'turn out rather than answering around the coordinator.',
+            interim: true,
+          ));
+        });
+        _autoscroll();
+        return;
+      }
+    }
+    unawaited(KaiGlobalPresenceService.instance.updateBodyState(
+      status: 'thinking',
+      gogglesOn: _gogglesOn,
+      userActive: true,
+    ));
     try {
       final resp = await _ai.sendMessage(
         text: text,
         personaId: _kPersona,
         model: _kModel,
-        surfaceContext: KaiSurfaceContext.desktop,
+        conversationSurfaceId: 'in_person',
+        surfaceContext: _desktopSurfaceContext,
         image: img, // he can finally look
         attachments: attachments
             .map((a) => AIChatAttachment(
@@ -674,6 +901,9 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
               text: note,
               actor: 'desktop',
             ));
+          }
+          if (runtimeTaskId != null) {
+            unawaited(_renewRuntimeTask(runtimeTaskId));
           }
           setState(() => _msgs.add(_ChatMsg(false, note, interim: true)));
           _autoscroll();
@@ -728,6 +958,13 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
                 ? const ['desktop AI path completed']
                 : _toolLog.map((t) => 'tool/progress: $t').toList(),
           );
+          if (runtimeTaskId != null) {
+            await _completeRuntimeTask(runtimeTaskId, summary);
+            runtimeTaskId = null;
+          }
+        } else if (runtimeTaskId != null) {
+          await _completeRuntimeTask(runtimeTaskId, resp.reply.trim());
+          runtimeTaskId = null;
         }
       }
     } catch (e) {
@@ -738,6 +975,13 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
             workRequest.id,
             error: e.toString(),
           );
+          if (runtimeTaskId != null) {
+            await _failRuntimeTask(runtimeTaskId, e.toString());
+            runtimeTaskId = null;
+          }
+        } else if (runtimeTaskId != null) {
+          await _failRuntimeTask(runtimeTaskId, e.toString());
+          runtimeTaskId = null;
         }
         if (_churnModeOn) {
           await _sendBreakworthyPhoneAlert(
@@ -751,6 +995,9 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
             () => _msgs.add(_ChatMsg(false, '⚠️ Something went wrong: $e')));
       }
     } finally {
+      if (runtimeTaskId != null) {
+        await _failRuntimeTask(runtimeTaskId, 'Desktop turn was interrupted.');
+      }
       final followUp = _queuedFollowUp;
       if (!_isStaleGeneration(generation)) {
         setState(() {
@@ -758,6 +1005,10 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
           _activeTool = null;
         });
       }
+      unawaited(KaiGlobalPresenceService.instance.updateBodyState(
+        status: 'idle',
+        gogglesOn: _gogglesOn,
+      ));
       _autoscroll();
       if (followUp != null) {
         _queuedFollowUp = null;
@@ -922,7 +1173,8 @@ FACTORY_NEXT: continue
         text: 'Desktop chat started the real work path.',
         actor: 'desktop',
       );
-      await _send(claimed.text, true, claimed);
+      final runtimeTaskId = await _claimRuntimeWorkTask(claimed);
+      await _send(claimed.text, true, claimed, runtimeTaskId);
     } catch (e) {
       await _workRequests.failRequest(
         _kPersona,
@@ -937,6 +1189,250 @@ FACTORY_NEXT: continue
           )));
       _autoscroll();
     }
+  }
+
+  static const _runtimeWorkerId = 'desktop-primary';
+
+  Future<void> _drainCentralConversationQueue() async {
+    if (_centralConversationBusy || _centralConversationQueue.isEmpty) return;
+    _centralConversationBusy = true;
+    try {
+      while (_centralConversationQueue.isNotEmpty) {
+        final request = _centralConversationQueue.first;
+        _centralConversationQueue = _centralConversationQueue
+            .where((item) => item.id != request.id)
+            .toList(growable: false);
+        await _processCentralConversationRequest(request);
+      }
+    } finally {
+      _centralConversationBusy = false;
+      if (_centralConversationQueue.isNotEmpty) {
+        unawaited(_drainCentralConversationQueue());
+      }
+    }
+  }
+
+  Future<void> _processCentralConversationRequest(
+    KaiConversationRequest request,
+  ) async {
+    final runtimeTaskId = 'conversation-request-${request.id}';
+    var durableRequestClaimed = false;
+    try {
+      final canonicalConversationId =
+          KaiConversationRequestService.canonicalConversationIdForSurface(
+        request.sourceSurface,
+      );
+      if (canonicalConversationId == null || !request.hasCanonicalRoute) {
+        await _conversationRequests.failRequest(
+          _kPersona,
+          request.id,
+          error: 'Rejected non-canonical conversation route: '
+              '${request.sourceSurface}/${request.conversationId}',
+        );
+        return;
+      }
+      if (!await _coreSidecar.client.isHealthy()) {
+        _deferCentralConversationRequest(request);
+        return;
+      }
+      final runtime = await _coreSidecar.client.enqueueTask(
+        taskId: runtimeTaskId,
+        lane: 'conversation',
+        kind: 'conversation_turn',
+        sourceSurface: request.sourceSurface,
+        conversationId: canonicalConversationId,
+        payload: {
+          'requestId': request.id,
+          'text': request.text,
+          'replyCeiling': request.replyCeiling,
+        },
+      );
+      if (runtime['status'] == 'running' &&
+          runtime['claimedBy'] == _runtimeWorkerId) {
+        await _coreSidecar.client.renewTaskLease(
+          runtimeTaskId,
+          workerId: _runtimeWorkerId,
+          lease: const Duration(minutes: 5),
+        );
+      } else {
+        await _coreSidecar.client.claimTask(
+          runtimeTaskId,
+          workerId: _runtimeWorkerId,
+          lease: const Duration(minutes: 5),
+        );
+      }
+
+      final claimed = await _conversationRequests.claimRequest(
+        _kPersona,
+        request.id,
+        workerId: _runtimeWorkerId,
+        runtimeTaskId: runtimeTaskId,
+      );
+      if (claimed == null) {
+        await _failRuntimeTask(
+            runtimeTaskId, 'Request was no longer claimable.');
+        return;
+      }
+      durableRequestClaimed = true;
+
+      final response = await _centralConversationAi.sendMessage(
+        text: claimed.text,
+        personaId: _kPersona,
+        model: _kModel,
+        conversationSurfaceId: canonicalConversationId,
+        surfaceContext: KaiSurfaceContext.messenger,
+        replyCeiling: claimed.replyCeiling,
+        onProgress: (_) => unawaited(_renewRuntimeTask(runtimeTaskId)),
+      );
+      final reply = response.reply.trim();
+      if (reply.isEmpty || reply == '(no reply)') {
+        throw StateError('Central Kai returned an empty reply.');
+      }
+      await _completeRuntimeTask(runtimeTaskId, reply);
+      await _conversationRequests.completeRequest(
+        _kPersona,
+        claimed.id,
+        reply: reply,
+      );
+    } catch (error) {
+      if (!durableRequestClaimed) {
+        _deferCentralConversationRequest(request);
+        return;
+      }
+      await _failRuntimeTask(runtimeTaskId, error.toString());
+      await _conversationRequests.failRequest(
+        _kPersona,
+        request.id,
+        error: error.toString(),
+      );
+    }
+  }
+
+  void _deferCentralConversationRequest(KaiConversationRequest request) {
+    Future<void>.delayed(const Duration(seconds: 2), () {
+      if (!mounted ||
+          _centralConversationQueue.any((item) => item.id == request.id)) {
+        return;
+      }
+      _centralConversationQueue = [
+        ..._centralConversationQueue,
+        request,
+      ]..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+      unawaited(_drainCentralConversationQueue());
+    });
+  }
+
+  Future<String?> _claimRuntimeConversationTask(
+    String text,
+    int generation,
+  ) async {
+    final taskId =
+        'desktop-turn-${DateTime.now().microsecondsSinceEpoch}-$generation';
+    try {
+      await _coreSidecar.client.enqueueTask(
+        taskId: taskId,
+        lane: 'conversation',
+        kind: 'conversation_turn',
+        sourceSurface: 'desktop',
+        conversationId: 'in_person',
+        payload: {
+          'text': text,
+          'generation': generation,
+        },
+      );
+      final deadline = DateTime.now().add(const Duration(seconds: 65));
+      while (DateTime.now().isBefore(deadline)) {
+        try {
+          await _coreSidecar.client.claimTask(
+            taskId,
+            workerId: _runtimeWorkerId,
+            lease: const Duration(minutes: 5),
+          );
+          return taskId;
+        } on KaiCoreException catch (error) {
+          if (error.statusCode != 409) rethrow;
+          await Future<void>.delayed(const Duration(milliseconds: 180));
+        }
+      }
+      await _coreSidecar.client.cancelTask(
+        taskId,
+        workerId: _runtimeWorkerId,
+      );
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<String?> _claimRuntimeWorkTask(KaiWorkRequest request) async {
+    final taskId = 'firebase-work-${request.id}';
+    try {
+      final task = await _coreSidecar.client.enqueueTask(
+        taskId: taskId,
+        lane: 'work',
+        kind: 'firebase_work_request',
+        sourceSurface: request.createdFrom,
+        priority: request.priority,
+        payload: {
+          'workRequestId': request.id,
+          'instruction': request.text,
+          'requiresDesktop': request.requiresDesktop,
+        },
+      );
+      if (task['status'] == 'running' &&
+          task['claimedBy'] == _runtimeWorkerId) {
+        await _coreSidecar.client.renewTaskLease(
+          taskId,
+          workerId: _runtimeWorkerId,
+          lease: const Duration(minutes: 5),
+        );
+        return taskId;
+      }
+      await _coreSidecar.client.claimTask(
+        taskId,
+        workerId: _runtimeWorkerId,
+        lease: const Duration(minutes: 5),
+      );
+      return taskId;
+    } catch (_) {
+      // The core is being introduced as a coordination authority without making
+      // an unavailable sidecar erase the existing durable Firebase work path.
+      return null;
+    }
+  }
+
+  Future<void> _renewRuntimeTask(String taskId) async {
+    try {
+      await _coreSidecar.client.renewTaskLease(
+        taskId,
+        workerId: _runtimeWorkerId,
+        lease: const Duration(minutes: 5),
+      );
+    } catch (_) {}
+  }
+
+  Future<void> _completeRuntimeTask(String taskId, String summary) async {
+    try {
+      await _coreSidecar.client.completeTask(
+        taskId,
+        workerId: _runtimeWorkerId,
+        result: {
+          'summary': summary.length > 500
+              ? '${summary.substring(0, 500)}â€¦'
+              : summary,
+        },
+      );
+    } catch (_) {}
+  }
+
+  Future<void> _failRuntimeTask(String taskId, String error) async {
+    try {
+      await _coreSidecar.client.failTask(
+        taskId,
+        workerId: _runtimeWorkerId,
+        error: error,
+      );
+    } catch (_) {}
   }
 
   List<String> _replyChunks(String text) => _replyChunker.chunks(text);
@@ -1339,7 +1835,7 @@ FACTORY_NEXT: continue
                   Row(
                     children: [
                       _projectsPanel(),
-                      Expanded(child: _chat()),
+                      Expanded(child: _mainSurface()),
                       _cortexPane(),
                     ],
                   ),
@@ -1758,32 +2254,51 @@ FACTORY_NEXT: continue
   }
 
   Widget _personaMessengerLane() {
-    return SizedBox(
-      height: 300,
-      child: Container(
-        margin: const EdgeInsets.only(top: 16, left: 10, right: 10, bottom: 10),
-        decoration: BoxDecoration(
-          border: Border.all(color: Colors.white.withOpacity(0.18), width: 1),
-          boxShadow: const [
-            BoxShadow(
-              color: Color(0x99000000),
-              blurRadius: 18,
-              offset: Offset(0, 10),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // Desktop must not stretch the phone messenger into whatever side-panel
+        // shape the shell happens to have. Mirror the mobile app by giving the
+        // real screen a phone-shaped viewport and centering it inside the lane.
+        const phoneAspect = 9 / 19.5;
+        const minUsablePhoneWidth = 240.0;
+        const horizontalGutter = 16.0;
+        final maxWidth = constraints.maxWidth;
+        final maxHeight = constraints.maxHeight;
+        final widthFromHeight = maxHeight * phoneAspect;
+        final widthFromLane = (maxWidth - horizontalGutter).clamp(
+          minUsablePhoneWidth,
+          double.infinity,
+        );
+        final frameWidth = widthFromHeight
+            .clamp(minUsablePhoneWidth, widthFromLane)
+            .clamp(0.0, maxWidth);
+        final frameHeight = frameWidth / phoneAspect;
+
+        return Align(
+          alignment: Alignment.topCenter,
+          child: SizedBox(
+            width: frameWidth,
+            height: frameHeight.clamp(0.0, maxHeight),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(24),
+              child: const KaiP5ChatScreen(personaId: _kPersona),
             ),
-          ],
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: const KaiP5ChatScreen(
-          personaId: _kPersona,
-          embedded: true,
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 
   Widget _projectsPanel() {
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final panelWidth = screenWidth >= 1320
+        ? 380.0
+        : screenWidth >= 1120
+            ? 340.0
+            : 300.0;
+
     return Container(
-      width: 210,
+      width: panelWidth,
       decoration: BoxDecoration(
         color: Colors.black.withOpacity(0.34),
         border: Border(right: BorderSide(color: kGpt.withOpacity(0.35))),
@@ -1808,8 +2323,8 @@ FACTORY_NEXT: continue
             ],
           ),
           const SizedBox(height: 8),
-          _personaMessengerLane(),
-          const SizedBox(height: 8),
+          _surfaceSwitch(),
+          const SizedBox(height: 12),
           _terminalSelfWorkCard(),
           const SizedBox(height: 12),
           const Text('PROJECTS',
@@ -2042,55 +2557,287 @@ FACTORY_NEXT: continue
     );
   }
 
-  Widget _chat() {
-    return Column(
-      children: [
-        // header + engineer chip
-        Container(
-          height: 46,
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          decoration: const BoxDecoration(
-            border: Border(bottom: BorderSide(color: Color(0xFF121B26))),
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                child: KaiPresence(personaId: _kPersona),
+  Widget _mainSurface() {
+    return _showMessengerSurface ? _messengerSurface() : _chat();
+  }
+
+  Widget _messengerSurface() {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final wide = constraints.maxWidth >= 760;
+        return Row(
+          children: [
+            Expanded(
+              flex: wide ? 5 : 1,
+              child: Container(
+                decoration: const BoxDecoration(
+                  border: Border(
+                    left: BorderSide(color: Color(0xFF121B26)),
+                    right: BorderSide(color: Color(0xFF121B26)),
+                  ),
+                ),
+                child: _personaMessengerLane(),
               ),
-              // What he costs, live — he spends money on his own initiative
-              // (inner life, reflections, proactive nudges), so the meter should
-              // be visible without being asked for.
-              const KaiEfficiencyDeltaMeter(),
-              const SizedBox(width: 8),
-              const KaiCostMeter(),
-              const SizedBox(width: 8),
-              _ttsButton(),
-              const SizedBox(width: 8),
-              _keysButton(),
-              const SizedBox(width: 8),
-              _engineerChip(),
+            ),
+            if (wide) ...[
+              SizedBox(
+                width: 280,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Container(
+                      height: 46,
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      alignment: Alignment.centerLeft,
+                      decoration: const BoxDecoration(
+                        border: Border(
+                          bottom: BorderSide(color: Color(0xFF121B26)),
+                        ),
+                      ),
+                      child: const Text(
+                        'Active work',
+                        style: TextStyle(
+                          color: Color(0xFFFFE7B0),
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: ListView(
+                        padding: const EdgeInsets.all(10),
+                        children: [
+                          SizedBox(
+                            height: 180,
+                            child: KaiProjectCard(
+                              personaId: _kPersona,
+                              projectId: KaiProjectService.smarterId,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          SizedBox(
+                            height: 180,
+                            child: KaiProjectCard(
+                              personaId: _kPersona,
+                              projectId: KaiProjectService.sentienceId,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          const KaiStateScorecardCard(limit: 40),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ],
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _surfaceSwitch() {
+    Widget chip({
+      required String label,
+      required IconData icon,
+      required bool selected,
+      required VoidCallback onTap,
+    }) {
+      return Expanded(
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: onTap,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 160),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+            decoration: BoxDecoration(
+              color: selected
+                  ? const Color(0xFFE53B2C).withOpacity(0.24)
+                  : Colors.white.withOpacity(0.04),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: selected
+                    ? const Color(0xFFFFE7B0).withOpacity(0.75)
+                    : Colors.white.withOpacity(0.08),
+              ),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icon,
+                    size: 15,
+                    color: selected ? const Color(0xFFFFE7B0) : Colors.white54),
+                const SizedBox(width: 7),
+                Flexible(
+                  child: Text(
+                    label,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color:
+                          selected ? const Color(0xFFFFE7B0) : Colors.white54,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
-        Expanded(
-          child: ListView.builder(
-            controller: _scroll,
-            padding: const EdgeInsets.fromLTRB(18, 16, 18, 8),
-            itemCount: _msgs.length + (_sending ? 1 : 0),
-            itemBuilder: (c, i) {
-              if (i >= _msgs.length) {
-                return _bubble(
-                    _ChatMsg(false,
-                        _activeTool != null ? '…$_activeTool' : 'thinking…'),
-                    dim: true);
-              }
-              // Mid-work narration renders dim; his real answer lands full.
-              return _bubble(_msgs[i], dim: _msgs[i].interim);
-            },
-          ),
+      );
+    }
+
+    return Row(
+      children: [
+        chip(
+          label: 'Dashboard',
+          icon: Icons.forum_outlined,
+          selected: !_showMessengerSurface,
+          onTap: () => setState(() => _showMessengerSurface = false),
         ),
-        _composer(),
+        const SizedBox(width: 8),
+        chip(
+          label: 'Messenger',
+          icon: Icons.phone_iphone,
+          selected: _showMessengerSurface,
+          onTap: () => setState(() => _showMessengerSurface = true),
+        ),
       ],
+    );
+  }
+
+  Widget _chat() {
+    final showRestoreNote =
+        _historyRestoreNote != null && _msgs.isEmpty && !_sending;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF050B12).withOpacity(0.86),
+        border: Border(
+          left: BorderSide(color: kGpt.withOpacity(0.12)),
+          right: BorderSide(color: kGpt.withOpacity(0.10)),
+        ),
+      ),
+      child: Column(
+        children: [
+          // header + engineer chip
+          Container(
+            height: 46,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            decoration: BoxDecoration(
+              color: const Color(0xFF06111C).withOpacity(0.92),
+              border:
+                  const Border(bottom: BorderSide(color: Color(0xFF121B26))),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: KaiPresence(personaId: _kPersona),
+                ),
+                KaiCoreHeartbeat(
+                  status: _coreHeartbeatStatus,
+                  bodyCount: _globalBodyCount,
+                  onTap: _showPairingCode,
+                ),
+                const SizedBox(width: 8),
+                // What he costs, live — he spends money on his own initiative
+                // (inner life, reflections, proactive nudges), so the meter should
+                // be visible without being asked for.
+                const KaiEfficiencyDeltaMeter(),
+                const SizedBox(width: 8),
+                const KaiCostMeter(),
+                const SizedBox(width: 8),
+                _gogglesButton(),
+                const SizedBox(width: 8),
+                _ttsButton(),
+                const SizedBox(width: 8),
+                _keysButton(),
+                const SizedBox(width: 8),
+                _engineerChip(),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: KaiBodyConstellation(
+              awake:
+                  _coreHeartbeatStatus.phase == KaiCoreHeartbeatPhase.healthy,
+              bodies: _globalBodies,
+            ),
+          ),
+          if (showRestoreNote)
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.fromLTRB(18, 14, 18, 0),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0B1622).withOpacity(0.92),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: kGpt.withOpacity(0.28)),
+              ),
+              child: Text(
+                _historyRestoreNote!,
+                style: const TextStyle(
+                  color: Color(0xFF9FB6C8),
+                  fontSize: 12,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ),
+          if (_coreHandoff != null)
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.fromLTRB(18, 14, 18, 0),
+              padding: const EdgeInsets.fromLTRB(12, 9, 6, 9),
+              decoration: BoxDecoration(
+                color: kClaude.withOpacity(0.10),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: kClaude.withOpacity(0.42)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.sync_alt, size: 16, color: kClaude),
+                  const SizedBox(width: 9),
+                  Expanded(
+                    child: Text(
+                      'THREAD FROM ${(_coreHandoff!['fromSurface'] ?? 'another body').toString().toUpperCase()}\n'
+                      '${_coreHandoff!['summary'] ?? ''}',
+                      style: const TextStyle(
+                        color: Color(0xFFCFEAF6),
+                        fontSize: 11,
+                        height: 1.35,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Dismiss thread continuation',
+                    onPressed: () => setState(() => _coreHandoff = null),
+                    icon: const Icon(Icons.close, size: 16),
+                  ),
+                ],
+              ),
+            ),
+          Expanded(
+            child: ListView.builder(
+              controller: _scroll,
+              padding: const EdgeInsets.fromLTRB(18, 16, 18, 8),
+              itemCount: _msgs.length + (_sending ? 1 : 0),
+              itemBuilder: (c, i) {
+                if (i >= _msgs.length) {
+                  return _bubble(
+                      _ChatMsg(false,
+                          _activeTool != null ? '…$_activeTool' : 'thinking…'),
+                      dim: true);
+                }
+                // Mid-work narration renders dim; his real answer lands full.
+                return _bubble(_msgs[i], dim: _msgs[i].interim);
+              },
+            ),
+          ),
+          _composer(),
+        ],
+      ),
     );
   }
 
@@ -2127,6 +2874,42 @@ FACTORY_NEXT: continue
               Text(on ? 'voice' : 'muted',
                   style: TextStyle(
                       color: c, fontSize: 10, fontFamily: 'monospace')),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _gogglesButton() {
+    final color = _gogglesOn ? kClaude : const Color(0xFF5B7183);
+    return Tooltip(
+      message: _gogglesOn
+          ? 'Goggles ON — co-creator tools and technical conversation available'
+          : 'Goggles OFF — friend presence, no technical work',
+      child: InkWell(
+        onTap: () => unawaited(_setGoggles(!_gogglesOn)),
+        borderRadius: BorderRadius.circular(20),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(9, 4, 9, 4),
+          decoration: BoxDecoration(
+            color: const Color(0xFF0D1826),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: color.withOpacity(0.55)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.visibility_outlined, size: 12, color: color),
+              const SizedBox(width: 6),
+              Text(
+                _gogglesOn ? 'goggles on' : 'goggles off',
+                style: TextStyle(
+                  color: color,
+                  fontSize: 10,
+                  fontFamily: 'monospace',
+                ),
+              ),
             ],
           ),
         ),

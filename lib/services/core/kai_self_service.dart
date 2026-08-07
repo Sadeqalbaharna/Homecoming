@@ -109,41 +109,42 @@ class KaiSelfService {
   Future<KaiSelf> awaken(String personaId) async {
     _persona = personaId;
     final now = DateTime.now().millisecondsSinceEpoch;
-    KaiSelf current;
+    final ref = _db.ref(_path);
     try {
-      final snap = await _db.ref(_path).get();
-      current = (snap.exists && snap.value is Map)
-          ? KaiSelf.fromMap(snap.value as Map)
-          : const KaiSelf(
-              bornAt: 0,
-              awakenings: 0,
-              identity: defaultIdentity,
-              values: defaultValues,
-              currentFocus: '',
-              lastAwake: 0);
-    } catch (_) {
-      current = KaiSelf(
-          bornAt: now,
-          awakenings: 1,
-          identity: defaultIdentity,
-          values: defaultValues,
-          currentFocus: '',
-          lastAwake: now);
-    }
-    final updated = {
-      'bornAt': current.bornAt == 0 ? now : current.bornAt,
-      'awakenings': current.awakenings + 1,
-      'identity': current.identity,
-      'values': current.values,
-      'currentFocus': current.currentFocus,
-      'lastAwake': now,
-      'dream': current.dream,
-      'purpose': current.purpose,
-    };
-    try {
-      await _db.ref(_path).update(updated);
+      final snap = await ref.get();
+      if (!snap.exists || snap.value is! Map) {
+        // Initialisation only. Do not include awakenings here: two bodies can
+        // boot together, and both increments must survive in either order.
+        await ref.update({
+          'bornAt': now,
+          'identity': defaultIdentity,
+          'values': defaultValues,
+          'currentFocus': '',
+          'dream': '',
+          'purpose': '',
+        });
+      }
+      await ref.update({
+        'awakenings': {
+          '.sv': {'increment': 1}
+        },
+        'lastAwake': now,
+      });
+      final fresh = await ref.get();
+      if (fresh.exists && fresh.value is Map) {
+        return KaiSelf.fromMap(fresh.value as Map);
+      }
     } catch (_) {}
-    return KaiSelf.fromMap(updated);
+    // Persistence failure should not block app startup, but the fallback is
+    // never written as an absolute self map later.
+    return KaiSelf(
+      bornAt: now,
+      awakenings: 1,
+      identity: defaultIdentity,
+      values: defaultValues,
+      currentFocus: '',
+      lastAwake: now,
+    );
   }
 
   /// Update what Kai is oriented toward right now (e.g. the active topic/project).

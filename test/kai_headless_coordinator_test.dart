@@ -1,0 +1,68 @@
+import 'dart:async';
+import 'dart:io';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:homecoming_app/services/core/kai_headless_coordinator.dart';
+
+void main() {
+  test('network and timeout failures are retried with bounded backoff', () {
+    expect(isTransientConversationFailure(TimeoutException('slow')), isTrue);
+    expect(isTransientConversationFailure(const SocketException('offline')),
+        isTrue);
+    expect(isTransientConversationFailure(StateError('empty reply')), isFalse);
+    expect(kaiRetryDelay(0), const Duration(seconds: 1));
+    expect(kaiRetryDelay(1), const Duration(seconds: 2));
+    expect(kaiRetryDelay(9), const Duration(seconds: 5));
+  });
+
+  test('only real user transcript turns reset proactive silence', () {
+    expect(
+      latestUserActivityMillis({
+        'proactive': {'userMessage': '', 'timestamp': 20},
+        'human': {'userMessage': 'hey', 'timestamp': 10},
+      }),
+      10,
+    );
+    expect(
+      latestUserActivityMillis({
+        'assistant-only': {'aiResponse': 'still here', 'timestamp': 30},
+      }),
+      0,
+    );
+  });
+
+  test('desktop room no longer owns Messenger, embodiment, or proactive loops',
+      () {
+    final desktop =
+        File('lib/screens/kai_desktop_shell.dart').readAsStringSync();
+    final headless = File('lib/services/core/kai_headless_coordinator.dart')
+        .readAsStringSync();
+
+    expect(desktop, isNot(contains('watchOpenRequests(_kPersona).listen')));
+    expect(desktop, isNot(contains('KaiProactiveService.instance.start')));
+    expect(headless, contains('watchOpenRequests(kKaiCentralPersona).listen'));
+    expect(headless, contains('KaiProactiveService.instance.start'));
+    expect(headless, contains('_startEmbodimentGateways'));
+    expect(headless, contains('Future<void> _recoverCore()'));
+    expect(headless, contains('KaiCoreServer? _embeddedCore'));
+    expect(headless, contains("'embedded_core_started'"));
+    expect(headless, contains("retry: false"));
+    expect(headless, contains('_watchCrossProcessActivity'));
+    expect(headless, isNot(contains("'conversation': 4")));
+  });
+
+  test('embodied bodies use independent ordered lanes', () {
+    final gateway = File(
+      'lib/services/embodiment/kai_embodiment_gateway_service.dart',
+    ).readAsStringSync();
+    expect(gateway, contains('bool _busy = false'));
+    expect(gateway, isNot(contains('static bool _busy = false')));
+  });
+
+  test('headless entrypoint mounts no desktop application', () {
+    final main = File('lib/main_mobile.dart').readAsStringSync();
+    expect(main, contains("args.contains('--coordinator-worker')"));
+    expect(main, contains('KaiHeadlessCoordinator.instance.start'));
+    expect(main, contains('if (!coordinatorMode)'));
+  });
+}

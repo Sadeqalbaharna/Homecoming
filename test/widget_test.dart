@@ -70,5 +70,14 @@ void main() {
       expect(source, contains('projectId: KaiProjectService.sentienceId'));
       expect('KaiProjectCard'.allMatches(source).length, greaterThanOrEqualTo(2));
     });
+
+    test('desktop left rail can expand for the Persona messenger surface', () {
+      expect(source, isNot(contains('width: 210,')),
+          reason: 'a fixed 210px rail miniaturises the mobile messenger mockup');
+      expect(source, contains('MediaQuery.sizeOf(context).width'));
+      expect(source, contains('380.0'));
+      expect(source, contains('340.0'));
+      expect(source, contains('300.0'));
+    });
   });
 }

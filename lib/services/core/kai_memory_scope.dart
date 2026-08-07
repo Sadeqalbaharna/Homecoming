@@ -3,16 +3,22 @@ import 'kai_surface_context.dart';
 
 export 'kai_memory_types.dart';
 
+/// Transport-only presence seeds are not autobiographical events.
+bool shouldFormMemoryForTurn(KaiSurfaceContext? context) =>
+    context?.isPresenceEvent != true;
+
 class KaiMemoryAccessPolicy {
   const KaiMemoryAccessPolicy({
     required this.allowedScopes,
     this.worldId,
     this.allowAllWorlds = false,
+    this.allowTechnicalContent = false,
   });
 
   final Set<KaiMemoryScope> allowedScopes;
   final String? worldId;
   final bool allowAllWorlds;
+  final bool allowTechnicalContent;
 
   bool allows({required KaiMemoryScope scope, String? memoryWorldId}) {
     if (!allowedScopes.contains(scope)) return false;
@@ -20,6 +26,16 @@ class KaiMemoryAccessPolicy {
     if (allowAllWorlds) return true;
     return worldId != null && worldId == memoryWorldId;
   }
+
+  /// Scope answers where a memory may travel; this answers whether its subject
+  /// belongs in the current posture. A relationship memory can still contain a
+  /// pasted debugging exchange, so goggles-off must enforce both boundaries.
+  bool allowsContent(String text) =>
+      allowTechnicalContent ||
+      (!looksLikeTechnicalContent(text) &&
+          !text
+              .toLowerCase()
+              .contains('goggles off, friend. i’m keeping the work talk'));
 
   static KaiMemoryAccessPolicy forContext(KaiSurfaceContext? context) {
     // Someone other than Sadeq is talking. His memory is not narrowed here, it
@@ -39,6 +55,7 @@ class KaiMemoryAccessPolicy {
     if (context == null) {
       return const KaiMemoryAccessPolicy(
         allowAllWorlds: true,
+        allowTechnicalContent: true,
         allowedScopes: {
           KaiMemoryScope.identity,
           KaiMemoryScope.relationship,
@@ -55,8 +72,9 @@ class KaiMemoryAccessPolicy {
 
     if (context.surface == KaiSurface.desktop ||
         context.surface == KaiSurface.mobile) {
-      return const KaiMemoryAccessPolicy(
+      return KaiMemoryAccessPolicy(
         allowAllWorlds: true,
+        allowTechnicalContent: context.allowsTechnicalConversation,
         allowedScopes: {
           KaiMemoryScope.identity,
           KaiMemoryScope.relationship,
@@ -73,6 +91,7 @@ class KaiMemoryAccessPolicy {
     if (context.surface == KaiSurface.vr && context.gogglesOn) {
       return KaiMemoryAccessPolicy(
         worldId: context.worldId,
+        allowTechnicalContent: true,
         allowedScopes: const {
           KaiMemoryScope.identity,
           KaiMemoryScope.relationship,
@@ -93,9 +112,138 @@ class KaiMemoryAccessPolicy {
   }
 }
 
+/// Conservative lexical guard for context supplied to a friend-presence turn.
+/// This is not a general topic classifier; it blocks unmistakable implementation
+/// language before that text reaches the model. Ambiguous everyday words are
+/// deliberately excluded to preserve ordinary conversation.
+bool looksLikeTechnicalContent(String text) {
+  final lower = text.toLowerCase();
+  const unmistakable = <String>[
+    'api key',
+    'authentication',
+    'firebase',
+    'database',
+    'repository',
+    'codebase',
+    'code area',
+    'related code',
+    'touching code',
+    'source code',
+    'debugging',
+    'debug ',
+    'architecture',
+    'implementation detail',
+    'technical implementation',
+    'calibration phrase',
+    'checksum',
+    'hot restart',
+    'stack trace',
+    'exception',
+    'memory embedding',
+    'restore logic',
+    'chat history',
+    'desktop messenger',
+    'phone messenger',
+    'messenger ui',
+    'storage/restore',
+    'restore mismatch',
+    'patched restore',
+    'startup issue',
+    'startup noise',
+    'patch the',
+    'patching the',
+    'flutter',
+  ];
+  if (unmistakable.any(lower.contains)) return true;
+
+  final signals = <RegExp>[
+    RegExp(r'\b(?:code|coding|technical|server|backend|frontend)\b'),
+    RegExp(r'\b(?:file|files|folder|folders)\b'),
+    RegExp(r'\b(?:build|compile|deploy|patch|refactor)\b'),
+    RegExp(r'\b(?:function|class|method|query|schema)\b'),
+  ];
+  return signals.where((signal) => signal.hasMatch(lower)).length >= 2;
+}
+
+/// The current knowledge graph is global, so only globally safe memories may
+/// enter it. Creative/world/private material remains in the scoped vector store
+/// until the graph itself carries equivalent scope metadata.
+bool shouldExtractIntoSharedKnowledgeGraph({
+  required KaiMemoryScope scope,
+  required String userText,
+  required String kaiReply,
+}) {
+  const sharedScopes = {
+    KaiMemoryScope.identity,
+    KaiMemoryScope.relationship,
+    KaiMemoryScope.sharedLife,
+  };
+  return sharedScopes.contains(scope) &&
+      !looksLikeTechnicalContent('$userText\n$kaiReply');
+}
+
+/// Final fail-closed boundary for visible friend-presence speech.
+///
+/// Providers are filtered upstream, but model output is still untrusted. Keep
+/// safe personal paragraphs from a mixed reply and discard implementation
+/// paragraphs before display, speech, and memory formation.
+const kaiGogglesOffWorkBoundary =
+    'Goggles off, friend. I’m keeping the work talk for when we put them on.';
+
+String sanitizeGogglesOffReply(
+  String reply, {
+  String? userText,
+}) {
+  final lower = reply.toLowerCase();
+  final mixesBoundaryWithWork = lower.contains('goggles') &&
+      RegExp(r'\b(?:work|working|fix|fixing|startup|project|machinery|code|technical|implementation)\b')
+          .hasMatch(lower);
+  // A boundary-shaped sentence in Kai's reply is not proof that Sadeq asked
+  // for work. The model may mention the goggles while correcting a previous
+  // misunderstanding, or retrieved conversation may prime that wording. Only
+  // collapse to the stock boundary when the current input is actually
+  // technical. Callers without the input retain the conservative legacy rule.
+  if (mixesBoundaryWithWork &&
+      (userText == null || looksLikeTechnicalContent(userText))) {
+    return kaiGogglesOffWorkBoundary;
+  }
+  if (!looksLikeTechnicalContent(reply)) return reply;
+
+  final safe = reply
+      .split(RegExp(r'\n\s*\n'))
+      .map((part) => part.trim())
+      .where((part) => part.isNotEmpty)
+      .where((part) => !looksLikeTechnicalContent(part))
+      .where((part) => !(part.length < 100 && part.endsWith(':')))
+      .toList(growable: false);
+
+  if (safe.isNotEmpty) return safe.join('\n\n');
+
+  // Models often answer a personal idea and an implementation thought in one
+  // paragraph. Paragraph-only filtering made one technical sentence poison the
+  // entire human reply. Salvage complete personal sentences before falling back
+  // to the boundary; this keeps friend mode conversational without leaking the
+  // machinery that happened to share its paragraph.
+  final safeSentences = reply
+      .split(RegExp(r'(?<=[.!?])\s+|\n+'))
+      .map((part) => part.trim())
+      .where((part) => part.isNotEmpty)
+      .where((part) => !looksLikeTechnicalContent(part))
+      .where((part) =>
+          !part.toLowerCase().contains('goggles off, friend') &&
+          !part.toLowerCase().contains('goggles need to go on'))
+      .toList(growable: false);
+  if (safeSentences.isNotEmpty) return safeSentences.join(' ');
+
+  return kaiGogglesOffWorkBoundary;
+}
+
 KaiMemoryScope scopeForTurn({
   required KaiSurfaceContext? context,
   required KaiRoute route,
+  KaiRoute? requestedRoute,
+  String? userText,
+  String? kaiReply,
 }) {
   if (context == null) return KaiMemoryScope.privateCore;
 
@@ -104,6 +252,20 @@ KaiMemoryScope scopeForTurn({
   // store, not in the history of his friendship with Sadeq. Checked first so
   // the emotional rule below cannot promote a stranger's turn.
   if (!context.isSadeq) return KaiMemoryScope.ephemeral;
+
+  // The capability broker may collapse a forbidden coding/tool request to
+  // fastChat so Kai can answer safely. That presentation route must not rewrite
+  // the subject into relationship memory. Otherwise the request and any
+  // accidental technical wording in the refusal become readable on Messenger.
+  // Preserve the original request classification solely for memory isolation.
+  if (!context.gogglesOn &&
+      (requestedRoute == KaiRoute.coding || requestedRoute == KaiRoute.tool)) {
+    return KaiMemoryScope.privateCore;
+  }
+  if (!context.gogglesOn &&
+      looksLikeTechnicalContent('${userText ?? ''}\n${kaiReply ?? ''}')) {
+    return KaiMemoryScope.privateCore;
+  }
 
   // A genuine emotional moment is relationship material in any body, including
   // AR. Checked first so the rule below cannot swallow it.
@@ -123,6 +285,12 @@ KaiMemoryScope scopeForTurn({
 
   if (!context.gogglesOn) return KaiMemoryScope.relationship;
   if (context.surface == KaiSurface.vr) {
+    // Intent routing cannot see the content of Kai's eventual answer. A casual
+    // recall question can still produce an implementation secret, so scope the
+    // completed exchange rather than trusting the question classification alone.
+    if (looksLikeTechnicalContent('${userText ?? ''}\n${kaiReply ?? ''}')) {
+      return KaiMemoryScope.creative;
+    }
     // The shared EXPERIENCE travels with him; the work of building does not.
     // A VR session is both — "we built the loft and he lost it at the crooked
     // window" belongs on Messenger; "the lighting rig needs a second pass"

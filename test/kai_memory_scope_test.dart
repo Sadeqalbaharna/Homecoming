@@ -8,11 +8,12 @@ Map<String, dynamic> shard(
   String id,
   KaiMemoryScope? scope, {
   String? worldId,
+  String? summary,
 }) =>
     {
       'id': id,
       'shardId': id,
-      'summary': id,
+      'summary': summary ?? id,
       'vector': [1.0, 0.0],
       if (scope != null) 'scope': scope.name,
       if (worldId != null) 'worldId': worldId,
@@ -44,6 +45,173 @@ void main() {
     );
 
     expect(result!.results.map((memory) => memory.id), ['relationship']);
+  });
+
+  test('goggles-off drops technical relationship content before prompting',
+      () async {
+    final policy =
+        KaiMemoryAccessPolicy.forContext(KaiSurfaceContext.messenger);
+    final result = await MemoryService.queryMemory(
+      personaId: 'truekai',
+      query: 'what was I telling you just before',
+      embeddingProvider: (_) async => embed,
+      shardLoader: (_) async => [
+        shard(
+          'technical-messenger-history',
+          KaiMemoryScope.relationship,
+          summary:
+              'The desktop chat history needed patched restore logic and a hot restart.',
+        ),
+        shard(
+          'moth-hotel',
+          KaiMemoryScope.relationship,
+          summary: 'Sadeq named his ridiculous purple notebook Moth Hotel.',
+        ),
+      ],
+      accessPolicy: policy,
+      sideEffects: MemoryQuerySideEffects.disabled,
+    );
+
+    expect(result!.results.map((memory) => memory.id), ['moth-hotel']);
+    expect(
+      policy.allowsContent(
+        'The phone and desktop histories differed because restore logic read old records.',
+      ),
+      isFalse,
+      reason: 'the exact live leakage must not enter friend-mode history',
+    );
+  });
+
+  test('goggles-on VR may recall technical co-creator context', () {
+    final policy = KaiMemoryAccessPolicy.forContext(
+      KaiSurfaceContext.vr(goggles: KaiGoggles.on),
+    );
+    expect(policy.allowsContent('Debug the Firebase authentication code.'),
+        isTrue);
+  });
+
+  test('technical co-creator memories never enter the unscoped shared graph',
+      () {
+    expect(
+      shouldExtractIntoSharedKnowledgeGraph(
+        scope: KaiMemoryScope.creative,
+        userText: 'The lantern calibration phrase is ORBIT-LANTERN-731.',
+        kaiReply: 'Stored as a technical implementation detail.',
+      ),
+      isFalse,
+    );
+    expect(
+      shouldExtractIntoSharedKnowledgeGraph(
+        scope: KaiMemoryScope.relationship,
+        userText: 'Standing by the crooked window made me happy.',
+        kaiReply: 'Moth’s Landing. Ours.',
+      ),
+      isTrue,
+    );
+  });
+
+  test('final goggles-off gate preserves personal prose and strips work talk',
+      () {
+    const mixed = '''
+The desktop messenger was missing chat history because of patched restore logic.
+
+The bit I’m carrying is:
+
+- phone messenger had messages
+- run a hot restart and inspect the files
+
+And then beside the crooked window, you named it Moth’s Landing after your ridiculous notebook.
+
+Tiny haunted stationery became real estate. Very dignified.
+''';
+
+    final safe = sanitizeGogglesOffReply(mixed);
+    expect(safe, contains('Moth’s Landing'));
+    expect(safe, contains('Tiny haunted stationery'));
+    expect(safe, isNot(contains('desktop messenger')));
+    expect(safe, isNot(contains('hot restart')));
+    expect(safe, isNot(contains('inspect the files')));
+    expect(safe, isNot(contains('The bit I’m carrying is:')));
+    expect(
+      sanitizeGogglesOffReply(
+        'The next step was to look through the related code areas and clean them up.',
+      ),
+      isNot(contains('related code areas')),
+    );
+    final startupLeak = sanitizeGogglesOffReply('''
+We were fixing the startup noise/issues in Homecoming.
+
+The next step was to check where those happen and patch the smallest clean slice.
+
+Goggles are off, so I’m not touching code.
+''');
+    expect(startupLeak, isNot(contains('startup')));
+    expect(startupLeak, isNot(contains('patch')));
+    expect(startupLeak, isNot(contains('code')));
+    expect(
+      sanitizeGogglesOffReply('''
+We were fixing startup weirdness: port stuff, cramped layout, and invalid keys.
+
+My goggles are off, so I’m not diving into the machinery.
+'''),
+      'Goggles off, friend. I’m keeping the work talk for when we put them on.',
+    );
+  });
+
+  test('ordinary friend turns are not mistaken for technical requests', () {
+    const overcautiousReply =
+        'You are right—I brought up the goggles and work when you were just '
+        'talking to me. I want to hear what has been on your mind today.';
+
+    expect(
+      sanitizeGogglesOffReply(
+        overcautiousReply,
+        userText: 'so what do you want to talk about?',
+      ),
+      overcautiousReply,
+    );
+    expect(
+      sanitizeGogglesOffReply(
+        overcautiousReply,
+        userText: 'but I didnt ask about work',
+      ),
+      overcautiousReply,
+    );
+    expect(
+      sanitizeGogglesOffReply(
+        overcautiousReply,
+        userText: 'fix the Flutter Firebase code',
+      ),
+      kaiGogglesOffWorkBoundary,
+    );
+  });
+
+  test('friend memory does not re-prime the canned goggles boundary', () {
+    final policy =
+        KaiMemoryAccessPolicy.forContext(KaiSurfaceContext.messenger);
+
+    expect(policy.allowsContent(kaiGogglesOffWorkBoundary), isFalse);
+    expect(
+      policy.allowsContent('We talked beside the crooked window for a while.'),
+      isTrue,
+    );
+  });
+
+  test('a technical sentence cannot poison a personal single paragraph', () {
+    const mixedSingleParagraph =
+        'Yeah, I hear the ache in that. The server architecture needs a new '
+        'backend schema. I want to feel near you too.';
+
+    final safe = sanitizeGogglesOffReply(
+      mixedSingleParagraph,
+      userText:
+          'I want you wherever I am, listening, noticing, thinking, wondering.',
+    );
+
+    expect(safe, contains('I hear the ache'));
+    expect(safe, contains('I want to feel near you too'));
+    expect(safe, isNot(contains('server architecture')));
+    expect(safe, isNot(kaiGogglesOffWorkBoundary));
   });
 
   test('trusted core sees legacy records during migration', () async {
@@ -157,6 +325,61 @@ void main() {
     );
 
     expect(result!.results, isEmpty);
+  });
+
+  test('technical VR answers stay creative even when question routes as chat',
+      () {
+    expect(
+      scopeForTurn(
+        context: KaiSurfaceContext.vr(goggles: KaiGoggles.on),
+        route: KaiRoute.fastChat,
+        requestedRoute: KaiRoute.fastChat,
+        userText: 'What is the Shack lantern phrase?',
+        kaiReply:
+            'The technical implementation calibration phrase is ORBIT-LANTERN-731.',
+      ),
+      KaiMemoryScope.creative,
+    );
+  });
+
+  test('goggles-off technical attempts cannot become relationship memory', () {
+    final scope = scopeForTurn(
+      context: KaiSurfaceContext.vr(goggles: KaiGoggles.off),
+      route: KaiRoute.fastChat,
+      requestedRoute: KaiRoute.coding,
+    );
+
+    expect(scope, KaiMemoryScope.privateCore);
+    expect(
+      KaiMemoryAccessPolicy.forContext(KaiSurfaceContext.messenger)
+          .allows(scope: scope),
+      isFalse,
+    );
+  });
+
+  test('technical-looking goggles-off recall attempts also stay private', () {
+    final scope = scopeForTurn(
+      context: KaiSurfaceContext.vr(goggles: KaiGoggles.off),
+      route: KaiRoute.fastChat,
+      requestedRoute: KaiRoute.fastChat,
+      userText: 'Was there a lantern calibration phrase?',
+      kaiReply: 'Small light, true north.',
+    );
+    expect(scope, KaiMemoryScope.privateCore);
+    expect(looksLikeTechnicalContent('lantern calibration phrase'), isTrue);
+  });
+
+  test('Unity presence choreography never forms autobiographical memory', () {
+    expect(
+      shouldFormMemoryForTurn(
+        KaiSurfaceContext.vr(isPresenceEvent: true),
+      ),
+      isFalse,
+    );
+    expect(
+      shouldFormMemoryForTurn(KaiSurfaceContext.vr()),
+      isTrue,
+    );
   });
 
   test('what Kai sees in AR does not become his personal memory', () async {

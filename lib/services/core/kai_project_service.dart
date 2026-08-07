@@ -163,12 +163,27 @@ class KaiLayer {
     final checklist = (m['checklist'] is List)
         ? (m['checklist'] as List).map((e) => e.toString()).toList()
         : const <String>[];
-    final rawStatus = (m['checklistStatus'] is Map)
+
+    // Firebase RTDB keys cannot contain ., $, #, [, ], or /.
+    // Checklist item text absolutely can, so the durable wire format is an
+    // index-aligned list. Keep accepting the original text-keyed map as a
+    // legacy fallback so existing local/test data still reads correctly.
+    final rawStatusByIndex = (m['checklistStatusByIndex'] is List)
+        ? (m['checklistStatusByIndex'] as List)
+        : const <dynamic>[];
+    final rawLegacyStatus = (m['checklistStatus'] is Map)
         ? Map<String, dynamic>.from(m['checklistStatus'] as Map)
         : const <String, dynamic>{};
+
     final status = <String, ChecklistStatus>{};
-    for (final item in checklist) {
-      status[item] = ChecklistStatus.parse(rawStatus[item]?.toString());
+    for (var i = 0; i < checklist.length; i++) {
+      final item = checklist[i];
+      final indexed = i < rawStatusByIndex.length
+          ? rawStatusByIndex[i]?.toString()
+          : null;
+      status[item] = ChecklistStatus.parse(
+        indexed ?? rawLegacyStatus[item]?.toString(),
+      );
     }
     return KaiLayer(
       n: (m['n'] is int) ? m['n'] as int : 0,
@@ -194,10 +209,10 @@ class KaiLayer {
         'state': state.name,
         'stamp': stamp,
         'checklist': checklist,
-        'checklistStatus': {
+        'checklistStatusByIndex': [
           for (final item in checklist)
-            item: (checklistStatus[item] ?? ChecklistStatus.pending).name,
-        },
+            (checklistStatus[item] ?? ChecklistStatus.pending).name,
+        ],
       };
 }
 

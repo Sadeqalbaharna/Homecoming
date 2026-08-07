@@ -30,6 +30,15 @@ class TTSService {
   /// (e.g. a deliberate "any voice is better than none" mode) if ever wanted.
   static bool allowStockFallbackVoice = false;
 
+  // Shared by all TTSService instances so quick responses and attention clips
+  // cannot each hammer ElevenLabs after the same credential is rejected.
+  static String? _blockedCredential;
+
+  static bool isStructurallyValidElevenLabsKey(String value) {
+    final key = value.trim();
+    return key.startsWith('sk_') && key.length > 12;
+  }
+
   /// Strip markdown and formatting symbols that would be read aloud literally.
   static String sanitizeForSpeech(String text) {
     return text
@@ -76,9 +85,18 @@ class TTSService {
     double style           = 0.0,
   }) async {
     text = sanitizeForSpeech(text);
-    final elevenlabsKey = await AIConfig.getElevenLabsKey();
+    final elevenlabsKey = (await AIConfig.getElevenLabsKey()).trim();
     if (elevenlabsKey.isEmpty) {
       print('ElevenLabs API key not configured');
+      return null;
+    }
+    if (_blockedCredential == elevenlabsKey) return null;
+    if (!isStructurallyValidElevenLabsKey(elevenlabsKey)) {
+      lastSpeechOk = false;
+      lastSpeechError =
+          'ElevenLabs credential is a key ID, not an API key (expected sk_…).';
+      _blockedCredential = elevenlabsKey;
+      print('⚠️ [TTS] Invalid ElevenLabs credential format; synthesis disabled');
       return null;
     }
 
@@ -131,6 +149,13 @@ class TTSService {
       lastSpeechOk = false;
       lastSpeechError = '${e.response?.statusCode ?? 'network'}: '
           '${body.isEmpty ? e.message ?? 'unknown' : body}';
+      if (e.response?.statusCode == 401 ||
+          e.response?.statusCode == 403 ||
+          body.contains('authentication_error') ||
+          body.contains('invalid_api_key')) {
+        _blockedCredential = elevenlabsKey;
+        print('⚠️ [TTS] Credential rejected; suppressing retries until restart');
+      }
       // Deliberately NOT falling back by default: his custom voice is his
       // identity, and speaking in a stranger's voice is worse than silence.
       if (allowStockFallbackVoice && selectedVoiceId != defaultVoice) {

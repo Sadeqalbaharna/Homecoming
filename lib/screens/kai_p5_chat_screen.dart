@@ -43,15 +43,20 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // Clipboard + HapticFeedback
 
 import '../constants.dart';
-import '../services/core/kai_surface_context.dart';
-import '../services/ai/ai_service.dart';
 import '../services/core/conversation_store_service.dart';
+import '../services/core/kai_conversation_request_service.dart';
 import '../services/core/kai_work_request_service.dart';
 import '../widgets/kai_p5_chat.dart';
+import '../widgets/kai_line_heartbeat.dart';
+import '../widgets/kai_body_constellation.dart';
+import '../services/core/kai_global_presence_service.dart';
 
 class _P5Msg {
   final String text;
   final bool fromKai;
+
+  /// When the message reached this local thread.
+  final DateTime time;
 
   /// A line he wrote MID-WORK rather than his answer.
   ///
@@ -62,7 +67,52 @@ class _P5Msg {
   /// tonight, the one thing never persisted anywhere.
   final bool interim;
 
-  const _P5Msg(this.text, {required this.fromKai, this.interim = false});
+  _P5Msg(
+    this.text, {
+    required this.fromKai,
+    this.interim = false,
+    DateTime? time,
+  }) : time = time ?? DateTime.now();
+}
+
+class _P5EmptyConversation extends StatelessWidget {
+  const _P5EmptyConversation();
+
+  @override
+  Widget build(BuildContext context) {
+    return Transform.rotate(
+      angle: -0.025,
+      child: DecoratedBox(
+        decoration: const BoxDecoration(
+          color: P5Palette.paper,
+          boxShadow: [
+            BoxShadow(
+              color: P5Palette.shadow,
+              offset: Offset(7, 7),
+              blurRadius: 0,
+            ),
+          ],
+          border: Border.fromBorderSide(
+            BorderSide(color: P5Palette.ink, width: 4),
+          ),
+        ),
+        child: const Padding(
+          padding: EdgeInsets.fromLTRB(14, 12, 14, 13),
+          child: Text(
+            'No messages yet.\nSend one, menace.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: P5Palette.ink,
+              fontSize: 13,
+              height: 1.25,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 0.8,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class KaiP5ChatScreen extends StatefulWidget {
@@ -94,15 +144,21 @@ class KaiP5ChatScreen extends StatefulWidget {
 }
 
 class _KaiP5ChatScreenState extends State<KaiP5ChatScreen> {
-  final _ai = AIService();
+  final _conversationRequests = KaiConversationRequestService.instance;
   final _workRequests = KaiWorkRequestService.instance;
   final _inp = TextEditingController();
   final _scroll = ScrollController();
   final _msgs = <_P5Msg>[];
   final Set<String> _announcedWorkRequests = {};
   final Set<String> _announcedWorkRequestEvents = {};
-  final Map<String, StreamSubscription<List<KaiWorkRequestEvent>>> _workEventSubs = {};
+  final Map<String, StreamSubscription<List<KaiWorkRequestEvent>>>
+      _workEventSubs = {};
   StreamSubscription<List<KaiWorkRequest>>? _workRequestSub;
+  StreamSubscription<List<ConversationLine>>? _historySub;
+  StreamSubscription<KaiGlobalPresenceSnapshot>? _connectionSub;
+  bool? _kaiAwake;
+  int _awakeBodyCount = 0;
+  List<KaiGlobalBody> _awakeBodies = const [];
   bool _sending = false;
 
   /// Which turn is live. Bumped on every send AND on every interrupt, so an
@@ -122,8 +178,9 @@ class _KaiP5ChatScreenState extends State<KaiP5ChatScreen> {
   /// bubble, leaving a message on screen that he never answered.
   final List<String> _queue = [];
 
-  /// Enough to feel continuous, few enough to open instantly on a phone.
-  static const _historyTurns = 12;
+  /// Keep the visible Messenger app feeling like an actual app: restore a deep
+  /// transcript instead of only the small AI context window.
+  static const _visibleHistoryTurns = 200;
 
   /// A text, not a document. See AIService.replyCeiling — 120 tokens is ~90
   /// words: room for a real thought, no room for a header.
@@ -137,11 +194,78 @@ class _KaiP5ChatScreenState extends State<KaiP5ChatScreen> {
   void initState() {
     super.initState();
     _loadHistory();
+    _watchHistory();
     _watchWorkRequests();
+    _watchContinuityLine();
+  }
+
+  void _watchContinuityLine() {
+    final presence = KaiGlobalPresenceService.instance;
+    void apply(KaiGlobalPresenceSnapshot snapshot) {
+      if (!mounted) return;
+      setState(() {
+        _kaiAwake = snapshot.connected ? snapshot.isAwake : null;
+        _awakeBodyCount = snapshot.bodyCount;
+        _awakeBodies = snapshot.bodies;
+      });
+    }
+
+    _connectionSub = presence.snapshots.listen(apply, onError: (_) {
+      if (mounted) setState(() => _kaiAwake = null);
+    });
+    apply(presence.latest);
+  }
+
+  Future<void> _showPairingDialog() async {
+    final controller = TextEditingController();
+    final code = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: P5Palette.ink,
+        title: const Text('PAIR THIS KAI BODY'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          textCapitalization: TextCapitalization.characters,
+          maxLength: 14,
+          decoration: const InputDecoration(
+            hintText: 'XXXX-XXXX-XXXX',
+            helperText: 'Tap the desktop heart to create a code.',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('CANCEL'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, controller.text),
+            child: const Text('PAIR'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (code == null || code.trim().isEmpty || !mounted) return;
+    try {
+      await KaiGlobalPresenceService.instance.claimPairingCode(code);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('This phone is now an approved Kai body.')),
+      );
+    } on KaiPairingException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.message)),
+      );
+    }
   }
 
   @override
   void dispose() {
+    _historySub?.cancel();
+    _connectionSub?.cancel();
     _workRequestSub?.cancel();
     for (final sub in _workEventSubs.values) {
       sub.cancel();
@@ -163,7 +287,8 @@ class _KaiP5ChatScreenState extends State<KaiP5ChatScreen> {
               request.status != KaiWorkRequestStatus.failed) {
             continue;
           }
-          if (!_announcedWorkRequests.add('${request.id}:${request.status.name}')) {
+          if (!_announcedWorkRequests
+              .add('${request.id}:${request.status.name}')) {
             continue;
           }
 
@@ -183,14 +308,14 @@ class _KaiP5ChatScreenState extends State<KaiP5ChatScreen> {
 
   void _watchWorkRequestEvents(String requestId) {
     if (_workEventSubs.containsKey(requestId)) return;
-    _workEventSubs[requestId] = _workRequests
-        .watchEvents(widget.personaId, requestId)
-        .listen((events) {
+    _workEventSubs[requestId] =
+        _workRequests.watchEvents(widget.personaId, requestId).listen((events) {
       if (!mounted) return;
       final fresh = <_P5Msg>[];
       for (final event in events) {
         if (!_shouldShowWorkEvent(event)) continue;
-        if (!_announcedWorkRequestEvents.add('$requestId:${event.id}')) continue;
+        if (!_announcedWorkRequestEvents.add('$requestId:${event.id}'))
+          continue;
         fresh.add(_P5Msg(_workEventText(event), fromKai: true, interim: true));
       }
       if (fresh.isEmpty) return;
@@ -257,6 +382,12 @@ class _KaiP5ChatScreenState extends State<KaiP5ChatScreen> {
       ));
   }
 
+  String _messageTime(DateTime time) {
+    final h = time.hour.toString().padLeft(2, '0');
+    final m = time.minute.toString().padLeft(2, '0');
+    return '$h:$m';
+  }
+
   void _autoscroll() {
     // Post-frame: the list hasn't laid out the new row yet, so maxScrollExtent
     // is still the old one.
@@ -275,23 +406,11 @@ class _KaiP5ChatScreenState extends State<KaiP5ChatScreen> {
       final lines = await ConversationStoreService().getHistory(
         widget.personaId,
         surfaceId: 'messenger',
-        maxTurns: _historyTurns,
+        maxTurns: _visibleHistoryTurns,
       );
       if (!mounted || lines.isEmpty) return;
 
-      // '[<digits>] User: <text>' or '[<digits>] Kai: <text>'. dotAll matters:
-      // his replies are multi-line, and a parser without it silently drops every
-      // one of them and leaves a transcript where only Sadeq ever spoke.
-      final pat = RegExp(r'^\[(\d+)\] (User|Kai):\s*([\s\S]*)$', dotAll: true);
-
-      final restored = <_P5Msg>[];
-      for (final line in lines) {
-        final m = pat.firstMatch(line.trimRight());
-        if (m == null) continue;
-        final text = m.group(3)!.trim();
-        if (text.isEmpty) continue;
-        restored.add(_P5Msg(text, fromKai: m.group(2) != 'User'));
-      }
+      final restored = _messagesFromFormattedHistory(lines);
       if (restored.isEmpty || !mounted) return;
 
       setState(() => _msgs
@@ -302,6 +421,60 @@ class _KaiP5ChatScreenState extends State<KaiP5ChatScreen> {
       // History is cosmetic. A load failure must never surface as an error —
       // opening a chat that's a bit short is fine; opening a red screen is not.
     }
+  }
+
+  void _watchHistory() {
+    _historySub = ConversationStoreService()
+        .watchHistory(
+      widget.personaId,
+      surfaceId: 'messenger',
+      maxTurns: _visibleHistoryTurns,
+    )
+        .listen((lines) {
+      if (!mounted || lines.isEmpty) return;
+      _applyRemoteHistory(lines);
+    });
+  }
+
+  List<_P5Msg> _messagesFromFormattedHistory(List<String> lines) {
+    // '[<digits>] User: <text>' or '[<digits>] Kai: <text>'. dotAll matters:
+    // replies can be multi-line, and a parser without it silently drops them.
+    final pat = RegExp(r'^\[(\d+)\] (User|Kai):\s*([\s\S]*)$', dotAll: true);
+    final restored = <_P5Msg>[];
+    for (final line in lines) {
+      final m = pat.firstMatch(line.trimRight());
+      if (m == null) continue;
+      final text = m.group(3)!.trim();
+      if (text.isEmpty) continue;
+      final rawMillis = int.tryParse(m.group(1)!);
+      restored.add(_P5Msg(
+        text,
+        fromKai: m.group(2) != 'User',
+        time: rawMillis == null
+            ? DateTime.now()
+            : DateTime.fromMillisecondsSinceEpoch(rawMillis),
+      ));
+    }
+    return restored;
+  }
+
+  void _applyRemoteHistory(List<ConversationLine> lines) {
+    final remote = lines
+        .map((line) => _P5Msg(
+              line.text,
+              fromKai: line.fromKai,
+              time: DateTime.fromMillisecondsSinceEpoch(line.timestampMillis),
+            ))
+        .toList();
+    if (remote.isEmpty) return;
+
+    final transient = _msgs.where((msg) => msg.interim).toList();
+
+    setState(() => _msgs
+      ..clear()
+      ..addAll(remote)
+      ..addAll(transient));
+    _autoscroll();
   }
 
   Future<void> _queueDesktopWork(
@@ -385,30 +558,70 @@ class _KaiP5ChatScreenState extends State<KaiP5ChatScreen> {
     });
     _autoscroll();
 
+    _P5Msg? acknowledgement;
     try {
-      final resp = await _ai.sendMessage(
+      final requestId = await _conversationRequests.createRequest(
+        widget.personaId,
         text: text,
-        personaId: widget.personaId,
         model: widget.model,
-        conversationSurfaceId: 'messenger',
-        surfaceContext: KaiSurfaceContext.messenger,
+        sourceSurface: 'messenger',
         // He narrates as he works. On the desktop these are footnotes next to a
         // tool log; here they're just what he's saying, which is closer to true.
-        onProgress: (note) {
-          // Stale interim from an interrupted turn — drop it.
-          if (!mounted || gen != _generation) return;
-          setState(() => _msgs.add(_P5Msg(note, fromKai: true, interim: true)));
-          _autoscroll();
-        },
+        // Stale interim from an interrupted turn — drop it.
         // THE LINE. Not a request to be brief — no room to be otherwise.
         replyCeiling: _textCeiling,
+      );
+      final accepted =
+          await _conversationRequests.waitForAcknowledgedOrTerminal(
+        widget.personaId,
+        requestId,
+      );
+      if (!mounted || gen != _generation) return;
+      if (accepted != null && !accepted.isTerminal) {
+        acknowledgement = _P5Msg(
+          'Got you. I’m thinking.',
+          fromKai: true,
+          interim: true,
+        );
+        setState(() => _msgs.add(acknowledgement!));
+        _autoscroll();
+      }
+      final result = await _conversationRequests.waitForTerminal(
+        widget.personaId,
+        requestId,
+        timeout: const Duration(seconds: 65),
       );
       // Interrupted while he was thinking — his answer is to a question you've
       // already moved past. Drop it rather than let it land under your new one.
       if (!mounted || gen != _generation) return;
-      final reply = resp.reply.trim();
+      if (result == null) {
+        if (acknowledgement != null) {
+          setState(() => _msgs.remove(acknowledgement));
+          acknowledgement = null;
+        }
+        setState(() => _msgs.add(_P5Msg(
+              'I have that. My core is still carrying it; the answer will land here when it is ready.',
+              fromKai: true,
+              interim: true,
+            )));
+        return;
+      }
+      if (result.status == KaiConversationRequestStatus.failed) {
+        throw StateError(result.error ?? 'Central conversation failed');
+      }
+      if (acknowledgement != null) {
+        setState(() => _msgs.remove(acknowledgement));
+        acknowledgement = null;
+      }
+      final reply = result.reply?.trim() ?? '';
       if (reply.isNotEmpty && reply != '(no reply)') {
-        setState(() => _msgs.add(_P5Msg(reply, fromKai: true)));
+        final alreadyVisible = _msgs.reversed.take(6).any(
+              (message) =>
+                  message.fromKai && !message.interim && message.text == reply,
+            );
+        if (!alreadyVisible) {
+          setState(() => _msgs.add(_P5Msg(reply, fromKai: true)));
+        }
       } else {
         // An empty reply is the silent drop. The turn ran, cost money, and put
         // nothing on screen — so it reads as him ignoring you, which is the one
@@ -422,7 +635,7 @@ class _KaiP5ChatScreenState extends State<KaiP5ChatScreen> {
         final saidSomething =
             _msgs.isNotEmpty && _msgs.last.fromKai && _msgs.last.interim;
         if (!saidSomething) {
-          setState(() => _msgs.add(const _P5Msg(
+          setState(() => _msgs.add(_P5Msg(
                 'lost my thread there for a sec. say that again?',
                 fromKai: true,
                 interim: true,
@@ -431,10 +644,14 @@ class _KaiP5ChatScreenState extends State<KaiP5ChatScreen> {
       }
     } catch (e) {
       if (!mounted || gen != _generation) return;
+      if (acknowledgement != null) {
+        setState(() => _msgs.remove(acknowledgement));
+        acknowledgement = null;
+      }
       // In his voice, because an error is still him talking to you. A red
       // SnackBar saying "Exception: ..." is the app breaking character at the
       // exact moment you needed it not to.
-      setState(() => _msgs.add(const _P5Msg(
+      setState(() => _msgs.add(_P5Msg(
             "that didn't go through. try me again?",
             fromKai: true,
             interim: true,
@@ -459,35 +676,56 @@ class _KaiP5ChatScreenState extends State<KaiP5ChatScreen> {
   Widget _chatBody() {
     return Column(
       children: [
-        Expanded(
-          child: ListView.builder(
-            controller: _scroll,
-            padding: const EdgeInsets.only(top: 10, bottom: 4),
-            itemCount: _msgs.length + (_sending ? 1 : 0),
-            itemBuilder: (_, i) {
-              if (i >= _msgs.length) {
-                return P5MessageRow.text('…', fromKai: true, seed: 7);
-              }
-              final m = _msgs[i];
-              // Long-press to copy. On a phone there's no right-click and
-              // the bubble isn't a text field, so this is the only way to
-              // get one of his lines out — and his lines are the whole
-              // point of the app.
-              return GestureDetector(
-                onLongPress: () => _copy(m.text),
-                child: P5MessageRow.text(
-                  m.text,
-                  fromKai: m.fromKai,
-                  dim: m.interim,
-                  // Seeded off the words, not the index: a message keeps
-                  // its tilt forever — across a rebuild, a scroll, a
-                  // restart. An index re-rolls every bubble the moment one
-                  // above it changes, and the whole column twitches.
-                  seed: m.text.hashCode,
-                ),
-              );
-            },
+        KaiLineHeartbeat(
+          awake: _kaiAwake,
+          bodyCount: _awakeBodyCount,
+          onTap: _showPairingDialog,
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: KaiBodyConstellation(
+            awake: _kaiAwake == true,
+            bodies: _awakeBodies,
+            compact: true,
           ),
+        ),
+        Expanded(
+          child: _msgs.isEmpty && !_sending
+              ? const Center(
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 22),
+                    child: _P5EmptyConversation(),
+                  ),
+                )
+              : ListView.builder(
+                  controller: _scroll,
+                  padding: const EdgeInsets.only(top: 10, bottom: 4),
+                  itemCount: _msgs.length + (_sending ? 1 : 0),
+                  itemBuilder: (_, i) {
+                    if (i >= _msgs.length) {
+                      return P5MessageRow.text('…', fromKai: true, seed: 7);
+                    }
+                    final m = _msgs[i];
+                    // Long-press to copy. On a phone there's no right-click and
+                    // the bubble isn't a text field, so this is the only way to
+                    // get one of his lines out — and his lines are the whole
+                    // point of the app.
+                    return GestureDetector(
+                      onLongPress: () => _copy(m.text),
+                      child: P5MessageRow.text(
+                        m.text,
+                        fromKai: m.fromKai,
+                        dim: m.interim,
+                        timestamp: _messageTime(m.time),
+                        // Seeded off the words, not the index: a message keeps
+                        // its tilt forever — across a rebuild, a scroll, a
+                        // restart. An index re-rolls every bubble the moment one
+                        // above it changes, and the whole column twitches.
+                        seed: m.text.hashCode,
+                      ),
+                    );
+                  },
+                ),
         ),
         P5Composer(controller: _inp, onSend: _send),
       ],

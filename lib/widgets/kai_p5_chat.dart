@@ -261,6 +261,9 @@ class P5MessageRow extends StatelessWidget {
   final bool fromKai;
   final Widget? portrait;
 
+  /// Small messenger receipt shown under every bubble.
+  final String? timestamp;
+
   /// Deterministic per-message tilt. NOT Random(): a bubble that jitters every
   /// rebuild is a bubble that jitters when you scroll. Seed it off the content
   /// and it's stable forever — see the note at the import, which is why there's
@@ -272,6 +275,7 @@ class P5MessageRow extends StatelessWidget {
     required this.child,
     required this.fromKai,
     this.portrait,
+    this.timestamp,
     this.seed = 0,
   });
 
@@ -288,6 +292,7 @@ class P5MessageRow extends StatelessWidget {
     Key? key,
     required bool fromKai,
     Widget? portrait,
+    String? timestamp,
     int seed = 0,
     bool dim = false,
   }) {
@@ -296,6 +301,7 @@ class P5MessageRow extends StatelessWidget {
       key: key,
       fromKai: fromKai,
       portrait: portrait,
+      timestamp: timestamp,
       seed: seed,
       child: Text(
         text,
@@ -328,51 +334,105 @@ class P5MessageRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final fill = fromKai ? P5Palette.ink : P5Palette.paper;
 
-    final bubble = Transform.rotate(
-      angle: _tilt,
-      child: ConstrainedBox(
-        // 74% of the width, hard. A bubble that can grow to fill the screen is a
-        // bubble that will be filled.
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.74,
-        ),
-        child: CustomPaint(
-          painter: P5BubblePainter(
-            tailLeft: fromKai,
-            fill: fill,
-            border: P5Palette.paper,
-          ),
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(
-              fromKai ? 26 : 16,
-              12,
-              fromKai ? 16 : 26,
-              13,
+    Widget stampedBubbleFor(double maxWidth) {
+      final bubble = Transform.rotate(
+        angle: _tilt,
+        child: ConstrainedBox(
+          // Size from the actual row constraints, not the whole desktop window.
+          // The desktop can mount this mobile-style chat inside a narrow rail;
+          // MediaQuery width there is the castle, constraints.maxWidth is the
+          // cupboard. Trust the cupboard.
+          constraints: BoxConstraints(maxWidth: maxWidth),
+          child: CustomPaint(
+            painter: P5BubblePainter(
+              tailLeft: fromKai,
+              fill: fill,
+              border: P5Palette.paper,
             ),
-            child: child,
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(
+                fromKai ? 26 : 16,
+                12,
+                fromKai ? 16 : 26,
+                13,
+              ),
+              child: child,
+            ),
           ),
         ),
-      ),
-    );
+      );
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(10, 7, 10, 7),
-      child: Row(
-        mainAxisAlignment:
-            fromKai ? MainAxisAlignment.start : MainAxisAlignment.end,
-        crossAxisAlignment: CrossAxisAlignment.start,
+      return Column(
+        crossAxisAlignment:
+            fromKai ? CrossAxisAlignment.start : CrossAxisAlignment.end,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          if (fromKai) ...[
-            // His art bleeds red to the edge and the room is the same red, so it
-            // sits ON the field rather than on top of it — which is why the gap
-            // is negative. The bubble tucks under the portrait's corner the way
-            // it does when someone throws two photos down on a table.
-            portrait ?? const KaiFace(),
-            const SizedBox(width: 2),
+          bubble,
+          if (timestamp != null && timestamp!.trim().isNotEmpty) ...[
+            const SizedBox(height: 5),
+            Padding(
+              padding: EdgeInsets.only(
+                left: fromKai ? 8 : 0,
+                right: fromKai ? 0 : 8,
+              ),
+              child: Text(
+                timestamp!,
+                style: TextStyle(
+                  color: P5Palette.paper.withOpacity(0.62),
+                  fontSize: 10,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0.9,
+                  shadows: const [
+                    Shadow(
+                      color: Colors.black,
+                      offset: Offset(1.2, 1.2),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ],
-          Flexible(child: bubble),
         ],
-      ),
+      );
+    }
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // Desktop can mount the mobile messenger in a rail that is narrower than
+        // a real phone. If the full portrait sits beside the bubble there, the
+        // bubble gets crushed into a vertical strip. Keep the full tossed-photo
+        // look on phone-sized surfaces, but protect the text on cramped panes.
+        final cramped = constraints.maxWidth < 360;
+        final kaiPortrait = portrait ?? KaiFace(size: cramped ? 78 : 116);
+        final portraitBudget = fromKai && !cramped ? 118.0 : 0.0;
+        final horizontalPadding = 20.0;
+        final availableBubbleWidth =
+            (constraints.maxWidth - portraitBudget - horizontalPadding)
+                .clamp(120.0, constraints.maxWidth);
+        final stampedBubble = stampedBubbleFor(availableBubbleWidth * 0.98);
+
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(10, 7, 10, 7),
+          child: Row(
+            mainAxisAlignment:
+                fromKai ? MainAxisAlignment.start : MainAxisAlignment.end,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (fromKai) ...[
+                // His art bleeds red to the edge and the room is the same red, so it
+                // sits ON the field rather than on top of it — which is why the gap
+                // is negative. The bubble tucks under the portrait's corner the way
+                // it does when someone throws two photos down on a table.
+                if (!cramped) ...[
+                  kaiPortrait,
+                  const SizedBox(width: 2),
+                ],
+              ],
+              Flexible(child: stampedBubble),
+            ],
+          ),
+        );
+      },
     );
   }
 }

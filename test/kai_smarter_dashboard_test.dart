@@ -67,6 +67,37 @@ void main() {
     expect(source, isNot(contains('updateIntent')));
   });
 
+  test('checklist status serialization uses Firebase-safe keys', () {
+    const slashyChecklistItem =
+        'working + durable facts / episodic.memory stays intact';
+    final layer = KaiLayer(
+      n: 4,
+      title: 'Memory / Knowing Sadeq',
+      intent: 'Know Darc without prompt stuffing.',
+      checklist: const [slashyChecklistItem],
+      checklistStatus: const {
+        slashyChecklistItem: ChecklistStatus.tested,
+      },
+    );
+
+    final map = layer.toMap();
+
+    expect(map, isNot(contains('checklistStatus')),
+        reason: 'Checklist text must never become Firebase child keys.');
+    expect(map['checklistStatusByIndex'], ['tested']);
+
+    final restored = KaiLayer.fromMap(map);
+    expect(restored.checklistStatus[slashyChecklistItem], ChecklistStatus.tested);
+
+    final legacyRestored = KaiLayer.fromMap({
+      ...map,
+      'checklistStatusByIndex': null,
+      'checklistStatus': {slashyChecklistItem: 'wired'},
+    });
+    expect(legacyRestored.checklistStatus[slashyChecklistItem],
+        ChecklistStatus.wired);
+  });
+
   test('progress requires evidence — a number alone is not a claim', () {
     expect(source, contains('Progress needs evidence'),
         reason: 'a bare percentage with no receipts is how 7/7 happened');
@@ -93,7 +124,7 @@ void main() {
     expect(source, contains('final List<String> checklist'));
     expect(source, contains('final Map<String, ChecklistStatus> checklistStatus'));
     expect(source, contains("'checklist': checklist"));
-    expect(source, contains("'checklistStatus':"));
+    expect(source, contains("'checklistStatusByIndex':"));
     expect(source, contains('checklistStatus: old.checklistStatus'),
         reason: 'setLayerProgress must preserve checklist proof status');
     expect(source, contains('checklist: old.checklist'),

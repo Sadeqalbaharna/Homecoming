@@ -117,11 +117,13 @@ class MemoryService {
       for (final shard in shards) {
         final scope = parseKaiMemoryScope(shard['scope']);
         final memoryWorldId = shard['worldId']?.toString();
+        final summary = shard['summary']?.toString() ?? '';
         if (accessPolicy != null &&
-            !accessPolicy.allows(
-              scope: scope,
-              memoryWorldId: memoryWorldId,
-            )) {
+            (!accessPolicy.allows(
+                  scope: scope,
+                  memoryWorldId: memoryWorldId,
+                ) ||
+                !accessPolicy.allowsContent(summary))) {
           continue;
         }
         final rawVector = shard['embedding'] ?? shard['vector'];
@@ -163,7 +165,7 @@ class MemoryService {
 
         scored.add(MemoryResult(
           id: shard['id']?.toString() ?? '',
-          summary: shard['summary']?.toString() ?? '',
+          summary: summary,
           similarity: sim,
           timestamp: shard['timestamp']?.toString() ?? '',
           shardId: shard['shardId']?.toString() ?? '',
@@ -182,6 +184,32 @@ class MemoryService {
       scored.sort((a, b) => b.similarity.compareTo(a.similarity));
       final top = scored.take(limit).toList();
 
+      // "What was I telling you just before?" is a temporal question, not a
+      // semantic one. Its embedding contains none of the nouns in the answer,
+      // so pure cosine search preferred an older Homecoming discussion over a
+      // relationship memory written two minutes earlier on Messenger.
+      //
+      // Scope filtering has already happened above. Recency may reorder only
+      // memories this surface is authorised to see, and only for language that
+      // explicitly asks for immediate continuity. Ordinary recall remains
+      // semantic, and stale memories do not become "just before" forever.
+      if (_asksForRecentContinuity(query)) {
+        final recent = scored.where((memory) {
+          final at = DateTime.tryParse(memory.timestamp)?.toUtc();
+          if (at == null) return false;
+          final age = DateTime.now().toUtc().difference(at);
+          return !age.isNegative && age <= const Duration(hours: 12);
+        }).toList()
+          ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
+
+        if (recent.isNotEmpty) {
+          final latest = recent.first;
+          top.removeWhere((memory) => memory.id == latest.id);
+          top.insert(0, latest);
+          if (top.length > limit) top.removeLast();
+        }
+      }
+
       // Retrieval is a memory-strengthening event. Offline evals disable this
       // side effect so tests never touch Firebase/cache mutation.
       if (sideEffects == MemoryQuerySideEffects.enabled) {
@@ -199,6 +227,16 @@ class MemoryService {
       print('❌ [MemoryService] queryMemory failed: $e');
       return null;
     }
+  }
+
+  static bool _asksForRecentContinuity(String query) {
+    final lower = query.trim().toLowerCase();
+    return lower.contains('just before') ||
+        lower.contains('just now') ||
+        lower.contains('last thing') ||
+        lower.contains('what was i telling you') ||
+        lower.contains('where were we') ||
+        lower.contains('before i came in');
   }
 
   /// Pin a memory shard to "facts" — it will always be included in context.
@@ -583,8 +621,17 @@ class MemoryService {
         // Cloud Functions store the embedding + summary together at
         // /memory/embeddings/{persona}/{shardId} as { vector, summary, shardRef }.
         // Map that server shape to what queryMemory expects (embedding/summary/…).
-        final data =
-            await FirebaseService.readData('memory/embeddings/$personaId');
+        // Never read this collection wholesale on a client. Each child carries
+        // a 1,536-value vector; loading the full history exhausted Android's
+        // 256 MB heap before Kai could reply. Retrieval remains client-side for
+        // now, but its working set is deliberately bounded.
+        final snapshot = await KaiDb.instance
+            .uncachedRef('memory/embeddings/$personaId')
+            .orderByChild('timestamp')
+            .limitToLast(40)
+            .get()
+            .timeout(const Duration(seconds: 12));
+        final data = snapshot.value;
         if (data != null && data is Map) {
           return data.entries.map((e) {
             final m = Map<String, dynamic>.from(e.value as Map);
