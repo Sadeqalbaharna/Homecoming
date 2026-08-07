@@ -188,6 +188,22 @@ class PersonalityService {
     await KaiStateService().saveMood(personaId, mood);
   }
 
+  // ── Delta writers ──────────────────────────────────────────────────────────
+  //
+  // Prefer these over the whole-map savers on any path that can run while
+  // another body is mid-turn. The savers are a read-modify-write, so the later
+  // one silently discards the earlier one's movement. See KaiStateService.
+
+  Future<void> applyMoodDeltas(String personaId, Map<String, int> deltas) =>
+      KaiStateService().applyMoodDeltas(personaId, deltas);
+
+  Future<void> applyPersonalityDeltas(
+          String personaId, Map<String, int> deltas) =>
+      KaiStateService().applyPersonalityDeltas(personaId, deltas);
+
+  Future<void> applyAffinityDeltas(String personaId, Map<String, int> deltas) =>
+      KaiStateService().applyAffinityDeltas(personaId, deltas);
+
   Future<void> saveAffinity(String personaId, Map<String, int> affinity) async {
     // Delegate: KaiStateService writes to Firebase + local cache.
     // (Previously affinity was never synced to Firebase — now it is.)
