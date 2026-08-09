@@ -580,6 +580,44 @@ a ten-minute hard timeout, and liveness proven by file, test, or process
 evidence rather than by a sent prompt. Because no governed box advanced, no
 screenshot is required or accepted for this window.
 
+### Portfolio activity window — 2026-08-09 14:42–14:52 Bahrain
+
+No macro Pizza phase is promoted in this window. The governed proof-state
+changes and active work are:
+
+- Homecoming Brief 019A is `REJECTED` at 8 PASS / 6 FAIL. H019A-2 is repairing
+  the two pipeline-owned causal defects: deterministic PASS receipt formatting
+  in build/runtime fixtures and scalar-safe capture-fingerprint counting.
+  Capture cases 10-13 remain future Brief 019B scope.
+- Hoard Brief 014 reports local validation plus 12/12 authorization, 15/15
+  staging, and 23/23 recovery checks passing. Reviewer acceptance and 014B
+  dispatch remain `ACTIVE`; no live recovery gate is crossed and no box is
+  promoted from the report alone.
+- Kingdom K1.6 is demoted from `TESTED` to `PROTOTYPE`. Its official 5/5 static
+  and 9/9 emulator checks passed, but the new defensive identity-binding
+  regression failed. Adoption is blocked and bounded local repair is `ACTIVE`.
+- Factory Find My Table private pilot-packet assembly remains `ACTIVE`; its
+  first hung test process was terminated and the strategy changed to resolving
+  the exact Flutter/Dart runtime.
+- Factory Daily critic scaffold is `TESTED` at `e6c1d95`; the deliberately
+  separate QA receipts are bound at `642e155`, and the CRC-verified v1.1 ZIP and
+  manifest are bound at `c2da00c4933f2393192dad4e53624d19c0a53cdf`.
+  Primary inspection confirms a clean worktree/index, empty protected diff,
+  null active build, 9/9 focused tests, and 13/13 full tests. CakeOrder Signal
+  market/contradiction scan is the next `ACTIVE` nested box. Listing, payment,
+  live use, and revenue remain `UNVERIFIED`.
+- TikTok Day 1 review video is `TESTED` locally: 29.417 seconds, 1080x1920,
+  H.264/AAC, QA PASS, and 40/40 reported tests. Creative acceptance remains a
+  sponsor gate; account, posting, and revenue stay locked.
+- No settled customer payment is evidenced anywhere in the portfolio.
+
+The prior Factory Daily test-side-effect diagnosis is retracted: the critic
+implementation, acceptance receipts, and packaged artifact are deliberately
+separated across three commits. Because the already-running Desktop Homecoming
+process cannot ingest this compile-time projection without an attended update,
+a fresh real-app screenshot is `UNVERIFIED`; no old or synthetic image may
+satisfy that gate.
+
 Focused delivery-box, portfolio, and Factory conveyor tests pass 37/37. A
 Windows Release build passed and the real updated Desktop Homecoming process is
 running from the governed worktree as PID 27260. Direct-window evidence

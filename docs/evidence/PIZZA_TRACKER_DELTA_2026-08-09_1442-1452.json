@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "deltaId": "pizza-delta-2026-08-09T14-42-14-52-bahrain",
+  "createdAt": "2026-08-09T14:52:00+03:00",
+  "sourceOfTruthRef": "docs/NORTHSTAR_SOURCE_OF_TRUTH.md#portfolio-activity-window--2026-08-09-14421452-bahrain",
+  "claims": [
+    {
+      "claimId": "homecoming.brief019a-h019a2",
+      "projectId": "homecoming_northstar",
+      "requestedState": "repairing",
+      "authorityOwner": "agent",
+      "riskClass": "local_safe",
+      "sourceOfTruthRef": "docs/briefs/BRIEF_019A_REAL_PIZZA_UPDATE_PIPELINE.md",
+      "changedSurfaces": ["portfolio_projection"],
+      "evidence": [{"id": "homecoming.h019a2.report", "kind": "reported_external"}]
+    },
+    {
+      "claimId": "hoard.brief014-review",
+      "projectId": "hoard_northstar",
+      "requestedState": "evidence_review",
+      "authorityOwner": "agent",
+      "riskClass": "local_safe",
+      "sourceOfTruthRef": "Hoard Brief 014 contract micro-box",
+      "changedSurfaces": ["portfolio_projection"],
+      "evidence": [{"id": "hoard.brief014.report", "kind": "reported_external"}]
+    },
+    {
+      "claimId": "kingdom.k1.6-prototype-repair",
+      "projectId": "kingdom_northstar",
+      "requestedState": "repairing",
+      "authorityOwner": "agent",
+      "riskClass": "local_safe",
+      "sourceOfTruthRef": "Kingdom K1.6 synthetic emulator invariant probe",
+      "changedSurfaces": ["delivery_catalog", "portfolio_projection"],
+      "evidence": [{"id": "kingdom.k1.6.regression-report", "kind": "reported_external"}]
+    },
+    {
+      "claimId": "factory.daily-v1.1-tested",
+      "projectId": "factory_northstar",
+      "requestedState": "active",
+      "authorityOwner": "agent",
+      "riskClass": "local_safe",
+      "sourceOfTruthRef": "C:/Users/sadeq/Documents/Codex/2026-08-09/factory-daily-products/outputs/daily-product-line-v1.1-manifest.md",
+      "changedSurfaces": ["factory_nested_lane", "portfolio_projection"],
+      "evidence": [
+        {"id": "factory.daily.critic", "kind": "git_commit", "repositoryRoot": "C:/Users/sadeq/Documents/Codex/2026-08-09/factory-daily-products", "commit": "e6c1d95"},
+        {"id": "factory.daily.receipts", "kind": "git_commit", "repositoryRoot": "C:/Users/sadeq/Documents/Codex/2026-08-09/factory-daily-products", "commit": "642e155"},
+        {"id": "factory.daily.package", "kind": "git_commit", "repositoryRoot": "C:/Users/sadeq/Documents/Codex/2026-08-09/factory-daily-products", "commit": "c2da00c4933f2393192dad4e53624d19c0a53cdf"}
+      ]
+    },
+    {
+      "claimId": "tiktok.day1-review-video",
+      "projectId": "tiktok_portfolio_manager",
+      "requestedState": "evidence_review",
+      "authorityOwner": "sponsor",
+      "riskClass": "product_decision",
+      "sourceOfTruthRef": "TikTok Portfolio Manager governed lane",
+      "changedSurfaces": ["portfolio_integration_delta"],
+      "evidence": [{"id": "tiktok.day1.video-report", "kind": "reported_external"}]
+    }
+  ]
+}
