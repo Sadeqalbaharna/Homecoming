@@ -672,6 +672,21 @@ actual Desktop Homecoming HUD screenshot is required after a safely authorized
 build/runtime update; the currently running PID 27260 remains locked, so no old
 or rendered image may satisfy that future gate.
 
+### Homecoming H019A-3 acceptance — 2026-08-09
+
+Brief 019A remains `REJECTED`. Independent execution of the frozen 14-case
+pipeline suite after H019A-3 produced 9 PASS / 5 FAIL, not the required 10/14
+pipeline acceptance boundary. Case 7 fails before its intended binding verdict
+because `kai_pizza_update_pipeline.ps1:138` invokes `.Contains($Name)` on a
+dictionary shape without that overload. Cases 10-13 remain the frozen Brief
+019B capture-script scope and do not count against H019A once case 7 passes.
+
+The next bounded repair is H019A-4: normalize dictionary key lookup in
+`scripts/tools/kai_pizza_update_pipeline.ps1` only, preserve canonical capture
+binding serialization, and rerun all 14 cases. Brief 019B remains locked until
+the independent result is exactly 10 PASS with only cases 10-13 failing. PID
+27260 and live services remain untouched.
+
 Focused delivery-box, portfolio, and Factory conveyor tests pass 37/37. A
 Windows Release build passed and the real updated Desktop Homecoming process is
 running from the governed worktree as PID 27260. Direct-window evidence

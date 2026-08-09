@@ -1231,7 +1231,7 @@ class KaiProjectService {
         governedAcceptedPhases: _homecomingGovernedAcceptedPhases,
         evidencePhases: _homecomingEvidencePhases,
         latestAdvance:
-            'The 37/37 tracker regressions pass after restoring canonical UNVERIFIED wording. Brief 019A remains REJECTED at 8/14 while H019A-2 repairs its pipeline-owned failures; the next gate is an independent 14/14 result and no Homecoming phase advanced.',
+            'The 37/37 tracker regressions pass. Brief 019A remains REJECTED at 9/14 after H019A-3: case 7 fails on dictionary Contains overload handling, while capture cases 10-13 remain future Brief 019B scope. H019A-4 must reach 10/14 before 019B unlocks.',
         blockers: const [
           'Replacing the old runtime now requires explicit authority for one supported human tray quit; forced termination, logoff, and reboot remain forbidden',
           'Standalone device transport does not exist — Unity and the embodiment servers are loopback-only',

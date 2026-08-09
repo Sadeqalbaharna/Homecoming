@@ -191,3 +191,29 @@ frozen Brief 019A plus acceptance suite to an isolated Claude-owned file set.
 If that model proof remains unavailable, sponsor authorization is required for
 a Codex coding fallback. Until one of those gates opens, preserve the draft and
 do not touch PID 27260.
+
+## H019A-3 independent rerun
+
+The later verified Opus 5 implementation lane produced H019A-3 on the same
+one-file scope. Codex reran the unchanged frozen suite independently.
+
+Result: **9 PASS / 5 FAIL — REJECTED**.
+
+Pipeline-owned failure:
+
+- Case 7, `real capture fixture is TEST_ONLY and needs an out-of-band pin`,
+  terminates at `scripts/tools/kai_pizza_update_pipeline.ps1:138` because
+  `.Contains($Name)` is called on a dictionary shape without a compatible
+  one-argument overload. The validator returns `unhandled_exception` rather
+  than the expected deterministic PASS receipt.
+
+Capture-script failures retained for Brief 019B:
+
+- case 10: attended-bound navigation is not the default;
+- case 11: failure ledger and allowed output root are not mandatory;
+- case 12: DPI-awareness failure is not fail-closed;
+- case 13: capture does not bind `app.so` and process freshness.
+
+Case 7 prevents the required 10/14 H019A boundary, so Brief 019B remains
+locked. H019A-4 is bounded to dictionary key lookup and canonical capture
+binding handling in `scripts/tools/kai_pizza_update_pipeline.ps1` only.
