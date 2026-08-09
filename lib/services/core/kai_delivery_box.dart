@@ -112,7 +112,11 @@ class KaiDeliveryBox {
     this.verifiedAt,
   });
 
-  String get identity => '$projectId:p$phase:$boxId';
+  /// External governed catalogs may already provide a globally stable box ID
+  /// (for example `hoard.p1.b04a`). Preserve it verbatim instead of wrapping it
+  /// in Homecoming's legacy project/phase identity format.
+  String get identity =>
+      boxId.contains('.') ? boxId : '$projectId:p$phase:$boxId';
 
   bool get isSponsorBoundary =>
       owner == KaiDeliveryBoxOwner.sponsor || risk != KaiDeliveryRisk.localSafe;

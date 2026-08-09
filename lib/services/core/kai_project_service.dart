@@ -53,19 +53,19 @@ enum CapabilityState {
   reflexive; // automatic, no longer thought about
 
   String get label => switch (this) {
-    CapabilityState.absent => 'Absent',
-    CapabilityState.prototype => 'Prototype',
-    CapabilityState.wired => 'Wired',
-    CapabilityState.tested => 'Tested',
-    CapabilityState.usedLive => 'Used live',
-    CapabilityState.trusted => 'Trusted',
-    CapabilityState.reflexive => 'Reflexive',
-  };
+        CapabilityState.absent => 'Absent',
+        CapabilityState.prototype => 'Prototype',
+        CapabilityState.wired => 'Wired',
+        CapabilityState.tested => 'Tested',
+        CapabilityState.usedLive => 'Used live',
+        CapabilityState.trusted => 'Trusted',
+        CapabilityState.reflexive => 'Reflexive',
+      };
 
   static CapabilityState parse(String? s) => CapabilityState.values.firstWhere(
-    (v) => v.name == s,
-    orElse: () => CapabilityState.absent,
-  );
+        (v) => v.name == s,
+        orElse: () => CapabilityState.absent,
+      );
 }
 
 enum ChecklistStatus {
@@ -76,25 +76,25 @@ enum ChecklistStatus {
   trusted;
 
   String get label => switch (this) {
-    ChecklistStatus.pending => 'pending',
-    ChecklistStatus.wired => 'wired',
-    ChecklistStatus.tested => 'tested',
-    ChecklistStatus.usedLive => 'used live',
-    ChecklistStatus.trusted => 'trusted',
-  };
+        ChecklistStatus.pending => 'pending',
+        ChecklistStatus.wired => 'wired',
+        ChecklistStatus.tested => 'tested',
+        ChecklistStatus.usedLive => 'used live',
+        ChecklistStatus.trusted => 'trusted',
+      };
 
   double get scoreWeight => switch (this) {
-    ChecklistStatus.pending => 0.0,
-    ChecklistStatus.wired => 0.35,
-    ChecklistStatus.tested => 0.65,
-    ChecklistStatus.usedLive => 0.85,
-    ChecklistStatus.trusted => 1.0,
-  };
+        ChecklistStatus.pending => 0.0,
+        ChecklistStatus.wired => 0.35,
+        ChecklistStatus.tested => 0.65,
+        ChecklistStatus.usedLive => 0.85,
+        ChecklistStatus.trusted => 1.0,
+      };
 
   static ChecklistStatus parse(String? s) => ChecklistStatus.values.firstWhere(
-    (v) => v.name == s,
-    orElse: () => ChecklistStatus.pending,
-  );
+        (v) => v.name == s,
+        orElse: () => ChecklistStatus.pending,
+      );
 }
 
 class KaiLayer {
@@ -189,9 +189,8 @@ class KaiLayer {
     final status = <String, ChecklistStatus>{};
     for (var i = 0; i < checklist.length; i++) {
       final item = checklist[i];
-      final indexed = i < rawStatusByIndex.length
-          ? rawStatusByIndex[i]?.toString()
-          : null;
+      final indexed =
+          i < rawStatusByIndex.length ? rawStatusByIndex[i]?.toString() : null;
       status[item] = ChecklistStatus.parse(
         indexed ?? rawLegacyStatus[item]?.toString(),
       );
@@ -218,20 +217,20 @@ class KaiLayer {
   }
 
   Map<String, dynamic> toMap() => {
-    'n': n,
-    'title': title,
-    'intent': intent,
-    'progress': progress,
-    'evidence': evidence,
-    'state': state.name,
-    'stamp': stamp,
-    'checklist': checklist,
-    'checklistStatusByIndex': [
-      for (final item in checklist)
-        (checklistStatus[item] ?? ChecklistStatus.pending).name,
-    ],
-    'deliveryBoxes': deliveryBoxes.map((box) => box.toMap()).toList(),
-  };
+        'n': n,
+        'title': title,
+        'intent': intent,
+        'progress': progress,
+        'evidence': evidence,
+        'state': state.name,
+        'stamp': stamp,
+        'checklist': checklist,
+        'checklistStatusByIndex': [
+          for (final item in checklist)
+            (checklistStatus[item] ?? ChecklistStatus.pending).name,
+        ],
+        'deliveryBoxes': deliveryBoxes.map((box) => box.toMap()).toList(),
+      };
 }
 
 /// The proof vocabulary from `docs/NORTHSTAR_SOURCE_OF_TRUTH.md`.
@@ -252,12 +251,12 @@ enum ProjectProofState {
   unverified;
 
   String get label => switch (this) {
-    ProjectProofState.verifiedLive => 'Verified live',
-    ProjectProofState.tested => 'Tested',
-    ProjectProofState.wired => 'Wired',
-    ProjectProofState.conceptual => 'Conceptual',
-    ProjectProofState.unverified => 'UNVERIFIED',
-  };
+        ProjectProofState.verifiedLive => 'Verified live',
+        ProjectProofState.tested => 'Tested',
+        ProjectProofState.wired => 'Wired',
+        ProjectProofState.conceptual => 'Conceptual',
+        ProjectProofState.unverified => 'UNVERIFIED',
+      };
 
   static ProjectProofState parse(String? s) =>
       ProjectProofState.values.firstWhere(
@@ -355,7 +354,7 @@ class KaiProject {
   double get completion => layers.isEmpty
       ? 0
       : layers.map((l) => l.honestProgress).reduce((a, b) => a + b) /
-            (layers.length * 100);
+          (layers.length * 100);
 
   int get doneCount => acceptedPhases;
 }
@@ -375,8 +374,9 @@ class KaiProjectService {
   static const _homecomingEvidencePhases = <int>[3];
   static const _hoardGovernedAcceptedPhases = <int>[0];
   static const _hoardEvidencePhases = <int>[1];
-  static const _factoryScanEvidencePhases = <int>[0];
-  static const _factoryScanOnly = true;
+  static const _factoryPacketAcceptedPhases = <int>[0];
+  static const _factoryBlueprintEvidencePhases = <int>[1];
+  static const _factoryPacketProjectionOnly = true;
 
   // ── Frozen phases, transcribed from the governing documents ────────────────
   //
@@ -774,12 +774,17 @@ class KaiProjectService {
 
   static const _factoryBaseline = <int, List<dynamic>>{
     0: [
-      0,
-      'Signal Scan ledger records 1 YES and 6 MAYBEs; rejected and awaiting-vote searches are retained. Blueprint is sponsor-locked.',
-      'prototype',
-      'SCAN ACTIVE. Candidate discovery is evidence, not an accepted commercial gate.',
+      100,
+      'Find My Table is bound to run, scan, candidate, and sponsor authorization identities in packet FSC-LEGACY-YES-001-BP-IC-v3.',
+      'trusted',
+      'SIGNAL SCAN ACCEPTED for this named candidate only; no other YES candidate receives Blueprint authority.',
     ],
-    1: [0, 'No accepted factory run evidence.', 'absent', ''],
+    1: [
+      0,
+      'Find My Table Blueprint v3 packet is Tested at 76dd3ade; scope and cuts are frozen, while commercial assumptions and the sponsor Shark verdict remain open.',
+      'tested',
+      'BLUEPRINT ACTIVE. Assembly, customer data, outreach, publishing, payment, and spend are not authorized.',
+    ],
     2: [0, 'No accepted factory run evidence.', 'absent', ''],
     3: [0, 'No accepted factory run evidence.', 'absent', ''],
     4: [0, 'No accepted factory run evidence.', 'absent', ''],
@@ -1046,34 +1051,34 @@ class KaiProjectService {
   ///     value is the only truth, and `set_layer_progress` is the only way in.
   ///   • Missing layers get added, so the plan can grow without a wipe.
   Future<void> ensureSmarterProject(String personaId) => _ensureProject(
-    personaId,
-    projectId: smarterId,
-    name: 'Kai Smarter Project',
-    why: 'Make me genuinely smarter — not a dashboard that says I am.',
-    sourceLayers: _smarterLayers,
-    baseline: _smarterBaseline,
-    // Off the desktop rail, data fully intact. The self-improvement runner,
-    // the tools, and the prompt block all still read it.
-    portfolioVisible: false,
-  );
+        personaId,
+        projectId: smarterId,
+        name: 'Kai Smarter Project',
+        why: 'Make me genuinely smarter — not a dashboard that says I am.',
+        sourceLayers: _smarterLayers,
+        baseline: _smarterBaseline,
+        // Off the desktop rail, data fully intact. The self-improvement runner,
+        // the tools, and the prompt block all still read it.
+        portfolioVisible: false,
+      );
 
   Future<void> ensureSentienceProject(String personaId) => _ensureProject(
-    personaId,
-    projectId: sentienceId,
-    name: 'Sentience Ladder',
-    why:
-        'Track the axes that make Kai more continuous, aware-seeming and capable — without pretending one scalar can measure a mind.',
-    sourceLayers: _sentienceLayers,
-    baseline: _sentienceBaseline,
-    portfolioVisible: false,
-  );
+        personaId,
+        projectId: sentienceId,
+        name: 'Sentience Ladder',
+        why:
+            'Track the axes that make Kai more continuous, aware-seeming and capable — without pretending one scalar can measure a mind.',
+        sourceLayers: _sentienceLayers,
+        baseline: _sentienceBaseline,
+        portfolioVisible: false,
+      );
 
   // Baseline entries are [progress, evidence, stateName?, stamp?]. The last two
   // are optional so the smarter baseline (two-element) still reads cleanly.
   static CapabilityState _baseState(List<dynamic>? base) =>
       (base != null && base.length > 2)
-      ? CapabilityState.parse(base[2] as String)
-      : CapabilityState.absent;
+          ? CapabilityState.parse(base[2] as String)
+          : CapabilityState.absent;
   static String _baseStamp(List<dynamic>? base) =>
       (base != null && base.length > 3) ? base[3] as String : '';
 
@@ -1132,9 +1137,8 @@ class KaiProjectService {
         workRequestId: existing.workRequestId,
         activeLeaseId: existing.activeLeaseId,
         evidenceRefs: existing.evidenceRefs,
-        verifiedBy: state == KaiDeliveryBoxState.verified
-            ? existing.verifiedBy
-            : null,
+        verifiedBy:
+            state == KaiDeliveryBoxState.verified ? existing.verifiedBy : null,
         verifiedAt:
             state == KaiDeliveryBoxState.verified ? existing.verifiedAt : null,
       );
@@ -1174,6 +1178,10 @@ class KaiProjectService {
       _homecomingEvidencePhases;
   static List<int> get hoardGovernedAcceptedPhasesForTest =>
       _hoardGovernedAcceptedPhases;
+  static List<int> get factoryPacketAcceptedPhasesForTest =>
+      _factoryPacketAcceptedPhases;
+  static List<int> get factoryBlueprintEvidencePhasesForTest =>
+      _factoryBlueprintEvidencePhases;
 
   /// A run is currently inside its reported stage. Earlier stations are
   /// accepted; the current station is active. Entering the terminal stage
@@ -1190,143 +1198,142 @@ class KaiProjectService {
     return switch (run.stage) {
       FactoryStage.scouting ||
       FactoryStage.specced ||
-      FactoryStage.building => ProjectProofState.wired,
+      FactoryStage.building =>
+        ProjectProofState.wired,
       FactoryStage.verified ||
       FactoryStage.listingReady ||
-      FactoryStage.awaitingApproval => ProjectProofState.tested,
+      FactoryStage.awaitingApproval =>
+        ProjectProofState.tested,
       FactoryStage.published ||
       FactoryStage.measuring ||
-      FactoryStage.learned => ProjectProofState.verifiedLive,
+      FactoryStage.learned =>
+        ProjectProofState.verifiedLive,
     };
   }
 
   /// Homecoming's own nine governed phases, from its source of truth.
   Future<void> ensureHomecomingProject(String personaId) => _ensureProject(
-    personaId,
-    projectId: homecomingId,
-    name: 'Homecoming',
-    why:
-        'One continuous Kai across time, devices and worlds — proven phase '
-        'by phase, never claimed from code existing.',
-    sourceLayers: _withDeliveryBoxes(
-      homecomingId,
-      r'docs\NORTHSTAR_SOURCE_OF_TRUTH.md',
-      _homecomingPhases,
-    ),
-    baseline: _homecomingBaseline,
-    sourceOfTruthPath: r'docs\NORTHSTAR_SOURCE_OF_TRUTH.md',
-    repositoryPath: r'C:\code\homecoming_app',
-    activePhase: 3,
-    governedAcceptedPhases: _homecomingGovernedAcceptedPhases,
-    evidencePhases: _homecomingEvidencePhases,
-    latestAdvance:
-        'Brief 018 local readiness is committed at 330d834. Its 17-case read-only verifier is ready; the attended clean restart and visible exactly-once proof remain open.',
-    blockers: const [
-      'Brief 018 needs an attended Quit Kai completely, relaunch, and exactly-once reminder walkthrough',
-      'Standalone device transport does not exist — Unity and the embodiment servers are loopback-only',
-      'Core depends on the current laptop; the watchdog recovers a process, not a lost machine',
-      'Unity outbound presentation is not accepted — no observed domain reload, Play Mode, or headset behaviour',
-    ],
-    proofState: ProjectProofState.wired,
-  );
+        personaId,
+        projectId: homecomingId,
+        name: 'Homecoming',
+        why:
+            'One continuous Kai across time, devices and worlds — proven phase '
+            'by phase, never claimed from code existing.',
+        sourceLayers: _withDeliveryBoxes(
+          homecomingId,
+          r'docs\NORTHSTAR_SOURCE_OF_TRUTH.md',
+          _homecomingPhases,
+        ),
+        baseline: _homecomingBaseline,
+        sourceOfTruthPath: r'docs\NORTHSTAR_SOURCE_OF_TRUTH.md',
+        repositoryPath: r'C:\code\homecoming_app',
+        activePhase: 3,
+        governedAcceptedPhases: _homecomingGovernedAcceptedPhases,
+        evidencePhases: _homecomingEvidencePhases,
+        latestAdvance:
+            'The governed Windows build passed 37/37 tracker/HUD checks and its real Pizza rendering is Verified live at PID 27260. Homecoming Phase 0 remains WIRED and no delivery phase advanced; Brief 018 restart and exactly-once delivery remain UNVERIFIED.',
+        blockers: const [
+          'Replacing the old runtime now requires explicit authority for one supported human tray quit; forced termination, logoff, and reboot remain forbidden',
+          'Standalone device transport does not exist — Unity and the embodiment servers are loopback-only',
+          'Core depends on the current laptop; the watchdog recovers a process, not a lost machine',
+          'Unity outbound presentation is not accepted — no observed domain reload, Play Mode, or headset behaviour',
+        ],
+        proofState: ProjectProofState.wired,
+      );
 
   /// Hoard's six governed phases. Homecoming tracks it; it never edits it.
   Future<void> ensureHoardProject(String personaId) => _ensureProject(
-    personaId,
-    projectId: hoardId,
-    name: 'Hoard',
-    why:
-        'Turn a restaurant\'s operational evidence into defensible profit '
-        'improvement — BD 500/month verified over a real pilot.',
-    sourceLayers: _withDeliveryBoxes(
-      hoardId,
-      r'C:\code\Hoard\docs\PROJECT_SOURCE_OF_TRUTH.md',
-      _hoardPhases,
-    ),
-    baseline: _hoardBaseline,
-    sourceOfTruthPath: r'C:\code\Hoard\docs\PROJECT_SOURCE_OF_TRUTH.md',
-    repositoryPath: r'C:\code\Hoard',
-    activePhase: 1,
-    governedAcceptedPhases: _hoardGovernedAcceptedPhases,
-    evidencePhases: _hoardEvidencePhases,
-    latestAdvance:
-        'Phase 0 is accepted. Briefs 004/004A and reset repair 005A are accepted at Tested level; 5821f73 binds reset to one fresh reviewed baseline and one atomic preconditioned plan. Brief 005 remains at the staging evidence gate.',
-    blockers: const [
-      'The real Settings UI same-scope staging restore, conflict refusal, receipt-byte exclusion, and pre/post parity are still unverified',
-      'The real protected baseline and immutable dry-run plan have not yet been produced and reviewed',
-      'Critical Functions hardening, staging/deploy checklist, and monitoring evidence remain open',
-      'No accepted 60–90 day real-venue pilot evidence or BD 500 verified outcome exists',
-    ],
-    proofState: ProjectProofState.tested,
-  );
+        personaId,
+        projectId: hoardId,
+        name: 'Hoard',
+        why: 'Turn a restaurant\'s operational evidence into defensible profit '
+            'improvement — BD 500/month verified over a real pilot.',
+        sourceLayers: _withDeliveryBoxes(
+          hoardId,
+          r'C:\code\Hoard\docs\PROJECT_SOURCE_OF_TRUTH.md',
+          _hoardPhases,
+        ),
+        baseline: _hoardBaseline,
+        sourceOfTruthPath: r'C:\code\Hoard\docs\PROJECT_SOURCE_OF_TRUTH.md',
+        repositoryPath: r'C:\code\Hoard',
+        activePhase: 1,
+        governedAcceptedPhases: _hoardGovernedAcceptedPhases,
+        evidencePhases: _hoardEvidencePhases,
+        latestAdvance:
+            'Phase 0 is accepted. Phase 1 retains 10 verified boxes, including Functions hardening at e1c7863 and local signal instrumentation at 4f22a3a. Governance verification reran with a changed child-process strategy after managed-sandbox spawn EPERM; no new box is promoted.',
+        blockers: const [
+          'hoard.p1.b02 attended recovery remains UNVERIFIED and requires a fresh sponsor/live window',
+          'Functions operational acceptance and external alert delivery remain sponsor/live gates',
+          'No accepted 60–90 day real-venue pilot evidence or BD 500 verified outcome exists',
+        ],
+        proofState: ProjectProofState.tested,
+      );
 
   /// Kingdom's six governed phases. Homecoming displays its evidence but never
   /// infers acceptance from the app, Firebase wiring, commits, or builds.
   Future<void> ensureKingdomProject(String personaId) => _ensureProject(
-    personaId,
-    projectId: kingdomId,
-    name: 'Kingdom',
-    why:
-        'Turn verified Tavern participation into a trusted faction, '
-        'progress, reward, and return loop.',
-    sourceLayers: _withDeliveryBoxes(
-      kingdomId,
-      r'docs\briefs\BRIEF_011_KINGDOM_PORTFOLIO.md',
-      _kingdomPhases,
-    ),
-    baseline: _kingdomBaseline,
-    sourceOfTruthPath:
-        r'C:\code\kingdom_working3.0\kingdom_working\kingdom\HANDOVER_FINANCE_BRIEF.md',
-    repositoryPath: r'C:\code\kingdom_working3.0\kingdom_working\kingdom',
-    activePhase: 0,
-    latestAdvance:
-        'The customer app, loyalty loop, and Firebase integrations form a substantial prototype, but today there are only dev/test-scale accounts and no accepted retention proof.',
-    blockers: const [
-      'RTDB security rules are reported emergency-open and must be hardened before any public launch',
-      'The Windows build is reported broken by corrupted source files',
-      'Quest-board publishing, real Google Reviews integration, and Raspberry Pi station behavior remain unverified',
-      'Pilot cohort, start date, and repeat-visit success target are not accepted',
-    ],
-    proofState: ProjectProofState.wired,
-  );
+        personaId,
+        projectId: kingdomId,
+        name: 'Kingdom',
+        why: 'Turn verified Tavern participation into a trusted faction, '
+            'progress, reward, and return loop.',
+        sourceLayers: _withDeliveryBoxes(
+          kingdomId,
+          r'docs\briefs\BRIEF_011_KINGDOM_PORTFOLIO.md',
+          _kingdomPhases,
+        ),
+        baseline: _kingdomBaseline,
+        sourceOfTruthPath:
+            r'C:\code\kingdom_working3.0\kingdom_working\kingdom\HANDOVER_FINANCE_BRIEF.md',
+        repositoryPath: r'C:\code\kingdom_working3.0\kingdom_working\kingdom',
+        activePhase: 1,
+        latestAdvance:
+            'Ledger Safety is active. K1.4 visit-state/economic-close evidence is reported Tested in isolated commit 620293c and K1.5 is next, but the commit object was unavailable in inspected local repositories; authoritative adoption remains UNVERIFIED.',
+        blockers: const [
+          'K1.4 evidence remains isolated and could not be bound to an available authoritative Kingdom Git object during this reconciliation',
+          'Quest-board publishing, real Google Reviews integration, and Raspberry Pi station behavior remain unverified',
+          'Pilot cohort, start date, and repeat-visit success target are not accepted',
+        ],
+        proofState: ProjectProofState.wired,
+      );
 
   /// Product Factory as a governed commercial project. Its slice follows the
   /// same live run that drives the conveyor; a new UI cannot award itself
   /// progress, and a storefront sale cannot close the final bank gate.
   Future<void> ensureFactoryProject(String personaId, {FactoryRun? run}) {
-    // The sponsor explicitly ordered scan-only operation for this discovery
-    // cycle. A parked legacy run remains intact for audit/recovery, but it must
-    // not move today's governed Pizza beyond Signal Scan.
-    final governedRun = _factoryScanOnly ? null : run;
-    // The sponsor-authorized discovery ledger is active even before an
-    // operational FactoryRun exists. It earns a visible Signal Scan marker,
-    // never acceptance and never permission to enter Blueprint.
+    // The accepted Find My Table packet advances the evidence projection to
+    // Blueprint without reviving a parked legacy run. It does not authorize
+    // Assembly, customer data, outreach, publishing, spending, or payment.
+    final governedRun = _factoryPacketProjectionOnly ? null : run;
+    // The run-bound Blueprint packet is authoritative for this projection even
+    // before an operational FactoryRun exists. Factory execution remains bound
+    // to the durable run service and cannot be simulated here.
     final stageIndex = governedRun == null
-        ? 0
+        ? 1
         : FactoryStage.values.indexOf(governedRun.stage);
     final accepted = factoryAcceptedPhasesForRun(governedRun);
     final banked = governedRun?.evidence.bankedRevenue;
     final settlement = governedRun?.evidence.bankSettlementReference?.trim();
     final latest = governedRun == null
-        ? 'Signal Scan active: 1 YES and 6 MAYBEs are recorded. Every search is retained; Blueprint is locked until your explicit approval.'
+        ? 'Signal Scan is accepted and Find My Table Blueprint packet FSC-LEGACY-YES-001-BP-IC-v3 is Tested at 76dd3ade; Blueprint is active and Assembly is not authorized. Table Ready remains Tested. BoothSignal product core is locally Tested 5/5 and package-ready, but both products are unpublished with demand, sales, fees, refunds, and net receipts UNVERIFIED.'
         : governedRun.stage == FactoryStage.learned
-        ? 'Northstar reached: ${banked ?? 0} is recorded as settled bank revenue under ${settlement ?? 'an unrecorded reference'}.'
-        : 'Run ${governedRun.id} is at ${governedRun.stage.name}: ${accepted.length} of 9 commercial gates are accepted. No banked-revenue success is claimed.';
+            ? 'Northstar reached: ${banked ?? 0} is recorded as settled bank revenue under ${settlement ?? 'an unrecorded reference'}.'
+            : 'Run ${governedRun.id} is at ${governedRun.stage.name}: ${accepted.length} of 9 commercial gates are accepted. No banked-revenue success is claimed.';
     final blockers = governedRun == null
         ? const <String>[
-            'Blueprint is locked until the sponsor explicitly advances a named YES candidate',
-            'The scan still has candidates awaiting sponsor votes',
+            'Find My Table still requires an explicit INVEST/REVISE/KILL/PARK packet verdict before Assembly; DM compensation remains sponsor-unconfirmed but does not block safe Blueprint analysis',
+            'Table Ready and BoothSignal still require seller identity, payout, tax/legal completion, and final public publish authority',
             'No genuine external customer bank settlement exists',
           ]
         : governedRun.stage == FactoryStage.learned
-        ? const <String>[]
-        : <String>[
-            'Current ${_factoryPhases[stageIndex].title} exit gate is not accepted',
-            if (banked == null || banked <= 0)
-              'No actual customer money has settled into the bank account',
-            if (settlement == null || settlement.isEmpty)
-              'No bank settlement reference reconciles revenue to an order',
-          ];
+            ? const <String>[]
+            : <String>[
+                'Current ${_factoryPhases[stageIndex].title} exit gate is not accepted',
+                if (banked == null || banked <= 0)
+                  'No actual customer money has settled into the bank account',
+                if (settlement == null || settlement.isEmpty)
+                  'No bank settlement reference reconciles revenue to an order',
+              ];
     return _ensureProject(
       personaId,
       projectId: factoryId,
@@ -1343,13 +1350,13 @@ class KaiProjectService {
       repositoryPath: r'C:\code\homecoming_app',
       activePhase: stageIndex,
       blockers: blockers,
-      governedAcceptedPhases: accepted,
-      evidencePhases: governedRun == null
-          ? _factoryScanEvidencePhases
-          : const [],
+      governedAcceptedPhases:
+          governedRun == null ? _factoryPacketAcceptedPhases : accepted,
+      evidencePhases:
+          governedRun == null ? _factoryBlueprintEvidencePhases : const [],
       latestAdvance: latest,
       proofState: governedRun == null
-          ? ProjectProofState.conceptual
+          ? ProjectProofState.tested
           : factoryProofStateForRun(governedRun),
     );
   }
@@ -1374,24 +1381,25 @@ class KaiProjectService {
     List<int> governedAcceptedPhases = const [],
     List<int> evidencePhases = const [],
     String latestAdvance = '',
-  }) => _ensureProject(
-    personaId,
-    projectId: projectId,
-    name: name,
-    why: why,
-    sourceLayers: approvedPhases,
-    baseline: baseline,
-    sourceOfTruthPath: sourceOfTruthPath,
-    repositoryPath: repositoryPath,
-    activePhase: activePhase,
-    blockers: blockers,
-    governedAcceptedPhases: governedAcceptedPhases,
-    evidencePhases: evidencePhases,
-    latestAdvance: latestAdvance,
-    // Never anything stronger on registration. Proof is earned by evidence
-    // through the existing update path, not asserted at creation.
-    proofState: ProjectProofState.unverified,
-  );
+  }) =>
+      _ensureProject(
+        personaId,
+        projectId: projectId,
+        name: name,
+        why: why,
+        sourceLayers: approvedPhases,
+        baseline: baseline,
+        sourceOfTruthPath: sourceOfTruthPath,
+        repositoryPath: repositoryPath,
+        activePhase: activePhase,
+        blockers: blockers,
+        governedAcceptedPhases: governedAcceptedPhases,
+        evidencePhases: evidencePhases,
+        latestAdvance: latestAdvance,
+        // Never anything stronger on registration. Proof is earned by evidence
+        // through the existing update path, not asserted at creation.
+        proofState: ProjectProofState.unverified,
+      );
 
   Future<void> _ensureProject(
     String personaId, {
@@ -1565,15 +1573,15 @@ class KaiProjectService {
       proofState: ProjectProofState.parse(v['proofState'] as String?),
       governedAcceptedPhases: (v['governedAcceptedPhases'] is List)
           ? (v['governedAcceptedPhases'] as List)
-                .whereType<num>()
-                .map((value) => value.toInt())
-                .toList()
+              .whereType<num>()
+              .map((value) => value.toInt())
+              .toList()
           : const [],
       evidencePhases: (v['evidencePhases'] is List)
           ? (v['evidencePhases'] as List)
-                .whereType<num>()
-                .map((value) => value.toInt())
-                .toList()
+              .whereType<num>()
+              .map((value) => value.toInt())
+              .toList()
           : const [],
       latestAdvance: (v['latestAdvance'] ?? '').toString(),
     );
@@ -1632,7 +1640,8 @@ class KaiProjectService {
 
     project = await get(personaId, projectId);
     if (project == null) return null;
-    final boxes = project.layers.expand((layer) => layer.deliveryBoxes).toList();
+    final boxes =
+        project.layers.expand((layer) => layer.deliveryBoxes).toList();
     final activeRequests = {
       for (final request in durableRequests)
         if (request.isOpen) request.id,
@@ -1662,13 +1671,15 @@ class KaiProjectService {
     KaiProject project,
     KaiDeliveryBox updated,
   ) async {
-    final layerIndex = project.layers.indexWhere((layer) => layer.n == updated.phase);
+    final layerIndex =
+        project.layers.indexWhere((layer) => layer.n == updated.phase);
     if (layerIndex < 0) throw StateError('delivery_phase_missing');
     final boxIndex = project.layers[layerIndex].deliveryBoxes
         .indexWhere((box) => box.identity == updated.identity);
     if (boxIndex < 0) throw StateError('delivery_box_missing');
     await KaiDb.instance
-        .ref('${_path(personaId, project.id)}/layers/$layerIndex/deliveryBoxes/$boxIndex')
+        .ref(
+            '${_path(personaId, project.id)}/layers/$layerIndex/deliveryBoxes/$boxIndex')
         .set(updated.toMap());
   }
 
@@ -1686,18 +1697,19 @@ class KaiProjectService {
   Stream<List<KaiProject>> watchPortfolio(
     String personaId, {
     String? workspaceRoot,
-  }) => KaiDb.instance.ref(_path(personaId)).onValue.map((event) {
-    final value = event.snapshot.value;
-    if (value is! Map) return const <KaiProject>[];
-    final projects = <KaiProject>[];
-    value.forEach((key, raw) {
-      final project = parseProject(key.toString(), raw);
-      if (project != null && project.portfolioVisible) {
-        projects.add(project);
-      }
-    });
-    return sortPortfolio(projects, workspaceRoot: workspaceRoot);
-  });
+  }) =>
+      KaiDb.instance.ref(_path(personaId)).onValue.map((event) {
+        final value = event.snapshot.value;
+        if (value is! Map) return const <KaiProject>[];
+        final projects = <KaiProject>[];
+        value.forEach((key, raw) {
+          final project = parseProject(key.toString(), raw);
+          if (project != null && project.portfolioVisible) {
+            projects.add(project);
+          }
+        });
+        return sortPortfolio(projects, workspaceRoot: workspaceRoot);
+      });
 
   /// Pure ordering, extracted so it can be tested without Firebase.
   static List<KaiProject> sortPortfolio(
@@ -1919,18 +1931,18 @@ class KaiProjectService {
     b.writeln(
       compact
           ? '\nCompact board view: frozen goals and checklist item text are omitted on '
-                'coding turns to save input tokens; use set_layer_progress and '
-                'set_checklist_status for exact updates.'
+              'coding turns to save input tokens; use set_layer_progress and '
+              'set_checklist_status for exact updates.'
           : '\nThe "goal" lines are FROZEN — original wording, I cannot edit them, on '
-                'purpose. Last time this plan lived only in a chat message; I lost it, '
-                're-derived each goal from the code in front of me, and marked all 7 '
-                'done. I graded an exam I had just written the answers to. So I measure '
-                'against the goal AS WRITTEN. The STATE (Absent → Prototype → Wired → '
-                'Tested → Used live → Trusted → Reflexive) is which rung a thing is '
-                'really on; the number can jump around, the rung cannot skip without '
-                'lying. The stamp is there to embarrass the number when it gets tidier '
-                'than the truth. I move a layer with set_layer_progress — number, '
-                'evidence, and, when the truth has shifted, state and stamp too.',
+              'purpose. Last time this plan lived only in a chat message; I lost it, '
+              're-derived each goal from the code in front of me, and marked all 7 '
+              'done. I graded an exam I had just written the answers to. So I measure '
+              'against the goal AS WRITTEN. The STATE (Absent → Prototype → Wired → '
+              'Tested → Used live → Trusted → Reflexive) is which rung a thing is '
+              'really on; the number can jump around, the rung cannot skip without '
+              'lying. The stamp is there to embarrass the number when it gets tidier '
+              'than the truth. I move a layer with set_layer_progress — number, '
+              'evidence, and, when the truth has shifted, state and stamp too.',
     );
     return b.toString();
   }

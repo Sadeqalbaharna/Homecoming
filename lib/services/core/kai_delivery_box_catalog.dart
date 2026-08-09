@@ -7,6 +7,7 @@ class _BoxSpec {
   final KaiDeliveryRisk risk;
   final KaiDeliveryBoxState state;
   final List<String> evidence;
+  final List<String>? dependencies;
 
   const _BoxSpec(
     this.id,
@@ -14,6 +15,7 @@ class _BoxSpec {
     this.owner = KaiDeliveryBoxOwner.agent,
     this.risk = KaiDeliveryRisk.localSafe,
     this.state = KaiDeliveryBoxState.deferred,
+    this.dependencies,
     this.evidence = const [
       'Focused tests and an evidence-backed review report'
     ],
@@ -37,9 +39,14 @@ class KaiDeliveryBoxCatalog {
         phase: phase,
         boxId: spec.id,
         outcome: spec.outcome,
-        dependencies: index == 0
-            ? const []
-            : ['$projectId:p$phase:${specs[index - 1].id}'],
+        dependencies: spec.dependencies ??
+            (index == 0
+                ? const []
+                : [
+                    specs[index - 1].id.contains('.')
+                        ? specs[index - 1].id
+                        : '$projectId:p$phase:${specs[index - 1].id}'
+                  ]),
         owner: spec.owner,
         risk: spec.risk,
         requiredEvidence: spec.evidence,
@@ -164,86 +171,215 @@ class KaiDeliveryBoxCatalog {
     },
     'hoard_northstar': {
       0: [
-        _BoxSpec(
-            'firestore_matrix', 'Prove the full Firestore allow/deny matrix',
-            state: KaiDeliveryBoxState.verified),
-        _BoxSpec('storage_contract',
-            'Prove and deploy the Storage authorization contract',
-            state: KaiDeliveryBoxState.verified),
-        _BoxSpec('phase_zero_acceptance',
-            'Accept the authorization contract with explicit deferrals',
+        _BoxSpec('hoard.p0.b01',
+            'Prove the complete Firestore venue authorization matrix',
+            state: KaiDeliveryBoxState.verified,
+            evidence: ['130/130 accepted Firestore authorization tests']),
+        _BoxSpec('hoard.p0.b02',
+            'Bind venue assignments and the idempotent backfill inventory',
             owner: KaiDeliveryBoxOwner.sponsor,
             risk: KaiDeliveryRisk.liveExternal,
-            state: KaiDeliveryBoxState.verified),
-      ],
-      1: [
-        _BoxSpec('reset_safety',
-            'Prove fail-closed resumable restore and atomic reset planning',
-            state: KaiDeliveryBoxState.verified),
-        _BoxSpec('protected_baseline',
-            'Capture and review the real protected baseline and dry-run plan',
+            state: KaiDeliveryBoxState.verified,
+            dependencies: ['hoard.p0.b01']),
+        _BoxSpec('hoard.p0.b03',
+            'Reconcile Storage authorization for the field-test boundary',
             owner: KaiDeliveryBoxOwner.sponsor,
             risk: KaiDeliveryRisk.securitySensitive,
-            state: KaiDeliveryBoxState.awaitingSponsor),
-        _BoxSpec('attended_restore',
-            'Observe same-scope restore, conflict refusal, exclusions, and parity',
+            state: KaiDeliveryBoxState.verified,
+            dependencies: ['hoard.p0.b01']),
+        _BoxSpec('hoard.p0.b04',
+            'Accept Phase 0 without converting deferred probes into proof',
             owner: KaiDeliveryBoxOwner.sponsor,
-            risk: KaiDeliveryRisk.destructive),
-        _BoxSpec('functions_monitoring',
-            'Harden critical Functions and assemble monitoring evidence'),
+            risk: KaiDeliveryRisk.productDecision,
+            state: KaiDeliveryBoxState.verified,
+            dependencies: [
+              'hoard.p0.b01',
+              'hoard.p0.b02',
+              'hoard.p0.b03',
+            ]),
+      ],
+      1: [
+        _BoxSpec('hoard.p1.b01',
+            'Bind backup, restore, and atomic reset safety locally',
+            state: KaiDeliveryBoxState.verified,
+            dependencies: ['hoard.p0.b04']),
+        _BoxSpec('hoard.p1.b02',
+            'Observe one attended same-scope recovery with protected parity',
+            owner: KaiDeliveryBoxOwner.sponsor,
+            risk: KaiDeliveryRisk.destructive,
+            state: KaiDeliveryBoxState.awaitingSponsor,
+            dependencies: ['hoard.p1.b01', 'hoard.p1.b03']),
+        _BoxSpec(
+            'hoard.p1.b03', 'Pin the staging release and rollback checklist',
+            state: KaiDeliveryBoxState.verified,
+            dependencies: ['hoard.p1.b01']),
+        _BoxSpec(
+            'hoard.p1.b04a', 'Inventory every critical Function trust boundary',
+            state: KaiDeliveryBoxState.verified,
+            dependencies: [
+              'hoard.p1.b01',
+              'hoard.p1.b03'
+            ],
+            evidence: [
+              'Commit e1c7863; functions inventory and validators PASS'
+            ]),
+        _BoxSpec('hoard.p1.b04b',
+            'Prove critical Functions fail closed at accepted boundaries',
+            risk: KaiDeliveryRisk.securitySensitive,
+            state: KaiDeliveryBoxState.verified,
+            dependencies: ['hoard.p1.b04a'],
+            evidence: ['Commit e1c7863; combined local suite 48/48 PASS']),
+        _BoxSpec('hoard.p1.b04c',
+            'Accept the hardened Functions candidate in an authorized live surface',
+            owner: KaiDeliveryBoxOwner.sponsor,
+            risk: KaiDeliveryRisk.liveExternal,
+            state: KaiDeliveryBoxState.awaitingSponsor,
+            dependencies: ['hoard.p1.b02', 'hoard.p1.b04b']),
+        _BoxSpec('hoard.p1.b05a',
+            'Freeze local recovery signal, redaction, threshold, and response contracts',
+            state: KaiDeliveryBoxState.verified,
+            dependencies: ['hoard.p1.b01', 'hoard.p1.b03'],
+            evidence: ['Commit 4f22a3a; three deterministic validators PASS']),
+        _BoxSpec('hoard.p1.b05b',
+            'Emit deterministic redacted recovery and ingestion signals locally',
+            state: KaiDeliveryBoxState.verified,
+            dependencies: [
+              'hoard.p1.b05a',
+              'hoard.p1.b04b'
+            ],
+            evidence: [
+              'Commit 4f22a3a; reset/inventory 23/23 and signal 5/5 PASS'
+            ]),
+        _BoxSpec('hoard.p1.b05c',
+            'Deliver approved signals through external monitoring',
+            owner: KaiDeliveryBoxOwner.sponsor,
+            risk: KaiDeliveryRisk.liveExternal,
+            state: KaiDeliveryBoxState.awaitingSponsor,
+            dependencies: [
+              'hoard.p1.b02',
+              'hoard.p1.b04b',
+              'hoard.p1.b05b',
+            ]),
+        _BoxSpec('hoard.p1.b06', 'Accept the complete pilot safety baseline',
+            owner: KaiDeliveryBoxOwner.sponsor,
+            risk: KaiDeliveryRisk.liveExternal,
+            state: KaiDeliveryBoxState.awaitingSponsor,
+            dependencies: [
+              'hoard.p1.b02',
+              'hoard.p1.b04a',
+              'hoard.p1.b04b',
+              'hoard.p1.b04c',
+              'hoard.p1.b05a',
+              'hoard.p1.b05b',
+              'hoard.p1.b05c',
+            ]),
       ],
       2: [
-        _BoxSpec('pilot_definition',
-            'Name the pilot venue, operator, period, and inputs',
+        _BoxSpec('hoard.p2.b01',
+            'Approve the pilot venue, operator, period, and privacy boundary',
             owner: KaiDeliveryBoxOwner.sponsor,
-            risk: KaiDeliveryRisk.productDecision),
-        _BoxSpec(
-            'coverage_close', 'Make source coverage and freshness visible'),
-        _BoxSpec('settlement_reconciliation',
-            'Reconcile POS/settlement close with no unexplained duplicates',
+            risk: KaiDeliveryRisk.productDecision,
+            dependencies: ['hoard.p1.b06']),
+        _BoxSpec('hoard.p2.b02',
+            'Expose ingestion provenance, freshness, coverage, and rejects',
+            dependencies: ['hoard.p2.b01']),
+        _BoxSpec('hoard.p2.b03',
+            'Bind the authoritative external POS or settlement close',
+            dependencies: ['hoard.p2.b02']),
+        _BoxSpec('hoard.p2.b04',
+            'Prevent double counting and expose unexplained gaps',
+            dependencies: ['hoard.p2.b02', 'hoard.p2.b03']),
+        _BoxSpec('hoard.p2.b05',
+            'Close one real explainable baseline without duplicates',
             owner: KaiDeliveryBoxOwner.sponsor,
-            risk: KaiDeliveryRisk.liveExternal),
+            risk: KaiDeliveryRisk.liveExternal,
+            dependencies: [
+              'hoard.p2.b01',
+              'hoard.p2.b02',
+              'hoard.p2.b03',
+              'hoard.p2.b04',
+            ]),
       ],
       3: [
-        _BoxSpec('finding_action_chain',
+        _BoxSpec('hoard.p3.b01',
             'Bind findings to owned actions and measured outcomes'),
-        _BoxSpec('estimate_separation',
-            'Prove estimates never enter verified savings'),
-        _BoxSpec('bd500_acceptance',
-            'Accept at least BD 500 per month of evidenced savings',
+        _BoxSpec('hoard.p3.b02',
+            'Run the finding-to-outcome loop without engineer repair',
+            dependencies: ['hoard.p3.b01']),
+        _BoxSpec(
+            'hoard.p3.b03', 'Run the pilot cadence with named action owners',
             owner: KaiDeliveryBoxOwner.sponsor,
-            risk: KaiDeliveryRisk.liveExternal),
+            risk: KaiDeliveryRisk.liveExternal,
+            dependencies: ['hoard.p3.b02']),
+        _BoxSpec('hoard.p3.b04',
+            'Verify at least BD 500 per month without estimate leakage',
+            owner: KaiDeliveryBoxOwner.sponsor,
+            risk: KaiDeliveryRisk.productDecision,
+            dependencies: [
+              'hoard.p3.b01',
+              'hoard.p3.b02',
+              'hoard.p3.b03',
+            ]),
       ],
       4: [
-        _BoxSpec('repeat_period',
-            'Run a second measured period without founder data repair',
+        _BoxSpec(
+            'hoard.p4.b01', 'Initialize a repeat run from a versioned playbook',
+            dependencies: ['hoard.p3.b04']),
+        _BoxSpec('hoard.p4.b02',
+            'Make support and recovery executable by a named operator',
+            dependencies: ['hoard.p4.b01']),
+        _BoxSpec('hoard.p4.b03',
+            'Observe a second operator complete and explain the loop',
             owner: KaiDeliveryBoxOwner.sponsor,
-            risk: KaiDeliveryRisk.liveExternal),
-        _BoxSpec('support_playbook',
-            'Prove failure handling and the operator support playbook'),
-        _BoxSpec('repeatability_acceptance',
-            'Accept repeatability and usability gates',
+            risk: KaiDeliveryRisk.liveExternal,
+            dependencies: ['hoard.p4.b01', 'hoard.p4.b02']),
+        _BoxSpec(
+            'hoard.p4.b04', 'Accept repeatability with bounded support load',
             owner: KaiDeliveryBoxOwner.sponsor,
-            risk: KaiDeliveryRisk.productDecision),
+            risk: KaiDeliveryRisk.productDecision,
+            dependencies: [
+              'hoard.p4.b01',
+              'hoard.p4.b02',
+              'hoard.p4.b03',
+            ]),
       ],
       5: [
-        _BoxSpec('lifecycle_entitlements',
-            'Implement safe onboarding, lifecycle, and entitlements'),
-        _BoxSpec(
-            'commercial_ops', 'Prove commercial and operational launch gates'),
-        _BoxSpec('growth_authorization',
-            'Choose whether optional growth experiments may begin',
+        _BoxSpec('hoard.p5.b01',
+            'Prove tenant-safe self-service organization lifecycle',
+            risk: KaiDeliveryRisk.securitySensitive,
+            dependencies: ['hoard.p4.b04']),
+        _BoxSpec('hoard.p5.b02',
+            'Approve fail-closed entitlements and commercial limits',
             owner: KaiDeliveryBoxOwner.sponsor,
-            risk: KaiDeliveryRisk.productDecision),
+            risk: KaiDeliveryRisk.productDecision,
+            dependencies: ['hoard.p5.b01']),
+        _BoxSpec('hoard.p5.b03',
+            'Make operational support and recovery launch-ready',
+            dependencies: ['hoard.p5.b01']),
+        _BoxSpec(
+            'hoard.p5.b04', 'Bound growth experiments behind financial trust',
+            owner: KaiDeliveryBoxOwner.sponsor,
+            risk: KaiDeliveryRisk.productDecision,
+            dependencies: ['hoard.p5.b02', 'hoard.p5.b03']),
+        _BoxSpec('hoard.p5.b05',
+            'Accept every commercial and operational launch gate',
+            owner: KaiDeliveryBoxOwner.sponsor,
+            risk: KaiDeliveryRisk.liveExternal,
+            dependencies: [
+              'hoard.p5.b01',
+              'hoard.p5.b02',
+              'hoard.p5.b03',
+              'hoard.p5.b04',
+            ]),
       ],
     },
     'kingdom_northstar': {
       0: [
         _BoxSpec('loyalty_loop_contract',
             'Freeze one loyalty loop and actor authority map',
-            state: KaiDeliveryBoxState.ready,
+            state: KaiDeliveryBoxState.evidenceReview,
             evidence: [
-              'Repository evidence and reviewer acceptance; current repository claims remain UNVERIFIED'
+              'K1.1 disposable package is Tested; authoritative adoption remains UNVERIFIED'
             ]),
         _BoxSpec('pilot_target', 'Choose the pilot cohort and return target',
             owner: KaiDeliveryBoxOwner.sponsor,
@@ -253,7 +389,11 @@ class KaiDeliveryBoxCatalog {
       ],
       1: [
         _BoxSpec('server_ledger',
-            'Move points, tiles, vouchers, and redemption to server authority'),
+            'Move points, tiles, vouchers, and redemption to server authority',
+            state: KaiDeliveryBoxState.active,
+            evidence: [
+              'K1.4 commit 620293c and its 5 static + 11 emulator cases are reported Tested in isolation; commit object was unavailable in the inspected local repositories, so authoritative adoption remains UNVERIFIED'
+            ]),
         _BoxSpec('emulator_matrix',
             'Prove roles, ownership, idempotency, and conservation'),
         _BoxSpec('failure_recovery', 'Prove replay-safe failure and recovery'),
@@ -306,22 +446,35 @@ class KaiDeliveryBoxCatalog {
         _BoxSpec('candidate_votes', 'Record Sadeq\'s Yes/Maybe/Close/No votes',
             owner: KaiDeliveryBoxOwner.sponsor,
             risk: KaiDeliveryRisk.productDecision,
-            state: KaiDeliveryBoxState.awaitingSponsor),
+            state: KaiDeliveryBoxState.verified,
+            evidence: [
+              'Run-bound Find My Table YES reconstruction bound in Factory packet FSC-LEGACY-YES-001-BP-IC-v3 at commit 76dd3ade'
+            ]),
         _BoxSpec('blueprint_authority',
             'Authorize one named YES candidate to enter Blueprint',
             owner: KaiDeliveryBoxOwner.sponsor,
-            risk: KaiDeliveryRisk.productDecision),
+            risk: KaiDeliveryRisk.productDecision,
+            state: KaiDeliveryBoxState.verified,
+            evidence: [
+              'Authorization BPA-20260809-FSC-LEGACY-YES-001 is bound only to the Find My Table Blueprint packet; it does not authorize Assembly'
+            ]),
       ],
       1: [
         _BoxSpec('offer_scope',
-            'Freeze the smallest sellable offer and explicit cuts'),
+            'Freeze the smallest sellable offer and explicit cuts',
+            state: KaiDeliveryBoxState.active,
+            evidence: [
+              'Find My Table packet FSC-LEGACY-YES-001-BP-IC-v3 is Tested by 8/8 operating-evidence checks at commit 76dd3ade; Blueprint remains active'
+            ]),
         _BoxSpec('commercial_terms',
             'Choose price, channel, fulfilment, refunds, and margin',
             owner: KaiDeliveryBoxOwner.sponsor,
-            risk: KaiDeliveryRisk.productDecision),
+            risk: KaiDeliveryRisk.productDecision,
+            state: KaiDeliveryBoxState.awaitingSponsor),
         _BoxSpec('blueprint_acceptance', 'Accept the run-bound Blueprint',
             owner: KaiDeliveryBoxOwner.sponsor,
-            risk: KaiDeliveryRisk.productDecision),
+            risk: KaiDeliveryRisk.productDecision,
+            state: KaiDeliveryBoxState.awaitingSponsor),
       ],
       2: [
         _BoxSpec('artifact_build', 'Produce the exact sellable artifact'),

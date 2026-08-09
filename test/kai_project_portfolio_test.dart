@@ -8,20 +8,20 @@ import 'package:homecoming_app/widgets/kai_project_portfolio.dart';
 
 /// A record exactly as it was written before the portfolio existed.
 Map<String, Object?> _legacyRecord() => {
-  'name': 'Kai Smarter Project',
-  'why': 'Make me genuinely smarter.',
-  'layers': [
-    {
-      'n': 1,
-      'title': 'Reply Spine',
-      'intent': 'Preserve the useful answer.',
-      'progress': 100,
-      'evidence': ['recoveredReply preserves the answer'],
-      'state': 'usedLive',
-    },
-  ],
-  'createdAt': 1,
-};
+      'name': 'Kai Smarter Project',
+      'why': 'Make me genuinely smarter.',
+      'layers': [
+        {
+          'n': 1,
+          'title': 'Reply Spine',
+          'intent': 'Preserve the useful answer.',
+          'progress': 100,
+          'evidence': ['recoveredReply preserves the answer'],
+          'state': 'usedLive',
+        },
+      ],
+      'createdAt': 1,
+    };
 
 KaiProject _portfolioProject({
   required String id,
@@ -30,17 +30,18 @@ KaiProject _portfolioProject({
   int activePhase = 0,
   List<String> blockers = const [],
   ProjectProofState proof = ProjectProofState.unverified,
-}) => KaiProject(
-  id: id,
-  name: name,
-  why: 'why',
-  layers: const [],
-  repositoryPath: repositoryPath,
-  activePhase: activePhase,
-  blockers: blockers,
-  portfolioVisible: true,
-  proofState: proof,
-);
+}) =>
+    KaiProject(
+      id: id,
+      name: name,
+      why: 'why',
+      layers: const [],
+      repositoryPath: repositoryPath,
+      activePhase: activePhase,
+      blockers: blockers,
+      portfolioVisible: true,
+      proofState: proof,
+    );
 
 void main() {
   group('backward compatibility', () {
@@ -321,12 +322,18 @@ void main() {
       );
     });
 
-    test('today\'s Factory scan is visible without claiming acceptance', () {
+    test('Factory accepts Signal Scan while Blueprint remains evidence-only',
+        () {
       final scan = KaiProjectService.factoryBaselineForTest[0]!;
-      expect(scan[0], 0);
-      expect(scan[2], 'prototype');
-      expect((scan[1] as String), contains('1 YES'));
-      expect((scan[1] as String), contains('6 MAYBEs'));
+      final blueprint = KaiProjectService.factoryBaselineForTest[1]!;
+      expect(scan[0], 100);
+      expect(scan[2], 'trusted');
+      expect((scan[1] as String), contains('FSC-LEGACY-YES-001-BP-IC-v3'));
+      expect(blueprint[0], 0);
+      expect(blueprint[2], 'tested');
+      expect((blueprint[3] as String), contains('Assembly'));
+      expect(KaiProjectService.factoryPacketAcceptedPhasesForTest, [0]);
+      expect(KaiProjectService.factoryBlueprintEvidencePhasesForTest, [1]);
     });
   });
 

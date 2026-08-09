@@ -450,6 +450,14 @@ attended clean tray quit, launch of the manifest's exact binary,
 and create → restart → one-body delivery → durable transcript → acknowledgement
 observation can promote the reminder slice to `VERIFIED LIVE`.
 
+The authorized 2026-08-09 Pizza/HUD Windows rebuild superseded the binary at
+that isolated Release path. Its current `app.so` SHA-256 is
+`12E6044161268E8D9DCCA244A358C867265A603661E3086FC3B66454500E7790`, which
+intentionally no longer matches the accepted Brief 018 manifest above. The
+verifier must therefore fail closed until a fresh governed artifact is built
+and bound. No Brief 018 restart or reminder was performed during the HUD
+rebuild.
+
 ## Pizza delivery-box controller — 2026-08-09
 
 Brief 019 adds an evidence-driven delivery controller beneath the four frozen
@@ -458,9 +466,12 @@ Pizza roadmaps without changing any Northstar or macro phase name. It is
 or external action occurred during acceptance.
 
 - Homecoming has 29 boxes across phases `3/3/3/4/3/3/4/3/3`.
-- Hoard has 19 boxes across phases `3/4/3/3/3/3`. Phase 0 remains accepted;
-  Phase 1B preserves tested reset repair `5821f73` and exposes the protected
-  baseline and attended restore as real sponsor/live gates.
+- Hoard has 32 boxes across phases `4/10/5/4/4/5`, reconciled from the accepted
+  Hoard tracker delta at `4f22a3a`. Ten are verified, eighteen are deferred
+  (the Hoard projection calls these locked), none are ready, and four remain
+  sponsor/live `UNVERIFIED` gates. Stable external IDs and dependencies are
+  preserved, including newly verified `hoard.p1.b04a`, `hoard.p1.b04b`,
+  `hoard.p1.b05a`, and `hoard.p1.b05b`.
 - Kingdom has 18 boxes across phases `3/3/3/3/3/3`. Its expected
   `C:\code\Kingdom\docs\PROJECT_SOURCE_OF_TRUTH.md` is absent, so no repository
   box is pre-verified; its first evidence requirement explicitly remains
@@ -488,6 +499,49 @@ reported no errors; four pre-existing desktop-shell warnings and existing style
 infos remain. The Pizza drawer's compact counts and authority language are
 tested; visible layout and label non-overlap remain `UNVERIFIED` until an
 attended desktop observation.
+
+### Pizza evidence reconciliation and real desktop observation — 2026-08-09
+
+The canonical catalog now contains 102 boxes (`29 + 32 + 18 + 23`) across the
+same four projects and 30 unchanged macro phases. The later 12:37–13:23 evidence
+window changes proof projection, not the frozen macro names or box count:
+
+- Homecoming's Pizza/HUD rendering is `VERIFIED LIVE` on the real updated
+  desktop process, but no Homecoming delivery phase advances.
+- Hoard Phase 1 retains exactly ten verified boxes. A managed-sandbox spawn
+  `EPERM` occurred before test logic and the owner changed strategy to a
+  child-process-permitted rerun; no additional box is promoted from that work.
+- Kingdom Ledger Safety is active. K1.4 visit-state/economic-close evidence is
+  reported Tested at isolated commit `620293c`, with K1.5 next. That object was
+  not present in the local repositories available to this acceptance review,
+  so authoritative adoption remains `UNVERIFIED` and no Kingdom box is marked
+  verified from the report alone.
+- Factory Signal Scan is accepted for run-bound Find My Table candidate
+  `FSC-LEGACY-YES-001`; Blueprint packet `FSC-LEGACY-YES-001-BP-IC-v3` is
+  `TESTED` at commit `76dd3ade` and Blueprint is active. Its two-tables/week,
+  four-players/table, BHD12 minimum baseline (BHD96 weekly gross; BHD48 per
+  incremental table) and Assembly/live exclusions were independently read from
+  the commit. Assembly is not authorized, and DM compensation still requires a
+  sponsor decision even though safe scenario analysis may continue.
+- Table Ready remains Tested and unpublished. BoothSignal's offline product
+  core is Tested by a primary QA receipt and production record (5/5
+  deterministic calculation/rendered-shell tests); it is package-ready but
+  unpublished, with willingness to pay, sales, fees, refunds, and net receipts
+  `UNVERIFIED` except for the receipt's explicit local zero-sales record.
+- The TikTok Portfolio Manager remains a separate governed lane. Seven visual
+  masters, seven local Piper voiceovers, retained 35/35 readiness tests, and an
+  active 1080×1920 render are recorded as an integration delta only. No Pizza
+  slice, account, post, or revenue state is invented.
+
+Focused delivery-box, portfolio, and Factory conveyor tests pass 37/37. A
+Windows Release build passed and the real updated Desktop Homecoming process is
+running from the governed worktree as PID 27260. Direct-window evidence
+`docs/evidence/REAL_KAI_DPI_SELECTION_RETRY_2026-08-09.png` (SHA-256
+`945722F65A03AB0F4E070963F7B09F79DB8A87DA869E75697C1024DBF50BF384`) was
+sponsor-accepted as a readable full-Pizza capture: the matrix, all four project
+labels, legend, and status row are visible without blocked glyphs or overflow
+hazard stripes. The detailed Hoard, Kingdom, and Factory drill-down drawers
+were not separately captured and remain `UNVERIFIED` visually.
 
 ## Evidence index
 
@@ -529,11 +583,16 @@ attended desktop observation.
   lifecycle, selection, repair, proof, UI, and stop contract for the controller.
 - `lib/services/core/kai_delivery_box.dart` — canonical box model, deterministic
   selector, honest work packet, bounded repair, and durable proof gate.
-- `lib/services/core/kai_delivery_box_catalog.dart` — 89 frozen boxes across all
+- `lib/services/core/kai_delivery_box_catalog.dart` — 102 frozen boxes across all
   30 Homecoming, Hoard, Kingdom, and Factory macro phases.
 - `test/kai_delivery_box_test.dart` — parsing, defaults, box counts, eligibility,
   idempotent dispatch, repair, escalation, sponsor refusal, proof durability,
   Factory scan-only, Hoard/Kingdom honesty, and Pizza semantics.
+- `docs/briefs/BRIEF_018A_AUTHENTICATED_LOCAL_GRACEFUL_SHUTDOWN.md` — bounded
+  future-runtime repair contract; it cannot control the currently running old
+  coordinator/watchdog binary.
+- `docs/evidence/REAL_KAI_DPI_SELECTION_RETRY_2026-08-09.png` — sponsor-accepted
+  direct capture of the real updated Windows Pizza HUD.
 
 Kingdom portfolio integration is code-tested only until an attended Windows
 check observes all three cards and their drill-down flowcharts.
