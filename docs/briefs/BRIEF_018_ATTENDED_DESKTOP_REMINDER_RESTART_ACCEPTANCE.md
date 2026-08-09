@@ -4,7 +4,7 @@ Owner: Northstar project manager with Sadeq as attended operator
 
 Reviewer: Northstar project manager
 
-Status: BLOCKED — AWAITING ATTENDED TRAY QUIT
+Status: READY FOR CLEAN-TRAY RE-ENTRY — IDENTITY REPAIR TESTED / LIVE UNVERIFIED
 
 Parent phase: Brief 012 durable scheduled commitment vertical slice
 
@@ -25,39 +25,42 @@ tests cannot establish about the running product.
 
 ## Current preflight evidence
 
-Captured 2026-08-08 without mutating live state:
+The 2026-08-09 attended attempt stopped before process or GUI action because
+the live payload hash `97A08CB0...` did not match the then-accepted
+`C69667AD...` payload and the live executable came from `C:\code\homecoming_app`
+rather than this governed worktree. It also proved that `/health.startedAt` is
+persisted Core-state metadata (`??=`), not an OS process-start instant. The old
+freshness inference was invalid and has been removed.
 
-- Two `Kai.exe` processes are running from
-  `build/windows/x64/runner/Release/Kai.exe`.
-- Core health reports `startedAt: 2026-08-07T15:32:30.045882Z` and advertises
-  only `presence`, `handoffs`, `runtime_tasks`, and `outbound_inbox`.
-- `GET /v1/commitments` returns 404.
-- The running `Kai.exe` was built at `2026-08-07T19:50:24Z`; the accepted
-  reminder source is newer (`2026-08-08T16:49:59Z`).
-- Therefore the current runtime is stale and cannot be used as evidence for
-  Brief 017. A successful unit suite does not alter that fact.
+The repaired local gate now has one immutable artifact manifest at
+`docs/evidence/BRIEF_018_ACCEPTED_ARTIFACT.json`:
 
-Fresh-build update:
+- governed root:
+  `C:\Users\sadeq\.codex\worktrees\3740\homecoming_app`;
+- source commit: `9a5c6ffc951a2213d9b5cf5d7a28df16518aa2b6`, plus an exact compiled-source
+  fingerprint for the captured dirty tree;
+- credential profile: `empty-local-build-stub-v1`;
+- `Kai.exe` SHA-256:
+  `B906B94D56E9B151DE1DC1CC23ADF3B257C1DA39A9D3AE2624A47B74B4192896`;
+- `app.so` SHA-256:
+  `E74B61177D81C9F09244BF9A87557AD7061AFF61C064CCAC75A34C871B8A82A8`;
+- binding ID:
+  `0B1D8B4FB435B4DE4DE6BEA12465A7E0104862F4F24F174F494463EA04EA874A`.
 
-- `flutter build windows --release` completed successfully in 100.1 seconds
-  without stopping the live Kai processes.
-- The native `Kai.exe` launcher is unchanged because no native runner source
-  changed. The authoritative rebuilt Dart payload is
-  `build/windows/x64/runner/Release/data/app.so`, written
-  `2026-08-08T16:59:38.6938163Z`, length 12,944,272 bytes, SHA-256
-  `C69667AD9DE71FA177F333960F0D9BC23C79F16B72440781D598131F8F44857C`.
-- The running process still serves the old loaded payload, as proven by its
-  unchanged health capability list. No live process or Core state was touched.
-- The build blocker is closed. The next action is the attended tray quit in
-  procedure step 2.
+The Release was built in this worktree without embedded credentials. Artifact
+verification passes locally. The live `C:\code` runtime remains untouched and
+is not acceptance evidence.
 
 ## Entry gate
 
 - Brief 017 is `ACCEPTED / TESTED / WIRED` with all 14 criteria passing.
-- Build a fresh Windows Release from the accepted dirty worktree without
-  deleting, reverting, staging, or committing unrelated work.
-- Do not begin the attended run until `/health` advertises
-  `scheduled_commitments` and `GET /v1/commitments` is supported.
+- Verify the immutable accepted-artifact manifest before any process action.
+- After the clean tray quit, launch only the manifest's exact `Kai.exe`.
+- Before opening a desktop room, the runtime verifier must bind port 8790 to
+  that executable and payload, prove one matching watchdog, and prove the OS
+  process creation time is later than the manifest binding time.
+- `/health.startedAt` may be recorded only as persisted-state metadata and must
+  never be used as process freshness evidence.
 - Before the first deliberate quit, record Core state-file path, length,
   modification time, and SHA-256. Keep any raw backup only under the local
   Homecoming data directory; never copy private Core state into the repository.
@@ -126,7 +129,9 @@ Fresh-build update:
 - `lib/screens/kai_desktop_shell.dart`
 - `windows/runner/main.cpp`
 - `scripts/test/kai_reminder_runtime_acceptance.ps1`
+- `scripts/test/bind_kai_reminder_acceptance_artifact.ps1`
 - `scripts/test/test_kai_reminder_runtime_acceptance.ps1`
+- `docs/evidence/BRIEF_018_ACCEPTED_ARTIFACT.json`
 - `%LOCALAPPDATA%/Homecoming/KaiCore/state.json`
 - `%LOCALAPPDATA%/Homecoming/KaiCore/operations/kai-operations.jsonl`
 - live Core `/health`, `/v1/commitments`, and `/v1/presence` responses
@@ -134,27 +139,39 @@ Fresh-build update:
 
 ## Attended procedure
 
-1. Capture a run ID, UTC start instant, build hashes/timestamps, Core health,
-   state metadata/hash, current commitment IDs/statuses, and current journal
-   position. Do not print reminder texts from unrelated records.
-2. Use the tray's **Quit Kai completely**. Within 15 seconds verify both Kai
-   processes exit and port 8790 closes. If not, stop; do not force-kill.
-3. Start the rebuilt `Kai.exe --coordinator-worker --background`, wait for
-   `coordinator_ready`, and verify Core advertises `scheduled_commitments` and
-   supports commitment listing. Open one visible desktop room and wait until
-   its exact body/inbox is online.
+1. Run `-Mode Artifact` against the committed manifest. Capture its binding ID,
+   UTC start instant, state metadata/hash, current commitment IDs/statuses, and
+   current journal position. Preflight must capture a non-empty journal anchor
+   hash/length that remains a byte prefix of one retained generation at
+   delivery. Do not print reminder texts from unrelated records. Any
+   manifest/path/hash mismatch stops before process or GUI action.
+2. Use the tray's **Quit Kai completely**. Within 15 seconds verify every
+   `Kai.exe` exits and port 8790 closes. If any governed or ungoverned Kai
+   process remains, stop; do not force-kill.
+3. Start the manifest's exact `Kai.exe --coordinator-worker --background`.
+   Before opening any GUI, run `-Mode Preflight` and prove stable port ownership,
+   exact governed root and hashes, one `--watchdog --watch-pid=<corePid>` child,
+   and OS process creation after artifact binding. Record the returned runtime
+   identity ID. Then verify `scheduled_commitments`, commitment listing, and
+   `coordinator_ready`; only then open one visible desktop room.
 4. Choose a Bahrain due time at least eight minutes ahead and before quiet
-   hours. In desktop chat ask Kai to set one reminder containing the unique run
-   marker. A plain-text promise without a successful tool receipt is `FAIL`.
+   hours. Use an opaque run marker. Record the exact composed reminder text and
+   its UTF-8 SHA-256 before reading Core; never derive the expected hash from a
+   Core response. In desktop chat ask Kai to set it. A plain-text promise
+   without a successful tool receipt is `FAIL`.
 5. Read Core and prove exactly one new `scheduled` commitment exists with the
    exact text, canonical Bahrain provenance, and no outbound ID. Record its ID
    and deterministic expected outbound ID without mutating it.
-6. Before due time, use **Quit Kai completely** again. Verify port 8790 closes,
-   then restart the rebuilt hidden coordinator and visible desktop room.
+6. Preserve the first `Created` evidence file and its promise fingerprint.
+   Before due time, use **Quit Kai completely** again. Verify port 8790 closes,
+   restart the exact bound coordinator, and run `-Mode Survived` before opening
+   the GUI. The new runtime identity must differ from the pre-restart identity.
 7. Prove the same commitment ID and exact fields survived and remain
    `scheduled`; no second commitment may exist for the run marker.
-8. Keep the desktop room visible through due time. Observe one exact reminder
-   bubble. Do not manually invoke Core dispatch or acknowledgement.
+8. Before due time capture `/v1/presence`, including the IDs and count of
+   work-eligible desktop bodies. Keep the room visible through due time and
+   observe one exact reminder bubble. Do not manually invoke Core dispatch or
+   acknowledgement.
 9. Prove Core reports that commitment `acknowledged`, with one outbound ID,
    one target body ID, one dispatch instant, and one acknowledgement instant.
    Prove the operations journal contains exactly one correlated
@@ -163,12 +180,15 @@ Fresh-build update:
     shows the reminder exactly once and Core stays acknowledged with no new
     dispatch. Capture a screenshot or attended observation plus the sanitized
     machine evidence.
-11. Stop and report. Do not start another feature.
+11. Use distinct immutable evidence files for Artifact, Preflight, Created,
+    Survived, and Delivered. The first verdict for each mode is authoritative;
+    do not rerun a failed mode to obtain green evidence. Stop and report.
 
 ## Pass criteria
 
-1. Rebuilt runtime health advertises `scheduled_commitments`; the endpoint is
-   not the stale preflight process.
+1. The port-owning coordinator and its one watchdog execute the exact governed
+   artifact, its payload hashes match the immutable binding, OS creation is
+   later than binding, and health advertises `scheduled_commitments`.
 2. The visible desktop request causes a real successful `set_reminder` tool
    execution, not narration or a manually inserted Core record.
 3. Exactly one new commitment stores the unique text byte-for-byte with
@@ -204,31 +224,28 @@ own tests; the attended run must leave them empty and query live Core.
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test/test_kai_reminder_runtime_acceptance.ps1
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test/kai_reminder_runtime_acceptance.ps1 -Mode Preflight -ExpectedCoreStartedAfterUtc 2026-08-08T16:59:38.6938163Z
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test/kai_reminder_runtime_acceptance.ps1 -Mode Artifact -AcceptedArtifactPath docs/evidence/BRIEF_018_ACCEPTED_ARTIFACT.json -ExpectedBindingId 0b1d8b4fb435b4de4de6bea12465a7e0104862f4f24f174f494463ea04ea874a
 ```
 
-After creation, restart, and delivery, rerun the collector respectively with
-`-Mode Created`, `-Mode Survived`, and `-Mode Delivered`, providing the exact
-commitment ID, UTF-8 text SHA-256, initial promise fingerprint, run marker,
-acceptance-window UTC instant, rejected-runtime boundary via
-`-ExpectedCoreStartedAfterUtc`, and a sanitized evidence output path. The
-fingerprint is mandatory after restart, and the run marker must identify
-exactly one commitment across the full ledger.
+After launching the accepted artifact, run `Preflight`, then `Created`,
+`Survived`, and `Delivered` with the same manifest. Pin Created to the Preflight
+runtime identity. Pin Survived to its newly returned identity and provide the
+previous identity so an unchanged process fails. Pin Delivered to the Survived
+identity. Copy each expected identity only from the preceding mode's immutable
+evidence file; never re-derive it from the runtime being checked. Also provide
+the Preflight journal anchor to Delivered so retention loss fails closed, the
+exact commitment ID, independently sourced UTF-8 text hash, initial promise
+fingerprint, opaque marker, acceptance-window UTC, and one distinct sanitized
+evidence path per mode.
 
-Verifier self-test evidence: **17/17 PASS** for rebuilt preflight; missing,
-stale, and capability-bearing-old runtime boundaries; creation; survival;
-missing/drifted fingerprints; text drift; a second run-marker commitment;
-completed delivery; early dispatch; acknowledgement-before-dispatch; malformed
-lifecycle instants; duplicate dispatch; and both correlated and uncorrelated
-journal marker leakage. The live preflight currently
-returns `UNVERIFIED` with Core start time
-`2026-08-07T15:32:30.045882Z`, exactly because the old process remains loaded.
-
-Blocked checkpoint: the same stale Core and three `Kai.exe` processes remain
-after three consecutive continuation turns. All safe preparation is complete.
-The PM will not substitute Task Manager, forced termination, direct ledger
-mutation, or a synthetic run for Sadeq's attended tray-level **Quit Kai
-completely**. Resume this brief when Sadeq reports that action complete.
+Verifier self-test evidence: **28/28 PASS**. Identity cases cover ignored stale
+persisted `startedAt`, missing artifact binding, wrong root, wrong payload,
+PID/port-owner change, process older than binding, missing watchdog relation,
+ungoverned extra Kai processes, out-of-band manifest pinning, payload/source
+ordering, cross-run evidence, and unchanged restart identity. The original
+creation, survival, exact-text, duplicate, timing, lifecycle, dispatch,
+journal-anchor retention and journal-privacy cases continue to pass. The live
+runtime was not restarted.
 
 ## Failure and rollback
 

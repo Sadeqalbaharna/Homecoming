@@ -420,41 +420,35 @@ six-file analyzer delta from six diagnostics to the same five pre-existing
 a clean diff check. All 14 criteria pass. The next separate gate is an attended
 restart and exactly-once desktop reminder walkthrough; it has not begun.
 
-Brief 018 is the active runtime gate. Read-only preflight found that the two
-currently running `Kai.exe` processes and Core are stale: health started on
-2026-08-07, omits `scheduled_commitments`, and `/v1/commitments` returns 404,
-while the accepted reminder source is newer than the Release binary. This is a
-runtime-version blocker, not a contradiction of Brief 017's code evidence. The
-next action is a fresh Release build followed by an attended, tray-controlled
-restart; no process will be force-terminated and no live Core state will be
-deleted. Only after that runtime proves create → restart → one-body delivery →
-durable transcript → acknowledgement may the reminder slice become
-`VERIFIED LIVE`.
+Brief 018 remains the active runtime gate and is now **READY FOR CLEAN-TRAY
+RE-ENTRY / LIVE UNVERIFIED**. The first attended attempt stopped before any
+process or GUI action because the live `C:\code\homecoming_app` payload did not
+match the accepted artifact. That incident also disproved the earlier use of
+`/health.startedAt` as runtime freshness: Core preserves that value in durable
+state with `??=`, so it describes state history rather than OS process identity.
 
-The fresh Windows Release build is now complete without interrupting the live
-runtime. Its authoritative Dart payload
-`build/windows/x64/runner/Release/data/app.so` was written at
-2026-08-08T16:59:38Z with SHA-256
-`C69667AD9DE71FA177F333960F0D9BC23C79F16B72440781D598131F8F44857C`.
-The old process remains loaded and intentionally still reports the stale
-capability set. Brief 018 is therefore **READY FOR ATTENDED RESTART**: the next
-action is Sadeq's tray-level **Quit Kai completely**, followed by launch and
-capability verification. No force termination or state deletion is authorized.
+The repaired gate binds one credential-free Windows Release built entirely in
+the governed worktree. `docs/evidence/BRIEF_018_ACCEPTED_ARTIFACT.json` records
+the governed root, source commit and compiled-source fingerprint, exact
+`Kai.exe` and `app.so` hashes, payload time, acceptance time, and immutable
+binding ID. The accepted `app.so` SHA-256 is
+`E74B61177D81C9F09244BF9A87557AD7061AFF61C064CCAC75A34C871B8A82A8`.
+The live `C:\code` runtime was not changed or restarted.
 
-Brief 018 now also has a content-free, read-only runtime verifier at
-`scripts/test/kai_reminder_runtime_acceptance.ps1`. Its nine fixture cases pass,
-including stale-runtime refusal, exact promise fingerprinting across restart,
-duplicate-dispatch rejection, and journal-text leakage rejection. A live run
-correctly reports `UNVERIFIED` against the old Core. The tool does not create,
-dispatch, acknowledge, edit, or delete records; it becomes evidence only after
-the attended clean restart loads the rebuilt payload.
-
-Brief 018 is now **BLOCKED ON ATTENDED ACTION** after the same stale runtime
-remained active across three consecutive continuation turns. This is a
-deliberate safety and evidence boundary, not a code blocker: the fresh Release,
-hash, focused contract, and nine-case read-only verifier are ready. Resume when
-Sadeq uses Kai's tray command **Quit Kai completely**. Forced termination,
-state deletion, and synthetic acceptance remain unauthorized.
+The read-only verifier now derives freshness and a correlation identity from
+the port-owning PID, stable before/after port ownership, exact governed
+executable and payload paths/hashes, OS process creation time after artifact
+binding, and one matching `--watchdog --watch-pid=<corePid>` process. Persisted
+`startedAt` is retained only as non-freshness metadata. All 28 fixture cases
+pass, including wrong-root/hash, PID/owner change, stale-process, watchdog,
+ungoverned-process, out-of-band manifest-pin, stale-source/payload, cross-run
+and unchanged-restart refusal plus the original reminder lifecycle and privacy
+checks. A preflight journal byte anchor must also survive in the retained
+generation set, preventing rotation from hiding an earlier duplicate dispatch.
+Artifact verification against the isolated Release also passes. Only an
+attended clean tray quit, launch of the manifest's exact binary,
+and create → restart → one-body delivery → durable transcript → acknowledgement
+observation can promote the reminder slice to `VERIFIED LIVE`.
 
 ## Pizza delivery-box controller — 2026-08-09
 
