@@ -64,4 +64,27 @@ void main() {
     expect(memo, contains(packetId));
     expect(pilot, contains(packetId));
   });
+
+  test('investment memo models DM terms without claiming live authority', () {
+    final memo = readDoc(
+        'FACTORY_BLUEPRINT_SCALE_INVESTMENT_MEMO_FSC_LEGACY_YES_001.md');
+
+    expect(memo, contains(packetId));
+    expect(memo, contains(factoryRunId));
+    expect(memo, contains('BHD10 fixed per delivered'));
+    expect(memo, contains('31.25%'));
+    expect(memo, contains('78.125%'));
+    expect(memo, contains('Fixed fee'));
+    expect(memo, contains('Gross revenue share'));
+    expect(memo, contains('Venue food/credit'));
+    expect(memo, contains('Volunteer/community host'));
+    expect(memo, contains('First ten-player acquisition design'));
+    expect(memo, contains('Conservative / base / upside'));
+    expect(memo, contains('20 agent hours and BHD0 new cash'));
+    expect(memo, contains('separate exact Assembly authorization'));
+    expect(memo, contains('No Assembly'));
+    expect(memo, contains('outreach'));
+    expect(memo, contains('spending'));
+    expect(memo, contains('publishing'));
+  });
 }

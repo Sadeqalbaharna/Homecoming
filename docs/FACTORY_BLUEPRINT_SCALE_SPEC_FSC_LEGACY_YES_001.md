@@ -124,6 +124,20 @@ The BHD12 minimum produces a BHD48 gross floor at four players. It is not a
 margin target. External DM compensation cannot be chosen safely until actual
 venue contribution and expected DM work are recorded.
 
+The companion investment memo
+`FACTORY_BLUEPRINT_SCALE_INVESTMENT_MEMO_FSC_LEGACY_YES_001.md` models fixed-fee,
+gross-share, venue-credit and volunteer/community-host structures without
+claiming actual costs. Its provisional recommendation is BHD10 fixed per
+approved, delivered session, conditional on a measured 31.25% minimum
+contribution margin at four BHD12 seats and BHD5 other incremental overhead.
+Sponsor confirmation is pending; this is not a live offer and is not stacked
+with venue credit by default.
+
+At the central 40% margin, that same case requires at least 78.125% of seats to
+be genuinely net-new. A player shifted from an existing table does not count as
+incremental acquisition. The live evidence ledger must preserve acquisition
+source and cannibalization instead of crediting all added-table gross.
+
 ## First evidence window
 
 ### Baseline instrumentation
@@ -157,7 +171,8 @@ Within a declared four-week scale window, require:
 
 - at least three additional delivered tables attributable to the workflow;
 - average attendance of at least three players per additional table;
-- at least one approved external DM delivers a table without Sadeq co-DMing;
+- an approved external DM delivers every counted additional table without Sadeq
+  co-DMing or rescuing it;
 - at least 80% of confirmed players attend;
 - no unresolved safety or material fit issue;
 - unmatched and rejected proposals retain explicit reasons;
