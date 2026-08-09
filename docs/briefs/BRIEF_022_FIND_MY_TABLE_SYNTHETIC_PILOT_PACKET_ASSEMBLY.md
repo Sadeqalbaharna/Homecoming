@@ -152,3 +152,21 @@ implementation fallback. The frozen brief and acceptance suite remain ready.
 The smallest remaining gate is explicit sponsor authorization for Codex to own
 this Brief 022 implementation, or restoration of a relay that reports Opus 5+
 metadata and offers verifiable file/test execution.
+
+## Pre-implementation acceptance evidence — 2026-08-09
+
+The accepted Brief 020 operator foundation remains green. Two calls through the
+Flutter batch wrapper stalled without output and were terminated; changing the
+runtime hypothesis to invoke Flutter's tool snapshot directly succeeded:
+
+```powershell
+& 'C:\code\flutter\bin\cache\dart-sdk\bin\dart.exe' `
+  'C:\code\flutter\bin\cache\flutter_tools.snapshot' test --no-pub `
+  test/find_my_table_operator_test.dart `
+  test/find_my_table_operator_repository_test.dart
+```
+
+Result: **20/20 PASS**, exit code 0, approximately 4.5 seconds. This proves the
+current synthetic operator and repository contracts used by the acceptance and
+workbook oracles. It does not prove Brief 022 generation, workbook validity,
+visual quality, or live operation; those remain `UNVERIFIED` until implemented.
