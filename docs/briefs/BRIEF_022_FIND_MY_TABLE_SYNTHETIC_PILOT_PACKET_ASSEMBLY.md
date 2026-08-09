@@ -57,6 +57,11 @@ The reviewer-owned product copy contract is also read-only input:
 `docs/FACTORY_FIND_MY_TABLE_PRIVATE_PILOT_CONTENT_CONTRACT.md`. Generated
 Markdown may reflow it for legibility but may not change its meaning or gates.
 
+The exact workbook cell/formula oracle is read-only implementation input:
+`docs/fixtures/find_my_table_private_pilot_v1_workbook_oracle.json`. Workbook
+sheet order, formulas, cached results, blank-input behavior, and locks must
+reproduce it exactly.
+
 ## Invariants and frozen inputs
 
 - Reuse `lib/logic/find_my_table_operator.dart`; do not create a second matcher.
