@@ -1,6 +1,17 @@
 # Factory Blueprint — Find My Table — Bahrain
 
-Status: **BLUEPRINT ACTIVE — FIRST QUESTION OPEN**
+Status: **BLUEPRINT ACTIVE — INVESTMENT COMMITTEE PACKET READY**
+
+Current packet: `FSC-LEGACY-YES-001-BP-IC-v1`. Research replaces the earlier
+unresolved first-payer hypothesis with a recommendation, not an automatic
+decision: **REVISE**, then test whether adult newcomers pay for one hosted,
+fixed-time TTRPG one-shot. The adjacent Reliable Table Kit serves a different
+buyer/channel and must return to its own Signal Scan; it inherits no authority
+from this recovered concept. See
+`FACTORY_BLUEPRINT_INVESTMENT_MEMO_FSC_LEGACY_YES_001.md`, the source ledger,
+economics notebook, and Shark Feedback Console. Blueprint remains active; no
+Assembly, outreach, venue participation, publishing, account action, spend, or
+payment is authorized.
 
 ## Exact authority
 
