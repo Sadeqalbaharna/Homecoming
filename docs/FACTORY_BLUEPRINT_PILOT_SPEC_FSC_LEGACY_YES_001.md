@@ -1,5 +1,10 @@
 # Find My Table — Hosted One-Shot Pilot Specification
 
+> **HISTORICAL — SUPERSEDED BY `FSC-LEGACY-YES-001-BP-IC-v3`.** Sponsor
+> operating evidence proves the venue already fills two hosted tables weekly.
+> Do not use this paid-seat pilot as the active product contract. See
+> `FACTORY_BLUEPRINT_SCALE_SPEC_FSC_LEGACY_YES_001.md`.
+
 Packet: `FSC-LEGACY-YES-001-BP-IC-v2`
 Factory run: `factory-run-legacy-recovery-20260809-tablefinder-01`
 Candidate: `FSC-LEGACY-YES-001`

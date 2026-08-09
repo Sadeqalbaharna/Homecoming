@@ -2,18 +2,17 @@
 
 Status: **BLUEPRINT ACTIVE — INVESTMENT COMMITTEE PACKET READY**
 
-Current packet: `FSC-LEGACY-YES-001-BP-IC-v2`. The v2 packet supersedes the
-unreviewed v1 packet and freezes the first-payer recommendation: **REVISE**,
-then—only after a later INVEST verdict and every live gate—test whether adult
-newcomers pay for one hosted, fixed-time TTRPG one-shot. The adjacent Reliable
-Table Kit serves a different
-buyer/channel and must return to its own Signal Scan; it inherits no authority
-from this recovered concept. See
-`FACTORY_BLUEPRINT_INVESTMENT_MEMO_FSC_LEGACY_YES_001.md`,
-`FACTORY_BLUEPRINT_PILOT_SPEC_FSC_LEGACY_YES_001.md`, the source ledger,
-economics notebook, and Shark Feedback Console. Blueprint remains active; no
-Assembly, outreach, venue participation, publishing, account action, spend, or
-payment is authorized.
+Current packet: `FSC-LEGACY-YES-001-BP-IC-v3`. Direct sponsor operating evidence
+supersedes the v2 paid-seat pilot: the sponsor owns the venue, already fills two
+four-player hosted tables per week, DMs them personally, and enforces a BHD12
+minimum food/drink bill per player. The active recommendation is **INVEST in a
+bounded internal table-scaling MVP**, not another event pilot and not a public
+marketplace. See `FACTORY_BLUEPRINT_OPERATING_EVIDENCE_FSC_LEGACY_YES_001.md`,
+`FACTORY_BLUEPRINT_SCALE_SPEC_FSC_LEGACY_YES_001.md`, the source ledger and
+Shark Feedback Console. The v2 investment memo, economics notebook and pilot
+specification are historical. Blueprint remains active; no Assembly, customer
+data access, outreach, DM recruitment, publishing, account action, spend or
+payment action is authorized.
 
 ## Exact authority
 
@@ -36,73 +35,59 @@ weights.
 
 ## Frozen concept
 
-**A Bahrain-focused group-matching product for TTRPG and board-game players,
-using known public venues such as The Tavern and The Raven’s Nest as table
-locations.**
+**An internal venue operations system that grows the sponsor's existing hosted
+TTRPG business by finding players, expanding DM capacity, and forming compatible
+four-player tables across schedules.**
 
-The concept enters Blueprint; it has not entered Assembly. No venue has been
-contacted and no partnership, purchase, payment, credential, deployment, or
-publication exists.
+The revenue outcome is incremental settled food-and-drink contribution from
+additional reliably filled tables. Players continue paying the venue's normal
+BHD12 minimum bill; the MVP does not add a ticket or subscription.
 
-## Frozen first buyer and paid outcome
+## Verified operating baseline
 
-The first buyer hypothesis is now explicit: an **adult newcomer or lapsed
-player**, not a venue, established group, GM-tool buyer, or broad marketplace
-member.
+- two filled hosted tables per week;
+- four players per table on average;
+- BHD12 minimum food/drink bill per player;
+- BHD48 minimum gross bill per average table;
+- BHD96 minimum gross weekly bill across the two current tables;
+- sponsor owns the venue and currently DMs the tables;
+- bottlenecks: finding players, finding DMs, and matching schedule/fit.
 
-The smallest paid outcome is a confirmed seat at one beginner-friendly,
-fixed-time TTRPG one-shot with a vetted host, clear fit/safety expectations and
-a consenting public Bahrain venue. The service—not an app—is the first matching
-product. Price cells are BHD5 and BHD7; both remain unvalidated.
+These are sponsor-attested operating facts. Gross bill is not profit, and the
+existing BHD96 weekly floor is not attributed to Find My Table.
 
-The venue-paid table board and general player-paid matching subscription remain
-rejected first wedges because they add two-sided liquidity and free-substitute
-risk before buyer demand is proven. The hosted-session choice is a Blueprint
-recommendation, not market validation or authority to operate.
+## Frozen first MVP
 
-## Frozen pilot cuts
-
+- private player pool and DM roster;
+- candidate time slots with four-player targets;
+- deterministic match proposals with visible reasons;
+- final human approval for every table;
+- invitations, confirmations, compatible waitlist and replacements;
+- attendance, mismatch, acquisition-source and DM-utilization evidence;
+- venue bill and incremental-contribution attribution;
+- one sponsor-owned venue only;
 - 18+ only;
-- one fixed date, one approved host and one consenting public venue;
-- target five to six paid seats; no oversized table to manufacture margin;
-- no app, subscription, campaign or marketplace;
-- no private-home location or live-location tracking;
-- no direct messages, social feed, public profiles or player ratings;
-- no proprietary adventure/rules content or implied venue/publisher affiliation;
-- no payment collection until the exact legal/account/refund route is approved;
-- no second date without the evidence gate or a materially changed hypothesis.
+- no public profiles, open chat, ratings, live location, marketplace, payment
+  collection, recommendation AI or automated DM approval.
 
-The complete customer journey, data minimization, roles, ledger, unit-economics
-contract, acquisition design, kill criteria and software eligibility gate are
-frozen in `FACTORY_BLUEPRINT_PILOT_SPEC_FSC_LEGACY_YES_001.md`.
+The complete product, evidence window, pass/kill gates and local Assembly scope
+are frozen in `FACTORY_BLUEPRINT_SCALE_SPEC_FSC_LEGACY_YES_001.md`.
 
-## Current evidence and open proof
+## Current open proof
 
-- The Tavern is publicly listed by Bahrain Tourism as a Bahrain venue offering
-  board and card games.
-- The Raven’s Nest is publicly described as a Bahrain board-game and community
-  venue.
-- A Manama board-game Meetup lists 81 members but no upcoming events.
-- Recent Bahrain discussions still ask where to find people and places for
-  board games and D&D.
-- Free direct competitors demonstrate the product shape and intensify the
-  monetization/cold-start risk.
-
-Open proof:
-
-1. Whether adult newcomers in Bahrain pay BHD5 or BHD7 for the confirmed-seat
-   outcome.
-2. Whether an acceptable host and consenting public venue can fit the BHD50
-   mechanism-test cap.
-3. Actual refunds, no-shows, support/operations time and later paid repeat.
-4. Exact lawful payment, refund, data-processing and commercial arrangement.
-5. Whether four paid sessions reveal a software-worthy coordination bottleneck.
+1. Average actual spend, food/beverage cost and contribution margin.
+2. Current acquisition channels, funnel losses, fill time and unmatched demand.
+3. Cancellation, no-show, repeat and fit-failure rates.
+4. Acceptable external-DM compensation and approval criteria.
+5. Sponsor DM and coordination time per table.
+6. Which schedule/fit constraint prevents the most additional tables.
+7. Incremental settled contribution attributable to the future workflow.
 
 ## Exact next gate
 
-Sadeq reviews packet `FSC-LEGACY-YES-001-BP-IC-v2` as Shark and returns
-`INVEST`, `REVISE`, `KILL`, or `PARK`. `INVEST` would approve only the bounded
-mechanism box described in the pilot specification; venue/host contact,
-outreach, accounts, credentials, payment, spending, publication and the event
-still require their own exact live permissions. Assembly and app development
-remain unauthorized.
+Sadeq reviews packet `FSC-LEGACY-YES-001-BP-IC-v3` as Shark and returns
+`INVEST`, `REVISE`, `KILL`, or `PARK`. `INVEST` would authorize only the
+repository-local internal-operations MVP described in the scale specification,
+using synthetic fixtures. Customer-data import, account access, player or DM
+contact, live venue workflow changes, public release, payment handling and
+spending remain separate exact gates.

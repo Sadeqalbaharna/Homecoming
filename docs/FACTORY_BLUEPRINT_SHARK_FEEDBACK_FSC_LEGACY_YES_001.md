@@ -1,6 +1,6 @@
 # Shark Feedback Console — FSC-LEGACY-YES-001
 
-Presentation: `FSC-LEGACY-YES-001-BP-IC-v2`
+Presentation: `FSC-LEGACY-YES-001-BP-IC-v3`
 Blueprint run: `factory-run-legacy-recovery-20260809-tablefinder-01`  
 Concept: `FSC-LEGACY-YES-001`  
 Date: `2026-08-09`  
@@ -29,7 +29,7 @@ Factory station unless the sponsor says so explicitly.
 | Field | Value |
 |---|---|
 | Record ID | assigned on capture |
-| Presentation | `FSC-LEGACY-YES-001-BP-IC-v2` |
+| Presentation | `FSC-LEGACY-YES-001-BP-IC-v3` |
 | Concept / Blueprint run | `FSC-LEGACY-YES-001` / `factory-run-legacy-recovery-20260809-tablefinder-01` |
 | Captured at / role | awaiting sponsor / awaiting sponsor |
 | Verdict / confidence | awaiting sponsor / awaiting sponsor |

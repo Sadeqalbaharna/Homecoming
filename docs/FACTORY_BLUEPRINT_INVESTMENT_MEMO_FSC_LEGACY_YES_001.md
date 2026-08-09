@@ -1,5 +1,10 @@
 # Find My Table — Bahrain: Blueprint investment memo
 
+> **HISTORICAL — SUPERSEDED BY `FSC-LEGACY-YES-001-BP-IC-v3`.** The v2 memo
+> assumed hosted-table demand and venue participation were unverified. Direct
+> sponsor operating evidence invalidated that premise. The active investment
+> case is `FACTORY_BLUEPRINT_SCALE_SPEC_FSC_LEGACY_YES_001.md`.
+
 Presentation: `FSC-LEGACY-YES-001-BP-IC-v2`
 Blueprint run: `factory-run-legacy-recovery-20260809-tablefinder-01`  
 Concept: `FSC-LEGACY-YES-001`  
