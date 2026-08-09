@@ -618,6 +618,35 @@ process cannot ingest this compile-time projection without an attended update,
 a fresh real-app screenshot is `UNVERIFIED`; no old or synthetic image may
 satisfy that gate.
 
+### Portfolio activity window — 2026-08-09 14:52–14:57 Bahrain
+
+No governed Pizza box or macro phase advances in this window:
+
+- Homecoming's focused tracker regressions pass 37/37 after restoring the
+  canonical `UNVERIFIED` wording. H019A-2 remains `ACTIVE` and unaccepted; Brief
+  019A retains its 8/14 rejection until an independent 14/14 run passes.
+- Hoard Brief 014A reviewer acceptance is `REJECTED`: the proposed contract
+  exposes 25 keys rather than the frozen exact 18, despite its legacy suites.
+  The exact-18-key Opus repair is `ACTIVE`; 014B remains queued.
+- Kingdom K1.6 remains `PROTOTYPE`, with authoritative adoption blocked by the
+  defensive identity-binding regression. A verified Opus 5 exact-root repair
+  is `ACTIVE`, but no attributed diff exists yet.
+- Factory Blueprint's operator-facing nine-artifact copy/form box is `ACTIVE`.
+  Its Flutter generator regression is `UNVERIFIED`; Assembly and live gates
+  remain locked.
+- Factory Daily retains the `TESTED` critic-scaffold and v1.1 packaging gate.
+  CakeOrder Signal and GroomQuote are `KILLED` from contradiction evidence;
+  WholesaleOrder Gate market/contradiction scan is `ACTIVE`.
+- TikTok's synthetic analytics/live-read authorization guardrails reportedly
+  pass 7/7 focused and 40/40 full tests. The box remains `ACTIVE`; creative
+  acceptance stays with the sponsor, and no account or post action is allowed.
+- No settled customer payment is evidenced anywhere in the portfolio.
+
+Portfolio effectiveness is `HIGH` and efficiency is `EFFICIENT` for this
+window; the earlier Flutter stall is suppressed rather than retried unchanged.
+Because no higher governed Pizza state is accepted, no fresh screenshot is
+required or valid for this window.
+
 Focused delivery-box, portfolio, and Factory conveyor tests pass 37/37. A
 Windows Release build passed and the real updated Desktop Homecoming process is
 running from the governed worktree as PID 27260. Direct-window evidence

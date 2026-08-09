@@ -1231,7 +1231,7 @@ class KaiProjectService {
         governedAcceptedPhases: _homecomingGovernedAcceptedPhases,
         evidencePhases: _homecomingEvidencePhases,
         latestAdvance:
-            'Brief 019A remains REJECTED at 8 PASS / 6 FAIL. The pipeline-owned receipt-formatting and scalar-safe fingerprint failures are under bounded H019A-2 repair; capture cases 10-13 remain future Brief 019B scope. No Homecoming phase advanced.',
+            'The 37/37 tracker regressions pass after restoring canonical UNVERIFIED wording. Brief 019A remains REJECTED at 8/14 while H019A-2 repairs its pipeline-owned failures; the next gate is an independent 14/14 result and no Homecoming phase advanced.',
         blockers: const [
           'Replacing the old runtime now requires explicit authority for one supported human tray quit; forced termination, logoff, and reboot remain forbidden',
           'Standalone device transport does not exist — Unity and the embodiment servers are loopback-only',
@@ -1260,7 +1260,7 @@ class KaiProjectService {
         governedAcceptedPhases: _hoardGovernedAcceptedPhases,
         evidencePhases: _hoardEvidencePhases,
         latestAdvance:
-            'Phase 0 is accepted and Phase 1 retains exactly 10 verified boxes. Brief 014 reports local validation plus 12/12 authorization, 15/15 staging, and 23/23 recovery tests passing; reviewer acceptance and 014B dispatch remain ACTIVE, with no live gate crossed.',
+            'Phase 0 is accepted and Phase 1 retains exactly 10 verified boxes. Brief 014A reviewer acceptance is REJECTED because the contract exposes 25 keys instead of the frozen exact 18; a focused Opus repair is ACTIVE and 014B remains queued.',
         blockers: const [
           'hoard.p1.b02 attended recovery remains UNVERIFIED and requires a fresh sponsor/live window',
           'Functions operational acceptance and external alert delivery remain sponsor/live gates',
@@ -1288,7 +1288,7 @@ class KaiProjectService {
         repositoryPath: r'C:\code\kingdom_working3.0\kingdom_working\kingdom',
         activePhase: 1,
         latestAdvance:
-            'Ledger Safety remains active. K1.6 is demoted from Tested to Prototype: 5/5 static and 9/9 emulator checks passed, but the new defensive identity-binding regression failed. Adoption is blocked and local repair is ACTIVE.',
+            'Ledger Safety remains active. K1.6 remains Prototype with adoption blocked by the failed defensive identity-binding regression. A verified Opus 5 exact-root repair is ACTIVE, but no attributed diff exists yet.',
         blockers: const [
           'K1.6 remains Prototype because its defensive identity-binding regression fails; authoritative adoption is blocked pending repair and independent acceptance',
           'Quest-board publishing, real Google Reviews integration, and Raspberry Pi station behavior remain unverified',
@@ -1315,13 +1315,14 @@ class KaiProjectService {
     final banked = governedRun?.evidence.bankedRevenue;
     final settlement = governedRun?.evidence.bankSettlementReference?.trim();
     final latest = governedRun == null
-        ? 'Find My Table Blueprint remains Tested and private pilot-packet assembly is ACTIVE. Factory Daily critic-scaffold commit e6c1d95 and v1.1 package commit c2da00c are independently accepted as Tested; CakeOrder Signal market/contradiction scan is ACTIVE. Listing, payment, live use, and revenue remain UNVERIFIED.'
+        ? 'Find My Table Blueprint remains Tested; its operator-facing nine-artifact copy/form box is ACTIVE and the Flutter generator regression is UNVERIFIED. Factory Daily critic scaffold and v1.1 package remain Tested; CakeOrder Signal and GroomQuote are KILLED by contradiction evidence, and WholesaleOrder Gate scan is ACTIVE. Live use and revenue remain locked.'
         : governedRun.stage == FactoryStage.learned
             ? 'Northstar reached: ${banked ?? 0} is recorded as settled bank revenue under ${settlement ?? 'an unrecorded reference'}.'
             : 'Run ${governedRun.id} is at ${governedRun.stage.name}: ${accepted.length} of 9 commercial gates are accepted. No banked-revenue success is claimed.';
     final blockers = governedRun == null
         ? const <String>[
             'The private table-fill pilot is Conceptual only; BHD4.20 is modeled contribution, not evidenced revenue or Assembly authority',
+            'The operator-facing nine-artifact Blueprint box cannot close until its Flutter generator regression is proven',
             'Table Ready, BoothSignal, and the Daily Product v1.1 package still require seller identity, payout, tax/legal completion, and final public publish authority',
             'No genuine external customer bank settlement exists',
           ]
