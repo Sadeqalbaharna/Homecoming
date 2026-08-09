@@ -20,6 +20,8 @@ void main() {
     liveUrl: 'https://gum.co/x',
     views: 900,
     sales: 12,
+    bankedRevenue: 49.00,
+    bankSettlementReference: 'bank-settlement-001',
     observedDays: 10,
   );
 
@@ -53,7 +55,8 @@ void main() {
       expect(advance(run).run!.stage, FactoryStage.specced);
     });
 
-    test('a failing build blocks listingReady — "it\'s done" is not evidence', () {
+    test('a failing build blocks listingReady — "it\'s done" is not evidence',
+        () {
       const run = FactoryRun(
         id: 'r1',
         stage: FactoryStage.verified,
@@ -88,14 +91,16 @@ void main() {
       factoryModeOn: true,
     );
 
-    test('publishing is refused without approval, even on perfect evidence', () {
+    test('publishing is refused without approval, even on perfect evidence',
+        () {
       final r = advance(ready);
       expect(r.advanced, isFalse);
       expect(r.refusal!.reason, contains('approval'));
     });
 
     test('publishing proceeds with a valid approval', () {
-      expect(advance(ready, approval: approval).run!.stage, FactoryStage.published);
+      expect(advance(ready, approval: approval).run!.stage,
+          FactoryStage.published);
     });
 
     test('an approval issued for another run is rejected — no replay', () {
@@ -112,7 +117,8 @@ void main() {
     test('malformed approvals are rejected', () {
       final blankApprover =
           HumanApproval(approvedBy: '  ', approvedAt: 1721000000, runId: 'r1');
-      final noTime = HumanApproval(approvedBy: 'sadeq', approvedAt: 0, runId: 'r1');
+      final noTime =
+          HumanApproval(approvedBy: 'sadeq', approvedAt: 0, runId: 'r1');
       expect(advance(ready, approval: blankApprover).advanced, isFalse);
       expect(advance(ready, approval: noTime).advanced, isFalse);
     });
@@ -164,6 +170,45 @@ void main() {
         factoryModeOn: true,
       );
       expect(advance(run).advanced, isFalse);
+    });
+
+    test('a storefront sale is not success until money reaches the bank', () {
+      const run = FactoryRun(
+        id: 'r1',
+        stage: FactoryStage.measuring,
+        evidence: RunEvidence(
+          liveUrl: 'https://x',
+          views: 900,
+          sales: 12,
+          observedDays: 10,
+        ),
+        factoryModeOn: true,
+      );
+
+      final result = advance(run);
+
+      expect(result.advanced, isFalse);
+      expect(result.refusal!.reason, contains('bank account'));
+    });
+
+    test('banked money needs a reconciliation reference', () {
+      const run = FactoryRun(
+        id: 'r1',
+        stage: FactoryStage.measuring,
+        evidence: RunEvidence(
+          liveUrl: 'https://x',
+          views: 900,
+          sales: 12,
+          observedDays: 10,
+          bankedRevenue: 49.00,
+        ),
+        factoryModeOn: true,
+      );
+
+      final result = advance(run);
+
+      expect(result.advanced, isFalse);
+      expect(result.refusal!.reason, contains('reconciliation reference'));
     });
 
     test('full data advances to learned', () {

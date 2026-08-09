@@ -21,6 +21,7 @@ library;
 
 import 'dart:async';
 import 'kai_db.dart';
+import 'kai_project_service.dart';
 import '../../logic/product_factory.dart';
 import '../../logic/scout_calibration.dart';
 import '../../logic/scout_learning.dart';
@@ -166,10 +167,18 @@ class KaiFactoryService {
         stoppedReason: null,
       );
       await _write(resumed);
+      await KaiProjectService.instance.ensureFactoryProject(
+        personaId,
+        run: resumed,
+      );
       return resumed;
     }
     final run = FactoryRun(id: id, factoryModeOn: true);
     await _write(run);
+    await KaiProjectService.instance.ensureFactoryProject(
+      personaId,
+      run: run,
+    );
     return run;
   }
 
@@ -186,6 +195,8 @@ class KaiFactoryService {
     String? liveUrl,
     int? views,
     int? sales,
+    num? bankedRevenue,
+    String? bankSettlementReference,
     int? observedDays,
     Map<String, int>? predictedScores,
   }) async {
@@ -207,10 +218,17 @@ class KaiFactoryService {
       liveUrl: liveUrl ?? e.liveUrl,
       views: views ?? e.views,
       sales: sales ?? e.sales,
+      bankedRevenue: bankedRevenue ?? e.bankedRevenue,
+      bankSettlementReference:
+          bankSettlementReference ?? e.bankSettlementReference,
       observedDays: observedDays ?? e.observedDays,
     );
     final updated = run.copyWith(evidence: merged);
     await _write(updated);
+    await KaiProjectService.instance.ensureFactoryProject(
+      personaId,
+      run: updated,
+    );
     return updated;
   }
 
@@ -219,13 +237,17 @@ class KaiFactoryService {
   Future<AdvanceResult> tryAdvance(String personaId) async {
     final run = await current(personaId);
     if (run == null) {
-      return const AdvanceResult.refused(
-          GateRefusal(FactoryStage.scouting, 'no active run — start one first'));
+      return const AdvanceResult.refused(GateRefusal(
+          FactoryStage.scouting, 'no active run — start one first'));
     }
     final approval = await approvalFor(personaId, run.id);
     final result = advance(run, approval: approval);
     if (result.advanced) {
       await _write(result.run!);
+      await KaiProjectService.instance.ensureFactoryProject(
+        personaId,
+        run: result.run!,
+      );
       if (result.run!.stage == FactoryStage.learned) {
         await _archive(result.run!);
       }
@@ -249,13 +271,19 @@ class KaiFactoryService {
         'closedAt': DateTime.now().millisecondsSinceEpoch,
       });
       await KaiDb.instance.ref(_currentPath).remove();
+      await KaiProjectService.instance.ensureFactoryProject(personaId);
     } catch (_) {}
   }
 
   Future<void> restartRun(String personaId) async {
     final run = await current(personaId);
     if (run == null) return;
-    await _write(restart(run));
+    final restarted = restart(run);
+    await _write(restarted);
+    await KaiProjectService.instance.ensureFactoryProject(
+      personaId,
+      run: restarted,
+    );
   }
 
   // ── Prompt surface ────────────────────────────────────────────────────────
@@ -277,7 +305,8 @@ class KaiFactoryService {
       }
       final b = StringBuffer('\n=== FACTORY ===\n');
       b.write('Run "${run.id}" is at ${run.stage.name}.');
-      final probe = advance(run, approval: await approvalFor(personaId, run.id));
+      final probe =
+          advance(run, approval: await approvalFor(personaId, run.id));
       if (probe.advanced) {
         b.write(' Ready to move to ${probe.run!.stage.name}.');
       } else if (probe.refusal != null) {
@@ -319,13 +348,18 @@ class KaiFactoryService {
         'evidence': {
           'hasSurvivingCandidate': r.evidence.hasSurvivingCandidate,
           'specComplete': r.evidence.specComplete,
-          if (r.evidence.artifactPath != null) 'artifactPath': r.evidence.artifactPath,
+          if (r.evidence.artifactPath != null)
+            'artifactPath': r.evidence.artifactPath,
           'testsPassed': r.evidence.testsPassed,
           'buildPassed': r.evidence.buildPassed,
           'listingPrepared': r.evidence.listingPrepared,
           if (r.evidence.liveUrl != null) 'liveUrl': r.evidence.liveUrl,
           if (r.evidence.views != null) 'views': r.evidence.views,
           if (r.evidence.sales != null) 'sales': r.evidence.sales,
+          if (r.evidence.bankedRevenue != null)
+            'bankedRevenue': r.evidence.bankedRevenue,
+          if (r.evidence.bankSettlementReference != null)
+            'bankSettlementReference': r.evidence.bankSettlementReference,
           'observedDays': r.evidence.observedDays,
           if (r.evidence.predictedScores != null)
             'predictedScores': r.evidence.predictedScores,
@@ -424,7 +458,8 @@ class KaiFactoryService {
     KillCause? killedBy,
   }) async {
     _persona = personaId;
-    final key = market.trim().toLowerCase().replaceAll(RegExp(r'[.#$/\[\]]'), '_');
+    final key =
+        market.trim().toLowerCase().replaceAll(RegExp(r'[.#$/\[\]]'), '_');
     if (key.isEmpty) return;
     try {
       final existing = (await arms(personaId))
@@ -523,6 +558,8 @@ class KaiFactoryService {
             liveUrl: em['liveUrl'] as String?,
             views: (em['views'] as num?)?.toInt(),
             sales: (em['sales'] as num?)?.toInt(),
+            bankedRevenue: em['bankedRevenue'] as num?,
+            bankSettlementReference: em['bankSettlementReference'] as String?,
             observedDays: (em['observedDays'] as num?)?.toInt() ?? 0,
             predictedScores: () {
               final p = em['predictedScores'];

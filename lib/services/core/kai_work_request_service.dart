@@ -9,6 +9,7 @@ library;
 import 'dart:async';
 
 import 'kai_db.dart';
+import 'kai_delivery_box.dart';
 
 /// The lifecycle of a remote work request.
 enum KaiWorkRequestStatus {
@@ -77,6 +78,8 @@ class KaiWorkRequest {
   final int updatedAt;
   final int? startedAt;
   final int? completedAt;
+  final String? deliveryBoxId;
+  final String? attemptFingerprint;
 
   const KaiWorkRequest({
     required this.id,
@@ -93,6 +96,8 @@ class KaiWorkRequest {
     this.evidence = const [],
     this.startedAt,
     this.completedAt,
+    this.deliveryBoxId,
+    this.attemptFingerprint,
   });
 
   factory KaiWorkRequest.fromMap(String id, Map<dynamic, dynamic> map) {
@@ -114,6 +119,8 @@ class KaiWorkRequest {
       startedAt: (map['startedAt'] is int) ? map['startedAt'] as int : null,
       completedAt:
           (map['completedAt'] is int) ? map['completedAt'] as int : null,
+      deliveryBoxId: map['deliveryBoxId']?.toString(),
+      attemptFingerprint: map['attemptFingerprint']?.toString(),
     );
   }
 
@@ -131,6 +138,9 @@ class KaiWorkRequest {
         'updatedAt': updatedAt,
         if (startedAt != null) 'startedAt': startedAt,
         if (completedAt != null) 'completedAt': completedAt,
+        if (deliveryBoxId != null) 'deliveryBoxId': deliveryBoxId,
+        if (attemptFingerprint != null)
+          'attemptFingerprint': attemptFingerprint,
       };
 
   bool get isOpen =>
@@ -209,6 +219,41 @@ class KaiWorkRequestService {
     return id;
   }
 
+  /// Create or reuse one deterministic delivery-box packet.
+  ///
+  /// Returns true when the durable request already existed. A queued packet is
+  /// only `READY FOR AGENT`; this method never claims or executes it.
+  Future<bool> ensureDeliveryBoxRequest(
+    String personaId,
+    KaiDeliveryWorkPacket packet,
+  ) async {
+    final ref = _request(personaId, packet.requestId);
+    final existing = await ref.get();
+    if (existing.exists) return true;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await ref.set(KaiWorkRequest(
+      id: packet.requestId,
+      text: packet.text,
+      status: KaiWorkRequestStatus.queued,
+      createdFrom: 'delivery_controller',
+      requiresDesktop: true,
+      priority: 'normal',
+      deliveryBoxId: packet.boxIdentity,
+      attemptFingerprint: packet.attemptFingerprint,
+      createdAt: now,
+      updatedAt: now,
+    ).toMap());
+    await appendEvent(
+      personaId,
+      packet.requestId,
+      kind: 'created',
+      text: 'READY FOR AGENT — deterministic delivery-box packet queued.',
+      actor: 'delivery_controller',
+      at: now,
+    );
+    return false;
+  }
+
   /// Live list for the mobile cockpit, newest first.
   Stream<List<KaiWorkRequest>> watchRequests(String personaId) {
     return _root(personaId).onValue.map((event) {
@@ -227,6 +272,16 @@ class KaiWorkRequestService {
   }
 
   Future<List<KaiWorkRequest>> fetchOpenRequests(String personaId) async {
+    return (await fetchRequests(personaId)).where((request) => request.isOpen).toList()
+      ..sort((a, b) {
+        final priority =
+            _priorityRank(b.priority).compareTo(_priorityRank(a.priority));
+        if (priority != 0) return priority;
+        return a.createdAt.compareTo(b.createdAt);
+      });
+  }
+
+  Future<List<KaiWorkRequest>> fetchRequests(String personaId) async {
     final snap = await _root(personaId).get();
     final value = snap.value;
     if (value is! Map) return const [];
@@ -234,16 +289,12 @@ class KaiWorkRequestService {
     value.forEach((key, raw) {
       if (raw is Map) {
         final request = KaiWorkRequest.fromMap(key.toString(), raw);
-        if (request.isOpen && request.text.trim().isNotEmpty) {
+        if (request.text.trim().isNotEmpty) {
           requests.add(request);
         }
       }
     });
-    requests.sort((a, b) {
-      final priority = _priorityRank(b.priority).compareTo(_priorityRank(a.priority));
-      if (priority != 0) return priority;
-      return a.createdAt.compareTo(b.createdAt);
-    });
+    requests.sort((a, b) => a.createdAt.compareTo(b.createdAt));
     return requests;
   }
 
