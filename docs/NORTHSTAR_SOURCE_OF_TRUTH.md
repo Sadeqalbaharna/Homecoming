@@ -647,6 +647,31 @@ window; the earlier Flutter stall is suppressed rather than retried unchanged.
 Because no higher governed Pizza state is accepted, no fresh screenshot is
 required or valid for this window.
 
+### Kingdom K1.6-M1 isolated advancement — 2026-08-09
+
+Kingdom K1.6 advances from `PROTOTYPE` to `TESTED` in its isolated evidence
+workspace only. The verified Claude Opus 5 four-file repair removes the
+caller-controlled spread that could overwrite authenticated identity in the
+`purchaseVoucher` wrapper. Codex independently bound the workspace to base
+`58dad479074ebdbaf2b3455b46a2c0356e18eaa9`, inspected the attributed four-file
+diff, and reran 10/10 static safeguards plus 15/15 local emulator behaviors.
+The accepted isolated artifact is committed at
+`64997adfe2a3001862cbbb2bfc99877980cfb35e`; its worktree and index are clean.
+
+Two prior emulator starts were refused before test logic because adjacent
+K1.3/K1.7 suites held the fixed local emulator ports. No process was terminated;
+after the adjacent suite released the ports, the unchanged K1.6 suite passed.
+The exact file hashes and test evidence are recorded in
+`docs/evidence/KINGDOM_K1_6_M1_ISOLATED_ACCEPTANCE_2026-08-09.md`.
+
+This promotion does not adopt the commit into the authoritative Kingdom
+repository, register it as governed production code, or prove live behavior.
+Those states remain `UNVERIFIED`. The next local-safe box is a bounded audit of
+adjacent callable wrappers that share the caller-data spread pattern. A fresh
+actual Desktop Homecoming HUD screenshot is required after a safely authorized
+build/runtime update; the currently running PID 27260 remains locked, so no old
+or rendered image may satisfy that future gate.
+
 Focused delivery-box, portfolio, and Factory conveyor tests pass 37/37. A
 Windows Release build passed and the real updated Desktop Homecoming process is
 running from the governed worktree as PID 27260. Direct-window evidence

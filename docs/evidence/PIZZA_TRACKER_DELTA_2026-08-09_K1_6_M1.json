@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "deltaId": "pizza-delta-2026-08-09-kingdom-k1.6-m1",
+  "createdAt": "2026-08-09T18:10:00+03:00",
+  "sourceOfTruthRef": "docs/NORTHSTAR_SOURCE_OF_TRUTH.md#kingdom-k16-m1-isolated-advancement--2026-08-09",
+  "claims": [
+    {
+      "claimId": "kingdom.k1.6-m1-tested-isolated",
+      "projectId": "kingdom_northstar",
+      "requestedState": "evidence_review",
+      "authorityOwner": "agent",
+      "riskClass": "local_safe",
+      "sourceOfTruthRef": "docs/evidence/KINGDOM_K1_6_M1_ISOLATED_ACCEPTANCE_2026-08-09.md",
+      "changedSurfaces": ["delivery_catalog", "portfolio_projection"],
+      "evidence": [
+        {
+          "id": "kingdom.k1.6-m1.base",
+          "kind": "git_commit",
+          "repositoryRoot": "C:/Users/sadeq/Documents/Codex/2026-08-09/kingdom-sectioning/work/kingdom_k1_1_integration",
+          "commit": "58dad479074ebdbaf2b3455b46a2c0356e18eaa9"
+        },
+        {
+          "id": "kingdom.k1.6-m1.accepted",
+          "kind": "git_commit",
+          "repositoryRoot": "C:/Users/sadeq/Documents/Codex/2026-08-09/kingdom-sectioning/work/kingdom_k1_1_integration",
+          "commit": "64997adfe2a3001862cbbb2bfc99877980cfb35e"
+        },
+        {
+          "id": "kingdom.k1.6-m1.wrapper",
+          "kind": "file_sha256",
+          "path": "C:/Users/sadeq/Documents/Codex/2026-08-09/kingdom-sectioning/work/kingdom_k1_1_integration/functions/index.js",
+          "sha256": "0b138bb85131561f2bd42479a6a162932609ad7ca55031723c0a1c26bccde156"
+        },
+        {
+          "id": "kingdom.k1.6-m1.static-tests",
+          "kind": "file_sha256",
+          "path": "C:/Users/sadeq/Documents/Codex/2026-08-09/kingdom-sectioning/work/kingdom_k1_1_integration/test/k1_6/static-contract.test.mjs",
+          "sha256": "177ca948a88fb34e2f1d6e4daca752b1ffa8ce91c937c54f80379ec255662d91"
+        },
+        {
+          "id": "kingdom.k1.6-m1.emulator-tests",
+          "kind": "file_sha256",
+          "path": "C:/Users/sadeq/Documents/Codex/2026-08-09/kingdom-sectioning/work/kingdom_k1_1_integration/test/k1_6/voucher-emulator.test.mjs",
+          "sha256": "386e9495da6cd13ff941deddaec0c394a173581439b712db6be876378a83251b"
+        }
+      ]
+    }
+  ]
+}

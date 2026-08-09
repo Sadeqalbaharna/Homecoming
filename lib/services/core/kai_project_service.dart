@@ -1288,9 +1288,10 @@ class KaiProjectService {
         repositoryPath: r'C:\code\kingdom_working3.0\kingdom_working\kingdom',
         activePhase: 1,
         latestAdvance:
-            'Ledger Safety remains active. K1.6 remains Prototype with adoption blocked by the failed defensive identity-binding regression. A verified Opus 5 exact-root repair is ACTIVE, but no attributed diff exists yet.',
+            'Ledger Safety remains active. K1.6-M1 is Tested in isolated commit 64997ad after 10/10 static safeguards and 15/15 local emulator behaviors passed; the authenticated-identity override defect is closed in that artifact. Adoption, authoritative registration, and live proof remain UNVERIFIED.',
         blockers: const [
-          'K1.6 remains Prototype because its defensive identity-binding regression fails; authoritative adoption is blocked pending repair and independent acceptance',
+          'K1.6-M1 isolated commit 64997ad is not adopted or registered in the authoritative Kingdom repository; independent integration review remains required',
+          'Adjacent callable wrappers using the caller-data spread pattern remain UNVERIFIED and require a bounded audit',
           'Quest-board publishing, real Google Reviews integration, and Raspberry Pi station behavior remain unverified',
           'Pilot cohort, start date, and repeat-visit success target are not accepted',
         ],

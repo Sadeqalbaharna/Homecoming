@@ -392,7 +392,7 @@ class KaiDeliveryBoxCatalog {
             'Move points, tiles, vouchers, and redemption to server authority',
             state: KaiDeliveryBoxState.active,
             evidence: [
-              'K1.6 is Prototype only: 5 static and 9 emulator checks reportedly pass, but the defensive identity-binding regression fails; authoritative adoption remains UNVERIFIED and blocked pending repair'
+              'K1.6-M1 is Tested in isolated commit 64997ad: 10/10 static safeguards and 15/15 emulator behaviors pass; authoritative adoption remains UNVERIFIED, as do registration and live proof'
             ]),
         _BoxSpec('emulator_matrix',
             'Prove roles, ownership, idempotency, and conservation'),
