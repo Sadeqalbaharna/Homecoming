@@ -687,6 +687,17 @@ binding serialization, and rerun all 14 cases. Brief 019B remains locked until
 the independent result is exactly 10 PASS with only cases 10-13 failing. PID
 27260 and live services remain untouched.
 
+H019A-4 removed the dictionary-overload crash, but independent acceptance
+remained 9/14. Case 7 now reaches the canonical comparison and reports computed
+binding `886fee001cbdeb9a9553ca8f9e306bf2fa963d1a33c034526a0d862434144e72`
+versus declared/expected
+`4638daf62b324338006e11badfe1296416f083799130cf8165e46233861c341a`.
+H019A-5 was dispatched to the same transport-verified `claude-opus-5` session
+with one-file scope, but produced no edit before the provider returned HTTP 429
+and a 21:30 Bahrain reset time. This is `CLAUDE BRIDGE BLOCKED`, not a code or
+test result. Codex has no coding-fallback authority, so case 7 remains the sole
+H019A blocker and Brief 019B remains locked.
+
 Focused delivery-box, portfolio, and Factory conveyor tests pass 37/37. A
 Windows Release build passed and the real updated Desktop Homecoming process is
 running from the governed worktree as PID 27260. Direct-window evidence

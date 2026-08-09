@@ -217,3 +217,25 @@ Capture-script failures retained for Brief 019B:
 Case 7 prevents the required 10/14 H019A boundary, so Brief 019B remains
 locked. H019A-4 is bounded to dictionary key lookup and canonical capture
 binding handling in `scripts/tools/kai_pizza_update_pipeline.ps1` only.
+
+## H019A-4 and H019A-5 status
+
+H019A-4 removed the dictionary `.Contains($Name)` overload crash. Independent
+acceptance remained **9 PASS / 5 FAIL** because case 7 then reached the binding
+comparison and failed deterministically:
+
+- computed:
+  `886fee001cbdeb9a9553ca8f9e306bf2fa963d1a33c034526a0d862434144e72`
+- declared/expected:
+  `4638daf62b324338006e11badfe1296416f083799130cf8165e46233861c341a`
+
+H019A-5 was dispatched on the same one-file scope to persistent session
+`78d1325f-9b6b-4b11-ba21-6966da3528fe`. Transport metadata reported canonical
+model `claude-opus-5`. The call ended with provider HTTP 429 and the message
+that the session limit resets at 21:30 Bahrain. It changed no file; pipeline
+SHA-256 remained
+`922AA2669CC3728430C04A777015F746E0BACC748E850E2FADB38C32A1D08D61`.
+
+Verdict: **CLAUDE BRIDGE BLOCKED / H019A REJECTED / 019B LOCKED**. Codex did
+not duplicate the product-code repair. The next eligible implementation packet
+is the frozen H019A-5 canonical binding repair after the provider limit clears.

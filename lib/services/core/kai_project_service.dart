@@ -1231,7 +1231,7 @@ class KaiProjectService {
         governedAcceptedPhases: _homecomingGovernedAcceptedPhases,
         evidencePhases: _homecomingEvidencePhases,
         latestAdvance:
-            'The 37/37 tracker regressions pass. Brief 019A remains REJECTED at 9/14 after H019A-3: case 7 fails on dictionary Contains overload handling, while capture cases 10-13 remain future Brief 019B scope. H019A-4 must reach 10/14 before 019B unlocks.',
+            'The 37/37 tracker regressions pass. Brief 019A remains REJECTED at 9/14: case 7 has a canonical capture-binding mismatch, while cases 10-13 remain future Brief 019B scope. H019A-5 made no file change because the verified Opus 5 session hit its provider limit; 019B stays locked.',
         blockers: const [
           'Replacing the old runtime now requires explicit authority for one supported human tray quit; forced termination, logoff, and reboot remain forbidden',
           'Standalone device transport does not exist — Unity and the embodiment servers are loopback-only',
