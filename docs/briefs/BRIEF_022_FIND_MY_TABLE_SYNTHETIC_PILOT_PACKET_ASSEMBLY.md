@@ -2,7 +2,7 @@
 
 Owner: Claude only if Relay v2 reports an exact model identifier proving Opus 5+
 Reviewer: Codex
-Status: READY; IMPLEMENTER MODEL GATE PENDING
+Status: BLOCKED — CLAUDE BRIDGE BLOCKED; CODE NOT DISPATCHED
 Factory run: `factory-run-legacy-recovery-20260809-tablefinder-01`
 Candidate: `FSC-LEGACY-YES-001`
 Assembly authority: standing repository-local safe-work authority
@@ -122,3 +122,20 @@ Report relay model metadata, authored paths/commit, exact commands/results,
 artifact SHA-256 values, PASS/FAIL/UNVERIFIED by criterion, remaining risks, and
 rollback. Do not use real data, contact anyone, offer DM compensation, book a
 table, access receipts, publish, charge, spend, or advance beyond Assembly.
+
+## Relay v2 dispatch record — 2026-08-09
+
+Claude implementation eligibility is **UNVERIFIED / INELIGIBLE**. Three
+materially different safe bridge attempts ended before any model identifier or
+allowlist verdict was returned:
+
+1. persistent-session content-free handshake with generated session identity;
+2. persistent-session handshake with an explicit caller-supplied UUID; and
+3. one-shot peer endpoint used only as a connectivity/metadata probe.
+
+Each endpoint returned `Transport closed`. No project brief or code was sent,
+Claude authored no files, no duplicate implementation began, and Codex made no
+implementation fallback. The frozen brief and acceptance suite remain ready.
+The smallest remaining gate is explicit sponsor authorization for Codex to own
+this Brief 022 implementation, or restoration of a relay that reports Opus 5+
+metadata and offers verifiable file/test execution.
