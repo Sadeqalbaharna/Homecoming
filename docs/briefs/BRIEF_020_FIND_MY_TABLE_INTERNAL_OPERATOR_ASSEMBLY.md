@@ -1,8 +1,8 @@
 # Brief 020 — Find My Table Internal Operator Assembly
 
-Owner: **Claude only if relay-reported model is Opus 5+; otherwise unassigned**  
+Owner: **Codex under explicit sponsor coding-fallback authorization**
 Reviewer: Codex (technical program manager and independent acceptance)  
-Status: **BLOCKED AT ENTRY GATE**  
+Status: **ACCEPTED — REPOSITORY-LOCAL SYNTHETIC ASSEMBLY ONLY**
 Factory packet: `FSC-LEGACY-YES-001-BP-IC-v3`  
 Factory run: `factory-run-legacy-recovery-20260809-tablefinder-01`  
 Candidate: `FSC-LEGACY-YES-001`
@@ -273,3 +273,30 @@ is reached. Report:
 
 Do not begin live data import, player/DM contact, UI integration, QA Gate,
 Packaging, publishing, payments, spending or venue execution.
+
+## Assembly acceptance record
+
+Entry gate resolved by the sponsor's direct `I authorize` reply to the exact
+preceding request naming this packet, run and candidate and explicitly
+authorizing Codex as coding fallback. The Claude relay still exposed no model
+identifier, so Claude remained `MODEL UNVERIFIED / INELIGIBLE`; Claude authored
+no implementation files.
+
+Assembly authorization ID:
+`FAA-20260809-FSC-LEGACY-YES-001-ASSEMBLY-01`.
+
+| Acceptance area | Verdict | Evidence |
+|---|---|---|
+| Matching, hard constraints, stable identity and dedupe | PASS | focused deterministic tests |
+| Human approval, lifecycle, rejection and waitlist replacement | PASS | focused deterministic tests |
+| Privacy projections and minimum-data DM brief | PASS | focused deterministic tests |
+| Explicit economics, unavailable inputs and cannibalization | PASS | focused deterministic tests |
+| Authority stripping, exact reapplication and future-schema refusal | PASS | domain and repository tests |
+| Persistence revision and failure behavior | PASS | repository tests |
+| No shared controller or live-tool integration | PASS | scoped diff inspection |
+| Owned-file analyzer | PASS | `No issues found` |
+| Factory regression suite | PASS | 88 tests |
+| Real customers, DMs, receipts, settlement or venue execution | UNVERIFIED | deliberately outside Assembly authority |
+
+Proof state: **TESTED**. The operator is not wired to a runtime UI, not using
+real customer data, and not verified live. QA Gate has not begun.
