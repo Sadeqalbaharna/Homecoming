@@ -1231,7 +1231,7 @@ class KaiProjectService {
         governedAcceptedPhases: _homecomingGovernedAcceptedPhases,
         evidencePhases: _homecomingEvidencePhases,
         latestAdvance:
-            'The governed Windows build passed 37/37 tracker/HUD checks and its real Pizza rendering is Verified live at PID 27260. Homecoming Phase 0 remains WIRED and no delivery phase advanced; Brief 018 restart and exactly-once delivery remain UNVERIFIED.',
+            'Brief 019A pipeline repair is ACTIVE under verified Claude Opus 5. Existing evidence remains 4 PASS / 10 FAIL; the next gate is all 14 frozen cases passing. Capture and real-HUD sync remain future gates, and no Homecoming phase advanced.',
         blockers: const [
           'Replacing the old runtime now requires explicit authority for one supported human tray quit; forced termination, logoff, and reboot remain forbidden',
           'Standalone device transport does not exist — Unity and the embodiment servers are loopback-only',
@@ -1260,7 +1260,7 @@ class KaiProjectService {
         governedAcceptedPhases: _hoardGovernedAcceptedPhases,
         evidencePhases: _hoardEvidencePhases,
         latestAdvance:
-            'Phase 0 is accepted. Phase 1 retains 10 verified boxes, including Functions hardening at e1c7863 and local signal instrumentation at 4f22a3a. Governance verification reran with a changed child-process strategy after managed-sandbox spawn EPERM; no new box is promoted.',
+            'Phase 0 is accepted and Phase 1 retains exactly 10 verified boxes. Brief 014 contract work is ACTIVE under verified Claude Opus 5; preliminary JSON/schema review passed, but A01-A18 remain UNVERIFIED pending an attributed diff and independent contract review.',
         blockers: const [
           'hoard.p1.b02 attended recovery remains UNVERIFIED and requires a fresh sponsor/live window',
           'Functions operational acceptance and external alert delivery remain sponsor/live gates',
@@ -1288,9 +1288,9 @@ class KaiProjectService {
         repositoryPath: r'C:\code\kingdom_working3.0\kingdom_working\kingdom',
         activePhase: 1,
         latestAdvance:
-            'Ledger Safety is active. K1.4 visit-state/economic-close evidence is reported Tested in isolated commit 620293c and K1.5 is next, but the commit object was unavailable in inspected local repositories; authoritative adoption remains UNVERIFIED.',
+            'Ledger Safety remains active. K1.6 synthetic emulator invariant probing is ACTIVE and its latest command failure is under repair. No isolated result is adopted into the authoritative Kingdom repository and no live proof is claimed.',
         blockers: const [
-          'K1.4 evidence remains isolated and could not be bound to an available authoritative Kingdom Git object during this reconciliation',
+          'K1.6 remains UNVERIFIED while its latest synthetic emulator command failure is under repair and no authoritative diff has been adopted',
           'Quest-board publishing, real Google Reviews integration, and Raspberry Pi station behavior remain unverified',
           'Pilot cohort, start date, and repeat-visit success target are not accepted',
         ],
@@ -1315,13 +1315,13 @@ class KaiProjectService {
     final banked = governedRun?.evidence.bankedRevenue;
     final settlement = governedRun?.evidence.bankSettlementReference?.trim();
     final latest = governedRun == null
-        ? 'Signal Scan is accepted and Find My Table Blueprint packet FSC-LEGACY-YES-001-BP-IC-v3 is Tested at 76dd3ade; Blueprint is active and Assembly is not authorized. Table Ready remains Tested. BoothSignal product core is locally Tested 5/5 and package-ready, but both products are unpublished with demand, sales, fees, refunds, and net receipts UNVERIFIED.'
+        ? 'Find My Table Blueprint remains Tested. A private table-fill pilot brief is committed at Conceptual level; modeled BHD4.20 contribution is a hypothesis, not revenue, and local synthetic packet assembly is next. BoothSignal remains Tested/package-ready/unpublished while its exact nine-file dual-lane critic scaffold is ACTIVE. Assembly, listing, payment, and live use remain locked.'
         : governedRun.stage == FactoryStage.learned
             ? 'Northstar reached: ${banked ?? 0} is recorded as settled bank revenue under ${settlement ?? 'an unrecorded reference'}.'
             : 'Run ${governedRun.id} is at ${governedRun.stage.name}: ${accepted.length} of 9 commercial gates are accepted. No banked-revenue success is claimed.';
     final blockers = governedRun == null
         ? const <String>[
-            'Find My Table still requires an explicit INVEST/REVISE/KILL/PARK packet verdict before Assembly; DM compensation remains sponsor-unconfirmed but does not block safe Blueprint analysis',
+            'The private table-fill pilot is Conceptual only; BHD4.20 is modeled contribution, not evidenced revenue or Assembly authority',
             'Table Ready and BoothSignal still require seller identity, payout, tax/legal completion, and final public publish authority',
             'No genuine external customer bank settlement exists',
           ]

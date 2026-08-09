@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 1,
+  "deltaId": "pizza-delta-2026-08-09T14-12-14-42-bahrain",
+  "createdAt": "2026-08-09T14:42:00+03:00",
+  "sourceOfTruthRef": "docs/NORTHSTAR_SOURCE_OF_TRUTH.md#portfolio-activity-window--2026-08-09-14121442-bahrain",
+  "claims": [
+    {
+      "claimId": "homecoming.brief019a-pipeline-repair",
+      "projectId": "homecoming_northstar",
+      "requestedState": "active",
+      "authorityOwner": "agent",
+      "riskClass": "local_safe",
+      "sourceOfTruthRef": "docs/briefs/BRIEF_019A_REAL_PIZZA_UPDATE_PIPELINE.md",
+      "changedSurfaces": ["portfolio_projection"],
+      "evidence": [
+        {
+          "id": "homecoming.brief019a.report",
+          "kind": "reported_external"
+        }
+      ]
+    },
+    {
+      "claimId": "hoard.brief014-contract-microbox",
+      "projectId": "hoard_northstar",
+      "requestedState": "active",
+      "authorityOwner": "agent",
+      "riskClass": "local_safe",
+      "sourceOfTruthRef": "Hoard Brief 014 contract micro-box",
+      "changedSurfaces": ["portfolio_projection"],
+      "evidence": [
+        {
+          "id": "hoard.brief014.report",
+          "kind": "reported_external"
+        }
+      ]
+    },
+    {
+      "claimId": "kingdom.k1.6-invariant-probe",
+      "projectId": "kingdom_northstar",
+      "requestedState": "repairing",
+      "authorityOwner": "agent",
+      "riskClass": "local_safe",
+      "sourceOfTruthRef": "Kingdom K1.6 synthetic emulator invariant probe",
+      "changedSurfaces": ["portfolio_projection"],
+      "evidence": [
+        {
+          "id": "kingdom.k1.6.report",
+          "kind": "reported_external"
+        }
+      ]
+    },
+    {
+      "claimId": "factory.private-table-pilot-and-daily-critic",
+      "projectId": "factory_northstar",
+      "requestedState": "active",
+      "authorityOwner": "agent",
+      "riskClass": "local_safe",
+      "sourceOfTruthRef": "Factory private table-fill pilot and Daily Product governed lanes",
+      "changedSurfaces": ["portfolio_projection", "factory_conveyor"],
+      "evidence": [
+        {
+          "id": "factory.activity-window.report",
+          "kind": "reported_external"
+        }
+      ]
+    },
+    {
+      "claimId": "tiktok.tiny-market-lab",
+      "projectId": "tiktok_portfolio_manager",
+      "requestedState": "active",
+      "authorityOwner": "agent",
+      "riskClass": "local_safe",
+      "sourceOfTruthRef": "TikTok Portfolio Manager governed lane",
+      "changedSurfaces": ["portfolio_integration_delta"],
+      "evidence": [
+        {
+          "id": "tiktok.tiny-market-lab.report",
+          "kind": "reported_external"
+        }
+      ]
+    }
+  ]
+}

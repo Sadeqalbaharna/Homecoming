@@ -544,8 +544,41 @@ publishing, and live action. Therefore Blueprint is Tested, while Assembly and
 public action remain future gates. Kingdom K1.6, Hoard Brief 014, BoothSignal,
 TikTok media, and Homecoming stream recovery receive no new proof promotion from
 the report alone. Tracker-code integration and any fresh real-HUD screenshot
-remain `UNVERIFIED` because the required write-enabled Opus 5 relay authority is
-not available and Desktop Homecoming must not restart.
+remained `UNVERIFIED` in that window because write-enabled Opus 5 relay
+authority was not yet available. The later authorized implementation activity
+is recorded below; Desktop Homecoming still must not restart for this sync.
+
+### Portfolio activity window — 2026-08-09 14:12–14:42 Bahrain
+
+No governed Pizza box or phase advanced in this window. The following activity
+is retained as work-in-progress evidence only:
+
+- Homecoming Brief 019A pipeline repair is `ACTIVE` under verified Claude Opus
+  5. The retained acceptance result is 4 PASS / 10 FAIL; capture and HUD work do
+  not begin until all 14 frozen cases pass.
+- Hoard Brief 014 contract work is `ACTIVE` under verified Claude Opus 5.
+  Preliminary JSON/schema review passed, but A01-A18 remain `UNVERIFIED` pending
+  an attributed diff and independent contract review. Phase 1 retains exactly
+  10 verified boxes.
+- Kingdom K1.6 synthetic emulator invariant probing is `ACTIVE`; its latest
+  command failure is under repair. No authoritative adoption or live promotion
+  is claimed.
+- Factory's private table-fill pilot brief is `CONCEPTUAL`. Its modeled BHD4.20
+  contribution is a hypothesis, not revenue; local synthetic packet assembly is
+  next and live use remains locked.
+- BoothSignal remains `TESTED`, package-ready, and unpublished. Its exact
+  nine-file deterministic dual-lane critic scaffold is `ACTIVE` under verified
+  Claude Opus 5; listing and payment states do not advance.
+- TikTok Tiny Market Lab is `ACTIVE` on local-safe commercial work. Account and
+  posting gates remain locked, and TikTok is not added as a Pizza slice.
+- No settled customer payment is evidenced anywhere in the portfolio.
+
+Portfolio effectiveness is `MEDIUM` and efficiency is `MIXED`: two oversized
+Claude calls deadlocked and were replaced by bounded micro-boxes without
+duplicate implementation. The operating rule is one-file/small-box dispatch,
+a ten-minute hard timeout, and liveness proven by file, test, or process
+evidence rather than by a sent prompt. Because no governed box advanced, no
+screenshot is required or accepted for this window.
 
 Focused delivery-box, portfolio, and Factory conveyor tests pass 37/37. A
 Windows Release build passed and the real updated Desktop Homecoming process is
