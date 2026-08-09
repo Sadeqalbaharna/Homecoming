@@ -3,7 +3,10 @@ import 'package:homecoming_app/logic/factory_scan_session.dart';
 
 void main() {
   FactoryScanSession fresh([String id = 'scan-1']) => FactoryScanSession.start(
-      id: id, startedAtMs: 1000, scanPolicyVersion: 'v1');
+      factoryRunId: 'factory-run-1',
+      id: id,
+      startedAtMs: 1000,
+      scanPolicyVersion: 'v1');
 
   ScanCalibrationChange loosen() => const ScanCalibrationChange(
         direction: CalibrationDirection.loosen,
@@ -205,10 +208,14 @@ void main() {
         .session;
     final accepted = session.checkBlueprintAuthorization(
         const SponsorBlueprintAuthorization(
+            authorizationId: 'test-auth',
+            factoryRunId: 'factory-run-1',
             sessionId: 'scan-1',
             candidateId: 'c1',
             approvedBy: 'sadeq',
-            approvedAtMs: 5000));
+            approvedAtMs: 5000,
+            sponsorEvidence: 'test sponsor evidence'),
+        factoryRunId: 'factory-run-1');
     expect(accepted.accepted, isTrue);
     expect(session.candidates.single.state, ScanCandidateState.yesShortlist);
     expect(accepted.reason, contains('trusted sponsor verification'));
@@ -221,10 +228,14 @@ void main() {
         .session;
     final refused = session.checkBlueprintAuthorization(
         const SponsorBlueprintAuthorization(
+            authorizationId: 'test-auth',
+            factoryRunId: 'factory-run-1',
             sessionId: 'old-run',
             candidateId: 'c1',
             approvedBy: 'sadeq',
-            approvedAtMs: 5000));
+            approvedAtMs: 5000,
+            sponsorEvidence: 'test sponsor evidence'),
+        factoryRunId: 'factory-run-1');
     expect(refused.accepted, isFalse);
     expect(refused.reason, contains('not transferable'));
   });

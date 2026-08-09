@@ -5,6 +5,12 @@ Scan session: `factory-scan-2026-08-09-block-01`
 Policy: `signal-scan-v1`
 Review state: **AWAITING SPONSOR VERDICTS — SCANNING HALTED**
 
+Legacy continuity: the earlier sponsor YES has been recovered as the
+human-readable “TTRPG and board-game group matching app at The Tavern and The
+Raven’s Nest.” Its historical ID/session remain absent, so it is preserved under
+the non-retroactive working ID `FSC-LEGACY-YES-001`. See
+`FACTORY_LEGACY_YES_EVIDENCE_REFRESH_2026-08-09.md`.
+
 ## Evidence status
 
 Credential-free public web search ran successfully during this block. The

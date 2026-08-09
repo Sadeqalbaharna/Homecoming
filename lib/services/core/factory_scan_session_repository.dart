@@ -107,6 +107,12 @@ class FactoryScanSessionRepository {
         reason: 'expected revision cannot be negative',
       );
     }
+    if (session.factoryRunId != factoryRunId.trim()) {
+      return const FactoryScanSaveResult(
+        saved: false,
+        reason: 'session belongs to another Factory run',
+      );
+    }
     String path;
     try {
       path = pathFor(
@@ -220,11 +226,16 @@ class FactoryScanSessionRepository {
           path: path,
         );
       }
-      final session = FactoryScanSession.fromJson(raw['session'] as Map);
-      if (session.id != scanSessionId) {
+      final sessionJson = Map<Object?, Object?>.from(raw['session'] as Map);
+      // A schema-zero/one session did not carry its run. The already validated
+      // repository envelope is the only safe migration source for that field.
+      sessionJson.putIfAbsent('factoryRunId', () => factoryRunId.trim());
+      final session = FactoryScanSession.fromJson(sessionJson);
+      if (session.id != scanSessionId ||
+          session.factoryRunId != factoryRunId.trim()) {
         return FactoryScanLoadResult(
           session: null,
-          reason: 'stored session id does not match its run-scoped path',
+          reason: 'stored session identity does not match its run-scoped path',
           path: path,
         );
       }

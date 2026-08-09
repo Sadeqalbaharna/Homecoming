@@ -32,6 +32,7 @@ class _MemoryStore implements FactoryScanDocumentStore {
 void main() {
   FactoryScanSession session([String id = 'scan-001']) =>
       FactoryScanSession.start(
+        factoryRunId: 'run-001',
         id: id,
         startedAtMs: 1000,
         scanPolicyVersion: 'signal-scan-v1',
@@ -91,6 +92,19 @@ void main() {
     expect(loaded.session!.toJson(), original.toJson());
   });
 
+  test('refuses saving a session under a different Factory run', () async {
+    final result =
+        await FactoryScanSessionRepository(store: _MemoryStore()).save(
+      personaId: 'truekai',
+      factoryRunId: 'run-002',
+      session: session(),
+      expectedRevision: 0,
+    );
+
+    expect(result.saved, isFalse);
+    expect(result.reason, contains('another Factory run'));
+  });
+
   test('loads a bound envelope containing a schema-zero session', () async {
     final store = _MemoryStore();
     final path = FactoryScanSessionRepository.pathFor(
@@ -114,6 +128,7 @@ void main() {
 
     expect(loaded.loaded, isTrue);
     expect(loaded.session!.schemaVersion, factoryScanSchemaVersion);
+    expect(loaded.session!.factoryRunId, 'run-001');
     expect(loaded.session!.attempts, isEmpty);
   });
 

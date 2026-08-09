@@ -5,7 +5,9 @@
 // result; a work packet is not evidence that a search happened.
 library;
 
-const int factoryScanSchemaVersion = 1;
+part 'factory_blueprint_authorization_registry.dart';
+
+const int factoryScanSchemaVersion = 2;
 const Duration factoryScanTimebox = Duration(minutes: 30);
 
 enum ScanCandidateState {
@@ -338,6 +340,7 @@ class SponsorVerdictRecord {
   final List<String> evidenceReferenceIds;
   final String? sponsorReason;
   final int recordedAtMs;
+  final bool reconstructed;
 
   const SponsorVerdictRecord({
     required this.sessionId,
@@ -347,6 +350,7 @@ class SponsorVerdictRecord {
     required this.evidenceReferenceIds,
     required this.recordedAtMs,
     this.sponsorReason,
+    this.reconstructed = false,
   });
 
   Map<String, Object?> toJson() => {
@@ -357,6 +361,7 @@ class SponsorVerdictRecord {
         'evidenceReferenceIds': evidenceReferenceIds,
         'sponsorReason': sponsorReason,
         'recordedAtMs': recordedAtMs,
+        'reconstructed': reconstructed,
       };
 
   factory SponsorVerdictRecord.fromJson(Map<Object?, Object?> json) =>
@@ -373,6 +378,7 @@ class SponsorVerdictRecord {
                 .toList(growable: false),
         sponsorReason: json['sponsorReason']?.toString(),
         recordedAtMs: (json['recordedAtMs'] as num?)?.toInt() ?? 0,
+        reconstructed: json['reconstructed'] == true,
       );
 }
 
@@ -547,15 +553,21 @@ class FailedScanRound {
 /// Deliberately data-only. The controller can validate this capability but
 /// cannot mint it; a sponsor-owned UI/storage seam must construct it.
 class SponsorBlueprintAuthorization {
+  final String authorizationId;
+  final String factoryRunId;
   final String sessionId;
   final String candidateId;
   final String approvedBy;
   final int approvedAtMs;
+  final String sponsorEvidence;
   const SponsorBlueprintAuthorization({
+    required this.authorizationId,
+    required this.factoryRunId,
     required this.sessionId,
     required this.candidateId,
     required this.approvedBy,
     required this.approvedAtMs,
+    required this.sponsorEvidence,
   });
 }
 
@@ -605,6 +617,7 @@ class ScanMutation {
 
 class FactoryScanSession {
   final int schemaVersion;
+  final String factoryRunId;
   final String id;
   final int startedAtMs;
   final int deadlineAtMs;
@@ -625,6 +638,7 @@ class FactoryScanSession {
 
   const FactoryScanSession({
     this.schemaVersion = factoryScanSchemaVersion,
+    required this.factoryRunId,
     required this.id,
     required this.startedAtMs,
     required this.deadlineAtMs,
@@ -645,15 +659,20 @@ class FactoryScanSession {
   });
 
   factory FactoryScanSession.start({
+    required String factoryRunId,
     required String id,
     required int startedAtMs,
     required String scanPolicyVersion,
   }) {
+    if (factoryRunId.trim().isEmpty) {
+      throw ArgumentError('Factory run id must be stable');
+    }
     if (id.trim().isEmpty) throw ArgumentError('session id must be stable');
     if (scanPolicyVersion.trim().isEmpty) {
       throw ArgumentError('scan policy version is required');
     }
     return FactoryScanSession(
+      factoryRunId: factoryRunId.trim(),
       id: id.trim(),
       startedAtMs: startedAtMs,
       deadlineAtMs: startedAtMs + factoryScanTimebox.inMilliseconds,
@@ -933,6 +952,7 @@ class FactoryScanSession {
     SponsorVote vote, {
     required int recordedAtMs,
     String? sponsorReason,
+    bool reconstructed = false,
   }) {
     if (vote == SponsorVote.none) {
       return ScanMutation(this, false, 'a sponsor vote must be explicit');
@@ -974,6 +994,7 @@ class FactoryScanSession {
                 ? null
                 : sponsorReason?.trim(),
             recordedAtMs: recordedAtMs,
+            reconstructed: reconstructed,
           ),
         ],
         reviewBackpressure: remainingStrong >= 3,
@@ -997,6 +1018,7 @@ class FactoryScanSession {
   Map<String, int> get transparentTraitWeights {
     final weights = <String, int>{};
     for (final verdict in verdictHistory) {
+      if (verdict.reconstructed) continue;
       final delta = switch (verdict.verdict) {
         SponsorVote.yes => 2,
         SponsorVote.maybe => 1,
@@ -1015,13 +1037,22 @@ class FactoryScanSession {
   /// therefore deliberately has no method that mutates a candidate into
   /// Blueprint from agent-constructible data.
   BlueprintAuthorizationCheck checkBlueprintAuthorization(
-      SponsorBlueprintAuthorization authorization) {
+    SponsorBlueprintAuthorization authorization, {
+    required String factoryRunId,
+  }) {
+    if (authorization.factoryRunId != factoryRunId ||
+        authorization.factoryRunId != this.factoryRunId) {
+      return const BlueprintAuthorizationCheck(false,
+          'authorization belongs to another Factory run and is not transferable');
+    }
     if (authorization.sessionId != id) {
       return const BlueprintAuthorizationCheck(false,
           'authorization belongs to another scan session and is not transferable');
     }
-    if (authorization.approvedBy.trim().isEmpty ||
-        authorization.approvedAtMs <= 0) {
+    if (authorization.authorizationId.trim().isEmpty ||
+        authorization.approvedBy.trim().isEmpty ||
+        authorization.approvedAtMs <= 0 ||
+        authorization.sponsorEvidence.trim().isEmpty) {
       return const BlueprintAuthorizationCheck(
           false, 'authorization is malformed');
     }
@@ -1121,6 +1152,7 @@ class FactoryScanSession {
         'Effectiveness: ${_enumName(report.effectiveness).toUpperCase()}. '
         'Wasted-token warning: ${report.efficiency == ScanEfficiency.wasteful ? 'YES' : 'NO'} ($wasteReason). '
         'Token usage: ${report.exactTokens?.toString() ?? 'unavailable'}. '
+        'Reconstructed verdicts: ${verdictHistory.where((value) => value.reconstructed).length}. '
         'Current action: $currentAction Exact next safe action: $nextSafeAction';
   }
 
@@ -1141,6 +1173,7 @@ class FactoryScanSession {
   }) =>
       FactoryScanSession(
         schemaVersion: schemaVersion,
+        factoryRunId: factoryRunId,
         id: id,
         startedAtMs: startedAtMs,
         deadlineAtMs: deadlineAtMs,
@@ -1165,6 +1198,7 @@ class FactoryScanSession {
 
   Map<String, Object?> toJson() => {
         'schemaVersion': schemaVersion,
+        'factoryRunId': factoryRunId,
         'id': id,
         'startedAtMs': startedAtMs,
         'deadlineAtMs': deadlineAtMs,
@@ -1199,6 +1233,7 @@ class FactoryScanSession {
     final started = (json['startedAtMs'] as num?)?.toInt() ?? 0;
     return FactoryScanSession(
       schemaVersion: factoryScanSchemaVersion,
+      factoryRunId: json['factoryRunId']?.toString() ?? 'legacy-unbound',
       id: json['id']?.toString() ?? '',
       startedAtMs: started,
       deadlineAtMs: (json['deadlineAtMs'] as num?)?.toInt() ??
