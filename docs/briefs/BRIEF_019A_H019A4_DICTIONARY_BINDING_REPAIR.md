@@ -1,7 +1,7 @@
 # Brief 019A H019A-4 — Dictionary-safe capture binding repair
 
-Owner: verified Claude Opus 5 implementation relay  
-Reviewer: Codex / Homecoming Kai  
+Owner: verified Claude Opus 5 implementation relay
+Reviewer: Codex / Homecoming Kai
 Status: READY
 
 ## Goal
