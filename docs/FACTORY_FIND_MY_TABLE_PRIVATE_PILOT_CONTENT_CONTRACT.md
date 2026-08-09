@@ -542,4 +542,3 @@ all synthetic/live proof distinctions, contains no invented venue detail or
 actual person, and leaves all live gates locked. Formatting changes may improve
 legibility but may not weaken consent, privacy, economics, evidence, or
 authority language.
-
