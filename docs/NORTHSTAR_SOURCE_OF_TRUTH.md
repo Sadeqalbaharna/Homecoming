@@ -533,6 +533,20 @@ window changes proof projection, not the frozen macro names or box count:
   active 1080×1920 render are recorded as an integration delta only. No Pizza
   slice, account, post, or revenue state is invented.
 
+The later 13:23–13:53 evidence packet is preserved pending a write-eligible
+implementation path. Factory commit `b6602c668fc670413cce3865eb6b71949fbb0e89`
+was independently resolved on `codex/factory-operator-automation`; its venue
+scale model, tests, and investment memo complete the Find My Table Blueprint
+packet at `TESTED` level with recommendation `INVEST` in a bounded internal
+operations MVP. The same primary packet explicitly retains separate exact
+Assembly authority and forbids outreach, customer data, payment, spend,
+publishing, and live action. Therefore Blueprint is Tested, while Assembly and
+public action remain future gates. Kingdom K1.6, Hoard Brief 014, BoothSignal,
+TikTok media, and Homecoming stream recovery receive no new proof promotion from
+the report alone. Tracker-code integration and any fresh real-HUD screenshot
+remain `UNVERIFIED` because the required write-enabled Opus 5 relay authority is
+not available and Desktop Homecoming must not restart.
+
 Focused delivery-box, portfolio, and Factory conveyor tests pass 37/37. A
 Windows Release build passed and the real updated Desktop Homecoming process is
 running from the governed worktree as PID 27260. Direct-window evidence

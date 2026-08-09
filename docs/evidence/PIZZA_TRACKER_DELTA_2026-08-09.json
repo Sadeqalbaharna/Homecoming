@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 1,
+  "deltaId": "pizza-delta-2026-08-09T13-23-bahrain",
+  "createdAt": "2026-08-09T13:23:00+03:00",
+  "sourceOfTruthRef": "docs/NORTHSTAR_SOURCE_OF_TRUTH.md#pizza-evidence-reconciliation-and-real-desktop-observation--2026-08-09",
+  "claims": [
+    {
+      "claimId": "homecoming.real-hud",
+      "projectId": "homecoming_northstar",
+      "requestedState": "verified",
+      "authorityOwner": "agent",
+      "riskClass": "local_safe",
+      "sourceOfTruthRef": "docs/NORTHSTAR_SOURCE_OF_TRUTH.md",
+      "changedSurfaces": ["pizza_hud", "windows_capture"],
+      "evidence": [
+        {
+          "id": "homecoming.real-hud.png",
+          "kind": "file_sha256",
+          "path": "docs/evidence/REAL_KAI_DPI_SELECTION_RETRY_2026-08-09.png",
+          "sha256": "945722f65a03ab0f4e070963f7b09f79db8a87da869e75697c1024dbf50bf384"
+        }
+      ]
+    },
+    {
+      "claimId": "hoard.phase1-retained",
+      "projectId": "hoard_northstar",
+      "requestedState": "active",
+      "authorityOwner": "agent",
+      "riskClass": "local_safe",
+      "sourceOfTruthRef": "C:/code/Hoard/docs/PROJECT_SOURCE_OF_TRUTH.md",
+      "changedSurfaces": ["delivery_catalog"],
+      "evidence": [
+        {
+          "id": "hoard.phase1.commit",
+          "kind": "git_commit",
+          "repositoryRoot": "C:/Users/sadeq/.codex/worktrees/a81c/Hoard",
+          "commit": "4f22a3a073467b923316e1c4040a37c3d70db8c9"
+        }
+      ]
+    },
+    {
+      "claimId": "kingdom.k1.4-isolated",
+      "projectId": "kingdom_northstar",
+      "requestedState": "active",
+      "authorityOwner": "agent",
+      "riskClass": "local_safe",
+      "sourceOfTruthRef": "Kingdom K1.4 isolated work packet",
+      "changedSurfaces": ["delivery_catalog"],
+      "evidence": [
+        {
+          "id": "kingdom.k1.4.report",
+          "kind": "reported_external"
+        }
+      ]
+    },
+    {
+      "claimId": "factory.find-my-table-blueprint",
+      "projectId": "factory_northstar",
+      "requestedState": "active",
+      "authorityOwner": "agent",
+      "riskClass": "local_safe",
+      "sourceOfTruthRef": "docs/FACTORY_BLUEPRINT_FSC_LEGACY_YES_001.md",
+      "changedSurfaces": ["delivery_catalog", "factory_conveyor"],
+      "evidence": [
+        {
+          "id": "factory.blueprint.commit",
+          "kind": "git_commit",
+          "repositoryRoot": "C:/Users/sadeq/.codex/worktrees/4176/homecoming_app",
+          "commit": "b6602c668fc670413cce3865eb6b71949fbb0e89"
+        }
+      ]
+    },
+    {
+      "claimId": "factory.boothsignal-core",
+      "projectId": "factory_northstar",
+      "requestedState": "evidence_review",
+      "authorityOwner": "agent",
+      "riskClass": "local_safe",
+      "sourceOfTruthRef": "factory-daily-products/outputs/boothsignal-production-record.md",
+      "changedSurfaces": ["factory_nested_lane"],
+      "evidence": [
+        {
+          "id": "factory.boothsignal.qa",
+          "kind": "file_sha256",
+          "path": "C:/Users/sadeq/Documents/Codex/2026-08-09/factory-daily-products/outputs/boothsignal-qa-receipt.json",
+          "sha256": "d9b8ad845b9d76841e86785052f20984fcf9a958dfbde415d61252d8f59200dd"
+        }
+      ]
+    },
+    {
+      "claimId": "tiktok.media-assets",
+      "projectId": "tiktok_portfolio_manager",
+      "requestedState": "active",
+      "authorityOwner": "agent",
+      "riskClass": "local_safe",
+      "sourceOfTruthRef": "TikTok Portfolio Manager governing lane",
+      "changedSurfaces": ["portfolio_integration_delta"],
+      "evidence": [
+        {
+          "id": "tiktok.media.report",
+          "kind": "reported_external"
+        }
+      ]
+    }
+  ]
+}
