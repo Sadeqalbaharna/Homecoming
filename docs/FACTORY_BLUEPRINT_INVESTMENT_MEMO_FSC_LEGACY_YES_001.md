@@ -1,11 +1,14 @@
 # Find My Table — Bahrain: Blueprint investment memo
 
-Presentation: `FSC-LEGACY-YES-001-BP-IC-v1`  
+Presentation: `FSC-LEGACY-YES-001-BP-IC-v2`
 Blueprint run: `factory-run-legacy-recovery-20260809-tablefinder-01`  
 Concept: `FSC-LEGACY-YES-001`  
 As of: 2026-08-09, Asia/Bahrain  
 Decision owner: Sadeq, acting as investor and intended-customer proxy  
 Gate: **BLUEPRINT ONLY — INVEST / REVISE / KILL / PARK**
+
+This v2 packet supersedes the unreviewed v1 packet. The frozen manual service
+contract is `FACTORY_BLUEPRINT_PILOT_SPEC_FSC_LEGACY_YES_001.md`.
 
 ## Answer first
 

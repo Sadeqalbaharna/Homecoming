@@ -2,13 +2,15 @@
 
 Status: **BLUEPRINT ACTIVE — INVESTMENT COMMITTEE PACKET READY**
 
-Current packet: `FSC-LEGACY-YES-001-BP-IC-v1`. Research replaces the earlier
-unresolved first-payer hypothesis with a recommendation, not an automatic
-decision: **REVISE**, then test whether adult newcomers pay for one hosted,
-fixed-time TTRPG one-shot. The adjacent Reliable Table Kit serves a different
+Current packet: `FSC-LEGACY-YES-001-BP-IC-v2`. The v2 packet supersedes the
+unreviewed v1 packet and freezes the first-payer recommendation: **REVISE**,
+then—only after a later INVEST verdict and every live gate—test whether adult
+newcomers pay for one hosted, fixed-time TTRPG one-shot. The adjacent Reliable
+Table Kit serves a different
 buyer/channel and must return to its own Signal Scan; it inherits no authority
 from this recovered concept. See
-`FACTORY_BLUEPRINT_INVESTMENT_MEMO_FSC_LEGACY_YES_001.md`, the source ledger,
+`FACTORY_BLUEPRINT_INVESTMENT_MEMO_FSC_LEGACY_YES_001.md`,
+`FACTORY_BLUEPRINT_PILOT_SPEC_FSC_LEGACY_YES_001.md`, the source ledger,
 economics notebook, and Shark Feedback Console. Blueprint remains active; no
 Assembly, outreach, venue participation, publishing, account action, spend, or
 payment is authorized.
@@ -42,61 +44,37 @@ The concept enters Blueprint; it has not entered Assembly. No venue has been
 contacted and no partnership, purchase, payment, credential, deployment, or
 publication exists.
 
-## Blueprint question 1 — who pays first?
+## Frozen first buyer and paid outcome
 
-This is the first causal question because the evidence validates local players
-and venues but not a buyer. Building a broad social matching app before choosing
-the first payer would create a costly two-sided network with no economic gate.
+The first buyer hypothesis is now explicit: an **adult newcomer or lapsed
+player**, not a venue, established group, GM-tool buyer, or broad marketplace
+member.
 
-### Option A — player-paid matching
+The smallest paid outcome is a confirmed seat at one beginner-friendly,
+fixed-time TTRPG one-shot with a vetted host, clear fit/safety expectations and
+a consenting public Bahrain venue. The service—not an app—is the first matching
+product. Price cells are BHD5 and BHD7; both remain unvalidated.
 
-- Offer: players pay for premium matching, reminders, or priority seats.
-- Strength: preserves the sponsor’s consumer-app framing.
-- Failure risk: free Meetup, WhatsApp, Discord, Instagram, Played Together,
-  Groupfinder, and Party Finder make willingness to pay doubtful.
-- Proof state: **CONCEPTUAL / LOW confidence**.
+The venue-paid table board and general player-paid matching subscription remain
+rejected first wedges because they add two-sided liquidity and free-substitute
+risk before buyer demand is proven. The hosted-session choice is a Blueprint
+recommendation, not market validation or authority to operate.
 
-### Option B — venue-paid table filling
+## Frozen pilot cuts
 
-- Offer: a venue pays a small monthly fee for scheduled table listings,
-  waitlists, seat filling, and attendance summaries.
-- Strength: one venue can fund the service while players join free; the product
-  solves visible empty-seat/event-cadence friction.
-- Failure risk: venue willingness to pay and operational ownership are entirely
-  unverified; outreach requires a later sponsor-approved live action.
-- Proof state: **CONCEPTUAL / MEDIUM hypothesis confidence**.
+- 18+ only;
+- one fixed date, one approved host and one consenting public venue;
+- target five to six paid seats; no oversized table to manufacture margin;
+- no app, subscription, campaign or marketplace;
+- no private-home location or live-location tracking;
+- no direct messages, social feed, public profiles or player ratings;
+- no proprietary adventure/rules content or implied venue/publisher affiliation;
+- no payment collection until the exact legal/account/refund route is approved;
+- no second date without the evidence gate or a materially changed hypothesis.
 
-### Option C — paid hosted sessions
-
-- Offer: a disclosed fee per confirmed public-venue seat, potentially shared
-  with a host or GM.
-- Strength: StartPlaying demonstrates that players pay for professionally hosted
-  online sessions.
-- Failure risk: importing paid-GM economics into Bahrain’s in-person hobby
-  community may be false; payments, refunds, no-shows, and safety expand scope.
-- Proof state: **CONCEPTUAL / LOW-MEDIUM confidence**.
-
-## Smallest proposed validation offer
-
-Pending sponsor choice, the narrowest coherent hypothesis is:
-
-> A free player-facing mobile table board for one public Bahrain venue, with
-> game/system, language, experience, date/time, open seats, join requests,
-> waitlist, and reminders; the venue is the candidate payer for table-filling
-> administration.
-
-Deliberate cuts:
-
-- no private-home locations or live-location tracking;
-- no direct messages;
-- no payments or refunds;
-- no global discovery;
-- no recommendation AI;
-- no social feed, reviews, or player ratings;
-- no second venue until one-venue match density is evidenced.
-
-This is a Blueprint hypothesis, not accepted scope. Assembly must not begin
-until Sadeq chooses the first payer and accepts or revises the cuts.
+The complete customer journey, data minimization, roles, ledger, unit-economics
+contract, acquisition design, kill criteria and software eligibility gate are
+frozen in `FACTORY_BLUEPRINT_PILOT_SPEC_FSC_LEGACY_YES_001.md`.
 
 ## Current evidence and open proof
 
@@ -112,15 +90,19 @@ until Sadeq chooses the first payer and accepts or revises the cuts.
 
 Open proof:
 
-1. First payer: player, venue, or hosted-session participant.
-2. Whether either named venue wants table-filling software.
-3. Minimum weekly active table density needed for matching to work.
-4. Safety/moderation rules for adults meeting strangers.
-5. Exact price, fulfilment, support, cancellation, and refund terms.
+1. Whether adult newcomers in Bahrain pay BHD5 or BHD7 for the confirmed-seat
+   outcome.
+2. Whether an acceptable host and consenting public venue can fit the BHD50
+   mechanism-test cap.
+3. Actual refunds, no-shows, support/operations time and later paid repeat.
+4. Exact lawful payment, refund, data-processing and commercial arrangement.
+5. Whether four paid sessions reveal a software-worthy coordination bottleneck.
 
 ## Exact next gate
 
-Sponsor chooses the first payer and confirms whether the one-venue table-board
-hypothesis is the Blueprint direction. That decision authorizes continued
-Blueprint specification only; it does not authorize venue outreach, Assembly,
-publishing, spending, deployment, or payments.
+Sadeq reviews packet `FSC-LEGACY-YES-001-BP-IC-v2` as Shark and returns
+`INVEST`, `REVISE`, `KILL`, or `PARK`. `INVEST` would approve only the bounded
+mechanism box described in the pilot specification; venue/host contact,
+outreach, accounts, credentials, payment, spending, publication and the event
+still require their own exact live permissions. Assembly and app development
+remain unauthorized.

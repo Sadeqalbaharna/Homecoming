@@ -1,6 +1,6 @@
 # Shark Feedback Console — FSC-LEGACY-YES-001
 
-Presentation: `FSC-LEGACY-YES-001-BP-IC-v1`  
+Presentation: `FSC-LEGACY-YES-001-BP-IC-v2`
 Blueprint run: `factory-run-legacy-recovery-20260809-tablefinder-01`  
 Concept: `FSC-LEGACY-YES-001`  
 Date: `2026-08-09`  
@@ -29,7 +29,7 @@ Factory station unless the sponsor says so explicitly.
 | Field | Value |
 |---|---|
 | Record ID | assigned on capture |
-| Presentation | `FSC-LEGACY-YES-001-BP-IC-v1` |
+| Presentation | `FSC-LEGACY-YES-001-BP-IC-v2` |
 | Concept / Blueprint run | `FSC-LEGACY-YES-001` / `factory-run-legacy-recovery-20260809-tablefinder-01` |
 | Captured at / role | awaiting sponsor / awaiting sponsor |
 | Verdict / confidence | awaiting sponsor / awaiting sponsor |
@@ -57,4 +57,3 @@ next hypothesis. Never claim opaque personal learning.
 Across presentations compare confidence, recurring objections, belief changes,
 weakest elements, and which requested proof changes a later verdict. Do not
 overfit one response.
-
