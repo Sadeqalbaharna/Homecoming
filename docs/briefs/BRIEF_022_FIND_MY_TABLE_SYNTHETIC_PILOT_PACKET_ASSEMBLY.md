@@ -49,6 +49,10 @@ Claude may create or edit only:
 is reviewer-owned and must not be edited. No dependency or shared-service edit
 is allowed; use the existing `archive` package for deterministic OOXML.
 
+The reviewer-owned acceptance oracle is read-only implementation input:
+`docs/fixtures/find_my_table_private_pilot_v1_acceptance_oracle.json`.
+Generated fixture values and expected outputs must reproduce it exactly.
+
 ## Invariants and frozen inputs
 
 - Reuse `lib/logic/find_my_table_operator.dart`; do not create a second matcher.
