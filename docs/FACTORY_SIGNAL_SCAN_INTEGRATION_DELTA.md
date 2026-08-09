@@ -1,6 +1,6 @@
 # Factory Signal Scan integration delta
 
-Status: TESTED domain slice; live search and runtime persistence wiring UNVERIFIED.
+Status: TESTED domain and persistence slices; live search and shared-controller wiring UNVERIFIED.
 
 ## Authority and ownership
 
@@ -18,12 +18,18 @@ invokes `advance()` and never enters Blueprint.
 
 ## KaiFactoryService adapter delta
 
-A later narrow adapter may persist `FactoryScanSession.toJson()` under a new
-run-scoped child such as:
+`FactoryScanSessionRepository` now persists `FactoryScanSession.toJson()` under
+the run-scoped child:
 
 `kai/{persona}/factory/scan_sessions/{factoryRunId}/{scanSessionId}`
 
-Required adapter rules:
+The repository is tested through an injected conditional document-store
+boundary. Its envelope binds persona, Factory run, scan session, and monotonic
+revision. Derived audit/trait projections are recomputed and are not persisted.
+The current `KaiDb` facade has no atomic compare-and-set surface, so its adapter
+fails closed rather than risk erasing a concurrent sponsor verdict. Live durable
+writes therefore remain UNVERIFIED; no live database write occurred.
+Remaining integration rules:
 
 1. Reads/writes session JSON only; it must not mirror mutable counts or audit
    fields elsewhere.
