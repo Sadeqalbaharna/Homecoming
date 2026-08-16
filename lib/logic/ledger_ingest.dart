@@ -85,6 +85,31 @@ class KaiBalanceReading {
   final DateTime at;
 }
 
+/// How well we know WHEN a payment happened.
+enum KaiAlertTimePrecision {
+  /// The bank stated a date and a time. Authoritative.
+  exact,
+
+  /// The bank stated a date but no time. Ordering within that day is unknown.
+  dateOnly,
+
+  /// The bank stated nothing usable, so delivery time stands in. Email can lag
+  /// a transaction by minutes and occasionally across midnight, so this is the
+  /// weakest of the three and is labelled rather than pretended about.
+  delivery,
+}
+
+/// When a payment happened, and how sure we are.
+class KaiAlertTiming {
+  const KaiAlertTiming(this.at, this.precision);
+
+  final DateTime at;
+  final KaiAlertTimePrecision precision;
+
+  /// Safe to order other transactions against on the same day.
+  bool get orderable => precision == KaiAlertTimePrecision.exact;
+}
+
 /// What ingestion concluded, including when it concluded nothing.
 class KaiIngestOutcome {
   const KaiIngestOutcome({
@@ -92,7 +117,15 @@ class KaiIngestOutcome {
     required this.reasonCode,
     this.autoConfirmed = false,
     this.matchedRule,
+    this.timing,
   });
+
+  /// When the bank says it happened, not when the message arrived.
+  ///
+  /// Carried alongside the candidate rather than inside it, because the shared
+  /// candidate type stores a date-only string and is also used for statement
+  /// imports, where a time genuinely does not exist.
+  final KaiAlertTiming? timing;
 
   /// Null when the text carried no transaction. Nothing is ever silently
   /// dropped: an unparseable alert returns a reason, so a ledger that is
@@ -220,8 +253,11 @@ class KaiLedgerIngest {
       return const KaiIngestOutcome(reasonCode: 'direction_ambiguous');
     }
 
+    final timing = readTiming(alert);
     final candidate = KaiCashImportCandidate(
-      date: _isoDate(alert.receivedAt),
+      // The bank's own date, so an email arriving after midnight does not file
+      // a payment on the wrong day.
+      date: _isoDate(timing.at),
       description: _extractMerchant(text) ?? text,
       amount: amount,
       direction: direction,
@@ -238,6 +274,7 @@ class KaiLedgerIngest {
       return KaiIngestOutcome(
         candidate: candidate,
         reasonCode: 'untrusted_sender_pending',
+        timing: timing,
       );
     }
 
@@ -246,6 +283,7 @@ class KaiLedgerIngest {
       return KaiIngestOutcome(
         candidate: candidate,
         reasonCode: 'no_rule_pending',
+        timing: timing,
       );
     }
 
@@ -264,6 +302,7 @@ class KaiLedgerIngest {
       reasonCode: 'auto_confirmed',
       autoConfirmed: true,
       matchedRule: rule.id,
+      timing: timing,
     );
   }
 
@@ -326,6 +365,53 @@ class KaiLedgerIngest {
       account: _account.firstMatch(alert.body)?.group(1) ?? 'unknown',
       balance: value,
       at: alert.receivedAt,
+    );
+  }
+
+  static final _stated = RegExp(
+    r'on\s+([0-3]?[0-9])[/-]([0-1]?[0-9])(?:[/-]([0-9]{2,4}))?(?:\s+at\s+([0-2]?[0-9]):([0-5][0-9]))?',
+    caseSensitive: false,
+  );
+
+  /// The instant the BANK says the payment happened.
+  ///
+  /// Alerts carry their own timestamp — "on 11/08/26 at 11:16" — and it is
+  /// better evidence than delivery time: an email can lag the transaction by
+  /// minutes and occasionally lands the other side of midnight, which would put
+  /// a payment on the wrong day.
+  ///
+  /// Real alerts vary: some omit the year, some omit the time entirely. Each
+  /// case is reported at the precision it deserves rather than padded out to
+  /// look complete.
+  static KaiAlertTiming readTiming(KaiBankAlert alert) {
+    final m = _stated.firstMatch(alert.body);
+    if (m == null) {
+      return KaiAlertTiming(alert.receivedAt, KaiAlertTimePrecision.delivery);
+    }
+    final day = int.tryParse(m.group(1) ?? '');
+    final month = int.tryParse(m.group(2) ?? '');
+    if (day == null || month == null || month < 1 || month > 12 || day > 31) {
+      return KaiAlertTiming(alert.receivedAt, KaiAlertTimePrecision.delivery);
+    }
+    // A two-digit year is this century; an absent year is the year the message
+    // arrived, which is right except across a New Year boundary and is the best
+    // available guess there too.
+    final rawYear = int.tryParse(m.group(3) ?? '');
+    final year = rawYear == null
+        ? alert.receivedAt.year
+        : (rawYear < 100 ? 2000 + rawYear : rawYear);
+
+    final hour = int.tryParse(m.group(4) ?? '');
+    final minute = int.tryParse(m.group(5) ?? '');
+    if (hour == null || minute == null || hour > 23) {
+      return KaiAlertTiming(
+        DateTime(year, month, day),
+        KaiAlertTimePrecision.dateOnly,
+      );
+    }
+    return KaiAlertTiming(
+      DateTime(year, month, day, hour, minute),
+      KaiAlertTimePrecision.exact,
     );
   }
 

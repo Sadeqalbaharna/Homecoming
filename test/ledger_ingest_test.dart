@@ -150,6 +150,81 @@ void main() {
     });
   });
 
+  // ── When it happened, not when it arrived ──────────────────────────────────
+  //
+  // Alerts carry the bank's own timestamp, and it is better evidence than
+  // delivery time. One real message arrived on 11 August and said "on 09/08" —
+  // trusting the header would have filed that payment two days late,
+  // manufacturing a gap on both days and, in the reconciler, an unexplained
+  // outflow that was really just a clock.
+  //
+  // The date also decides ORDER, which is what makes two same-amount payments
+  // at the same merchant on one day distinguishable at all.
+  group('the bank says when it happened', () {
+    KaiAlertTiming timing(String body, {DateTime? delivered}) =>
+        KaiLedgerIngest.readTiming(alert(
+          body,
+          when: delivered ?? DateTime(2026, 8, 11, 8, 16),
+        ));
+
+    test('a full date and time is exact and orderable', () {
+      final t = timing(
+        'BHD 24.420 debited from Acc. XXX94150000 at FINE FOODS '
+        'BH.Bal: BHD 354.620 on 11/08/26 at 11:16.',
+      );
+      expect(t.at, DateTime(2026, 8, 11, 11, 16));
+      expect(t.precision, KaiAlertTimePrecision.exact);
+      expect(t.orderable, isTrue);
+    });
+
+    test('a missing year comes from the message, and the DAY still wins', () {
+      // Verbatim: delivered 11 Aug, body says 09/08.
+      final t = timing(
+        'BHD11.890 has been debited from your account XXXX94150000 at PAYPAL '
+        'FACEBOOK IE on 09/08 at 09:21. Your balance is BHD 289.467.',
+      );
+      expect(t.at, DateTime(2026, 8, 9, 9, 21));
+      expect(t.precision, KaiAlertTimePrecision.exact);
+    });
+
+    test('a date with no time is dateOnly, and not orderable', () {
+      final t = timing(
+        'Fawri payment BHD 73.855 credited to your account XXXX55100100. '
+        'Your Balance is BHD 338.653 on 11/08',
+      );
+      expect(t.at, DateTime(2026, 8, 11));
+      expect(t.precision, KaiAlertTimePrecision.dateOnly);
+      expect(t.orderable, isFalse,
+          reason: 'ordering within that day is genuinely unknown');
+    });
+
+    test('no stated date falls back to delivery, and says so', () {
+      final t = timing('BHD 5.000 debited from your account XXXX94150000.');
+      expect(t.precision, KaiAlertTimePrecision.delivery);
+      expect(t.orderable, isFalse);
+    });
+
+    test('a merchant containing "on" does not become a date', () {
+      // "TIM HORTONS - GALLERI" has to not be read as a timestamp.
+      final t = timing(
+        'BHD 1.200 debited at TIM HORTONS - GALLERI BAH BH.Bal: BHD 560.971 '
+        'on 06/08/26 at 11:21.',
+      );
+      expect(t.at, DateTime(2026, 8, 6, 11, 21));
+    });
+
+    test('the row is dated by the bank, not by the inbox', () {
+      final out = ingestWith().ingest(alert(
+        'BHD11.890 has been debited from your account XXXX94150000 at PAYPAL '
+        'FACEBOOK IE on 09/08 at 09:21. Your balance is BHD 289.467.',
+        when: DateTime(2026, 8, 11, 8, 16),
+      ));
+      expect(out.candidate!.date, '2026-08-09',
+          reason: 'delivery lag must not move a payment to another day');
+      expect(out.timing!.precision, KaiAlertTimePrecision.exact);
+    });
+  });
+
   group('nothing is silently dropped', () {
     test('an alert with no amount says so', () {
       final out = ingestWith().ingest(alert('Your statement is ready'));
