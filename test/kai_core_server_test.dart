@@ -38,11 +38,14 @@ void main() {
       sessionId: 'session-one',
       foreground: true,
       audioAvailable: false,
+      status: 'thinking',
     );
     expect(heartbeat['online'], isTrue);
+    expect(heartbeat['status'], 'thinking');
     expect(heartbeat['leaseExpiresAt'], '2026-08-07T12:01:00.000Z');
 
     expect((await client.activeDevices()).single['deviceId'], 'desktop-one');
+    expect((await client.activeDevices()).single['status'], 'thinking');
     now = now.add(const Duration(seconds: 61));
     expect(await client.activeDevices(), isEmpty);
   });
@@ -77,6 +80,68 @@ void main() {
     expect(await client.pendingHandoffs('vr'), isEmpty);
   });
 
+  test('outbound attention is body-targeted, durable, and acknowledged',
+      () async {
+    final created = await client.createOutbound(
+      outboundId: 'outbound-one',
+      kind: 'proactive_friend',
+      fromSurface: 'central',
+      toSurface: 'vr',
+      targetBodyId: 'quest-shack',
+      conversationId: 'vr_shack',
+      text: 'I found something you might like.',
+      gesture: 'wave',
+      expiresAt: now.add(const Duration(minutes: 5)),
+    );
+    expect(created['status'], 'pending');
+    expect(
+      await client.pendingOutbound(
+        toSurface: 'vr',
+        bodyId: 'different-quest',
+      ),
+      isEmpty,
+    );
+    final pending = await client.pendingOutbound(
+      toSurface: 'vr',
+      bodyId: 'quest-shack',
+    );
+    expect(pending.single['text'], 'I found something you might like.');
+
+    final acknowledged = await client.acknowledgeOutbound(
+      'outbound-one',
+      bodyId: 'quest-shack',
+      surface: 'vr',
+    );
+    expect(acknowledged['status'], 'acknowledged');
+    expect(
+      await client.pendingOutbound(
+        toSurface: 'vr',
+        bodyId: 'quest-shack',
+      ),
+      isEmpty,
+    );
+  });
+
+  test('wrong body cannot acknowledge targeted outbound attention', () async {
+    await client.createOutbound(
+      outboundId: 'private-outbound',
+      kind: 'direct_reply',
+      fromSurface: 'central',
+      toSurface: 'ar',
+      targetBodyId: 'glasses-one',
+      text: 'For this body only.',
+      expiresAt: now.add(const Duration(minutes: 5)),
+    );
+    await expectLater(
+      client.acknowledgeOutbound(
+        'private-outbound',
+        bodyId: 'glasses-two',
+        surface: 'ar',
+      ),
+      throwsA(isA<KaiCoreException>()),
+    );
+  });
+
   test('coordination state survives a core restart', () async {
     await client.heartbeat(
       deviceId: 'desktop-one',
@@ -100,6 +165,15 @@ void main() {
       sourceSurface: 'messenger',
       payload: const {'instruction': 'Keep working.'},
     );
+    await client.createOutbound(
+      outboundId: 'durable-outbound',
+      kind: 'proactive_friend',
+      fromSurface: 'central',
+      toSurface: 'vr',
+      targetBodyId: 'quest-durable',
+      text: 'This should still be waiting after Core restarts.',
+      expiresAt: now.add(const Duration(minutes: 5)),
+    );
 
     client.close();
     await server.stop();
@@ -117,6 +191,14 @@ void main() {
       'durable-handoff',
     );
     expect((await client.tasks()).single['taskId'], 'durable-task');
+    expect(
+      (await client.pendingOutbound(
+        toSurface: 'vr',
+        bodyId: 'quest-durable',
+      ))
+          .single['outboundId'],
+      'durable-outbound',
+    );
   });
 
   test('conversation lane allows parallel threads but preserves turn order',

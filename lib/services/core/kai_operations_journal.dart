@@ -46,7 +46,8 @@ class KaiOperationsJournal {
   }) {
     final safeDetails = <String, Object?>{};
     for (final entry in details.entries) {
-      safeDetails[entry.key] = _safeValue(entry.value);
+      safeDetails[entry.key] =
+          _isSecretKey(entry.key) ? '[REDACTED]' : _safeValue(entry.value);
     }
     final line = jsonEncode({
       'at': DateTime.now().toUtc().toIso8601String(),
@@ -128,10 +129,75 @@ class KaiOperationsJournal {
     }
     if (value is Map) {
       return value.map(
-        (key, item) => MapEntry(key.toString(), _safeValue(item)),
+        (key, item) {
+          final textKey = key.toString();
+          return MapEntry(
+            textKey,
+            _isSecretKey(textKey) ? '[REDACTED]' : _safeValue(item),
+          );
+        },
       );
     }
-    final text = value.toString();
+    final text = _redactText(value.toString());
     return text.length <= 1000 ? text : '${text.substring(0, 1000)}…';
+  }
+
+  static bool _isSecretKey(String key) {
+    final normalized = key.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+    return const {
+      'auth',
+      'authorization',
+      'token',
+      'accesstoken',
+      'refreshtoken',
+      'idtoken',
+      'apikey',
+      'xapikey',
+      'clientsecret',
+      'secret',
+      'password',
+      'signature',
+      'sig',
+      'credential',
+      'cookie',
+      'setcookie',
+    }.contains(normalized);
+  }
+
+  /// Errors frequently stringify the complete request URI. Redact at the final
+  /// journal boundary so every current and future caller gets the same safety.
+  static String _redactText(String input) {
+    var output = input;
+
+    // URL/query and key-value forms, including Firebase's `?auth=<JWT>` and
+    // Google API `?key=<AIza...>` parameters.
+    output = output.replaceAllMapped(
+      RegExp(
+        r'([?&;,\s](?:auth|authorization|token|access_token|refresh_token|id_token|api_key|apikey|key|signature|sig)=)([^&#;,\s]+)',
+        caseSensitive: false,
+      ),
+      (match) => '${match.group(1)}[REDACTED]',
+    );
+
+    // Header/message forms.
+    output = output.replaceAllMapped(
+      RegExp(r'(Bearer\s+)[A-Za-z0-9._~+\-/=]+', caseSensitive: false),
+      (match) => '${match.group(1)}[REDACTED]',
+    );
+
+    // Common provider credentials or JWTs appearing outside a named field.
+    output = output.replaceAll(
+      RegExp(r'AIza[0-9A-Za-z_-]{20,}'),
+      '[REDACTED_GOOGLE_KEY]',
+    );
+    output = output.replaceAll(
+      RegExp(r'(?:sk-ant-|sk-)[0-9A-Za-z_-]{16,}'),
+      '[REDACTED_PROVIDER_KEY]',
+    );
+    output = output.replaceAll(
+      RegExp(r'eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+'),
+      '[REDACTED_JWT]',
+    );
+    return output;
   }
 }

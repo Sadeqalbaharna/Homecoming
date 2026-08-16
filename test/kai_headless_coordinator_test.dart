@@ -49,6 +49,16 @@ void main() {
     expect(headless, contains("retry: false"));
     expect(headless, contains('_watchCrossProcessActivity'));
     expect(headless, isNot(contains("'conversation': 4")));
+    expect(headless, contains("'proactive_friend'"));
+    expect(headless, contains('targetBodyId: body.bodyId'));
+    expect(headless, contains('saveAssistantReply: !embodied'));
+    expect(headless, contains('ConversationStoreService().saveTurn'));
+    expect(headless, contains('KaiProactiveAttentionQueue'));
+    expect(headless, contains('_enqueueProactiveNudge'));
+    expect(headless, contains('_drainProactiveAttention'));
+    expect(headless, contains("'attention_decision'"));
+    expect(headless, isNot(contains('final route = routeKaiOutput(')),
+        reason: 'proactive attention must use the accepted decision engine');
   });
 
   test('embodied bodies use independent ordered lanes', () {

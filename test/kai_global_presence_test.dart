@@ -4,6 +4,40 @@ import 'package:homecoming_app/services/core/kai_global_presence_service.dart';
 void main() {
   final now = DateTime.utc(2026, 8, 7, 20);
 
+  test('ordinary bodies can never mutate the central coordinator lease', () {
+    expect(
+      resolveKaiCoordinatorLeaseAction(
+        managesCoordinatorLease: false,
+        requestedAwake: false,
+      ),
+      KaiCoordinatorLeaseAction.none,
+    );
+    expect(
+      resolveKaiCoordinatorLeaseAction(
+        managesCoordinatorLease: false,
+        requestedAwake: true,
+      ),
+      KaiCoordinatorLeaseAction.none,
+    );
+  });
+
+  test('the authorised coordinator can renew and expire its own lease', () {
+    expect(
+      resolveKaiCoordinatorLeaseAction(
+        managesCoordinatorLease: true,
+        requestedAwake: true,
+      ),
+      KaiCoordinatorLeaseAction.renew,
+    );
+    expect(
+      resolveKaiCoordinatorLeaseAction(
+        managesCoordinatorLease: true,
+        requestedAwake: false,
+      ),
+      KaiCoordinatorLeaseAction.expire,
+    );
+  });
+
   test('Kai is awake when the central coordinator lease is alive', () {
     final snapshot = resolveKaiGlobalPresence(
       connected: true,
@@ -86,6 +120,26 @@ void main() {
         reason: 'an awake body cannot impersonate the central coordinator');
   });
 
+  test('visible heart can beat from a live body without coordinator ownership', () {
+    final snapshot = resolveKaiGlobalPresence(
+      connected: true,
+      serverNow: now,
+      coordinatorValue: null,
+      bodiesValue: {
+        'desktop-one': {
+          'surface': 'desktop',
+          'leaseExpiresAt':
+              now.add(const Duration(minutes: 1)).millisecondsSinceEpoch,
+        },
+      },
+    );
+
+    expect(snapshot.isAwake, isFalse,
+        reason: 'visible desktop bodies must not impersonate the coordinator');
+    expect(snapshot.hasLiveBody, isTrue,
+        reason: 'the desktop badge should show the reachable core as alive');
+  });
+
   test('loss of central verification never leaves a fake beating heart', () {
     final snapshot = resolveKaiGlobalPresence(
       connected: false,
@@ -104,5 +158,6 @@ void main() {
     );
 
     expect(snapshot.isAwake, isFalse);
+    expect(snapshot.hasLiveBody, isFalse);
   });
 }

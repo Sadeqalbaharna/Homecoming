@@ -20,6 +20,7 @@ void main() {
 
     final reported = await reportEmbodiedPresenceToCore(
       client: client,
+      status: 'thinking',
       context: KaiSurfaceContext.vr(
         worldId: 'vr_shack',
         deviceId: 'quest-three',
@@ -29,6 +30,7 @@ void main() {
     );
 
     expect(reported, isTrue);
+    expect((await client.activeDevices()).single['status'], 'thinking');
     final body = (await client.activeDevices()).single;
     expect(body['deviceId'], 'quest-three');
     expect(body['surface'], 'vr');

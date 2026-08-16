@@ -4,10 +4,16 @@ import 'dart:async';
 import 'dart:io';
 
 import '../ai/ai_service.dart';
+import '../attention/kai_attention_engine.dart';
+import '../attention/kai_proactive_attention_queue.dart';
+import '../attention/kai_proactive_attention_store.dart';
 import '../embodiment/kai_embodiment_gateway_service.dart';
 import 'kai_conversation_request_service.dart';
 import 'kai_body_event.dart';
+import 'conversation_store_service.dart';
 import 'kai_core_client.dart';
+import 'kai_due_commitment_loop.dart';
+import 'kai_due_commitment_scheduler.dart';
 import 'kai_core_server.dart';
 import 'kai_db.dart';
 import 'kai_global_presence_service.dart';
@@ -71,6 +77,10 @@ class KaiHeadlessCoordinator {
       KaiConversationRequestService.instance;
   final KaiCoreClient _core = KaiCoreClient();
   final KaiOperationsJournal _journal = KaiOperationsJournal();
+  final KaiProactiveAttentionQueue _proactiveAttention =
+      KaiProactiveAttentionQueue();
+  final KaiProactiveAttentionStore _attentionStore =
+      KaiProactiveAttentionStore();
   KaiCoreServer? _embeddedCore;
 
   StreamSubscription<List<KaiConversationRequest>>? _requestSub;
@@ -88,6 +98,7 @@ class KaiHeadlessCoordinator {
       const KaiGlobalPresenceSnapshot.connecting();
   Timer? _bootstrapRetryTimer;
   Timer? _bodyMirrorTimer;
+  Timer? _attentionTimer;
   bool _bodyMirrorBusy = false;
   bool _coreRecoveryBusy = false;
 
@@ -126,15 +137,85 @@ class KaiHeadlessCoordinator {
       },
     );
 
+    // HYDRATE FIRST. Before the nudge subscription exists and before the timer
+    // can drain, or a restart would evaluate an empty queue, hand Kai six fresh
+    // nudges, and re-deliver something he already said.
+    await _hydrateProactiveAttention();
+
     // Proactive friend messages move with the coordinator. Tool-bearing nudges
     // remain parked for an attended desktop session.
     KaiProactiveService.instance.start(kKaiCentralPersona);
     _watchCrossProcessActivity();
     _proactiveSub = KaiProactiveService.instance.nudges.listen(
-      (nudge) => unawaited(_deliverProactiveNudge(nudge)),
+      (nudge) => unawaited(_enqueueProactiveNudge(nudge)),
+    );
+    _attentionTimer ??= Timer.periodic(
+      const Duration(seconds: 20),
+      (_) => unawaited(_drainProactiveAttention()),
     );
 
+    // Due reminders get their OWN loop, not a share of the proactive timer.
+    // They carry no model call and their lateness is the whole failure mode,
+    // so they must not inherit conversation work's pacing or its busy flag.
+    // The loop owns its initial drain, so there is nothing to kick here.
+    _dueLoop.start();
+
     await _journal.record('coordinator_ready');
+  }
+
+  /// The due-commitment loop: Core → attention decision → dispatch or defer.
+  ///
+  /// Lifecycle and policy are separate objects on purpose. The loop decides
+  /// WHEN — initial drain, periodic tick, presence wake, shutdown — and the
+  /// scheduler it builds decides WHAT. Both are the real production objects
+  /// the tests drive; neither is reimplemented in a harness.
+  late final KaiDueCommitmentLoop _dueLoop = KaiDueCommitmentLoop(
+    createScheduler: (isActive) => KaiDueCommitmentScheduler(
+      client: _core,
+      presence: () => _globalPresence,
+      now: DateTime.now,
+      quietHours: kKaiCoordinatorQuietHours,
+      journal: (event, {severity = 'info', details = const {}}) =>
+          _journal.record(event,
+              component: 'due_commitments',
+              severity: severity,
+              details: details),
+      // Authorization comes from the loop, so a drain suspended across a
+      // shutdown cannot resume and write to Core.
+      isActive: isActive,
+    ),
+  );
+
+  /// Stop timers and subscriptions so nothing fires after shutdown.
+  ///
+  /// The coordinator previously had no teardown at all: every timer and stream
+  /// outlived it. That is survivable in a process that only ever exits, but it
+  /// means a test — or a restart inside one process — leaves callbacks running
+  /// that can still reach Core and mutate a promise.
+  Future<void> stop() async {
+    _started = false;
+    // Awaited, not just cancelled: this is the one subsystem that can still
+    // mutate a durable promise after its trigger is gone.
+    await _dueLoop.stop();
+    _attentionTimer?.cancel();
+    _attentionTimer = null;
+    _bodyMirrorTimer?.cancel();
+    _bodyMirrorTimer = null;
+    _bootstrapRetryTimer?.cancel();
+    _bootstrapRetryTimer = null;
+    _heartbeat?.stop();
+    _heartbeat = null;
+    await _presenceSub?.cancel();
+    _presenceSub = null;
+    await _requestSub?.cancel();
+    _requestSub = null;
+    await _proactiveSub?.cancel();
+    _proactiveSub = null;
+    for (final sub in _activitySubs) {
+      await sub.cancel();
+    }
+    _activitySubs.clear();
+    await _journal.record('coordinator_stopped');
   }
 
   void _startBodyMirror() {
@@ -200,6 +281,9 @@ class KaiHeadlessCoordinator {
         // The coordinator is Kai's heart, not a visible desktop body. Publishing
         // it here made the constellation claim the room was open when it wasn't.
         publishBodyLease: false,
+        // This is the only process allowed to mutate Kai's central lease.
+        // Visible desktop/mobile/VR/AR bodies publish their own leases only.
+        managesCoordinatorLease: true,
         foreground: false,
         status: 'coordinating',
       );
@@ -353,6 +437,15 @@ class KaiHeadlessCoordinator {
       phase: phase,
       lastSuccessAt: snapshot.observedAt,
     )));
+    if (_proactiveAttention.pending.isNotEmpty) {
+      unawaited(_drainProactiveAttention());
+    }
+    // A desktop that just came back is the reason a waiting reminder can
+    // finally be shown, so it wakes the drain rather than costing up to a
+    // whole timer interval. Presence churn that adds no eligible body — a
+    // phone reconnecting, a lease renewing — returns false and creates
+    // nothing.
+    unawaited(_dueLoop.onPresence(snapshot));
   }
 
   Future<void> _drain() async {
@@ -571,8 +664,7 @@ class KaiHeadlessCoordinator {
     } catch (_) {}
   }
 
-  Future<void> _deliverProactiveNudge(KaiNudge nudge) async {
-    if (_busy || _proactiveBusy) return;
+  Future<void> _enqueueProactiveNudge(KaiNudge nudge) async {
     if (nudge.wantsHands) {
       await _journal.record(
         'proactive_work_parked',
@@ -580,10 +672,27 @@ class KaiHeadlessCoordinator {
       );
       return;
     }
-    _proactiveBusy = true;
-    final started = DateTime.now().toUtc();
-    try {
-      final candidates = _globalPresence.bodies.map((body) {
+
+    final receivedAt = DateTime.now().toUtc();
+    final pending = _proactiveAttention.enqueue(
+      nudge,
+      receivedAt: receivedAt,
+    );
+    await _persistProactiveAttention();
+    await _journal.record(
+      'attention_event_received',
+      requestId: pending.event.eventId,
+      details: {
+        'kind': pending.event.kind.name,
+        'nudgeKind': nudge.kind.name,
+        'receivedAt': receivedAt,
+      },
+    );
+    await _drainProactiveAttention();
+  }
+
+  List<KaiBodyRouteCandidate> _attentionCandidates() =>
+      _globalPresence.bodies.map((body) {
         final conversationSurface = body.surface == 'messenger'
             ? 'messenger'
             : body.surface == 'desktop'
@@ -595,35 +704,159 @@ class KaiHeadlessCoordinator {
           bodyId: body.bodyId,
           surface: body.surface,
           lastUserActivityAt: body.lastUserActivityAt ??
-              DateTime.fromMillisecondsSinceEpoch(observedActivity,
-                  isUtc: true),
+              DateTime.fromMillisecondsSinceEpoch(
+                observedActivity,
+                isUtc: true,
+              ),
           foreground: body.foreground,
-          // Until Unity has an outbound inbox, only visible chat bodies may be
-          // selected. This prevents a proactive line from being "delivered" to
-          // a headset that has no receiver and silently disappearing.
-          allowsFriendConversation:
-              body.surface == 'messenger' || body.surface == 'desktop',
+          allowsFriendConversation: const {
+            'messenger',
+            'desktop',
+            'vr',
+            'ar',
+          }.contains(body.surface),
         );
-      });
-      final route = routeKaiOutput(
-        kind: KaiOutboundKind.proactiveFriend,
-        candidates: candidates,
-      );
-      if (route.storeForLater) {
+      }).toList(growable: false);
+
+  /// Load durable attention state, or start honestly empty.
+  ///
+  /// Never throws. A coordinator that will not start because one JSON file is
+  /// unreadable is worse than a coordinator that starts having forgotten what
+  /// it was waiting to say — so a degraded load is journalled, not fatal.
+  Future<void> _hydrateProactiveAttention() async {
+    try {
+      final snapshot = await _attentionStore.load();
+      if (snapshot != null) {
+        _proactiveAttention.restore(snapshot);
         await _journal.record(
-          'proactive_parked_no_body',
-          details: {'kind': nudge.kind.name, 'reason': route.reason},
+          _attentionStore.lastLoadUsedBackup
+              ? 'attention_state_recovered_from_backup'
+              : 'attention_state_loaded',
+          severity: _attentionStore.lastLoadUsedBackup ? 'warning' : 'info',
+          // Counts only. The seed lives in the state file because resumption
+          // needs it; it must never reach the operations journal.
+          details: {
+            'pending': _proactiveAttention.pending.length,
+            'deliveriesUsed': _proactiveAttention.deliveriesUsed,
+          },
         );
         return;
       }
-      final body = _globalPresence.bodies.firstWhere(
-        (candidate) => candidate.bodyId == route.bodyId,
+
+      // Each remaining outcome gets its own record. Brief 008 mapped an
+      // unsupported version onto `attention_state_loaded`, so a build reading
+      // state it could not understand reported a successful start.
+      switch (_attentionStore.lastLoadStatus) {
+        case KaiAttentionLoadStatus.unsupportedVersion:
+          await _journal.record(
+            'attention_state_unsupported_version',
+            severity: 'warning',
+            details: const {'startedEmpty': true, 'evidenceRetained': true},
+          );
+          break;
+        case KaiAttentionLoadStatus.corrupt:
+          await _journal.record(
+            'attention_state_unreadable',
+            severity: 'warning',
+            details: const {'startedEmpty': true, 'evidenceRetained': true},
+          );
+          break;
+        case KaiAttentionLoadStatus.absent:
+          // A first run is not an incident.
+          break;
+        case KaiAttentionLoadStatus.loaded:
+        case KaiAttentionLoadStatus.recoveredFromBackup:
+          break;
+      }
+    } catch (error) {
+      await _journal.record(
+        'attention_state_load_failed',
+        severity: 'warning',
+        details: {'error': error.toString()},
       );
-      final targetSurface =
-          body.surface == 'messenger' ? 'messenger' : 'in_person';
-      final context = body.surface == 'messenger'
-          ? KaiSurfaceContext.messenger
-          : KaiSurfaceContext.desktop.copyWith(goggles: KaiGoggles.off);
+    }
+  }
+
+  /// Persist after any queue mutation. An extra write after a read-only
+  /// evaluation is harmless; a missed mutation is not, so this is called on
+  /// every path rather than only where state provably changed.
+  Future<void> _persistProactiveAttention() async {
+    try {
+      await _attentionStore.save(_proactiveAttention.snapshot());
+    } catch (error) {
+      await _journal.record(
+        'attention_state_persist_failed',
+        severity: 'warning',
+        details: {'error': error.toString()},
+      );
+    }
+  }
+
+  Future<void> _drainProactiveAttention() async {
+    // Unlike the old path, contention does not discard the event. It is already
+    // queued and the bounded timer will evaluate it again.
+    if (_busy || _proactiveBusy) return;
+    final revisionBefore = _proactiveAttention.revision;
+    final dispatch = _proactiveAttention.evaluate(
+      now: DateTime.now().toUtc(),
+      candidates: _attentionCandidates(),
+    );
+    // A null dispatch is NOT a no-op. evaluate() resets the Bahrain budget day
+    // before it checks whether anything is due, so a midnight rollover with
+    // everything blocked mutates state and then returns early. Brief 008
+    // returned here without writing, and a restart after midnight restored
+    // yesterday's exhausted budget.
+    //
+    // Keyed on the revision so an idle 20-second timer still writes nothing.
+    if (_proactiveAttention.revision != revisionBefore) {
+      await _persistProactiveAttention();
+    }
+    if (dispatch == null) return;
+
+    final decision = dispatch.decision;
+    await _journal.record(
+      'attention_decision',
+      requestId: decision.eventId,
+      details: decision.toJson(),
+    );
+    switch (decision.outcome) {
+      case KaiAttentionOutcome.deliverNow:
+        break;
+      case KaiAttentionOutcome.deferUntil:
+      case KaiAttentionOutcome.storeForLater:
+      case KaiAttentionOutcome.discardDuplicate:
+      case KaiAttentionOutcome.discardExpired:
+        return;
+    }
+
+    _proactiveBusy = true;
+    final started = DateTime.now().toUtc();
+    try {
+      final body = _globalPresence.bodies.firstWhere(
+        (candidate) => candidate.bodyId == decision.bodyId,
+      );
+      final nudge = dispatch.pending.nudge;
+      final embodied = body.surface == 'vr' || body.surface == 'ar';
+      final targetSurface = switch (body.surface) {
+        'messenger' => 'messenger',
+        'desktop' => 'in_person',
+        'vr' => 'vr_shack',
+        _ => 'ar',
+      };
+      final context = switch (body.surface) {
+        'messenger' => KaiSurfaceContext.messenger,
+        'desktop' =>
+          KaiSurfaceContext.desktop.copyWith(goggles: KaiGoggles.off),
+        'vr' => KaiSurfaceContext.vr(
+            worldId: 'vr_shack',
+            deviceId: body.deviceId,
+            sessionId: body.sessionId,
+          ),
+        _ => KaiSurfaceContext.ar.copyWith(
+            deviceId: body.deviceId,
+            sessionId: body.sessionId,
+          ),
+      };
       final response = await _ai
           .sendMessage(
             text: nudge.seed,
@@ -635,12 +868,43 @@ class KaiHeadlessCoordinator {
             useMemory: false,
             useWebSearch: false,
             saveUserMessage: false,
-            saveAssistantReply: true,
+            // Embodied delivery is committed to Core first. Persisting before
+            // the inbox write could make history claim Kai spoke in a world
+            // that never received the line.
+            saveAssistantReply: !embodied,
             source: 'proactive',
           )
           .timeout(const Duration(seconds: 45));
       final delivered = response.reply.trim().isNotEmpty &&
           response.reply.trim() != '(no reply)';
+      if (delivered && embodied) {
+        final outboundId = dispatch.pending.event.eventId;
+        await _core.createOutbound(
+          outboundId: outboundId,
+          kind: 'proactive_friend',
+          fromSurface: 'central',
+          toSurface: body.surface,
+          targetBodyId: body.bodyId,
+          conversationId: targetSurface,
+          correlationId: dispatch.pending.event.correlationId,
+          text: response.reply.trim(),
+          expiresAt: DateTime.now().toUtc().add(const Duration(minutes: 10)),
+        );
+        await ConversationStoreService().saveTurn(
+          personaId: kKaiCentralPersona,
+          surfaceId: targetSurface,
+          aiReply: response.reply.trim(),
+          personalityDeltas: const {},
+        );
+      }
+      _proactiveAttention.complete(
+        dispatch.pending.event.eventId,
+        now: DateTime.now().toUtc(),
+      );
+      // Persisted BEFORE the journal entry: the processed-ID ledger and the
+      // budget count are what stop a redelivery after a crash, so they should
+      // reach disk before anything else about this delivery does.
+      await _persistProactiveAttention();
       await _journal.record(
         delivered ? 'proactive_delivered' : 'proactive_empty',
         severity: delivered ? 'info' : 'warning',
@@ -649,18 +913,32 @@ class KaiHeadlessCoordinator {
         details: {
           'kind': nudge.kind.name,
           'bodyId': body.bodyId,
-          'route': route.reason,
+          'route': decision.reasonCode,
+          'eventId': dispatch.pending.event.eventId,
         },
       );
     } catch (error) {
+      _proactiveAttention.fail(
+        dispatch.pending.event.eventId,
+        now: DateTime.now().toUtc(),
+      );
+      await _persistProactiveAttention();
       await _journal.record(
         'proactive_failed',
         severity: 'warning',
         surface: 'central',
-        details: {'kind': nudge.kind.name, 'error': error},
+        requestId: dispatch.pending.event.eventId,
+        details: {
+          'kind': dispatch.pending.nudge.kind.name,
+          'error': error,
+          'retryInMs': _proactiveAttention.failureRetryDelay.inMilliseconds,
+        },
       );
     } finally {
       _proactiveBusy = false;
+      if (_proactiveAttention.pending.isNotEmpty) {
+        unawaited(_drainProactiveAttention());
+      }
     }
   }
 }
