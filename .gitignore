@@ -84,3 +84,9 @@ tmp_*.patch
 /build-*/
 /tmp/
 /.tool-home/
+
+# Live Firebase web console — carries a project API key in plain text.
+# Excluded by hand on 2026-08-16 and then committed anyway by a concurrent
+# merge that swept untracked files. A deliberate exclusion that only lives in
+# one agent's head is not an exclusion; this is the version that survives.
+/tavern_console/
