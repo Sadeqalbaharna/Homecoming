@@ -40,6 +40,27 @@ the Northstar.
 - The final gate requires a positive amount and a reconciliation reference.
 - Failed and rejected attempts remain useful history; they are not progress.
 
+## Pre-build commercial value gate
+
+`factory-pre-build-commercial-value-v1` sits at Blueprint and applies before
+Assembly. Its origin is recorded rather than theorised: Practice Ladder passed
+every technical check and the sponsor rejected it on buyer value and quality.
+The gate exists so that verdict arrives before substantial build work, not
+after it.
+
+Six required checks: a one-sentence paid transformation naming the exact buyer
+and why payment is rational; a depth benchmark against at least three real
+current products with live external evidence; a finished buyer-facing sample;
+an adversarial buyer-value review; sponsor review of that exact sample hash;
+and a thin-wrapper kill.
+
+**Technical tests cannot pass this value gate.** A green suite proves the thing
+works, never that anyone would pay for it, and the run that created this gate
+is the proof of that distinction. Agents may prepare evidence and may not infer
+sponsor approval. Passing authorizes neither Assembly nor publishing.
+
+Verdicts are PASS, REVISE, KILL or UNVERIFIED. UNVERIFIED is not a soft pass.
+
 ## Advancement gates
 
 | # | Station | Outcome | Exit gate |

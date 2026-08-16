@@ -121,3 +121,20 @@ Allowed adaptations:
 Kai may loosen taste and format. Kai may not loosen citations, counts, prices, or the scorer verdict.
 
 **Refusal condition:** if Kai cannot cite evidence, he must say *"no defensible gap found"* rather than inventing one. A scout that never returns empty-handed is not a scout.
+
+## PRE-BUILD COMMERCIAL VALUE GATE
+
+Before Assembly, a candidate must survive `factory-pre-build-commercial-value-v1`.
+
+It was added because Practice Ladder passed its technical checks and was
+rejected by the sponsor on buyer value — so the scout's job is not finished
+when a thing is buildable, only when someone would rationally pay for it.
+
+The kill condition is explicit: a product that does not materially exceed a
+thin wrapper or randomizer is killed at Blueprint, however cleanly it is
+implemented. Relabeling, prompt wrapping, and aggregation without judgment all
+fail here. Depth is benchmarked against at least three real, current, priced
+products — inspected live, not recalled.
+
+The sponsor reviews the exact sample. Agents prepare evidence; agents never
+infer approval.
