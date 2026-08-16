@@ -61,7 +61,7 @@ class KaiToolsPlugin(private val context: Context) : MethodChannel.MethodCallHan
             "openAccessibilitySettings" -> openAccessibilitySettings(result)
             "drainBankAlerts"           -> drainBankAlerts(result)
             "pendingBankAlerts"         -> result.success(KaiBankAlertStore.pending(context))
-            "enrollBankSender"          -> enrollBankSender(call, result)
+            "setBankSenders"            -> setBankSenders(call, result)
             else                        -> result.notImplemented()
         }
     }
@@ -843,14 +843,13 @@ class KaiToolsPlugin(private val context: Context) : MethodChannel.MethodCallHan
         result.success(KaiBankAlertStore.drain(context))
     }
 
-    private fun enrollBankSender(call: MethodCall, result: MethodChannel.Result) {
-        val sender = call.argument<String>("sender")?.trim()
-        if (sender.isNullOrBlank()) {
-            result.error("bad_sender", "A sender id is required.", null)
-            return
-        }
-        KaiBankAlertStore.enroll(sender)
-        result.success(true)
+    // Dart owns the enrolment list; this pushes it down as a capture filter.
+    // Replaces rather than appends, so removing a sender in the app actually
+    // removes it here — a revocation that only adds is not a revocation.
+    private fun setBankSenders(call: MethodCall, result: MethodChannel.Result) {
+        val senders = call.argument<List<String>>("senders") ?: emptyList()
+        KaiBankAlertStore.setEnrolled(context, senders)
+        result.success(KaiBankAlertStore.enrolledSenders(context).size)
     }
 
 }

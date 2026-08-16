@@ -44,24 +44,63 @@ object KaiBankAlertStore {
     private const val MAX_QUEUED = 500
 
     /**
-     * Sender ids that may be captured. Matched case-insensitively against the
-     * notification title (which is the SMS sender id) AND the package name, so
-     * this works whether the bank texts you or has its own app.
+     * Senders whose alerts may be captured, synced down from Dart.
      *
-     * Deliberately a literal list rather than a pattern: "anything containing
-     * BANK" would match a scammer calling themselves BANK-ALERT.
+     * EMPTY BY DEFAULT, on purpose. An earlier version shipped with five
+     * guessed Bahraini sender ids already enrolled, which invented a trust
+     * boundary rather than asking for one — and a wrong guess here fails as
+     * SILENCE, the worst possible way for a trust boundary to be wrong.
+     *
+     * Dart owns the list; this copy is a capture filter, not the authority.
+     * Persisted so a restart cannot quietly empty it: an enrolment that
+     * forgets is worse than no enrolment, because the ledger simply stops
+     * filling and nothing says why.
      */
-    private val enrolled = mutableSetOf(
-        "NBB", "BBK", "AUB", "BENEFIT", "STCPAY",
-        "com.nbbonline.mobile", "com.bbkonline", "com.ahliunited",
-    )
+    private var enrolled: Set<String> = emptySet()
+    private var loaded = false
 
-    fun enroll(sender: String) { enrolled.add(sender.uppercase()) }
+    private const val ENROL_FILE = "kai_bank_senders.json"
 
-    fun isEnrolled(sender: String?, pkg: String?): Boolean {
+    @Synchronized
+    fun setEnrolled(ctx: Context, senders: List<String>) {
+        enrolled = senders.map { it.trim().uppercase() }.filter { it.isNotEmpty() }.toSet()
+        loaded = true
+        runCatching {
+            val arr = JSONArray()
+            enrolled.forEach { arr.put(it) }
+            File(ctx.filesDir, ENROL_FILE).writeText(arr.toString())
+        }
+    }
+
+    @Synchronized
+    private fun ensureLoaded(ctx: Context) {
+        if (loaded) return
+        loaded = true
+        runCatching {
+            val f = File(ctx.filesDir, ENROL_FILE)
+            if (!f.exists()) return
+            val arr = JSONArray(f.readText())
+            val out = HashSet<String>(arr.length())
+            for (i in 0 until arr.length()) out.add(arr.optString(i).uppercase())
+            enrolled = out
+        }
+    }
+
+    fun enrolledSenders(ctx: Context): Set<String> {
+        ensureLoaded(ctx)
+        return enrolled
+    }
+
+    /**
+     * Exact match only. A pattern like "contains BANK" would match a scammer
+     * calling themselves BANK-ALERT, which is the whole attack.
+     */
+    fun isEnrolled(ctx: Context, sender: String?, pkg: String?): Boolean {
+        ensureLoaded(ctx)
+        if (enrolled.isEmpty()) return false
         val s = sender?.trim()?.uppercase() ?: ""
-        val p = pkg?.trim() ?: ""
-        return enrolled.any { it.uppercase() == s } || enrolled.contains(p)
+        val p = pkg?.trim()?.uppercase() ?: ""
+        return enrolled.contains(s) || enrolled.contains(p)
     }
 
     /**

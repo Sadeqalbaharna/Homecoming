@@ -136,7 +136,7 @@ class KaiNotificationService : NotificationListenerService() {
         // Enrolled senders therefore get a durable, append-only queue of their
         // own. Captured HERE, at arrival, rather than on a pull: a transaction
         // that lands while nothing is asking must still be there later.
-        if (KaiBankAlertStore.isEnrolled(title, pkg)) {
+        if (KaiBankAlertStore.isEnrolled(applicationContext, title, pkg)) {
             runCatching {
                 KaiBankAlertStore.capture(
                     applicationContext,
