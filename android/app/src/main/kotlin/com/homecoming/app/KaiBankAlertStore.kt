@@ -103,6 +103,61 @@ object KaiBankAlertStore {
         return enrolled.contains(s) || enrolled.contains(p)
     }
 
+
+    // ── Liveness ─────────────────────────────────────────────────────────────
+    //
+    // A listener can stop without saying so: OEM battery managers unbind it,
+    // and "remove permissions if app unused" revokes the grant after days of
+    // not opening the app. Neither produces an error, and an empty ledger looks
+    // exactly like a quiet week.
+    //
+    // The disambiguator is that this service sees EVERY notification, not only
+    // bank alerts — dozens a day, entirely independent of whether Sadeq spent
+    // anything. So a recent heartbeat with no bank alerts means a quiet week,
+    // and no heartbeat at all means the pipe is dead.
+    //
+    // Written on every notification and read rarely, so it is kept in its own
+    // tiny file rather than rewriting the alert queue.
+
+    private const val HEALTH_FILE = "kai_capture_health.json"
+
+    @Synchronized
+    fun noteSeen(ctx: Context, timestamp: Long) {
+        runCatching {
+            val f = File(ctx.filesDir, HEALTH_FILE)
+            val o = if (f.exists()) JSONObject(f.readText()) else JSONObject()
+            o.put("lastAnyNotification", timestamp)
+            f.writeText(o.toString())
+        }
+    }
+
+    @Synchronized
+    fun noteListenerState(ctx: Context, connected: Boolean) {
+        runCatching {
+            val f = File(ctx.filesDir, HEALTH_FILE)
+            val o = if (f.exists()) JSONObject(f.readText()) else JSONObject()
+            o.put("listenerConnected", connected)
+            o.put("listenerStateAt", System.currentTimeMillis())
+            f.writeText(o.toString())
+        }
+    }
+
+    fun health(ctx: Context): Map<String, Any?> {
+        val o = runCatching {
+            val f = File(ctx.filesDir, HEALTH_FILE)
+            if (f.exists()) JSONObject(f.readText()) else JSONObject()
+        }.getOrDefault(JSONObject())
+        return mapOf(
+            "lastAnyNotification" to
+                (if (o.has("lastAnyNotification")) o.optLong("lastAnyNotification") else null),
+            // Absent means never observed. Defaulting to true would report a
+            // listener that has never run as healthy.
+            "listenerConnected" to
+                (if (o.has("listenerConnected")) o.optBoolean("listenerConnected") else false),
+            "queued" to pending(ctx),
+        )
+    }
+
     /**
      * Append one alert. Idempotent on (sender, text, timestamp): Android
      * redelivers notifications on reconnect, and a duplicated row in a ledger

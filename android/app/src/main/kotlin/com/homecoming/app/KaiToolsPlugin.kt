@@ -61,6 +61,10 @@ class KaiToolsPlugin(private val context: Context) : MethodChannel.MethodCallHan
             "openAccessibilitySettings" -> openAccessibilitySettings(result)
             "drainBankAlerts"           -> drainBankAlerts(result)
             "pendingBankAlerts"         -> result.success(KaiBankAlertStore.pending(context))
+            "captureHealth"             -> result.success(
+                KaiBankAlertStore.health(context) +
+                    mapOf("accessGranted" to isNotificationAccessGranted())
+            )
             "setBankSenders"            -> setBankSenders(call, result)
             else                        -> result.notImplemented()
         }

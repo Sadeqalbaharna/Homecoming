@@ -71,8 +71,24 @@ class KaiNotificationService : NotificationListenerService() {
 
     // ── NotificationListenerService callbacks ──────────────────────────────
 
+    // The OS tells us directly when the binding comes and goes. Better evidence
+    // than inferring it from a gap, and the only way to distinguish "unbound"
+    // from "you had a quiet night".
+    override fun onListenerConnected() {
+        KaiBankAlertStore.noteListenerState(applicationContext, true)
+    }
+
+    override fun onListenerDisconnected() {
+        KaiBankAlertStore.noteListenerState(applicationContext, false)
+    }
+
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         val pkg = sbn.packageName ?: return
+
+        // Heartbeat on EVERY notification, before any filtering. This is what
+        // separates "no transactions" from "the listener is dead": bank alerts
+        // are rare, everything else is constant.
+        KaiBankAlertStore.noteSeen(applicationContext, sbn.postTime)
 
         // Skip noise: system UI, ongoing (music player bars, etc.), group summaries
         if (pkg == "android" || pkg == "com.android.systemui") return
