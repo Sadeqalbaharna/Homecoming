@@ -1,0 +1,35 @@
+{
+  "evidence_id": "factory-line-maturity-p6-2026-08-10",
+  "observed_at": "2026-08-10T15:39:18.4062092+03:00",
+  "proof_state": "TESTED",
+  "runtime_proof_state": "UNVERIFIED",
+  "factory_line": {
+    "active_phase": 6,
+    "active_label": "Dispatch",
+    "active_proof": "LIVE UNVERIFIED",
+    "reached_phases": [0, 1, 2, 3, 4, 5],
+    "future_phases": [7, 8],
+    "leading_product_lane": "boothsignal",
+    "preserved_product_lanes": ["boothsignal", "find_my_table"],
+    "settled_revenue": "UNVERIFIED"
+  },
+  "tests": {
+    "focused": "27/27 PASS",
+    "proportional_factory_regression": "61/61 PASS",
+    "scoped_analysis": "0 errors; 3 pre-existing style infos"
+  },
+  "build": {
+    "result": "PASS",
+    "duration_seconds": 130.0,
+    "kai_exe_sha256": "B906B94D56E9B151DE1DC1CC23ADF3B257C1DA39A9D3AE2624A47B74B4192896",
+    "app_so_sha256": "361EB66DC8A26B961247269872C8C9A5C3839C358968EFC5E03AC18FD7AC5BA0"
+  },
+  "runtime": {
+    "room_process": null,
+    "core_pid": 127176,
+    "watchdog_pid": 89468,
+    "core_health": "PASS",
+    "screenshot": null,
+    "stop_reason": "Ordinary room startup invokes Firebase project metadata update calls; this brief explicitly forbids Firebase mutation."
+  }
+}

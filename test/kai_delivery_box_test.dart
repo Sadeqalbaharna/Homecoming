@@ -79,14 +79,14 @@ void main() {
       final hoardBoxes = hoard.expand((layer) => layer.deliveryBoxes).toList();
       expect(
           hoardBoxes.where((box) => box.state == KaiDeliveryBoxState.verified),
-          hasLength(10));
+          hasLength(14));
       expect(
           hoardBoxes.where((box) => box.state == KaiDeliveryBoxState.deferred),
-          hasLength(18));
+          hasLength(17));
       expect(
           hoardBoxes
               .where((box) => box.state == KaiDeliveryBoxState.awaitingSponsor),
-          hasLength(4));
+          hasLength(1));
       expect(
           hoard[1].deliveryBoxes.map((box) => box.identity),
           containsAll([
@@ -110,18 +110,21 @@ void main() {
           contains('authoritative adoption remains UNVERIFIED'));
     });
 
-    test('Factory accepts only Signal Scan and keeps Blueprint/Assembly honest',
-        () {
+    test('Factory accepts through Dispatch and keeps later gates honest', () {
       final factory = KaiProjectService.factoryPhasesForTest;
-      expect(factory[0].deliveryBoxes[0].state, KaiDeliveryBoxState.verified);
-      expect(factory[0].deliveryBoxes[1].state, KaiDeliveryBoxState.verified);
-      expect(factory[0].deliveryBoxes[2].state, KaiDeliveryBoxState.verified);
+      for (var phase = 0; phase <= 6; phase++) {
+        expect(
+          factory[phase]
+              .deliveryBoxes
+              .every((box) => box.state == KaiDeliveryBoxState.verified),
+          isTrue,
+          reason: 'Factory phase $phase is accepted',
+        );
+      }
       expect(factory[0].deliveryBoxes[2].owner, KaiDeliveryBoxOwner.sponsor);
-      expect(factory[1].deliveryBoxes[0].state, KaiDeliveryBoxState.active);
-      expect(factory[1].deliveryBoxes[1].state,
+      expect(factory[7].deliveryBoxes.first.state, KaiDeliveryBoxState.ready);
+      expect(factory[7].deliveryBoxes.last.state,
           KaiDeliveryBoxState.awaitingSponsor);
-      expect(
-          factory[2].deliveryBoxes.first.state, KaiDeliveryBoxState.deferred);
       expect(factory[6].deliveryBoxes.last.risk, KaiDeliveryRisk.liveExternal);
       expect(factory[8].deliveryBoxes.first.owner, KaiDeliveryBoxOwner.sponsor);
       expect(factory[8].deliveryBoxes.last.outcome.toLowerCase(),

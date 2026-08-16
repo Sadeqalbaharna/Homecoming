@@ -137,6 +137,137 @@ void main() {
     expect(queue.pending, isEmpty);
   });
 
+  test('paraphrases of one durable topic produce one delivery', () {
+    final queue = KaiProactiveAttentionQueue();
+    final now = DateTime.utc(2026, 8, 11, 9);
+    const first = KaiNudge(
+      '(proactive) two Kai headers may target the wrong region',
+      kind: KaiNudgeKind.noticed,
+      topicId: 'header-observation-42',
+    );
+    const paraphrase = KaiNudge(
+      '(proactive) the lookalike Kai labels are goblin machinery',
+      kind: KaiNudgeKind.noticed,
+      topicId: 'header-observation-42',
+    );
+
+    final original = queue.enqueue(first, receivedAt: now);
+    expect(
+      queue.evaluate(now: now, candidates: [body])!.decision.outcome,
+      KaiAttentionOutcome.deliverNow,
+    );
+    queue.complete(original.event.eventId, now: now);
+
+    queue.enqueue(
+      paraphrase,
+      receivedAt: now.add(const Duration(hours: 3)),
+    );
+    final replay = queue.evaluate(
+      now: now.add(const Duration(hours: 3)),
+      candidates: [body],
+    )!;
+
+    expect(replay.decision.outcome, KaiAttentionOutcome.discardDuplicate);
+    expect(queue.pending, isEmpty);
+  });
+
+  test('paraphrases of one topic cannot stack while delivery is pending', () {
+    final queue = KaiProactiveAttentionQueue();
+    final now = DateTime.utc(2026, 8, 11, 9);
+    const first = KaiNudge(
+      '(proactive) two Kai headers may target the wrong region',
+      kind: KaiNudgeKind.noticed,
+      topicId: 'header-observation-42',
+    );
+    const paraphrase = KaiNudge(
+      '(proactive) the lookalike Kai labels are goblin machinery',
+      kind: KaiNudgeKind.noticed,
+      topicId: 'header-observation-42',
+    );
+
+    final original = queue.enqueue(first, receivedAt: now);
+    final duplicate = queue.enqueue(
+      paraphrase,
+      receivedAt: now.add(const Duration(minutes: 1)),
+    );
+
+    expect(duplicate, same(original));
+    expect(queue.pending, hasLength(1));
+    expect(queue.pending.single.nudge.seed, first.seed);
+  });
+
+  test('one semantic topic deduplicates across proactive kinds', () {
+    final queue = KaiProactiveAttentionQueue();
+    final now = DateTime.utc(2026, 8, 15, 9);
+    const checkIn = KaiNudge(
+      '(proactive) checking in',
+      kind: KaiNudgeKind.checkIn,
+      topicId: 'silence:123',
+    );
+    const companionship = KaiNudge(
+      '(proactive) still around',
+      kind: KaiNudgeKind.companionship,
+      topicId: 'silence:123',
+    );
+
+    final original = queue.enqueue(checkIn, receivedAt: now);
+    final duplicate = queue.enqueue(
+      companionship,
+      receivedAt: now.add(const Duration(minutes: 1)),
+    );
+
+    expect(duplicate, same(original));
+    expect(queue.pending, hasLength(1));
+    expect(original.event.eventId, 'proactive-topic:silence:123');
+
+    expect(
+      queue.evaluate(now: now, candidates: [body])!.decision.outcome,
+      KaiAttentionOutcome.deliverNow,
+    );
+    queue.complete(original.event.eventId, now: now);
+    queue.enqueue(
+      companionship,
+      receivedAt: now.add(const Duration(hours: 3)),
+    );
+    expect(
+      queue
+          .evaluate(
+            now: now.add(const Duration(hours: 3)),
+            candidates: [body],
+          )!
+          .decision
+          .outcome,
+      KaiAttentionOutcome.discardDuplicate,
+    );
+  });
+
+  test('final delivery boundary defers a generation crossing quiet hours', () {
+    final queue = KaiProactiveAttentionQueue();
+    final admitted = DateTime.utc(2026, 8, 15, 18, 59); // 21:59 Bahrain.
+    final pending = queue.enqueue(
+      const KaiNudge(
+        '(proactive) one last thought',
+        topicId: 'silence:456',
+      ),
+      receivedAt: admitted,
+    );
+
+    expect(
+      queue.evaluate(now: admitted, candidates: [body])!.decision.outcome,
+      KaiAttentionOutcome.deliverNow,
+    );
+    expect(
+      queue.deferForQuietHours(
+        pending.event.eventId,
+        now: DateTime.utc(2026, 8, 15, 19, 0), // 22:00 Bahrain.
+      ),
+      isTrue,
+    );
+    expect(queue.pending.single.notBefore, DateTime.utc(2026, 8, 16, 5));
+    expect(queue.processedEventIds, isEmpty);
+    expect(queue.deliveriesUsed, 0);
+  });
+
   test('two-hour-old ordinary nudge is explicitly expired', () {
     final queue = KaiProactiveAttentionQueue();
     final received = DateTime.utc(2026, 8, 8, 9);

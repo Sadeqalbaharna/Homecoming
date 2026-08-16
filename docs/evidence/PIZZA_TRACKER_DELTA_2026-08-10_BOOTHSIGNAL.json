@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "deltaId": "pizza-delta-2026-08-10-boothsignal-gumroad",
+  "createdAt": "2026-08-10T14:30:00+03:00",
+  "sourceOfTruthRef": "docs/NORTHSTAR_SOURCE_OF_TRUTH.md#factory-daily--boothsignal-sponsor-listing-report--2026-08-10",
+  "claims": [
+    {
+      "claimId": "factory.boothsignal-sponsor-confirmed-listing",
+      "projectId": "factory_northstar",
+      "requestedState": "active",
+      "authorityOwner": "sponsor",
+      "riskClass": "live_external",
+      "sourceOfTruthRef": "factory-daily-products/outputs/boothsignal-production-record.md",
+      "changedSurfaces": ["factory_nested_lane", "portfolio_projection"],
+      "evidence": [
+        {
+          "id": "factory.boothsignal.qa",
+          "kind": "file_sha256",
+          "path": "C:/Users/sadeq/Documents/Codex/2026-08-09/factory-daily-products/outputs/boothsignal-qa-receipt.json",
+          "sha256": "d9b8ad845b9d76841e86785052f20984fcf9a958dfbde415d61252d8f59200dd"
+        },
+        {
+          "id": "factory.boothsignal.gumroad-sponsor-report",
+          "kind": "sponsor_decision",
+          "authorityId": "sponsor-report-2026-08-10-boothsignal-gumroad"
+        }
+      ]
+    }
+  ]
+}

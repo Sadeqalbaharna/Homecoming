@@ -2,11 +2,15 @@
 #include <flutter/flutter_view_controller.h>
 #include <windows.h>
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
 
 #include "flutter_window.h"
 #include "utils.h"
 
 namespace {
+std::wstring CurrentExecutablePath();
+
 void RegisterKaiAutoStart() {
   wchar_t executable[MAX_PATH]{};
   if (GetModuleFileNameW(nullptr, executable, MAX_PATH) == 0) return;
@@ -22,6 +26,62 @@ void RegisterKaiAutoStart() {
                  reinterpret_cast<const BYTE*>(command.c_str()),
                  static_cast<DWORD>((command.size() + 1) * sizeof(wchar_t)));
   RegCloseKey(key);
+}
+
+void RegisterHomecomingProtocol() {
+  const std::wstring executable = CurrentExecutablePath();
+  if (executable.empty()) return;
+  const std::wstring base = L"Software\\Classes\\homecoming";
+  HKEY key = nullptr;
+  if (RegCreateKeyExW(HKEY_CURRENT_USER, base.c_str(), 0, nullptr, 0,
+                      KEY_SET_VALUE, nullptr, &key, nullptr) != ERROR_SUCCESS) {
+    return;
+  }
+  const std::wstring label = L"URL:Homecoming Protocol";
+  const std::wstring empty;
+  RegSetValueExW(key, nullptr, 0, REG_SZ,
+                 reinterpret_cast<const BYTE*>(label.c_str()),
+                 static_cast<DWORD>((label.size() + 1) * sizeof(wchar_t)));
+  RegSetValueExW(key, L"URL Protocol", 0, REG_SZ,
+                 reinterpret_cast<const BYTE*>(empty.c_str()),
+                 static_cast<DWORD>(sizeof(wchar_t)));
+  RegCloseKey(key);
+
+  const std::wstring command_key = base + L"\\shell\\open\\command";
+  if (RegCreateKeyExW(HKEY_CURRENT_USER, command_key.c_str(), 0, nullptr, 0,
+                      KEY_SET_VALUE, nullptr, &key, nullptr) != ERROR_SUCCESS) {
+    return;
+  }
+  const std::wstring command = L"\"" + executable +
+                               L"\" --whoop-oauth \"%1\"";
+  RegSetValueExW(key, nullptr, 0, REG_SZ,
+                 reinterpret_cast<const BYTE*>(command.c_str()),
+                 static_cast<DWORD>((command.size() + 1) * sizeof(wchar_t)));
+  RegCloseKey(key);
+}
+
+bool CaptureWhoopOAuthCallback(const std::vector<std::string>& arguments) {
+  const auto marker = std::find(arguments.begin(), arguments.end(),
+                                "--whoop-oauth");
+  if (marker == arguments.end() || std::next(marker) == arguments.end()) {
+    return false;
+  }
+  const std::string callback = *std::next(marker);
+  if (callback.rfind("homecoming://whoop/oauth?", 0) != 0) return true;
+
+  wchar_t local_app_data[MAX_PATH]{};
+  const DWORD length = GetEnvironmentVariableW(
+      L"LOCALAPPDATA", local_app_data, static_cast<DWORD>(MAX_PATH));
+  if (length == 0 || length >= MAX_PATH) return true;
+  const std::filesystem::path directory =
+      std::filesystem::path(local_app_data) / L"Homecoming";
+  std::error_code error;
+  std::filesystem::create_directories(directory, error);
+  if (error) return true;
+  std::ofstream output(directory / L"whoop_oauth_callback.txt",
+                       std::ios::binary | std::ios::trunc);
+  output << callback;
+  return true;
 }
 
 std::wstring CurrentExecutablePath() {
@@ -109,6 +169,11 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
 
   std::vector<std::string> command_line_arguments =
       GetCommandLineArguments();
+  if (CaptureWhoopOAuthCallback(command_line_arguments)) {
+    ::CoUninitialize();
+    return EXIT_SUCCESS;
+  }
+  RegisterHomecomingProtocol();
   const bool is_watchdog =
       std::find(command_line_arguments.begin(), command_line_arguments.end(),
                 "--watchdog") != command_line_arguments.end();
@@ -126,6 +191,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                 "--coordinator-worker") != command_line_arguments.end();
 
   HANDLE coordinator_mutex = nullptr;
+  HANDLE desktop_room_mutex = nullptr;
   if (coordinator_worker) {
     coordinator_mutex =
         CreateMutexW(nullptr, FALSE, L"Local\\KaiHomecomingCentralCoordinator");
@@ -136,6 +202,15 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
     }
     RegisterKaiAutoStart();
     StartKaiWatchdog();
+  } else {
+    desktop_room_mutex =
+        CreateMutexW(nullptr, FALSE, L"Local\\KaiHomecomingDesktopRoom");
+    if (desktop_room_mutex != nullptr &&
+        GetLastError() == ERROR_ALREADY_EXISTS) {
+      CloseHandle(desktop_room_mutex);
+      ::CoUninitialize();
+      return EXIT_SUCCESS;
+    }
   }
 
   project.set_dart_entrypoint_arguments(std::move(command_line_arguments));
@@ -145,6 +220,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   Win32Window::Point origin(10, 10);
   Win32Window::Size size(1280, 720);
   if (!window.Create(L"Kai", origin, size)) {
+    if (desktop_room_mutex != nullptr) CloseHandle(desktop_room_mutex);
     return EXIT_FAILURE;
   }
   window.SetQuitOnClose(true);
@@ -156,6 +232,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   }
 
   if (coordinator_mutex != nullptr) CloseHandle(coordinator_mutex);
+  if (desktop_room_mutex != nullptr) CloseHandle(desktop_room_mutex);
   ::CoUninitialize();
   return EXIT_SUCCESS;
 }

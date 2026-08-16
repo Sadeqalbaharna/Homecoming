@@ -8,7 +8,8 @@
 //      plus the gap, the open thread, and his mood.
 //   2. LET HIM SAY IT (his real voice, via presenceDirective — the same soul
 //      source as his replies and his idle mind), handed the situation from (1)
-//      and the thought his idle mind was actually chewing on while Sadeq was gone.
+//      and, only when explicitly approved for speech, the thought his idle mind
+//      was actually chewing on while Sadeq was gone.
 //
 // Templates remain underneath as the offline/no-key net, so a dead network
 // degrades to "canned" instead of "silent".
@@ -269,13 +270,27 @@ Return ONLY the greeting itself. No quotes, no label, no explanation.''';
       if (v is! Map || v.isEmpty) return null;
       String? text;
       v.forEach((_, val) {
-        if (val is Map && val['text'] != null) text = val['text'].toString();
+        final candidate = debugShareableGreetingThought(val);
+        if (candidate != null) text = candidate;
       });
-      final t = text?.trim();
-      return (t == null || t.isEmpty) ? null : t;
+      return text;
     } catch (_) {
       return null;
     }
+  }
+
+  /// A greeting is proactive speech, so private inner-monologue rows must not
+  /// silently become its subject. Historical rows fail closed. Even an opted-in
+  /// row must be genuine model output rather than a synthetic fallback.
+  @visibleForTesting
+  static String? debugShareableGreetingThought(Object? value) {
+    if (value is! Map || value['shareable'] != true) return null;
+    if (value['synthetic'] == true || value['origin'] != 'model_generated') {
+      return null;
+    }
+    final text = value['text']?.toString().trim() ?? '';
+    if (text.isEmpty || text.startsWith('↳')) return null;
+    return text;
   }
 
   /// Models like to wrap a line in quotes or prefix it. Strip the costume.

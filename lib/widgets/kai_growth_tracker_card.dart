@@ -5,11 +5,23 @@ import 'package:flutter/material.dart';
 import '../services/core/kai_growth_tracker_service.dart';
 
 typedef KaiGrowthLoader = Future<KaiGrowthSnapshot> Function(int days);
+typedef KaiGrowthGoogleConnector = Future<void> Function();
+typedef KaiGrowthSocialConnector = Future<void> Function(
+  String email,
+  String password,
+);
 
 class KaiGrowthTrackerCard extends StatefulWidget {
-  const KaiGrowthTrackerCard({super.key, this.loader});
+  const KaiGrowthTrackerCard({
+    super.key,
+    this.loader,
+    this.googleConnector,
+    this.socialConnector,
+  });
 
   final KaiGrowthLoader? loader;
+  final KaiGrowthGoogleConnector? googleConnector;
+  final KaiGrowthSocialConnector? socialConnector;
 
   @override
   State<KaiGrowthTrackerCard> createState() => _KaiGrowthTrackerCardState();
@@ -27,7 +39,15 @@ class _KaiGrowthTrackerCardState extends State<KaiGrowthTrackerCard> {
     _future = _loader(28);
   }
 
-  void _refresh() => setState(() => _future = _loader(28));
+  void _refresh() {
+    final next = _loader(28);
+    setState(() {
+      _future = next;
+    });
+  }
+
+  bool _needsConnection(Object? error) =>
+      '$error'.contains('Growth access is not linked');
 
   @override
   Widget build(BuildContext context) {
@@ -72,11 +92,23 @@ class _KaiGrowthTrackerCardState extends State<KaiGrowthTrackerCard> {
                 )
               else if (snapshot.hasError)
                 _GrowthUnavailable(
-                    error: '${snapshot.error}', onRetry: _refresh)
+                  error: '${snapshot.error}',
+                  actionLabel: _needsConnection(snapshot.error)
+                      ? 'Connect Tavern'
+                      : 'Retry',
+                  actionIcon: _needsConnection(snapshot.error)
+                      ? Icons.link
+                      : Icons.refresh,
+                  onAction: _needsConnection(snapshot.error)
+                      ? () => _showConnection(context)
+                      : _refresh,
+                )
               else if (snapshot.data?.hasChartData != true)
                 _GrowthUnavailable(
                   error: 'No comparable Growth days yet.',
-                  onRetry: _refresh,
+                  actionLabel: 'Retry',
+                  actionIcon: Icons.refresh,
+                  onAction: _refresh,
                 )
               else ...[
                 _GrowthLegend(series: snapshot.data!.series, compact: true),
@@ -97,6 +129,25 @@ class _KaiGrowthTrackerCardState extends State<KaiGrowthTrackerCard> {
                     fontSize: 8.5,
                   ),
                 ),
+                if (!snapshot.data!.socialConnected ||
+                    !snapshot.data!.salesConnected)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      key: const Key('growth-connect-missing-source'),
+                      onPressed: () => _showConnection(context),
+                      icon: const Icon(Icons.add_link, size: 12),
+                      label: Text(
+                        !snapshot.data!.socialConnected &&
+                                !snapshot.data!.salesConnected
+                            ? 'Connect data sources'
+                            : !snapshot.data!.socialConnected
+                                ? 'Connect social trackers'
+                                : 'Connect sales reports',
+                        style: const TextStyle(fontSize: 9),
+                      ),
+                    ),
+                  ),
               ],
             ],
           ),
@@ -114,6 +165,20 @@ class _KaiGrowthTrackerCardState extends State<KaiGrowthTrackerCard> {
       builder: (context) =>
           _GrowthDetailDialog(loader: _loader, initial: initial),
     );
+  }
+
+  Future<void> _showConnection(BuildContext context) async {
+    final connected = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => _TavernConnectionDialog(
+        googleConnector: widget.googleConnector ??
+            TavernGrowthConnection.instance.connectWithGoogle,
+        socialConnector:
+            widget.socialConnector ?? TavernGrowthConnection.instance.connect,
+      ),
+    );
+    if (connected == true && mounted) _refresh();
   }
 }
 
@@ -146,10 +211,17 @@ class _GrowthCardShell extends StatelessWidget {
 }
 
 class _GrowthUnavailable extends StatelessWidget {
-  const _GrowthUnavailable({required this.error, required this.onRetry});
+  const _GrowthUnavailable({
+    required this.error,
+    required this.actionLabel,
+    required this.actionIcon,
+    required this.onAction,
+  });
 
   final String error;
-  final VoidCallback onRetry;
+  final String actionLabel;
+  final IconData actionIcon;
+  final VoidCallback onAction;
 
   @override
   Widget build(BuildContext context) {
@@ -167,12 +239,261 @@ class _GrowthUnavailable extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           TextButton.icon(
-            onPressed: onRetry,
-            icon: const Icon(Icons.refresh, size: 13),
-            label: const Text('Retry', style: TextStyle(fontSize: 10)),
+            onPressed: onAction,
+            icon: Icon(actionIcon, size: 13),
+            label: Text(actionLabel, style: const TextStyle(fontSize: 10)),
           ),
         ],
       ),
+    );
+  }
+}
+
+class _TavernConnectionDialog extends StatefulWidget {
+  const _TavernConnectionDialog({
+    required this.googleConnector,
+    required this.socialConnector,
+  });
+
+  final KaiGrowthGoogleConnector googleConnector;
+  final KaiGrowthSocialConnector socialConnector;
+
+  @override
+  State<_TavernConnectionDialog> createState() =>
+      _TavernConnectionDialogState();
+}
+
+class _TavernConnectionDialogState extends State<_TavernConnectionDialog> {
+  final _email = TextEditingController();
+  final _password = TextEditingController();
+  bool _googleBusy = false;
+  bool _socialBusy = false;
+  bool _connectedAny = false;
+  bool _salesConnected = false;
+  bool _socialConnected = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _email.dispose();
+    _password.dispose();
+    super.dispose();
+  }
+
+  Future<void> _connectSales() async {
+    if (_googleBusy) return;
+    setState(() {
+      _googleBusy = true;
+      _error = null;
+    });
+    try {
+      await widget.googleConnector();
+      if (!mounted) return;
+      setState(() {
+        _googleBusy = false;
+        _connectedAny = true;
+        _salesConnected = true;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _googleBusy = false;
+        _error = '$error'.replaceFirst('Bad state: ', '');
+      });
+    }
+  }
+
+  Future<void> _connectSocial() async {
+    if (_socialBusy) return;
+    setState(() {
+      _socialBusy = true;
+      _error = null;
+    });
+    try {
+      await widget.socialConnector(_email.text, _password.text);
+      _password.clear();
+      if (!mounted) return;
+      setState(() {
+        _socialBusy = false;
+        _connectedAny = true;
+        _socialConnected = true;
+      });
+    } catch (error) {
+      _password.clear();
+      if (!mounted) return;
+      setState(() {
+        _socialBusy = false;
+        _error = '$error'.replaceFirst('Bad state: ', '');
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      key: const Key('tavern-growth-connect-dialog'),
+      backgroundColor: const Color(0xFF091410),
+      title: const Text('Connect Growth data'),
+      content: SizedBox(
+        width: 380,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Connect the two read-only sources that feed this graph.',
+                style: TextStyle(color: Color(0xFF9DB6AE), fontSize: 12),
+              ),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0D1D18),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                      color: const Color(0xFF35C7AC).withOpacity(.25)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'SALES REPORTS',
+                      style: TextStyle(
+                        color: Color(0xFF72D590),
+                        fontSize: 10,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    const Text(
+                      'Your exact Hoard venue sales reports, connected with Google.',
+                      style: TextStyle(color: Color(0xFFB8CEC7), fontSize: 11),
+                    ),
+                    const SizedBox(height: 8),
+                    FilledButton.icon(
+                      key: const Key('growth-connect-sales'),
+                      onPressed:
+                          _salesConnected || _googleBusy ? null : _connectSales,
+                      icon: _googleBusy
+                          ? const SizedBox(
+                              width: 13,
+                              height: 13,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : Icon(
+                              _salesConnected
+                                  ? Icons.check_circle
+                                  : Icons.account_circle_outlined,
+                              size: 16,
+                            ),
+                      label: Text(
+                        _salesConnected
+                            ? 'Sales connected'
+                            : 'Connect Hoard sales',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0D1D18),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: const Color(0xFF35C7AC).withOpacity(.25),
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'SOCIAL TRACKERS',
+                      style: TextStyle(
+                        color: Color(0xFF64E5CC),
+                        fontSize: 10,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    const Text(
+                      'Use the Tavern staff login. The password is cleared immediately.',
+                      style: TextStyle(color: Color(0xFFB8CEC7), fontSize: 11),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      key: const Key('growth-social-email'),
+                      controller: _email,
+                      enabled: !_socialBusy && !_socialConnected,
+                      keyboardType: TextInputType.emailAddress,
+                      decoration: const InputDecoration(
+                          labelText: 'Tavern staff email'),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      key: const Key('growth-social-password'),
+                      controller: _password,
+                      enabled: !_socialBusy && !_socialConnected,
+                      obscureText: true,
+                      onSubmitted: (_) => _connectSocial(),
+                      decoration: const InputDecoration(labelText: 'Password'),
+                    ),
+                    const SizedBox(height: 8),
+                    OutlinedButton.icon(
+                      key: const Key('growth-connect-social'),
+                      onPressed: _socialConnected || _socialBusy
+                          ? null
+                          : _connectSocial,
+                      icon: _socialBusy
+                          ? const SizedBox(
+                              width: 13,
+                              height: 13,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : Icon(
+                              _socialConnected
+                                  ? Icons.check_circle
+                                  : Icons.link,
+                              size: 16,
+                            ),
+                      label: Text(
+                        _socialConnected
+                            ? 'Social connected'
+                            : 'Connect social trackers',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (_error != null) ...[
+                const SizedBox(height: 10),
+                Text(
+                  _error!,
+                  key: const Key('tavern-growth-connect-error'),
+                  style:
+                      const TextStyle(color: Color(0xFFFF8D83), fontSize: 11),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          key: const Key('growth-connect-cancel'),
+          onPressed: () => Navigator.of(context).pop(_connectedAny),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          key: const Key('tavern-growth-connect-submit'),
+          onPressed: _connectedAny && !_googleBusy && !_socialBusy
+              ? () => Navigator.of(context).pop(true)
+              : null,
+          child: const Text('Done'),
+        ),
+      ],
     );
   }
 }
@@ -377,24 +698,31 @@ class _GrowthLegend extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final available = {for (final item in series) item.platform: item};
     return Wrap(
       spacing: compact ? 8 : 14,
       runSpacing: 5,
       children: [
-        for (final item in series)
+        for (final platform in KaiGrowthPlatform.values)
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(
                 width: 12,
                 height: 3,
-                color: growthColour(item.platform),
+                color: growthColour(platform).withOpacity(
+                  available.containsKey(platform) ? 1 : .28,
+                ),
               ),
               const SizedBox(width: 4),
               Text(
-                item.platform.label,
+                available.containsKey(platform)
+                    ? platform.label
+                    : '${platform.label} · no data',
                 style: TextStyle(
-                  color: Colors.white.withOpacity(.72),
+                  color: Colors.white.withOpacity(
+                    available.containsKey(platform) ? .72 : .35,
+                  ),
                   fontSize: compact ? 8 : 10,
                 ),
               ),

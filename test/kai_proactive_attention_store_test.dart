@@ -35,7 +35,9 @@ void main() {
       final queue = KaiProactiveAttentionQueue();
       final pending = queue.enqueue(
         const KaiNudge('(proactive) the crooked window',
-            wantsHands: true, kind: KaiNudgeKind.noticed),
+            wantsHands: true,
+            kind: KaiNudgeKind.noticed,
+            topicId: 'crooked-window'),
         receivedAt: _noon,
         occurredAt: _noon.subtract(const Duration(minutes: 5)),
       );
@@ -55,6 +57,7 @@ void main() {
       expect(item.nudge.seed, '(proactive) the crooked window');
       expect(item.nudge.wantsHands, isTrue);
       expect(item.nudge.kind, KaiNudgeKind.noticed);
+      expect(item.nudge.topicId, 'crooked-window');
     });
 
     test('a restored event keeps its original receipt time and expiry', () {
@@ -142,6 +145,34 @@ void main() {
       );
       expect(dispatch!.decision.outcome, KaiAttentionOutcome.discardDuplicate);
       expect(dispatch.decision.bodyId, isNull);
+    });
+
+    test('a paraphrased topic remains closed after restart', () {
+      final queue = KaiProactiveAttentionQueue();
+      const first = KaiNudge(
+        'the Kai headers may target the wrong region',
+        kind: KaiNudgeKind.noticed,
+        topicId: 'header-observation-42',
+      );
+      final delivered = queue.enqueue(first, receivedAt: _noon);
+      queue.complete(delivered.event.eventId, now: _noon);
+
+      final restored = KaiProactiveAttentionQueue()..restore(queue.snapshot());
+      restored.enqueue(
+        const KaiNudge(
+          'the two Kai labels are wearing the same hat',
+          kind: KaiNudgeKind.noticed,
+          topicId: 'header-observation-42',
+        ),
+        receivedAt: _noon.add(const Duration(hours: 4)),
+      );
+
+      final dispatch = restored.evaluate(
+        now: _noon.add(const Duration(hours: 4)),
+        candidates: [_body('desktop')],
+      );
+      expect(dispatch!.decision.outcome, KaiAttentionOutcome.discardDuplicate);
+      expect(restored.pending, isEmpty);
     });
 
     test('a retry instant survives restart and cannot run early', () {

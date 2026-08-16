@@ -61,6 +61,40 @@ void main() {
     expect(find.text('↓ 50%'), findsNWidgets(3));
   });
 
+  testWidgets('header meter expands the full scorecard on demand',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1100, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final rows = [
+      trace(tokens: 1000, schemaTokens: 800, firstTokenMs: 1000, second: 0),
+      trace(tokens: 1000, schemaTokens: 800, firstTokenMs: 1000, second: 1),
+      trace(tokens: 500, schemaTokens: 400, firstTokenMs: 500, second: 2),
+      trace(tokens: 500, schemaTokens: 400, firstTokenMs: 500, second: 3),
+    ];
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: Align(
+          alignment: Alignment.topCenter,
+          child: KaiEfficiencyDeltaMeter(
+            window: 2,
+            traceLoader: () async => rows,
+          ),
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('KAI STATE SCORECARD'), findsNothing);
+    await tester.tap(find.byKey(const Key('kai-efficiency-scorecard-toggle')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('kai-efficiency-scorecard-panel')),
+        findsOneWidget);
+    expect(find.text('KAI STATE SCORECARD'), findsOneWidget);
+    expect(find.text('efficiency window'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('renders no-data dashes until there is enough baseline', (tester) async {
     await tester.pumpWidget(
       MaterialApp(

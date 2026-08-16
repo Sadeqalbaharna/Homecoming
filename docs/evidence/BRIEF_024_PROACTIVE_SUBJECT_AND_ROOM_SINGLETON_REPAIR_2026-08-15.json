@@ -1,0 +1,46 @@
+{
+  "brief": "BRIEF_024_PROACTIVE_SUBJECT_AND_ROOM_SINGLETON_REPAIR",
+  "accepted_at_utc": "2026-08-15T13:17:00Z",
+  "proof_state": "TESTED_BOUND_LIVE_OVERNIGHT_UNVERIFIED",
+  "branch": "codex/homecoming-kai-claude-partnership",
+  "artifact": {
+    "release_root": "C:\\Users\\sadeq\\.codex\\worktrees\\3740\\homecoming_app\\build-proactive-stability\\windows\\x64\\runner\\Release",
+    "exe_sha256": "58148A9B2C22E10483F0E3EADEEB12984C6ED0FFDCBE171527D185601FA92193",
+    "app_so_sha256": "2B2A57603E6E65072C86D59E0561BCCA141AF0EA6EE8497C32B3780A68F09206"
+  },
+  "tests": {
+    "focused": {"passed": 47, "failed": 0},
+    "proportional_regression": {"passed": 115, "failed": 0},
+    "scoped_analysis": "PASS_NO_ISSUES",
+    "windows_release_build": "PASS"
+  },
+  "runtime": {
+    "core_pid": 5644,
+    "watchdog_pid": 10460,
+    "room_pid": 55640,
+    "duplicate_room_attempt_pid": 47944,
+    "duplicate_room_exited": true,
+    "visible_room_count": 1,
+    "core_health": "healthy",
+    "journal_startup_events": [
+      "coordinator_started",
+      "embedded_core_started",
+      "core_heartbeat_healthy",
+      "attention_state_loaded",
+      "coordinator_ready"
+    ],
+    "post_start_warning_or_error_count": 0,
+    "post_start_proactive_delivery_count": 0
+  },
+  "durable_state": {
+    "attention_primary_sha256_before": "9B4092FEA9F5E97A04D5AFD270486FC56EE8FA6752109C88701BE40BA1AD5D83",
+    "attention_primary_sha256_after": "9B4092FEA9F5E97A04D5AFD270486FC56EE8FA6752109C88701BE40BA1AD5D83",
+    "attention_backup_sha256_before": "01AAC5D1F2B51E4CED183CD55138CB3190C12BC8BF19EBE7B48AD278FF47A5C9",
+    "attention_backup_sha256_after": "01AAC5D1F2B51E4CED183CD55138CB3190C12BC8BF19EBE7B48AD278FF47A5C9"
+  },
+  "rollback": {
+    "retained_release": "build-core-stability",
+    "sponsor_owned_worktree_preserved": true
+  },
+  "remaining_gate": "Observe one complete 22:00-08:00 Asia/Bahrain window and verify zero proactive transcript writes or deliveries during quiet hours and no repeated semantic subject after the window."
+}

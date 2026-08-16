@@ -10,6 +10,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../services/core/kai_factory_daily_lane.dart';
 import '../services/core/kai_project_service.dart';
 import '../services/core/kai_delivery_box.dart';
 
@@ -57,8 +58,8 @@ KaiDeliveryPhaseSummary summarizeDeliveryBoxes(List<KaiDeliveryBox> boxes) {
         KaiDeliveryBoxState.repairing,
         KaiDeliveryBoxState.evidenceReview,
       }.contains(box.state));
-  final sponsor = boxes
-      .where((box) => box.state == KaiDeliveryBoxState.awaitingSponsor);
+  final sponsor =
+      boxes.where((box) => box.state == KaiDeliveryBoxState.awaitingSponsor);
   return KaiDeliveryPhaseSummary(
     total: boxes.length,
     verified: count(KaiDeliveryBoxState.verified),
@@ -488,6 +489,12 @@ class _StageDrawer extends StatelessWidget {
             ),
             const SizedBox(height: 5),
           ],
+          if (project.id == KaiProjectService.factoryId) ...[
+            const KaiFactoryDailyLanePanel(
+              lane: boothSignalFactoryDailyLane,
+            ),
+            const SizedBox(height: 7),
+          ],
           _DrawerLine(label: 'EXIT GATE', value: gate, color: _hudAmber),
           const SizedBox(height: 5),
           _DrawerLine(label: 'BLOCKER', value: blocker, color: _hudRed),
@@ -521,6 +528,100 @@ class _StageDrawer extends StatelessWidget {
             const SizedBox(height: 7),
             for (final box in boxes) _DeliveryBoxLine(box),
           ],
+        ],
+      ),
+    );
+  }
+}
+
+@visibleForTesting
+class KaiFactoryDailyLanePanel extends StatelessWidget {
+  const KaiFactoryDailyLanePanel({
+    super.key,
+    required this.lane,
+  });
+
+  final KaiFactoryDailyLane lane;
+
+  Color _stateColor(KaiFactoryDailyStation station) => switch (station.state) {
+        KaiFactoryDailyStationState.tested => _hudViolet,
+        KaiFactoryDailyStationState.sponsorCompleted => _hudAmber,
+        KaiFactoryDailyStationState.verifiedLive => _hudGreen,
+        KaiFactoryDailyStationState.active => _hudGreen,
+        KaiFactoryDailyStationState.future => _hudMuted,
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      key: const ValueKey('factory-daily-lane'),
+      width: double.infinity,
+      padding: const EdgeInsets.all(7),
+      decoration: BoxDecoration(
+        color: _hudBackground,
+        border: Border.all(color: _hudViolet.withValues(alpha: 0.55)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'FACTORY DAILY / ${lane.productName.toUpperCase()}',
+            style: const TextStyle(
+              color: _hudViolet,
+              fontSize: 9,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.7,
+              fontFamily: 'monospace',
+            ),
+          ),
+          const SizedBox(height: 5),
+          for (final station in lane.stations)
+            Container(
+              key: ValueKey('factory-daily-station-${station.id}'),
+              width: double.infinity,
+              margin: const EdgeInsets.only(bottom: 4),
+              padding: const EdgeInsets.fromLTRB(6, 5, 6, 5),
+              decoration: BoxDecoration(
+                color: _hudPanel,
+                border: Border(
+                  left: BorderSide(color: _stateColor(station), width: 2),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${station.label.toUpperCase()}  •  ${station.state.label}'
+                    '${station.isNextGate ? '  •  NEXT GATE' : ''}',
+                    style: TextStyle(
+                      color: _stateColor(station),
+                      fontSize: 8,
+                      fontWeight: FontWeight.w700,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${station.proof.label} — ${station.detail}',
+                    style: const TextStyle(
+                      color: _hudInk,
+                      fontSize: 8,
+                      height: 1.25,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          Text(
+            'REVENUE  •  ${lane.revenueProof}',
+            key: const ValueKey('factory-daily-revenue-proof'),
+            style: const TextStyle(
+              color: _hudRed,
+              fontSize: 8,
+              height: 1.25,
+              fontFamily: 'monospace',
+            ),
+          ),
         ],
       ),
     );
@@ -658,8 +759,8 @@ class ProjectSectorHit {
 
 class _SectorGeometry {
   _SectorGeometry(this.size)
-    : center = Offset(size.width / 2, size.height / 2),
-      maxRadius = size.shortestSide / 2;
+      : center = Offset(size.width / 2, size.height / 2),
+        maxRadius = size.shortestSide / 2;
 
   final Size size;
   final Offset center;
@@ -730,11 +831,9 @@ class _ProjectSectorPainter extends CustomPainter {
       if (project.layers.isNotEmpty) {
         final band =
             (geometry.phaseOuter - geometry.phaseInner) / project.layers.length;
-        for (
-          var layerIndex = 0;
-          layerIndex < project.layers.length;
-          layerIndex++
-        ) {
+        for (var layerIndex = 0;
+            layerIndex < project.layers.length;
+            layerIndex++) {
           final layer = project.layers[layerIndex];
           final inner = geometry.phaseInner + layerIndex * band + 1.2;
           final outer = geometry.phaseInner + (layerIndex + 1) * band - 1.2;
@@ -857,11 +956,9 @@ class _ProjectSectorPainter extends CustomPainter {
     _SectorGeometry geometry,
     double angle,
   ) {
-    final from =
-        geometry.center +
+    final from = geometry.center +
         Offset(math.cos(angle), math.sin(angle)) * geometry.phaseInner;
-    final to =
-        geometry.center +
+    final to = geometry.center +
         Offset(math.cos(angle), math.sin(angle)) * geometry.dividerOuter;
     canvas.drawLine(
       from,

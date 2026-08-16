@@ -31,6 +31,17 @@ void main() {
     );
   });
 
+  test('proactive generation cannot echo the prior room transcript', () {
+    expect(kKaiProactiveContextTurns, 0);
+
+    final headless = File(
+      'lib/services/core/kai_headless_coordinator.dart',
+    ).readAsStringSync();
+    expect(headless, contains('ctxTurns: kKaiProactiveContextTurns'));
+    expect(headless, contains('useMemory: false'));
+    expect(headless, contains('saveUserMessage: false'));
+  });
+
   test('desktop room no longer owns Messenger, embodiment, or proactive loops',
       () {
     final desktop =
@@ -51,7 +62,9 @@ void main() {
     expect(headless, isNot(contains("'conversation': 4")));
     expect(headless, contains("'proactive_friend'"));
     expect(headless, contains('targetBodyId: body.bodyId'));
-    expect(headless, contains('saveAssistantReply: !embodied'));
+    expect(headless, contains('saveAssistantReply: false'));
+    expect(headless, contains('deferForQuietHours'));
+    expect(headless, contains("'proactive_delivery_deferred_quiet_hours'"));
     expect(headless, contains('ConversationStoreService().saveTurn'));
     expect(headless, contains('KaiProactiveAttentionQueue'));
     expect(headless, contains('_enqueueProactiveNudge'));
@@ -72,7 +85,12 @@ void main() {
   test('headless entrypoint mounts no desktop application', () {
     final main = File('lib/main_mobile.dart').readAsStringSync();
     expect(main, contains("args.contains('--coordinator-worker')"));
-    expect(main, contains('KaiHeadlessCoordinator.instance.start'));
+    expect(
+      main,
+      contains('final coordinator = KaiHeadlessCoordinator.instance'),
+    );
+    expect(main, contains('await coordinator.start'));
+    expect(main, contains('await shutdownService.start'));
     expect(main, contains('if (!coordinatorMode)'));
   });
 }

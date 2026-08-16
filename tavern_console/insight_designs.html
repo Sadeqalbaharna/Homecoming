@@ -1,0 +1,121 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Insight panel — three designs</title>
+<style>
+:root{--bg:#0d0a07;--panel:#171208;--line:#2e2415;--gold:#ffe7b0;--amber:#ffc862;
+--txt:#efe6d6;--dim:#9c8f7a;--good:#7ee787;--warn:#ffc862;--bad:#ff6b6b}
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600&family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--txt);margin:0;padding:30px 20px 80px;
+  font-family:"Space Grotesk",system-ui,sans-serif}
+.wrap{max-width:820px;margin:0 auto}
+h2.lbl{font-size:12px;letter-spacing:2px;text-transform:uppercase;color:var(--amber);
+  margin:44px 0 4px;font-weight:700}
+.note{color:var(--dim);font-size:13px;margin:0 0 18px;max-width:640px;line-height:1.6}
+.stage{background:#0a0805;border:1px solid var(--line);border-radius:16px;padding:34px;
+  position:relative;overflow:hidden}
+.stage::before{content:'';position:absolute;width:420px;height:420px;border-radius:50%;
+  background:var(--amber);filter:blur(110px);opacity:.05;top:-160px;right:-120px}
+h1.title{font-size:30px;color:var(--gold);margin:0 0 8px;font-weight:700;letter-spacing:-.5px}
+.lead{color:var(--txt);font-size:16px;line-height:1.5;margin:0 0 24px;max-width:560px;opacity:.9}
+
+/* ══ A · LEDGER STATEMENT (monospace, receipt feel, framed left) ══ */
+.A{font-family:"IBM Plex Mono",monospace;border:1px solid var(--line);border-radius:12px;
+  background:#0e0b07;padding:0;overflow:hidden;max-width:460px}
+.A .cap{background:#151009;padding:10px 16px;font-size:11px;letter-spacing:1px;color:var(--dim);
+  border-bottom:1px solid var(--line);display:flex;justify-content:space-between}
+.A .cap b{color:var(--good)}
+.A ul{list-style:none;margin:0;padding:8px 16px}
+.A li{display:flex;align-items:baseline;gap:8px;padding:9px 0;font-size:13px;color:var(--txt)}
+.A li .dots{flex:1;border-bottom:1px dotted #3a2e1a;transform:translateY(-3px)}
+.A li .amt{color:var(--gold);font-weight:600}
+.A .tot{border-top:1px solid var(--line);padding:14px 16px;display:flex;justify-content:space-between;
+  align-items:baseline;background:#120d07}
+.A .tot .n{font-size:26px;color:var(--gold);font-weight:600}
+.A .tot span{font-size:11px;color:var(--dim)}
+
+/* ══ B · HERO NUMBER + TICKER (huge serif figure, centered) ══ */
+.B{text-align:center;padding:10px 0}
+.B .kick{font-size:11px;letter-spacing:3px;text-transform:uppercase;color:var(--amber);margin-bottom:10px}
+.B .big{font-family:"Fraunces",serif;font-size:76px;line-height:1;color:var(--gold);font-weight:600;
+  font-variant-numeric:tabular-nums}
+.B .big small{font-size:26px;opacity:.6;font-weight:400}
+.B .sub{color:var(--dim);font-size:14px;margin:8px 0 22px}
+.B .ticker{display:flex;flex-wrap:wrap;gap:10px;justify-content:center}
+.B .chip{background:rgba(255,200,98,.08);border:1px solid rgba(255,200,98,.25);border-radius:99px;
+  padding:8px 16px;font-size:13.5px;color:var(--txt)}
+.B .chip b{color:var(--gold);margin-left:6px}
+
+/* ══ C · CARD GRID (each finding a tile, icon, spread wide) ══ */
+.C .kick{font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--amber);margin-bottom:14px}
+.C .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.C .tile{background:#120d07;border:1px solid var(--line);border-radius:12px;padding:16px;
+  border-top:3px solid var(--amber)}
+.C .tile.bad{border-top-color:var(--bad)}
+.C .tile .ic{font-size:20px;margin-bottom:8px}
+.C .tile .t{font-size:14px;line-height:1.4;color:var(--txt);min-height:38px}
+.C .tile .m{font-size:22px;color:var(--gold);font-weight:700;margin-top:10px;font-family:"Fraunces",serif}
+.C .tile .m small{font-size:12px;color:var(--dim);font-weight:400;font-family:"Space Grotesk"}
+.C .foot{margin-top:14px;color:var(--good);font-size:13px}
+@media(max-width:640px){.C .grid{grid-template-columns:1fr}}
+</style></head><body><div class="wrap">
+
+<h2 class="lbl" style="margin-top:0">Design A · Ledger statement</h2>
+<p class="note">Monospace, framed narrow on the left like a printed receipt or bank statement. Dotted leaders, a bold total. Feels precise and financial — "these are your numbers."</p>
+<div class="stage">
+  <div style="display:flex;gap:8px;margin-bottom:20px">
+    <span style="width:34px;height:5px;border-radius:3px;background:var(--good)"></span>
+    <span style="width:34px;height:5px;border-radius:3px;background:var(--good)"></span>
+    <span style="width:34px;height:5px;border-radius:3px;background:var(--good)"></span>
+    <span style="width:34px;height:5px;border-radius:3px;background:#2a2318"></span>
+    <span style="width:34px;height:5px;border-radius:3px;background:var(--amber)"></span>
+    <span style="width:34px;height:5px;border-radius:3px;background:#2a2318"></span>
+    <span style="color:var(--dim);font-size:12px;margin-left:8px">3 of 6 · a good place to pause</span>
+  </div>
+  <h1 class="title">You've done the quick part</h1>
+  <p class="lead">The easy exports are in, and the report already has something to say. What's left is where the real numbers come from.</p>
+  <div class="A">
+    <div class="cap"><span>ALREADY FOUND — real, not examples</span><b>live</b></div>
+    <ul>
+      <li>2 days staffed below target<span class="dots"></span><span class="amt">BD 54</span></li>
+      <li>20 of 20 top sellers uncosted<span class="dots"></span><span class="amt">—</span></li>
+      <li>0% of revenue costed yet<span class="dots"></span><span class="amt">—</span></li>
+    </ul>
+    <div class="tot"><span>Named so far · costly half still to come</span><span class="n">BD 54</span></div>
+  </div>
+</div>
+
+<h2 class="lbl">Design B · Hero figure + ticker</h2>
+<p class="note">The money is the whole point, so it's enormous — a serif display figure, centred, with the findings as small pills beneath. Confident and celebratory. Different font entirely (Fraunces serif for the number).</p>
+<div class="stage">
+  <h1 class="title" style="text-align:center">You've done the quick part</h1>
+  <p class="lead" style="margin:0 auto 26px;text-align:center">The costly half is still to come — but your own numbers already show this.</p>
+  <div class="B">
+    <div class="kick">Already found · real, not examples</div>
+    <div class="big"><small>BD</small> 54<small>.00</small></div>
+    <div class="sub">named so far — and costs and recipes usually find the most</div>
+    <div class="ticker">
+      <span class="chip">2 days overstaffed<b>BD 54</b></span>
+      <span class="chip">20 top sellers uncosted</span>
+      <span class="chip">≈ 1.7 hrs typing saved</span>
+    </div>
+  </div>
+</div>
+
+<h2 class="lbl">Design C · Card tiles</h2>
+<p class="note">Each finding is its own tile in a row, with an icon and a big number — spread wide across the panel, scannable at a glance. Most "dashboard-like". Fraunces for the figures, Space Grotesk for labels.</p>
+<div class="stage">
+  <h1 class="title">You've done the quick part</h1>
+  <p class="lead">The report already has something to say from what you've entered.</p>
+  <div class="C">
+    <div class="kick">Already found · real, not examples</div>
+    <div class="grid">
+      <div class="tile bad"><div class="ic">⏱</div><div class="t">2 days staffed below your labour target</div><div class="m">BD 54<small>/wk</small></div></div>
+      <div class="tile"><div class="ic">▤</div><div class="t">All 20 top sellers have no recipe yet</div><div class="m">20<small> dishes</small></div></div>
+      <div class="tile"><div class="ic">⚡</div><div class="t">Share of revenue the app can cost</div><div class="m">0%<small> so far</small></div></div>
+    </div>
+    <div class="foot">≈ 1.7 hrs of typing already done for you · each shows its arithmetic in the full report</div>
+  </div>
+</div>
+
+</div></body></html>

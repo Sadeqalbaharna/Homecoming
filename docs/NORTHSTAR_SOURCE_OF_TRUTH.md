@@ -165,6 +165,11 @@ standalone Quest connection.
 - Ordinary proactive friend events now enter the tested Attention Engine before
   generation: Bahrain quiet hours, daily pacing, expiry, retry, deduplication,
   and exact-body selection are production-wired in the headless coordinator.
+- Brief 024 binds every produced proactive subject to a durable semantic or
+  silence-episode identity, deduplicates that identity across nudge variants,
+  re-checks quiet hours immediately before persistence/delivery, and enforces a
+  separate native singleton for the visible Desktop room. The repaired Release
+  is bound live; the next full overnight observation remains `UNVERIFIED`.
 - Self-context has evidence/provenance rules, token ceilings, and tests for slow
   identity development.
 - The self-improvement runner selects one bounded manual job and requires proof
@@ -220,7 +225,9 @@ standalone Quest connection.
    and mutation-gated persistence. Controlled coordinator crash/resume and one
    exact desktop delivery are **Verified live**; natural proactive intake,
    commitment clocks, completed-work/direct-reply admission, and a seven-day
-   observed run remain `UNVERIFIED`.
+   observed run remain `UNVERIFIED`. Brief 024's semantic-subject suppression,
+   final quiet-hours boundary, and Desktop-room singleton are tested and bound
+   live, but have not yet completed a full 22:00–08:00 Bahrain observation.
 2. Self-improvement plans one manual job. It lacks isolated execution,
    evaluation suites, staged rollout, automatic rollback, and promotion
    authority separation.
@@ -492,9 +499,11 @@ causal blocker escalates after three distinct safe strategies. Sponsor/live
 boundaries stop immediately. A box cannot become `verified` without durable
 requirement-bound evidence, Northstar-PM review identity, and review time.
 
-Factory's conveyor now reads the same governed project delivery-box states as
-the Pizza. The project remains a projection of the scan-only/`FactoryRun`
-authority, so a parked legacy run cannot award a contradictory Pizza state.
+Factory's conveyor and Pizza retain the same frozen nine commercial gates and
+delivery-box catalog. The Pizza's line-level phase is derived from typed,
+product-specific evidence: it selects the furthest evidence-backed stage
+without merging product identities or authority. A persisted operational run
+must be product-bound in that governed catalog before it may affect the line.
 
 Automated evidence: 68/68 focused tests passed across delivery boxes, portfolio,
 work requests, Factory conveyor, and commercial gates. Scoped Dart analysis
@@ -701,6 +710,67 @@ and a 21:30 Bahrain reset time. This is `CLAUDE BRIDGE BLOCKED`, not a code or
 test result. Codex has no coding-fallback authority, so case 7 remains the sole
 H019A blocker and Brief 019B remains locked.
 
+### Homecoming H019A/H019B local acceptance — 2026-08-09
+
+A later sponsor directive authorized Codex to implement safe bounded local
+boxes. The canonical binding repair now reaches the exact Brief 019A boundary:
+10 PASS / 4 FAIL, with only the frozen capture-script cases 10-13 outstanding.
+Brief 019A is `ACCEPTED`.
+
+The Brief 019B one-file capture-script repair then produced 14 PASS / 0 FAIL in
+the unchanged frozen suite. It is `TESTED`: authority, output root, failure
+ledger, payload and process identity, OS freshness, DPI, semantic labels,
+readability, retry suppression, and manifest binding all fail closed. PID 27260
+and live services were untouched, so fresh real-HUD capture remains
+`UNVERIFIED` and no Homecoming macro phase is promoted.
+
+Portfolio reconciliation at this checkpoint preserves proof-state separation:
+
+- Hoard Brief 014B is `TESTED`; 014C is active on gate/rollback receipts. Its
+  attended recovery remains a sponsor/live gate and the verified-box count does
+  not change.
+- Kingdom K1.6-M1 remains isolated `TESTED` at commit `64997ad`. K1.6B static
+  checks, including its 12-test wrapper oracle, are green, but emulator proof is
+  `UNVERIFIED` after managed-sandbox EPERM and its candidate is uncommitted.
+- Factory Blueprint has nine passing packet tests; spreadsheet import/formula/
+  render QA is active and analyzer proof is `UNVERIFIED`.
+- Factory Daily Practice Ladder core is `TESTED` at commit `2d00dbe` (16/16
+  deterministic tests and three syntax checks). Four current A4/Letter PDFs
+  were rendered and all eight pages were inspected: no clipping and current
+  pagination is 4/4. The print-only CSS repair and QA artifacts remain
+  uncommitted, so Packaging, listing, payment, and revenue remain `UNVERIFIED`.
+
+The running Desktop app cannot reflect this compile-time tracker reconciliation
+without a build/runtime handover. That handover is outside this local checkpoint;
+therefore no old or synthetic image is accepted as fresh screenshot proof.
+
+### Factory Daily / BoothSignal sponsor listing report — 2026-08-10
+
+BoothSignal's local build, buyer approval, QA, buyer ZIP, storefront assets and
+copy, price/launch packet, and Packaging remain `TESTED` / package-ready. The
+sponsor reports that the Publish Gate was completed and BoothSignal is now on
+Gumroad. Because no listing URL or direct storefront observation is bound to
+this checkpoint, Listing is `ACTIVE` and sponsor-confirmed but live proof is
+`UNVERIFIED`; it is not independently accepted as a verified public listing.
+
+Plain-language status: **BoothSignal is on Gumroad; next proof is the first
+external settled payment.** No sale, fee, refund, receipt, settlement, or
+revenue is evidenced. First Payment is the next commercial evidence gate.
+
+Sponsor product-meaning decision, 2026-08-10: the Factory wheel represents how
+far the commercial line has reached across its individual product lanes. Typed
+BoothSignal evidence therefore advances the line through P5 Approval and makes
+P6 Dispatch `ACTIVE` / live `UNVERIFIED`. This does not promote or rewrite Find
+My Table, which remains a separate product lane at Blueprint. P7 Telemetry and
+P8 Money in Bank remain future; no revenue is claimed.
+
+Local acceptance evidence is bound in
+`docs/evidence/FACTORY_LINE_MATURITY_P6_2026-08-10.json`: 27/27 focused tests,
+61/61 proportional regressions, and the Windows Release build pass. Real-HUD
+proof remains `UNVERIFIED` because ordinary room startup invokes Firebase
+metadata updates and this focused brief explicitly forbids Firebase mutation.
+No new screenshot is accepted for this state.
+
 Focused delivery-box, portfolio, and Factory conveyor tests pass 37/37. A
 Windows Release build passed and the real updated Desktop Homecoming process is
 running from the governed worktree as PID 27260. Direct-window evidence
@@ -889,9 +959,13 @@ is thinner than it was.
 - `test/kai_delivery_box_test.dart` — parsing, defaults, box counts, eligibility,
   idempotent dispatch, repair, escalation, sponsor refusal, proof durability,
   Factory scan-only, Hoard/Kingdom honesty, and Pizza semantics.
-- `docs/briefs/BRIEF_018A_AUTHENTICATED_LOCAL_GRACEFUL_SHUTDOWN.md` — bounded
-  future-runtime repair contract; it cannot control the currently running old
-  coordinator/watchdog binary.
+- `docs/briefs/BRIEF_018A_AUTHENTICATED_LOCAL_GRACEFUL_SHUTDOWN.md` —
+  `ACCEPTED / VERIFIED LIVE`: 22/22 focused and 187/187 proportional
+  regressions pass. The first live round exposed and retained an audio-plugin
+  teardown crash; the repaired headless plugin set then shut down Core 52612 and
+  watchdog 51820 with durable flush, port closure, capability removal, no crash,
+  and no recovery. The accepted Release was restored as healthy Core 47916 plus
+  watchdog 48276.
 - `docs/evidence/REAL_KAI_DPI_SELECTION_RETRY_2026-08-09.png` — sponsor-accepted
   direct capture of the real updated Windows Pizza HUD.
 
@@ -911,8 +985,38 @@ close it. Phase 8 requires positive `bankedRevenue` and a non-empty
 `bankSettlementReference`; `product_factory.dart` enforces that requirement
 before the run may enter its terminal stage.
 
-Current Factory state is derived from the persisted live run. No banked-revenue
-success is claimed unless the final gate passes.
+Current Factory wheel state is the deterministic maximum evidence-backed stage
+across typed individual product lanes. Product identities, sponsor approvals,
+and proof remain lane-bound; an operational run must be catalog-bound before it
+may affect the projection. No banked-revenue success is claimed unless the
+final gate passes.
+
+### Pizza portfolio reconciliation — 2026-08-15
+
+- **Homecoming:** P0 Baseline remains the only accepted macro. P3 Central
+  Attention has stronger evidence: Brief 024 is live with 47/47 focused and
+  115/115 shared checks plus a passing build; Brief 018A authenticated graceful
+  shutdown is `ACCEPTED / VERIFIED LIVE` with 22/22 focused and 187/187
+  proportional checks. Brief 018 exact reminder survival/exactly-once Desktop
+  delivery and the seven-day run remain open, so P3 is not promoted.
+- **Hoard:** P0 Authorization contract and P1 Pilot safety baseline are
+  accepted without waivers at `2621afd` (Brief 024 PASS, b07c Verified live,
+  G3 4/4, G4 PASS, governance 13/13). P2 Real venue close is current/open; no
+  60-90 day reconciled close, savings result, repeatability, or growth outcome
+  is inherited.
+- **Kingdom:** no loyalty/economic macro is promoted. A separate reservation
+  stream is task-reported shadow-ready 6/6 at `efb6aa2`, but primary repository
+  inspection was unavailable from this workspace, so the parallel readiness is
+  `UNVERIFIED` here. Sponsor approval to replace the public booking link and a
+  clean 14-day shadow with Eat App authoritative remain open; any mismatch
+  restarts the clock.
+- **Factory:** BoothSignal's $9 listing is publicly purchasable at
+  `https://salbaharna.gumroad.com/l/boothsignal`. P0-P6 are accepted and P7
+  Telemetry is current/open. Nested Factory Daily shows Listing `VERIFIED LIVE`
+  and First Payment `ACTIVE / UNVERIFIED`. P8 Money in Bank remains future; no
+  sale or revenue is claimed. Find My Table remains a separate Blueprint lane.
+- **TikTok:** no Pizza slice is created; the current catalog has no sponsor-
+  accepted TikTok macro project.
 
 ## Document governance
 

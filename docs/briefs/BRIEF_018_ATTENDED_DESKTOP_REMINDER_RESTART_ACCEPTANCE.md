@@ -32,7 +32,7 @@ rather than this governed worktree. It also proved that `/health.startedAt` is
 persisted Core-state metadata (`??=`), not an OS process-start instant. The old
 freshness inference was invalid and has been removed.
 
-The repaired local gate now has one immutable artifact manifest at
+The repaired local gate uses one immutable artifact manifest at
 `docs/evidence/BRIEF_018_ACCEPTED_ARTIFACT.json`:
 
 - governed root:
@@ -46,6 +46,12 @@ The repaired local gate now has one immutable artifact manifest at
   `E74B61177D81C9F09244BF9A87557AD7061AFF61C064CCAC75A34C871B8A82A8`;
 - binding ID:
   `0B1D8B4FB435B4DE4DE6BEA12465A7E0104862F4F24F174F494463EA04EA874A`.
+
+The binder accepts an explicit governed-root-relative artifact directory so a
+separately named acceptance build can be bound without copying it over another
+Release. Absolute paths and traversal fail closed. Dart payload freshness is
+checked against Dart/package inputs, while executable freshness is checked
+independently against native Windows inputs.
 
 The Release was built in this worktree without embedded credentials. Artifact
 verification passes locally. The live `C:\code` runtime remains untouched and

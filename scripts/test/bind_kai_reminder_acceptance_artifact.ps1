@@ -1,11 +1,16 @@
 [CmdletBinding()]
 param(
-    [string]$GovernedRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path,
+    [string]$GovernedRoot,
     [string]$ManifestPath,
+    [string]$ArtifactBuildRoot = 'build\windows\x64\runner\Release',
     [string]$ForbiddenLiveRoot = 'C:\code\homecoming_app'
 )
 
 $ErrorActionPreference = 'Stop'
+
+if ([string]::IsNullOrWhiteSpace($GovernedRoot)) {
+    $GovernedRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+}
 
 function Get-StringSha256 {
     param([string]$Value)
@@ -40,8 +45,12 @@ if (-not $gitRoot.Equals($root, [StringComparison]::OrdinalIgnoreCase)) {
     throw 'GovernedRoot must be the exact Git worktree root.'
 }
 
-$relativeExecutable = 'build\windows\x64\runner\Release\Kai.exe'
-$relativePayload = 'build\windows\x64\runner\Release\data\app.so'
+$artifactRoot = $ArtifactBuildRoot.Trim().TrimStart('\','/').TrimEnd('\','/')
+if ([string]::IsNullOrWhiteSpace($artifactRoot) -or [System.IO.Path]::IsPathRooted($artifactRoot) -or $artifactRoot -match '(^|[\\/])\.\.([\\/]|$)') {
+    throw 'ArtifactBuildRoot must be a governed-root-relative path without traversal.'
+}
+$relativeExecutable = Join-Path $artifactRoot 'Kai.exe'
+$relativePayload = Join-Path $artifactRoot 'data\app.so'
 $secretsPath = Join-Path $root 'lib\secrets.dart'
 if (-not (Test-Path -LiteralPath $secretsPath -PathType Leaf)) {
     throw 'Credential-free lib\secrets.dart build stub is required.'
@@ -66,27 +75,37 @@ $commit = (& git -C $root rev-parse HEAD 2>&1 | Out-String).Trim()
 if ($LASTEXITCODE -ne 0 -or $commit -notmatch '^[0-9a-f]{40}$') {
     throw 'Could not bind the artifact to a source commit.'
 }
-$runtimeSourceFiles = @(
-    Get-ChildItem -LiteralPath (Join-Path $root 'lib'),(Join-Path $root 'windows') -File -Recurse |
+$dartSourceFiles = @(
+    Get-ChildItem -LiteralPath (Join-Path $root 'lib') -File -Recurse |
         Where-Object {
             -not $_.FullName.Equals($secretsPath, [StringComparison]::OrdinalIgnoreCase) -and
             $_.FullName -notmatch '[\\/]windows[\\/]flutter[\\/]ephemeral[\\/]'
         }
     Get-Item -LiteralPath (Join-Path $root 'pubspec.yaml'),(Join-Path $root 'pubspec.lock')
 ) | Sort-Object FullName
+$nativeSourceFiles = @(Get-ChildItem -LiteralPath (Join-Path $root 'windows') -File -Recurse |
+    Where-Object { $_.FullName -notmatch '[\\/]windows[\\/]flutter[\\/]ephemeral[\\/]' }) | Sort-Object FullName
+$runtimeSourceFiles = @($dartSourceFiles + $nativeSourceFiles) | Sort-Object FullName
 $runtimeSourceInventory = @($runtimeSourceFiles | ForEach-Object {
     $relative = $_.FullName.Substring($root.Length + 1).Replace('\','/')
     "$relative=$((Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())"
 }) -join [char]31
 $maxSourceLastWriteUtc = @($runtimeSourceFiles + (Get-Item -LiteralPath $secretsPath) |
     Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1).LastWriteTimeUtc.ToUniversalTime()
-if ($payload.LastWriteTimeUtc.ToUniversalTime() -lt $maxSourceLastWriteUtc) {
-    throw 'Refusing to bind a payload older than a compiled source input.'
+$maxDartSourceLastWriteUtc = @($dartSourceFiles + (Get-Item -LiteralPath $secretsPath) |
+    Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1).LastWriteTimeUtc.ToUniversalTime()
+$maxNativeSourceLastWriteUtc = @($nativeSourceFiles |
+    Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1).LastWriteTimeUtc.ToUniversalTime()
+if ($payload.LastWriteTimeUtc.ToUniversalTime() -lt $maxDartSourceLastWriteUtc) {
+    throw 'Refusing to bind a payload older than a Dart build input.'
+}
+if ($executable.LastWriteTimeUtc.ToUniversalTime() -lt $maxNativeSourceLastWriteUtc) {
+    throw 'Refusing to bind an executable older than a native build input.'
 }
 
 $acceptedAt = (Get-Date).ToUniversalTime()
 $fields = [ordered]@{
-    schemaVersion = 1
+    schemaVersion = 2
     governedRoot = $root
     sourceCommit = $commit.ToLowerInvariant()
     # Exact content fingerprint of every compiled project input. Documentation,
@@ -94,6 +113,8 @@ $fields = [ordered]@{
     # not affect app.so.
     sourceStatusSha256 = Get-StringSha256 $runtimeSourceInventory
     maxSourceLastWriteUtc = $maxSourceLastWriteUtc.ToString('o')
+    maxDartSourceLastWriteUtc = $maxDartSourceLastWriteUtc.ToString('o')
+    maxNativeSourceLastWriteUtc = $maxNativeSourceLastWriteUtc.ToString('o')
     buildCredentialProfile = 'empty-local-build-stub-v1'
     buildCredentialStubSha256 = Get-StringSha256 $secretsText
     executableRelativePath = $relativeExecutable

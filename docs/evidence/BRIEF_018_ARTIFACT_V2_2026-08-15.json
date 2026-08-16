@@ -1,0 +1,18 @@
+﻿{
+    "verdict":  "PASS",
+    "mode":  "Artifact",
+    "reason":  "The governed acceptance artifact still matches its immutable binding.",
+    "checkedAt":  "2026-08-15T14:06:55.7562684Z",
+    "coreBaseUri":  "http://127.0.0.1:8790",
+    "evidence":  {
+                     "bindingId":  "4e2baa9e93fafffeabd77e90539bb60d3f6640044b0f46fc830641a7870d34ec",
+                     "governedRoot":  "C:\\Users\\sadeq\\.codex\\worktrees\\3740\\homecoming_app",
+                     "sourceCommit":  "2ea659b1b5d23b9a30ab9b9be5c99512517d3741",
+                     "executablePath":  "C:\\Users\\sadeq\\.codex\\worktrees\\3740\\homecoming_app\\build-graceful-shutdown\\windows\\x64\\runner\\Release\\Kai.exe",
+                     "executableSha256":  "779735cf82b40cb6ec6eaea85b53f851015241338873ab4a947d0434d346c232",
+                     "payloadPath":  "C:\\Users\\sadeq\\.codex\\worktrees\\3740\\homecoming_app\\build-graceful-shutdown\\windows\\x64\\runner\\Release\\data\\app.so",
+                     "payloadSha256":  "01bbed5a2e748c38b068367bcc37ab74e72d4d882e5d5a723fe7884a83c0d1e7",
+                     "payloadLastWriteUtc":  "2026-08-15T13:45:28.1367879Z",
+                     "acceptedAtUtc":  "2026-08-15T14:06:50.6942729Z"
+                 }
+}

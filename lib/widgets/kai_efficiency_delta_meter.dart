@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../services/core/trace_store_service.dart';
 import '../tools/replay.dart';
+import 'kai_state_scorecard_card.dart';
 
 /// Tiny always-visible header meter for whether Kai is getting cheaper/faster.
 ///
@@ -25,23 +26,28 @@ class KaiEfficiencyDeltaMeter extends StatelessWidget {
       future: (traceLoader ?? (() => TraceStoreService.instance.readAll(limit: limit)))(),
       builder: (context, snap) {
         if (snap.connectionState != ConnectionState.done) {
-          return const _EfficiencyShell(
-            child: SizedBox(
+          return _scorecardAnchor(
+            context,
+            const _EfficiencyShell(child: SizedBox(
               width: 12,
               height: 12,
               child: CircularProgressIndicator(strokeWidth: 1.4),
-            ),
+            )),
           );
         }
 
         if (snap.hasError) {
-          return const _EfficiencyShell(child: _TinyText('EFF', 'trace?'));
+          return _scorecardAnchor(
+            context,
+            const _EfficiencyShell(child: _TinyText('EFF', 'trace?')),
+          );
         }
 
         final rows = snap.data ?? const <Map<String, dynamic>>[];
         final stats = EfficiencyDelta.fromRows(rows, window: window);
-        return _EfficiencyShell(
-          child: Row(
+        return _scorecardAnchor(
+          context,
+          _EfficiencyShell(child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               _DeltaPill(label: 'tok', delta: stats.tokenReduction),
@@ -50,9 +56,55 @@ class KaiEfficiencyDeltaMeter extends StatelessWidget {
               const SizedBox(width: 5),
               _DeltaPill(label: 'lat', delta: stats.latencyReduction),
             ],
-          ),
+          )),
         );
       },
+    );
+  }
+
+  Widget _scorecardAnchor(BuildContext context, Widget meter) {
+    final viewport = MediaQuery.sizeOf(context);
+    final panelWidth = (viewport.width - 32).clamp(280.0, 520.0);
+    final panelHeight = (viewport.height - 92).clamp(320.0, 740.0);
+    return MenuAnchor(
+      key: const Key('kai-efficiency-scorecard-anchor'),
+      alignmentOffset: const Offset(0, 8),
+      style: MenuStyle(
+        padding: const WidgetStatePropertyAll(EdgeInsets.all(8)),
+        backgroundColor:
+            const WidgetStatePropertyAll(Color(0xFF07111C)),
+        maximumSize:
+            WidgetStatePropertyAll(Size(panelWidth + 16, panelHeight + 16)),
+        side: WidgetStatePropertyAll(
+          BorderSide(color: const Color(0xFFFFD48A).withOpacity(.28)),
+        ),
+        shape: WidgetStatePropertyAll(
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        ),
+      ),
+      menuChildren: [
+        SizedBox(
+          width: panelWidth,
+          height: panelHeight,
+          child: SingleChildScrollView(
+            key: const Key('kai-efficiency-scorecard-panel'),
+            primary: false,
+            child: KaiStateScorecardCard(
+              traceLoader: traceLoader,
+              limit: limit,
+            ),
+          ),
+        ),
+      ],
+      builder: (context, controller, child) => Tooltip(
+        message: 'Open Kai State Scorecard',
+        child: InkWell(
+          key: const Key('kai-efficiency-scorecard-toggle'),
+          borderRadius: BorderRadius.circular(999),
+          onTap: controller.isOpen ? controller.close : controller.open,
+          child: meter,
+        ),
+      ),
     );
   }
 }

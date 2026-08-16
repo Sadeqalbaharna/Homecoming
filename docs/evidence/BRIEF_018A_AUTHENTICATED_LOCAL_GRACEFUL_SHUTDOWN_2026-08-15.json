@@ -1,0 +1,69 @@
+{
+  "brief": "018A",
+  "capturedAtUtc": "2026-08-15T14:00:05.7856051Z",
+  "branch": "codex/homecoming-kai-claude-partnership",
+  "baseHead": "2ea659b1b5d23b9a30ab9b9be5c99512517d3741",
+  "proofState": "ACCEPTED_VERIFIED_LIVE",
+  "candidate": {
+    "root": "build-graceful-shutdown/windows/x64/runner/Release",
+    "executableSha256": "779735CF82B40CB6EC6EAEA85B53F851015241338873AB4A947D0434D346C232",
+    "executableCreatedAtUtc": "2026-08-15T13:57:52.3211116Z",
+    "payloadSha256": "01BBED5A2E748C38B068367BCC37AB74E72D4D882E5D5A723FE7884A83C0D1E7"
+  },
+  "tests": {
+    "focused": {"result": "PASS", "passed": 22, "failed": 0},
+    "proportionateRegression": {"result": "PASS", "passed": 187, "failed": 0},
+    "analysis": "PASS_NO_ISSUES",
+    "powershellParse": "PASS",
+    "diffCheck": "PASS",
+    "windowsReleaseBuild": "PASS"
+  },
+  "security": {
+    "bind": "127.0.0.1 random port",
+    "capability": "32 random bytes per run; never logged",
+    "runIdentity": "24 random bytes plus exact PID",
+    "controlFileAcl": "inheritance removed; current user FullControl only",
+    "mismatchBehavior": "fail closed before drain",
+    "forceKillFallback": false
+  },
+  "liveRounds": [
+    {
+      "round": 1,
+      "result": "FAIL_REPAIRED",
+      "corePid": 44784,
+      "watchdogPid": 34184,
+      "durableFlush": true,
+      "recoveredCorePid": 50180,
+      "cause": "Windows APPCRASH in audioplayers_windows_plugin.dll",
+      "exceptionCode": "0xc0000005",
+      "repair": "Do not register the unused audio plugin in the headless coordinator; desktop rooms retain the full generated plugin set."
+    },
+    {
+      "round": 2,
+      "result": "PASS",
+      "corePid": 52612,
+      "watchdogPid": 51820,
+      "runId": "b0926811cc9f716b4eba1497f626d7db68bce7452f713dee",
+      "durableFlush": true,
+      "port8790Closed": true,
+      "capabilityRemoved": true,
+      "postExitObservationSeconds": 15,
+      "recoveredProcessCount": 0,
+      "newWindowsCrashEvents": 0
+    }
+  ],
+  "operationalRestoration": {
+    "result": "PASS",
+    "corePid": 47916,
+    "watchdogPid": 48276,
+    "runId": "19d4935cf89b23b3384e8e484530c51562579bccf8742db3",
+    "port8790Owner": 47916,
+    "health": "ok",
+    "processCount": 2
+  },
+  "rollback": {
+    "preservedArtifactRoot": "build-proactive-stability/windows/x64/runner/Release",
+    "preservedExecutableSha256": "58148A9B2C22E10483F0E3EADEEB12984C6ED0FFDCBE171527D185601FA92193"
+  },
+  "verdict": "PASS"
+}

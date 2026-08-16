@@ -1,0 +1,51 @@
+{
+  "brief": "BRIEF_023_CORE_PROACTIVE_ECHO_STABILITY",
+  "observedAtUtc": "2026-08-15T12:53:38Z",
+  "verdict": "TESTED_BOUND_LIVE_OVERNIGHT_UNVERIFIED",
+  "rootCause": "runtime_payload_drift",
+  "tests": {
+    "focused": { "passed": 54, "failed": 0 },
+    "sharedCoreCoordinator": { "passed": 66, "failed": 0 },
+    "scopedAnalysis": { "errors": 0, "warnings": 0, "infos": 2 }
+  },
+  "sourceHashes": {
+    "lib/services/core/kai_headless_coordinator.dart": "0F94A813E8BDD788C6C33A44D7DD191C2A426A4D7DB2B782A5808A47672E7E1B",
+    "lib/services/core/kai_proactive_service.dart": "4CC50BC0FE4031683C2AE22616C362C437301652B8B25543793F2C0DF1C34C4E",
+    "lib/services/attention/kai_proactive_attention_queue.dart": "F987D2D47FEC874C81E6802C2792BF7E05A717BC3F02A1DECD9ACBAD18A1021B",
+    "lib/services/attention/kai_proactive_attention_store.dart": "E32E5AD3E7689478512FA92DBCEA39AF34D7F2D0E52C69B87149686A02B5087A"
+  },
+  "oldRuntime": {
+    "corePid": 23992,
+    "watchdogPid": 24504,
+    "root": "build-cash-ledger/windows/x64/runner/Release",
+    "executableSha256": "31B72623C93FB116A97AF1DA82E57B28BB52B1A2610E71E905E5EF26D6FC91C4",
+    "payloadSha256": "B0DD083F7E3901021656410103DEB098B3B604C7043C52800257DEA0C2C9798C"
+  },
+  "newRuntime": {
+    "corePid": 47400,
+    "watchdogPid": 14728,
+    "root": "build-core-stability/windows/x64/runner/Release",
+    "executableSha256": "E0B3B0D2CD8609218908F2EF175545E9CCB63B7B5A00C516F305980A74693B8C",
+    "payloadSha256": "81A375071C88606CC18974EE0C8861CAD88D9E10A012970015D796D11D7E90C6",
+    "port": 8790,
+    "health": "PASS",
+    "watchdogRelationship": "PASS"
+  },
+  "durableState": {
+    "attentionSha256Before": "9B4092FEA9F5E97A04D5AFD270486FC56EE8FA6752109C88701BE40BA1AD5D83",
+    "attentionSha256After": "9B4092FEA9F5E97A04D5AFD270486FC56EE8FA6752109C88701BE40BA1AD5D83",
+    "continuity": "PASS"
+  },
+  "handover": {
+    "method": "exact_pid_scoped_crash_safe_replacement",
+    "reason": "old runtime exposed no invocable graceful shutdown and no Kai tray/window surface was targetable",
+    "desktopRoomProcessesTouched": 0,
+    "rollbackArtifactRetained": true
+  },
+  "runtimeObservation": {
+    "startupJournal": "PASS",
+    "boundedWarningsOrErrors": 0,
+    "boundedProactiveEvents": 0,
+    "overnightQuietHoursNoRepeat": "UNVERIFIED"
+  }
+}

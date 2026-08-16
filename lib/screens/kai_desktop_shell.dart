@@ -32,9 +32,8 @@ import '../services/core/kai_transcript_echo_guard.dart';
 import '../services/core/tool_policy_service.dart';
 import '../services/core/tool_executor_service.dart';
 import '../widgets/kai_project_portfolio.dart';
-import '../widgets/kai_factory_conveyor.dart';
-import '../widgets/kai_state_scorecard_card.dart';
 import '../widgets/kai_growth_tracker_card.dart';
+import '../widgets/kai_factory_conveyor.dart';
 import '../services/core/code_workspace_service.dart';
 import '../services/core/kai_surface_context.dart';
 import '../services/core/engineer_status_bus.dart';
@@ -46,6 +45,10 @@ import '../widgets/kai_presence.dart';
 import '../widgets/kai_core_heartbeat.dart';
 import '../widgets/kai_body_constellation.dart';
 import '../widgets/kai_presence_card.dart';
+import '../widgets/kai_status_card.dart';
+import '../widgets/kai_personal_cash_card.dart';
+import '../widgets/kai_fitness_tracker_card.dart';
+import '../widgets/kai_tavern_business_card.dart';
 import '../widgets/kai_inner_monologue.dart';
 import '../widgets/kai_command_palette.dart';
 import '../widgets/kai_cost_meter.dart';
@@ -178,6 +181,7 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
   int _lastDesktopHistoryMillis = 0;
   int _globalBodyCount = 0;
   List<KaiGlobalBody> _globalBodies = const [];
+  bool _globalPresenceAwake = false;
   KaiCoreHeartbeatStatus _coreHeartbeatStatus = const KaiCoreHeartbeatStatus(
     phase: KaiCoreHeartbeatPhase.connecting,
   );
@@ -392,7 +396,7 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
       deviceId: 'desktop-${Platform.localHostname}',
       surface: 'desktop',
       sessionId: 'desktop-$pid-${DateTime.now().microsecondsSinceEpoch}',
-      onStatus: (_) {},
+      onStatus: _applyCoreHeartbeatStatus,
     );
     _coreHeartbeat = heartbeat;
     heartbeat.start();
@@ -487,23 +491,19 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
 
   KaiSurfaceContext get _desktopSurfaceContext => KaiSurfaceContext.desktop;
 
+  void _applyCoreHeartbeatStatus(KaiCoreHeartbeatStatus status) {
+    if (!mounted) return;
+    setState(() => _coreHeartbeatStatus = status);
+    unawaited(KaiTaskbarHeartbeat.setStatus(status));
+  }
+
   void _applyGlobalPresence(KaiGlobalPresenceSnapshot snapshot) {
     if (!mounted) return;
-    final phase = !snapshot.connected
-        ? KaiCoreHeartbeatPhase.reconnecting
-        : snapshot.isAwake
-            ? KaiCoreHeartbeatPhase.healthy
-            : KaiCoreHeartbeatPhase.offline;
-    final status = KaiCoreHeartbeatStatus(
-      phase: phase,
-      lastSuccessAt: snapshot.observedAt,
-    );
     setState(() {
       _globalBodyCount = snapshot.bodyCount;
       _globalBodies = snapshot.bodies;
-      _coreHeartbeatStatus = status;
+      _globalPresenceAwake = snapshot.isAwake;
     });
-    unawaited(KaiTaskbarHeartbeat.setStatus(status));
   }
 
   Future<void> _showPairingCode() async {
@@ -1964,6 +1964,7 @@ FACTORY_NEXT: continue
                     ),
                   ),
                   Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       _projectsPanel(),
                       Expanded(child: _mainSurface()),
@@ -2447,8 +2448,8 @@ FACTORY_NEXT: continue
               boxes.every((box) => box.state == KaiDeliveryBoxState.verified)) {
             return KaiFactoryStationStatus.complete;
           }
-          if (boxes.any(
-              (box) => box.state == KaiDeliveryBoxState.awaitingSponsor)) {
+          if (boxes
+              .any((box) => box.state == KaiDeliveryBoxState.awaitingSponsor)) {
             return KaiFactoryStationStatus.waitingApproval;
           }
           if (boxes.any((box) => {
@@ -2866,6 +2867,10 @@ FACTORY_NEXT: continue
           Expanded(
             child: ListView(
               children: [
+                if (screenWidth < 1690) ...[
+                  const KaiPersonalCashCard(),
+                  const SizedBox(height: 12),
+                ],
                 _productFactoryOpsCard(),
                 const SizedBox(height: 12),
                 const KaiGrowthTrackerCard(),
@@ -2879,8 +2884,6 @@ FACTORY_NEXT: continue
                   workspaceRoot: CodeWorkspaceService.instance.root,
                   onOpenProject: _openProjectFlowchart,
                 ),
-                const SizedBox(height: 8),
-                const KaiStateScorecardCard(limit: 40),
                 const SizedBox(height: 8),
                 SizedBox(height: 150, child: _desktopWorkQueueCard()),
               ],
@@ -3069,7 +3072,41 @@ FACTORY_NEXT: continue
   }
 
   Widget _mainSurface() {
-    return _showMessengerSurface ? _messengerSurface() : _chat();
+    if (_showMessengerSurface) return _messengerSurface();
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < 980) return _chat();
+        final dockWidth = (constraints.maxWidth * 0.36).clamp(390.0, 455.0);
+        return Column(
+          children: [
+            _chatHeader(),
+            Expanded(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(child: _chat(includeHeader: false)),
+                  SizedBox(
+                    width: dockWidth,
+                    child: const Padding(
+                      padding: EdgeInsets.fromLTRB(8, 10, 10, 12),
+                      child: Column(
+                        children: [
+                          Expanded(child: KaiPersonalCashDock()),
+                          SizedBox(height: 10),
+                          Expanded(child: KaiFitnessTrackerCard()),
+                          SizedBox(height: 10),
+                          Expanded(child: KaiTavernBusinessCard()),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   Widget _messengerSurface() {
@@ -3129,8 +3166,6 @@ FACTORY_NEXT: continue
                             workspaceRoot: CodeWorkspaceService.instance.root,
                             onOpenProject: _openProjectFlowchart,
                           ),
-                          const SizedBox(height: 8),
-                          const KaiStateScorecardCard(limit: 40),
                         ],
                       ),
                     ),
@@ -3214,7 +3249,48 @@ FACTORY_NEXT: continue
     );
   }
 
-  Widget _chat() {
+  Widget _chatHeader() => Container(
+        height: 46,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        decoration: BoxDecoration(
+          color: const Color(0xFF06111C).withOpacity(0.92),
+          border: const Border(bottom: BorderSide(color: Color(0xFF121B26))),
+        ),
+        child: Row(
+          children: [
+            KaiPresence(personaId: _kPersona),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      KaiCoreHeartbeat(
+                        status: _coreHeartbeatStatus,
+                        bodyCount: _globalBodyCount,
+                        onTap: _showPairingCode,
+                      ),
+                      const SizedBox(width: 6),
+                      const KaiEfficiencyDeltaMeter(),
+                      const SizedBox(width: 6),
+                      const KaiCostMeter(),
+                      const SizedBox(width: 6),
+                      _keysButton(),
+                      const SizedBox(width: 6),
+                      _engineerChip(),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+
+  Widget _chat({bool includeHeader = true}) {
     final showRestoreNote =
         _historyRestoreNote != null && _msgs.isEmpty && !_sending;
 
@@ -3229,55 +3305,55 @@ FACTORY_NEXT: continue
       child: Column(
         children: [
           // header + engineer chip
-          Container(
-            height: 46,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            decoration: BoxDecoration(
-              color: const Color(0xFF06111C).withOpacity(0.92),
-              border:
-                  const Border(bottom: BorderSide(color: Color(0xFF121B26))),
-            ),
-            child: Row(
-              children: [
-                KaiPresence(personaId: _kPersona),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          KaiCoreHeartbeat(
-                            status: _coreHeartbeatStatus,
-                            bodyCount: _globalBodyCount,
-                            onTap: _showPairingCode,
-                          ),
-                          const SizedBox(width: 6),
-                          // What he costs, live — he spends money on his own initiative
-                          // (inner life, reflections, proactive nudges), so the meter should
-                          // be visible without being asked for.
-                          const KaiEfficiencyDeltaMeter(),
-                          const SizedBox(width: 6),
-                          const KaiCostMeter(),
-                          const SizedBox(width: 6),
-                          _keysButton(),
-                          const SizedBox(width: 6),
-                          _engineerChip(),
-                        ],
+          if (includeHeader)
+            Container(
+              height: 46,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              decoration: BoxDecoration(
+                color: const Color(0xFF06111C).withOpacity(0.92),
+                border:
+                    const Border(bottom: BorderSide(color: Color(0xFF121B26))),
+              ),
+              child: Row(
+                children: [
+                  KaiPresence(personaId: _kPersona),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            KaiCoreHeartbeat(
+                              status: _coreHeartbeatStatus,
+                              bodyCount: _globalBodyCount,
+                              onTap: _showPairingCode,
+                            ),
+                            const SizedBox(width: 6),
+                            // What he costs, live — he spends money on his own initiative
+                            // (inner life, reflections, proactive nudges), so the meter should
+                            // be visible without being asked for.
+                            const KaiEfficiencyDeltaMeter(),
+                            const SizedBox(width: 6),
+                            const KaiCostMeter(),
+                            const SizedBox(width: 6),
+                            _keysButton(),
+                            const SizedBox(width: 6),
+                            _engineerChip(),
+                          ],
+                        ),
                       ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: KaiBodyConstellation(
-              awake:
-                  _coreHeartbeatStatus.phase == KaiCoreHeartbeatPhase.healthy,
+              awake: _globalPresenceAwake,
               bodies: _globalBodies,
             ),
           ),
@@ -3753,6 +3829,42 @@ FACTORY_NEXT: continue
   }
 
   Widget _cortexPane() {
+    final (handsLabel, handsColor) = switch (_handsState) {
+      KaiHandsState.on => ('HANDS ON', const Color(0xFF54F6A3)),
+      KaiHandsState.activating => ('HANDS ACTIVATING', const Color(0xFFFFB84D)),
+      KaiHandsState.off => ('HANDS OFF', const Color(0xFF718294)),
+    };
+    return Container(
+      width: 330,
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.34),
+        border: Border(left: BorderSide(color: kClaude.withOpacity(0.35))),
+      ),
+      padding: const EdgeInsets.fromLTRB(12, 14, 12, 14),
+      child: SingleChildScrollView(
+        child: Column(
+          children: [
+            KaiStatusCard(
+              personaId: _kPersona,
+              handsLabel: handsLabel,
+              handsColor: handsColor,
+              onOpenAtlas: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const KaiCortexScreen(personaId: _kPersona),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            const KaiGrowthTrackerCard(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Retained as a rollback reference until the consolidated rail is accepted live.
+  // ignore: unused_element
+  Widget _legacyCortexPane() {
     return Container(
       width: 330,
       decoration: BoxDecoration(

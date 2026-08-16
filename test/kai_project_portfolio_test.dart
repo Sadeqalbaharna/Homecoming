@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:homecoming_app/logic/product_factory.dart';
+import 'package:homecoming_app/services/core/kai_factory_daily_lane.dart';
 import 'package:homecoming_app/services/core/kai_project_service.dart';
 import 'package:homecoming_app/widgets/kai_project_portfolio.dart';
 
@@ -290,9 +291,10 @@ void main() {
 
         expect(KaiProjectService.homecomingGovernedAcceptedPhasesForTest, [0]);
         expect(KaiProjectService.homecomingEvidencePhasesForTest, [3]);
-        expect(KaiProjectService.hoardGovernedAcceptedPhasesForTest, [0]);
+        expect(KaiProjectService.hoardGovernedAcceptedPhasesForTest, [0, 1]);
         expect(KaiProjectService.hoardBaselineForTest[0]![0], 100);
-        expect(KaiProjectService.hoardBaselineForTest[1]![2], 'tested');
+        expect(KaiProjectService.hoardBaselineForTest[1]![0], 100);
+        expect(KaiProjectService.hoardBaselineForTest[1]![2], 'usedLive');
       },
     );
 
@@ -302,7 +304,8 @@ void main() {
       final phase3 = KaiProjectService.homecomingBaselineForTest[3]!;
       expect(phase3[0], 0);
       expect(phase3[2], 'wired');
-      expect((phase3[1] as String).toLowerCase(), contains('coordinator'));
+      expect((phase3[1] as String), contains('Brief 018A'));
+      expect((phase3[1] as String).toLowerCase(), contains('seven-day'));
       expect(KaiProjectService.homecomingEvidencePhasesForTest, contains(3));
     });
 
@@ -322,18 +325,43 @@ void main() {
       );
     });
 
-    test('Factory accepts Signal Scan while Blueprint remains evidence-only',
+    test(
+        'Factory baseline reflects line maturity while preserving product lanes',
         () {
       final scan = KaiProjectService.factoryBaselineForTest[0]!;
       final blueprint = KaiProjectService.factoryBaselineForTest[1]!;
+      final dispatch = KaiProjectService.factoryBaselineForTest[6]!;
       expect(scan[0], 100);
       expect(scan[2], 'trusted');
-      expect((scan[1] as String), contains('FSC-LEGACY-YES-001-BP-IC-v3'));
-      expect(blueprint[0], 0);
+      expect((scan[1] as String), contains('product-specific'));
+      expect(blueprint[0], 100);
       expect(blueprint[2], 'tested');
-      expect((blueprint[3] as String), contains('Assembly'));
+      expect((blueprint[1] as String), contains('Find My Table'));
+      expect(dispatch[0], 100);
+      expect(dispatch[2], 'usedLive');
+      expect((dispatch[3] as String), contains('VERIFIED LIVE'));
       expect(KaiProjectService.factoryPacketAcceptedPhasesForTest, [0]);
       expect(KaiProjectService.factoryBlueprintEvidencePhasesForTest, [1]);
+      expect(KaiProjectService.factoryLineMaturityForTest.activePhase, 7);
+      expect(KaiProjectService.factoryLineMaturityForTest.reachedPhases,
+          [0, 1, 2, 3, 4, 5, 6]);
+      expect(KaiProjectService.factoryLineMaturityForTest.evidencePhases, [7]);
+    });
+
+    test('BoothSignal Dispatch is verified while later money proof stays open',
+        () {
+      final status = KaiProjectService.factoryProjectionLatestForTest;
+      expect(status, contains('accepted P0-P6'));
+      expect(status, contains('salbaharna.gumroad.com/l/boothsignal'));
+      expect(status, contains('Dispatch is accepted and Verified live'));
+      expect(status, contains('P7 Telemetry is current'));
+      expect(status, contains('Money in Bank remains future'));
+      expect(
+          status, contains('no sale, fee, refund, receipt, settled payment'));
+      expect(KaiProjectService.factoryPacketAcceptedPhasesForTest, [0]);
+      expect(KaiProjectService.factoryBlueprintEvidencePhasesForTest, [1]);
+      expect(KaiProjectService.factoryLineMaturityForTest.activeProof,
+          KaiFactoryLineActiveProof.unverified);
     });
   });
 

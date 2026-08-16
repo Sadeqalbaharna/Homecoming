@@ -86,8 +86,25 @@ class KaiProactiveAttentionQueue {
     String? eventId,
   }) {
     final receivedUtc = receivedAt.toUtc();
+    final topicId = nudge.topicId?.trim();
     final id = eventId ??
-        'proactive-${receivedUtc.microsecondsSinceEpoch}-${_sequence++}';
+        (topicId != null && topicId.isNotEmpty
+            ? 'proactive-topic:$topicId'
+            : 'proactive-${receivedUtc.microsecondsSinceEpoch}-${_sequence++}');
+    if (topicId != null &&
+        topicId.isNotEmpty &&
+        _processedEventIds.any((processed) =>
+            processed == id ||
+            (processed.startsWith('proactive-topic:') &&
+                processed.endsWith(':$topicId')))) {
+      _rememberProcessed(id);
+    }
+    // The generator may rediscover the same unresolved subject while its first
+    // delivery is still pending. Identity is the topic, not the model wording:
+    // retain the original event instead of stacking another paraphrase.
+    final existing = _find(id) ??
+        (topicId == null || topicId.isEmpty ? null : _findTopic(topicId));
+    if (existing != null) return existing;
     final pending = KaiPendingProactiveAttention(
       event: KaiAttentionEvent(
         eventId: id,
@@ -181,9 +198,30 @@ class KaiProactiveAttentionQueue {
     _revision++;
   }
 
+  /// Re-check the non-negotiable sleep boundary after model generation but
+  /// before any transcript or body write. A call that began at 21:59 can finish
+  /// after 22:00; the earlier admission decision cannot authorize that later
+  /// delivery.
+  bool deferForQuietHours(String eventId, {required DateTime now}) {
+    final nowUtc = now.toUtc();
+    if (!quietHours.contains(nowUtc)) return false;
+    final item = _find(eventId);
+    if (item == null) return false;
+    item.notBefore = quietHours.endsAfter(nowUtc);
+    _revision++;
+    return true;
+  }
+
   KaiPendingProactiveAttention? _find(String eventId) {
     for (final item in _pending) {
       if (item.event.eventId == eventId) return item;
+    }
+    return null;
+  }
+
+  KaiPendingProactiveAttention? _findTopic(String topicId) {
+    for (final item in _pending) {
+      if (item.nudge.topicId?.trim() == topicId) return item;
     }
     return null;
   }
@@ -238,6 +276,7 @@ class KaiProactiveAttentionQueue {
               'seed': item.nudge.seed,
               'wantsHands': item.nudge.wantsHands,
               'nudgeKind': item.nudge.kind.name,
+              if (item.nudge.topicId != null) 'topicId': item.nudge.topicId,
             },
         ],
         'processedEventIds': _processedEventIds.toList(),
@@ -323,6 +362,7 @@ class KaiProactiveAttentionQueue {
             (k) => k.name == entry['nudgeKind']?.toString(),
             orElse: () => KaiNudgeKind.companionship,
           ),
+          topicId: entry['topicId']?.toString(),
         ),
         notBefore:
             DateTime.tryParse(entry['notBefore']?.toString() ?? '')?.toUtc(),

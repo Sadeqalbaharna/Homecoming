@@ -27,6 +27,14 @@ const String kKaiCentralPersona = 'truekai';
 const String kKaiCentralModel = 'gpt-5.5';
 const String kKaiHeadlessWorkerId = 'central-headless';
 
+/// Proactive speech is generated from the admitted nudge only.
+///
+/// Loading the ordinary room transcript here creates an assistant-only echo
+/// chamber: each generic check-in sees Kai's previous proactive reply and
+/// paraphrases its stale subject again. The nudge already carries the approved
+/// topic and the live personality/mood prompt still supplies Kai's voice.
+const int kKaiProactiveContextTurns = 0;
+
 bool isTransientConversationFailure(Object error) {
   if (error is TimeoutException || error is SocketException) return true;
   final text = error.toString().toLowerCase();
@@ -102,6 +110,7 @@ class KaiHeadlessCoordinator {
   Timer? _attentionTimer;
   bool _bodyMirrorBusy = false;
   bool _coreRecoveryBusy = false;
+  Future<void>? _gracefulStopFuture;
 
   Future<void> start({bool recovered = false}) async {
     if (_started) return;
@@ -217,8 +226,38 @@ class KaiHeadlessCoordinator {
       await sub.cancel();
     }
     _activitySubs.clear();
+    KaiProactiveService.instance.stop();
     await _journal.record('coordinator_stopped');
   }
+
+  /// Drain every coordinator-owned writer before the native runner exits.
+  ///
+  /// This is deliberately separate from ordinary widget/process disposal. The
+  /// authenticated local shutdown seam is the only production caller, and the
+  /// cached future makes simultaneous accepted requests idempotent.
+  Future<void> gracefulStop() => _gracefulStopFuture ??= _performGracefulStop();
+
+  Future<void> _performGracefulStop() async {
+    await stop();
+    await KaiEmbodimentGatewayService.vr.stop();
+    await KaiEmbodimentGatewayService.ar.stop();
+    final embeddedCore = _embeddedCore;
+    _embeddedCore = null;
+    if (embeddedCore != null) await embeddedCore.stop();
+    await _journal.flush();
+  }
+
+  Future<void> auditShutdownEvent(
+    String event, {
+    String severity = 'info',
+    Map<String, Object?> details = const {},
+  }) =>
+      _journal.record(
+        event,
+        component: 'graceful_shutdown',
+        severity: severity,
+        details: details,
+      );
 
   void _startBodyMirror() {
     unawaited(_mirrorEmbodiedBodies());
@@ -889,6 +928,11 @@ class KaiHeadlessCoordinator {
         },
       );
     }
+    await _journal.record(
+      'attention_decision',
+      requestId: decision.eventId,
+      details: decision.toJson(),
+    );
     switch (decision.outcome) {
       case KaiAttentionOutcome.deliverNow:
         break;
@@ -932,19 +976,43 @@ class KaiHeadlessCoordinator {
             text: nudge.seed,
             personaId: kKaiCentralPersona,
             model: kKaiCentralModel,
+            ctxTurns: kKaiProactiveContextTurns,
             conversationSurfaceId: targetSurface,
             surfaceContext: context,
             replyCeiling: 90,
             useMemory: false,
             useWebSearch: false,
             saveUserMessage: false,
-            // Embodied delivery is committed to Core first. Persisting before
-            // the inbox write could make history claim Kai spoke in a world
-            // that never received the line.
-            saveAssistantReply: !embodied,
+            // No proactive reply is persisted inside AIService. The final
+            // delivery boundary below re-checks quiet hours first, then commits
+            // the body/transcript in that order — which also covers the
+            // embodied case this branch previously guarded with `!embodied`:
+            // committing to Core first is now the only path, so history can
+            // never claim Kai spoke in a world that never received the line.
+            saveAssistantReply: false,
             source: 'proactive',
           )
           .timeout(const Duration(seconds: 45));
+      final deliveryAt = DateTime.now().toUtc();
+      if (_proactiveAttention.deferForQuietHours(
+        dispatch.pending.event.eventId,
+        now: deliveryAt,
+      )) {
+        await _persistProactiveAttention();
+        await _journal.record(
+          'proactive_delivery_deferred_quiet_hours',
+          requestId: dispatch.pending.event.eventId,
+          surface: body.surface,
+          details: {
+            'eventId': dispatch.pending.event.eventId,
+            'notBefore': _proactiveAttention.pending
+                .firstWhere((item) =>
+                    item.event.eventId == dispatch.pending.event.eventId)
+                .notBefore,
+          },
+        );
+        return;
+      }
       final delivered = response.reply.trim().isNotEmpty &&
           response.reply.trim() != '(no reply)';
       if (delivered && embodied) {
@@ -960,6 +1028,8 @@ class KaiHeadlessCoordinator {
           text: response.reply.trim(),
           expiresAt: DateTime.now().toUtc().add(const Duration(minutes: 10)),
         );
+      }
+      if (delivered) {
         await ConversationStoreService().saveTurn(
           personaId: kKaiCentralPersona,
           surfaceId: targetSurface,
