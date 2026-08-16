@@ -3,6 +3,7 @@ library;
 import 'dart:async';
 import 'dart:io';
 
+import '../../logic/repeat_suppression.dart';
 import '../ai/ai_service.dart';
 import '../attention/kai_attention_engine.dart';
 import '../attention/kai_proactive_attention_queue.dart';
@@ -125,14 +126,15 @@ class KaiHeadlessCoordinator {
 
     _requestSub = _requests.watchOpenRequests(kKaiCentralPersona).listen(
       (requests) {
+        unawaited(_recordStreamRecovered('stream:request'));
         _queue = requests;
         unawaited(_drain());
       },
       onError: (error) {
-        unawaited(_journal.record(
+        unawaited(_recordStreamFailure(
           'request_stream_unavailable',
-          severity: 'warning',
-          details: {'error': error},
+          key: 'stream:request',
+          error: error,
         ));
       },
     );
@@ -250,6 +252,10 @@ class KaiHeadlessCoordinator {
           .limitToLast(3)
           .onValue
           .listen((event) {
+        unawaited(_recordStreamRecovered(
+          'stream:activity:$surface',
+          surface: surface,
+        ));
         final latest = latestUserActivityMillis(event.snapshot.value);
         final previous = _lastUserActivityBySurface[surface];
         _lastUserActivityBySurface[surface] = latest;
@@ -261,11 +267,11 @@ class KaiHeadlessCoordinator {
           ));
         }
       }, onError: (error) {
-        unawaited(_journal.record(
+        unawaited(_recordStreamFailure(
           'activity_stream_unavailable',
-          severity: 'warning',
+          key: 'stream:activity:$surface',
+          error: error,
           surface: surface,
-          details: {'error': error},
         ));
       });
       _activitySubs.add(sub);
@@ -664,6 +670,50 @@ class KaiHeadlessCoordinator {
     } catch (_) {}
   }
 
+  /// Keeps a sleeping laptop from burying a real outage.
+  ///
+  /// These handlers fire on every retry — roughly every two seconds while the
+  /// network is down — and logged at full volume they produced 968 and 482
+  /// entries in one 48-hour window, rotating the journal at 2MB. Every decision
+  /// underneath was correct; the record was the thing that had stopped being
+  /// readable.
+  final RepeatSuppressor _streamFailures = RepeatSuppressor();
+
+  Future<void> _recordStreamFailure(
+    String event, {
+    required String key,
+    required Object error,
+    String? surface,
+  }) async {
+    final decision = _streamFailures.record(key, DateTime.now());
+    if (!decision.shouldEmit) return;
+    await _journal.record(
+      event,
+      severity: 'warning',
+      surface: surface,
+      details: {
+        'error': error,
+        if (decision.suppressedSinceLastEmit > 0)
+          'suppressedSinceLastEntry': decision.suppressedSinceLastEmit,
+      },
+    );
+  }
+
+  /// The stream delivered again. Closes the episode and says what it cost.
+  ///
+  /// Recovery is the half that makes suppression safe to read: without it a
+  /// quiet journal is ambiguous between "it fixed itself" and "it is still
+  /// broken and I stopped mentioning it".
+  Future<void> _recordStreamRecovered(String key, {String? surface}) async {
+    final summary = _streamFailures.resolve(key);
+    if (summary == null) return;
+    await _journal.record(
+      'stream_recovered',
+      surface: surface,
+      details: summary.toJson(),
+    );
+  }
+
   Future<void> _enqueueProactiveNudge(KaiNudge nudge) async {
     if (nudge.wantsHands) {
       await _journal.record(
@@ -814,11 +864,31 @@ class KaiHeadlessCoordinator {
     if (dispatch == null) return;
 
     final decision = dispatch.decision;
-    await _journal.record(
-      'attention_decision',
-      requestId: decision.eventId,
-      details: decision.toJson(),
-    );
+    // A held thought is re-decided on every presence tick and every retry
+    // instant. With no body online that produced an identical
+    // `storeForLater / no_suitable_body_online` line every ~60 seconds, for
+    // hours, about ONE nudge. The decision was right each time; writing it down
+    // each time is what made the audit unreadable.
+    //
+    // Delivery is never suppressed — that line is the receipt for something Kai
+    // actually said, and it happens once per event by construction.
+    final holding = decision.outcome != KaiAttentionOutcome.deliverNow;
+    final auditKey = 'attention:${decision.eventId}:${decision.reasonCode}';
+    final repeat = holding
+        ? _streamFailures.record(auditKey, DateTime.now())
+        : const RepeatDecision(RepeatAction.emit);
+    if (!holding) await _recordStreamRecovered(auditKey);
+    if (repeat.shouldEmit) {
+      await _journal.record(
+        'attention_decision',
+        requestId: decision.eventId,
+        details: {
+          ...decision.toJson(),
+          if (repeat.suppressedSinceLastEmit > 0)
+            'identicalDecisionsSuppressed': repeat.suppressedSinceLastEmit,
+        },
+      );
+    }
     switch (decision.outcome) {
       case KaiAttentionOutcome.deliverNow:
         break;
