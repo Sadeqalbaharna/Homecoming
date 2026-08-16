@@ -41,6 +41,7 @@ import 'firebase_options.dart';
 import 'widgets/debug_button.dart';
 import 'api_key_setup_screen.dart';
 import 'services/core/kai_state_service.dart';
+import 'services/core/kai_ledger_runner.dart';
 import 'services/core/emotional_event_service.dart';
 import 'services/core/memory_reflection_service.dart';
 import 'services/core/kai_reflection_worker.dart';
@@ -692,6 +693,17 @@ class _MobileKaiState extends State<_MobileKai>
     WidgetsBinding.instance.addObserver(this);
     KaiStateService().setSurface('mobile');
     EmotionalEventService().setSurface('mobile');
+
+    // The ledger drain. Android only — the notification listener, the capture
+    // filter and the durable queue all live on the phone, so there is nothing
+    // to drain anywhere else.
+    //
+    // The listener captures at ARRIVAL into a durable queue, so this interval
+    // only decides how fast a captured transaction reaches the ledger, never
+    // whether it is captured at all. Missing a tick costs latency, not a row.
+    if (Platform.isAndroid) {
+      KaiLedgerRunner.instance.start();
+    }
     _glowCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 1400))
       ..repeat(reverse: true);

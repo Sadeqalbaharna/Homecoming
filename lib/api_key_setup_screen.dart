@@ -10,6 +10,7 @@ import 'services/ai/ai_config.dart';
 import 'services/core/kai_secret_inventory.dart';
 import 'logic/secret_registry.dart';
 import 'widgets/kai_key_status_strip.dart';
+import 'widgets/kai_bank_sender_field.dart';
 
 /// Screen for setting up API keys on first launch
 class ApiKeySetupScreen extends StatefulWidget {
@@ -332,6 +333,12 @@ class _ApiKeySetupScreenState extends State<ApiKeySetupScreen> {
 
               // Which of these needs doing, before scrolling to the fields.
               KaiKeyStatusStrip(registry: _registry),
+
+              // Not a credential — the enrolment list that decides which
+              // senders may reach the ledger at all. It lives here because it
+              // is the same kind of thing: a short string that grants access,
+              // and the one place Sadeq already looks for those.
+              const KaiBankSenderField(),
 
               // Header
               const Icon(
