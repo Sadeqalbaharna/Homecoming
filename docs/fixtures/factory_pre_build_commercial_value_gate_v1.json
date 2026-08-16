@@ -1,0 +1,116 @@
+{
+  "schemaVersion": 1,
+  "gateId": "factory-pre-build-commercial-value-v1",
+  "station": "Blueprint",
+  "appliesBefore": "Assembly",
+  "purpose": "Stop technically correct but commercially thin products before substantial build work.",
+  "originEvidence": {
+    "event": "Practice Ladder passed technical checks but the sponsor rejected its buyer value and quality.",
+    "recordedAt": "2026-08-09",
+    "proofState": "SPONSOR_REPORTED"
+  },
+  "allowedVerdicts": ["PASS", "REVISE", "KILL", "UNVERIFIED"],
+  "authority": {
+    "sponsorOwnsSampleReview": true,
+    "agentsMayPrepareEvidence": true,
+    "agentsMayNotInferSponsorApproval": true,
+    "technicalTestsCanSatisfyGate": false,
+    "passDoesNotAuthorizeAssembly": true,
+    "passDoesNotAuthorizePublishing": true
+  },
+  "requiredChecks": [
+    {
+      "id": "paid_transformation",
+      "label": "One-sentence paid transformation",
+      "required": true,
+      "passWhen": "One sentence names the exact buyer, before-state, useful after-state, and why payment is rational.",
+      "evidenceFields": ["statement", "buyer", "beforeState", "afterState", "paymentReason"]
+    },
+    {
+      "id": "competitor_depth",
+      "label": "Real-current-product depth benchmark",
+      "required": true,
+      "passWhen": "At least three current real products are inspected and the proposed sample meets or deliberately exceeds the relevant depth dimensions.",
+      "evidenceFields": ["accessDate", "products", "sourceUrls", "prices", "depthDimensions", "proposedDepthComparison", "contradictions"],
+      "minimumCurrentProducts": 3,
+      "liveExternalEvidenceRequired": true
+    },
+    {
+      "id": "representative_sample",
+      "label": "Finished representative buyer-facing sample",
+      "required": true,
+      "passWhen": "One finished page or screen is shown at intended release quality and demonstrates the core paid value rather than a placeholder.",
+      "evidenceFields": ["artifactPath", "artifactSha256", "sampleType", "coreValueDemonstrated", "visualQaRecord"]
+    },
+    {
+      "id": "adversarial_buyer_value",
+      "label": "Adversarial buyer value verdict",
+      "required": true,
+      "passWhen": "A skeptical intended-buyer review identifies a concrete teaching, time-saving, or outcome-improving effect and finds the sample worth paying for at the tested price hypothesis.",
+      "evidenceFields": ["reviewerRole", "testedPrice", "teachesWhat", "timeSaved", "outcomeImproved", "strongestRejectionReason", "verdict", "verbatimReason"],
+      "permittedValueEffects": ["TEACHES", "SAVES_TIME", "IMPROVES_OUTCOME"]
+    },
+    {
+      "id": "sponsor_sample_review",
+      "label": "Sponsor review of the representative sample",
+      "required": true,
+      "passWhen": "The sponsor reviews the exact sample hash and records PASS before substantial build.",
+      "evidenceFields": ["sponsorVerdict", "sampleArtifactPath", "sampleArtifactSha256", "reviewedAt", "sponsorReason"],
+      "requiredSponsorVerdict": "PASS"
+    },
+    {
+      "id": "thin_wrapper_kill",
+      "label": "Thin-wrapper and randomizer refusal",
+      "required": true,
+      "passWhen": "The product performs a coherent buyer job that materially exceeds relabeling, prompt wrapping, aggregation without judgment, or random output.",
+      "evidenceFields": ["coherentBuyerJob", "uniqueUsefulWork", "thinWrapperOrRandomizer", "reason"],
+      "killWhen": "thinWrapperOrRandomizer is true"
+    }
+  ],
+  "decisionRules": [
+    {
+      "priority": 1,
+      "when": "thin_wrapper_kill.thinWrapperOrRandomizer == true",
+      "verdict": "KILL",
+      "reason": "A thin wrapper or randomizer is not a paid transformation."
+    },
+    {
+      "priority": 2,
+      "when": "any required evidence is absent, stale, placeholder, or unverified",
+      "verdict": "UNVERIFIED",
+      "reason": "Technical completeness cannot substitute for commercial-value evidence."
+    },
+    {
+      "priority": 3,
+      "when": "adversarial buyer verdict is negative or sponsor verdict is REVISE",
+      "verdict": "REVISE",
+      "reason": "Repair the sample or offer before substantial build."
+    },
+    {
+      "priority": 4,
+      "when": "all required checks pass and sponsor verdict is PASS for the exact sample hash",
+      "verdict": "PASS",
+      "reason": "Commercial value is provisionally credible enough to request a separate Assembly gate."
+    }
+  ],
+  "recordTemplate": {
+    "recordId": "",
+    "factoryRunId": "",
+    "conceptId": "",
+    "blueprintRunId": "",
+    "offerVersion": "",
+    "evaluatedAt": "",
+    "checks": {
+      "paid_transformation": {},
+      "competitor_depth": {},
+      "representative_sample": {},
+      "adversarial_buyer_value": {},
+      "sponsor_sample_review": {},
+      "thin_wrapper_kill": {}
+    },
+    "gateVerdict": "UNVERIFIED",
+    "gateReasons": [],
+    "assemblyAuthorityId": null,
+    "publicAuthorityId": null
+  }
+}

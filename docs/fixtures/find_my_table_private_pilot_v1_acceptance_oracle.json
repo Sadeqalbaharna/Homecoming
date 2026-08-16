@@ -1,0 +1,276 @@
+{
+  "schemaVersion": 1,
+  "oracleId": "FMT-PILOT-V1-ORACLE-001",
+  "proofState": "synthetic_acceptance_oracle",
+  "packetId": "FSC-LEGACY-YES-001-BP-IC-v3",
+  "factoryRunId": "factory-run-legacy-recovery-20260809-tablefinder-01",
+  "scanSessionId": "factory-scan-legacy-recovery-20260809-tablefinder-01",
+  "candidateId": "FSC-LEGACY-YES-001",
+  "assemblyAuthorizationId": "FAA-20260809-FSC-LEGACY-YES-001-ASSEMBLY-01",
+  "syntheticOnly": true,
+  "liveLocks": {
+    "realData": false,
+    "outreach": false,
+    "dmOffer": false,
+    "venueExecution": false,
+    "receiptAccess": false,
+    "paymentOrRefund": false,
+    "publicPost": false,
+    "laterStationAdvance": false
+  },
+  "slot": {
+    "id": "slot-pilot-friday-1900",
+    "identityFingerprint": "fixture-slot-pilot-friday-1900",
+    "system": "system-a",
+    "language": "en",
+    "experience": "mixed",
+    "commitment": "oneShot",
+    "dmId": "dm-pilot-001",
+    "targetPlayers": 4
+  },
+  "dm": {
+    "id": "dm-pilot-001",
+    "identityFingerprint": "fixture-dm-pilot-001",
+    "approved": true,
+    "availableSlotIds": ["slot-pilot-friday-1900"],
+    "systems": ["system-a"],
+    "languages": ["en"],
+    "supportedExperience": ["mixed"],
+    "commitments": ["oneShot"],
+    "supportedAccessibility": ["step-free"],
+    "acceptedContentBoundaries": ["no-pvp"],
+    "capacity": 4
+  },
+  "prospects": [
+    {
+      "id": "p001",
+      "identityFingerprint": "fixture-person-001",
+      "route": "existing_player_referral",
+      "netNewToAddedTable": true,
+      "fit": "compatible"
+    },
+    {
+      "id": "p002",
+      "identityFingerprint": "fixture-person-002",
+      "route": "venue_inbound",
+      "netNewToAddedTable": true,
+      "fit": "compatible"
+    },
+    {
+      "id": "p003",
+      "identityFingerprint": "fixture-person-003",
+      "route": "approved_community_channel",
+      "netNewToAddedTable": true,
+      "fit": "compatible"
+    },
+    {
+      "id": "p004",
+      "identityFingerprint": "fixture-person-004",
+      "route": "existing_player_referral",
+      "netNewToAddedTable": true,
+      "fit": "compatible"
+    },
+    {
+      "id": "p005",
+      "identityFingerprint": "fixture-person-005",
+      "route": "venue_inbound",
+      "netNewToAddedTable": true,
+      "fit": "compatible"
+    },
+    {
+      "id": "p006",
+      "identityFingerprint": "fixture-person-006",
+      "route": "approved_community_channel",
+      "netNewToAddedTable": true,
+      "fit": "compatible"
+    },
+    {
+      "id": "p007",
+      "identityFingerprint": "fixture-person-007",
+      "route": "existing_player_referral",
+      "netNewToAddedTable": true,
+      "fit": "language_mismatch",
+      "languages": ["ar"]
+    },
+    {
+      "id": "p008",
+      "identityFingerprint": "fixture-person-002",
+      "route": "existing_player_referral",
+      "netNewToAddedTable": true,
+      "fit": "duplicate_of_p002"
+    },
+    {
+      "id": "p009",
+      "identityFingerprint": "fixture-person-009",
+      "route": "venue_inbound",
+      "netNewToAddedTable": true,
+      "fit": "system_mismatch",
+      "systems": ["system-b"]
+    },
+    {
+      "id": "p010",
+      "identityFingerprint": "fixture-person-010",
+      "route": "approved_community_channel",
+      "netNewToAddedTable": true,
+      "fit": "compatible"
+    }
+  ],
+  "compatibleDefaults": {
+    "availableSlotIds": ["slot-pilot-friday-1900"],
+    "systems": ["system-a"],
+    "languages": ["en"],
+    "experienceComfort": ["mixed"],
+    "commitments": ["oneShot"],
+    "accessibilityNeedsDisclosed": true,
+    "accessibilityNeeds": ["step-free"],
+    "contentBoundariesDisclosed": true,
+    "contentBoundaries": ["no-pvp"]
+  },
+  "expectedMatching": {
+    "routeCountsBeforeDedupe": {
+      "existing_player_referral": 4,
+      "venue_inbound": 3,
+      "approved_community_channel": 3
+    },
+    "retainedDuplicate": {
+      "recordId": "p008",
+      "duplicateOfId": "p002",
+      "reason": "duplicate identity fingerprint suppressed"
+    },
+    "unmatched": [
+      {
+        "subjectId": "p007",
+        "reason": "language mismatch"
+      },
+      {
+        "subjectId": "p009",
+        "reason": "system mismatch"
+      }
+    ],
+    "proposalId": "proposal-1-slot-pilot-friday-1900",
+    "proposalFingerprint": "fsc-legacy-yes-001-bp-ic-v3|factory-run-legacy-recovery-20260809-tablefinder-01|fsc-legacy-yes-001|slot-pilot-friday-1900|dm-pilot-001|p001|p002|p003|p004",
+    "selectedPlayerIds": ["p001", "p002", "p003", "p004"],
+    "waitlistPlayerIds": ["p005", "p006", "p010"]
+  },
+  "expectedLifecycle": [
+    {
+      "recordedAtMs": 1000,
+      "subjectId": "proposal-1-slot-pilot-friday-1900",
+      "from": "proposed",
+      "to": "approved",
+      "reason": "synthetic operator approved exact table"
+    },
+    {
+      "recordedAtMs": 1100,
+      "subjectId": "p003",
+      "from": "selected",
+      "to": "invited",
+      "reason": "synthetic invitation after approval"
+    },
+    {
+      "recordedAtMs": 1200,
+      "subjectId": "p003",
+      "from": "invited",
+      "to": "accepted",
+      "reason": "synthetic acceptance retained"
+    },
+    {
+      "recordedAtMs": 1300,
+      "subjectId": "p003",
+      "from": "accepted",
+      "to": "confirmed",
+      "reason": "synthetic confirmation retained"
+    },
+    {
+      "recordedAtMs": 1400,
+      "subjectId": "p003",
+      "from": "confirmed",
+      "to": "cancelled",
+      "reason": "synthetic cancellation retained"
+    },
+    {
+      "recordedAtMs": 1500,
+      "subjectId": "p005",
+      "from": "waitlisted",
+      "to": "selected",
+      "reason": "ordered compatible replacement for p003"
+    },
+    {
+      "recordedAtMs": 1600,
+      "subjectId": "p004",
+      "from": "selected",
+      "to": "invited",
+      "reason": "synthetic invitation after approval"
+    },
+    {
+      "recordedAtMs": 1700,
+      "subjectId": "p004",
+      "from": "invited",
+      "to": "declined",
+      "reason": "synthetic decline retained"
+    }
+  ],
+  "economics": {
+    "currency": "BHD",
+    "playerBills": [12.0, 12.0, 12.0, 12.0],
+    "matchingSurcharge": 0.0,
+    "contributionMarginFixture": 0.4,
+    "incrementalOverheadFixture": 5.0,
+    "dmCostFixture": 10.0,
+    "allNetNew": {
+      "netNewSeats": [true, true, true, true],
+      "gross": 48.0,
+      "netNewShare": 1.0,
+      "attributableContribution": 4.2,
+      "nonNegative": true
+    },
+    "oneTransferred": {
+      "netNewSeats": [true, true, true, false],
+      "gross": 48.0,
+      "netNewShare": 0.75,
+      "attributableContribution": -0.6,
+      "nonNegative": false
+    },
+    "missingInputResult": "UNAVAILABLE",
+    "liveProofStates": {
+      "delivered": "UNAVAILABLE",
+      "billed": "UNAVAILABLE",
+      "settled": "UNAVAILABLE",
+      "bankReconciled": "UNAVAILABLE"
+    }
+  },
+  "privacyOracle": {
+    "playerFacingAllowed": ["playerId", "systems", "languages", "commitments"],
+    "playerFacingForbidden": [
+      "identityFingerprint",
+      "route",
+      "accessibilityNeeds",
+      "contentBoundaries",
+      "dmPrivateFields",
+      "operatorPrivateFields"
+    ],
+    "dmBriefAllowed": [
+      "proposalId",
+      "system",
+      "language",
+      "experience",
+      "commitment",
+      "playerCount",
+      "aggregatedAccessibilityRequirements",
+      "aggregatedContentBoundaries"
+    ]
+  },
+  "workbookOracle": {
+    "matchWorkbookRequiredSheets": ["Review Queue", "Evidence Ledger"],
+    "revenueWorkbookRequiredSheets": ["Attribution", "Proof States"],
+    "centralFormula": "SUMPRODUCT(playerBills,--netNewSeats)*contributionMargin-incrementalOverhead-dmCost",
+    "netNewShareFormula": "COUNTIF(netNewSeats,TRUE)/ROWS(netNewSeats)",
+    "missingInputGuard": "IF(any required input is blank,UNAVAILABLE,no numeric result)",
+    "forbiddenFeatures": [
+      "macros",
+      "external links",
+      "external data connections",
+      "hidden sheets"
+    ]
+  }
+}

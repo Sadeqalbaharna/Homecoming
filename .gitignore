@@ -85,6 +85,11 @@ tmp_*.patch
 /tmp/
 /.tool-home/
 
+# Dart analysis profile cache — 11,178 downloaded package files, not source.
+# It was drowning every git status in the factory worktree, which is how real
+# uncommitted work stayed invisible there for a week.
+/.tmp/
+
 # Live Firebase web console — carries a project API key in plain text.
 # Excluded by hand on 2026-08-16 and then committed anyway by a concurrent
 # merge that swept untracked files. A deliberate exclusion that only lives in

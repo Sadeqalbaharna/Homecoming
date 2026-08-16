@@ -1,0 +1,186 @@
+{
+  "schemaVersion": 1,
+  "oracleId": "FMT-PILOT-V1-WORKBOOK-ORACLE-001",
+  "proofState": "synthetic_workbook_acceptance_oracle",
+  "appliesTo": "FMT-PILOT-V1-ORACLE-001",
+  "globalRequirements": {
+    "format": "xlsx_ooxml_no_macros",
+    "zipMetadata": "fixed_for_byte_determinism",
+    "calculationMode": "automatic",
+    "dateSystem": "1900",
+    "hiddenSheets": 0,
+    "hiddenColumns": 0,
+    "hiddenRows": 0,
+    "externalLinks": 0,
+    "externalDataConnections": 0,
+    "macros": 0,
+    "mergedCells": 0,
+    "formulaErrorsAllowed": 0,
+    "blankRequiredInputResult": "UNAVAILABLE"
+  },
+  "matchReviewWorkbook": {
+    "file": "03_match_review_workbook.xlsx",
+    "sheetOrder": ["Review Queue", "Evidence Ledger"],
+    "reviewQueue": {
+      "headerRow": 1,
+      "headers": {
+        "A": "Prospect ID",
+        "B": "Route",
+        "C": "Net-new proof",
+        "D": "Slot fit",
+        "E": "System fit",
+        "F": "Language fit",
+        "G": "Experience fit",
+        "H": "Commitment fit",
+        "I": "Optional requirements disclosed",
+        "J": "Eligibility",
+        "K": "Proposal role",
+        "L": "Retained reason",
+        "M": "Operator decision",
+        "N": "Proof state"
+      },
+      "rows": [
+        ["p001", "existing_player_referral", "synthetic_net_new", "pass", "pass", "pass", "pass", "pass", "yes", "eligible", "selected", "all hard constraints satisfied", "approved proposal", "synthetic"],
+        ["p002", "venue_inbound", "synthetic_net_new", "pass", "pass", "pass", "pass", "pass", "yes", "eligible", "selected", "all hard constraints satisfied", "approved proposal", "synthetic"],
+        ["p003", "approved_community_channel", "synthetic_net_new", "pass", "pass", "pass", "pass", "pass", "yes", "eligible", "selected_then_cancelled", "ordered replacement retained", "approved proposal", "synthetic"],
+        ["p004", "existing_player_referral", "synthetic_net_new", "pass", "pass", "pass", "pass", "pass", "yes", "eligible", "selected_then_declined", "decline retained", "approved proposal", "synthetic"],
+        ["p005", "venue_inbound", "synthetic_net_new", "pass", "pass", "pass", "pass", "pass", "yes", "eligible", "waitlist_then_replacement", "ordered compatible replacement for p003", "approved proposal", "synthetic"],
+        ["p006", "approved_community_channel", "synthetic_net_new", "pass", "pass", "pass", "pass", "pass", "yes", "eligible", "waitlist", "ordered surplus", "approved proposal", "synthetic"],
+        ["p007", "existing_player_referral", "synthetic_net_new", "pass", "pass", "fail", "pass", "pass", "yes", "ineligible", "unmatched", "language mismatch", "not proposed", "synthetic"],
+        ["p008", "existing_player_referral", "synthetic_net_new", "not_evaluated", "not_evaluated", "not_evaluated", "not_evaluated", "not_evaluated", "not_evaluated", "duplicate", "duplicate", "duplicate identity fingerprint suppressed; duplicate of p002", "not proposed", "synthetic"],
+        ["p009", "venue_inbound", "synthetic_net_new", "pass", "fail", "pass", "pass", "pass", "yes", "ineligible", "unmatched", "system mismatch", "not proposed", "synthetic"],
+        ["p010", "approved_community_channel", "synthetic_net_new", "pass", "pass", "pass", "pass", "pass", "yes", "eligible", "waitlist", "ordered surplus", "approved proposal", "synthetic"]
+      ],
+      "routeCountCells": {
+        "P2": "existing_player_referral",
+        "Q2": 4,
+        "P3": "venue_inbound",
+        "Q3": 3,
+        "P4": "approved_community_channel",
+        "Q4": 3
+      },
+      "routeCountFormulas": {
+        "R2": "=COUNTIF(B2:B11,P2)",
+        "R3": "=COUNTIF(B2:B11,P3)",
+        "R4": "=COUNTIF(B2:B11,P4)"
+      }
+    },
+    "evidenceLedger": {
+      "headers": ["Sequence", "Subject ID", "Event type", "From", "To", "Reason", "Synthetic time ms", "Authority state"],
+      "requiredEventsInOrder": [
+        [1, "p008", "duplicate", "discovered", "suppressed", "duplicate identity fingerprint suppressed; duplicate of p002", 0, "assembly_only"],
+        [2, "p007", "unmatched", "evaluated", "rejected", "language mismatch", 0, "assembly_only"],
+        [3, "p009", "unmatched", "evaluated", "rejected", "system mismatch", 0, "assembly_only"],
+        [4, "proposal-1-slot-pilot-friday-1900", "operator_decision", "proposed", "approved", "synthetic operator approved exact table", 1000, "assembly_only"],
+        [5, "p003", "participant_state", "selected", "invited", "synthetic invitation after approval", 1100, "assembly_only"],
+        [6, "p003", "participant_state", "invited", "accepted", "synthetic acceptance retained", 1200, "assembly_only"],
+        [7, "p003", "participant_state", "accepted", "confirmed", "synthetic confirmation retained", 1300, "assembly_only"],
+        [8, "p003", "participant_state", "confirmed", "cancelled", "synthetic cancellation retained", 1400, "assembly_only"],
+        [9, "p005", "replacement", "waitlisted", "selected", "ordered compatible replacement for p003", 1500, "assembly_only"],
+        [10, "p004", "participant_state", "selected", "invited", "synthetic invitation after approval", 1600, "assembly_only"],
+        [11, "p004", "participant_state", "invited", "declined", "synthetic decline retained", 1700, "assembly_only"]
+      ]
+    }
+  },
+  "revenueAttributionWorkbook": {
+    "file": "07_revenue_attribution.xlsx",
+    "sheetOrder": ["Attribution", "Proof States"],
+    "attribution": {
+      "centralCase": {
+        "labels": {
+          "A1": "Central P0 synthetic fixture",
+          "A8": "Contribution margin",
+          "A9": "Incremental overhead BHD",
+          "A10": "DM cost BHD",
+          "A11": "Discounts BHD",
+          "A12": "Refunds BHD",
+          "A13": "Fees BHD",
+          "A14": "Support labor BHD",
+          "A16": "Gross BHD",
+          "A17": "Net-new seat share",
+          "A18": "Attributable contribution BHD",
+          "A19": "Non-negative"
+        },
+        "playerHeaders": {
+          "A2": "Player ID",
+          "B2": "Bill BHD",
+          "C2": "Net-new"
+        },
+        "playerRows": {
+          "A3:C3": ["p001", 12.0, true],
+          "A4:C4": ["p002", 12.0, true],
+          "A5:C5": ["p003", 12.0, true],
+          "A6:C6": ["p004", 12.0, true]
+        },
+        "inputs": {
+          "B8": 0.4,
+          "B9": 5.0,
+          "B10": 10.0,
+          "B11": 0.0,
+          "B12": 0.0,
+          "B13": 0.0,
+          "B14": 0.0
+        },
+        "formulas": {
+          "B16": "=IF(COUNT(B3:B6)<>4,\"UNAVAILABLE\",SUM(B3:B6))",
+          "B17": "=IF(COUNTA(C3:C6)<>4,\"UNAVAILABLE\",COUNTIF(C3:C6,TRUE)/ROWS(C3:C6))",
+          "B18": "=IF(OR(COUNT(B3:B6)<>4,COUNTA(C3:C6)<>4,COUNT(B8:B14)<>7),\"UNAVAILABLE\",SUMPRODUCT(B3:B6,--C3:C6)*B8-B9-B10-B11-B12-B13-B14)",
+          "B19": "=IF(NOT(ISNUMBER(B18)),\"UNAVAILABLE\",B18>=0)"
+        },
+        "cachedExpectedValues": {
+          "B16": 48.0,
+          "B17": 1.0,
+          "B18": 4.2,
+          "B19": true
+        }
+      },
+      "transferredSeatCase": {
+        "titleCell": "E1",
+        "title": "One transferred seat synthetic failure",
+        "playerBillRange": "F3:F6",
+        "playerBillValues": [12.0, 12.0, 12.0, 12.0],
+        "netNewRange": "G3:G6",
+        "netNewValues": [true, true, true, false],
+        "inputRange": "F8:F14",
+        "inputValues": [0.4, 5.0, 10.0, 0.0, 0.0, 0.0, 0.0],
+        "formulas": {
+          "F16": "=IF(COUNT(F3:F6)<>4,\"UNAVAILABLE\",SUM(F3:F6))",
+          "F17": "=IF(COUNTA(G3:G6)<>4,\"UNAVAILABLE\",COUNTIF(G3:G6,TRUE)/ROWS(G3:G6))",
+          "F18": "=IF(OR(COUNT(F3:F6)<>4,COUNTA(G3:G6)<>4,COUNT(F8:F14)<>7),\"UNAVAILABLE\",SUMPRODUCT(F3:F6,--G3:G6)*F8-F9-F10-F11-F12-F13-F14)",
+          "F19": "=IF(NOT(ISNUMBER(F18)),\"UNAVAILABLE\",F18>=0)"
+        },
+        "cachedExpectedValues": {
+          "F16": 48.0,
+          "F17": 0.75,
+          "F18": -0.6,
+          "F19": false
+        }
+      },
+      "blankInputMutation": {
+        "requiredUnavailableByDeletedCell": {
+          "B3": ["B16", "B18", "B19"],
+          "C3": ["B17", "B18", "B19"],
+          "B8": ["B18", "B19"],
+          "B9": ["B18", "B19"],
+          "B10": ["B18", "B19"],
+          "B11": ["B18", "B19"],
+          "B12": ["B18", "B19"],
+          "B13": ["B18", "B19"],
+          "B14": ["B18", "B19"]
+        },
+        "requiredResult": "UNAVAILABLE"
+      }
+    },
+    "proofStates": {
+      "headers": ["State", "Synthetic evidence", "Live evidence", "May satisfy money gate"],
+      "rows": [
+        ["proposed", "SYNTHETIC", "UNAVAILABLE", false],
+        ["approved", "SYNTHETIC", "UNAVAILABLE", false],
+        ["delivered", "UNAVAILABLE", "UNAVAILABLE", false],
+        ["billed", "UNAVAILABLE", "UNAVAILABLE", false],
+        ["settled", "UNAVAILABLE", "UNAVAILABLE", false],
+        ["bank-reconciled", "UNAVAILABLE", "UNAVAILABLE", false]
+      ]
+    }
+  }
+}
