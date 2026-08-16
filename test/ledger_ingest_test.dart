@@ -71,6 +71,85 @@ void main() {
     });
   });
 
+  // ── Verbatim Al Salam alerts ───────────────────────────────────────────────
+  //
+  // Everything above was written against the shapes banks TYPICALLY use. These
+  // are copied from Sadeq's actual inbox, and four of them broke the parser:
+  //
+  //   * "Fawri payment ... credited to your account" contains an expense word
+  //     AND two income words, so direction came back ambiguous and every credit
+  //     was refused. A ledger recording only what LEAVES is worse than none.
+  //   * "Your balance is BHD 208.050" — the word "is" sat between the label and
+  //     the number, so no balance was read and reconciliation had nothing to
+  //     anchor on.
+  //   * Accounts are 8 digits (XXX94150000), not the 3–4 assumed.
+  //   * The merchant pattern matched "from Acc." and "from your account",
+  //     filing purchases under a merchant called "your".
+  //
+  // Guessing a format is the same mistake as guessing a sender id, and it fails
+  // the same way: quietly.
+  group('the alerts Al Salam actually sends', () {
+    KaiIngestOutcome parse(String body) =>
+        ingestWith().ingest(alert(body, when: DateTime(2026, 8, 11)));
+
+    KaiBalanceReading? balance(String body) => KaiLedgerIngest.readBalance(
+          alert(body, when: DateTime(2026, 8, 11)),
+        );
+
+    const cardPurchase =
+        'BHD 24.420 debited from Acc. XXX94150000 at FINE FOODS - MINA '
+        'SALMMANAMA BH.Bal: BHD 354.620 on 11/08/26 at 11:16. Tel 17005500';
+    const plainDebit =
+        'BHD 100.000 has been debited from your account XXXX94150000. Your '
+        'balance is BHD 208.050 on 11/08/26 at 14:15.';
+    const noSpaceAmount =
+        'BHD11.890 has been debited from your account XXXX94150000 at PAYPAL '
+        'FACEBOOK 4029357733 IE on 09/08 at 09:21. Your balance is BHD 289.467.';
+    const fawriCredit =
+        'Fawri payment BHD 73.855 ref 398GBSF262230602 received from IBAN EAZY '
+        'FINANCIAL SERVICE credited to your account XXXX55100100. Your Balance '
+        'is BHD 338.653 on 11/08';
+
+    test('a card purchase is read whole', () {
+      final c = parse(cardPurchase).candidate!;
+      expect(c.amount, 24.42);
+      expect(c.direction, KaiCashImportDirection.expense);
+      expect(c.description, contains('FINE FOODS'));
+      expect(c.description.toLowerCase(), isNot(contains('acc')),
+          reason: 'the merchant is not the word "Acc."');
+    });
+
+    test('an amount with no space after the currency still parses', () {
+      expect(parse(noSpaceAmount).candidate!.amount, 11.89);
+      expect(parse(noSpaceAmount).candidate!.description,
+          contains('PAYPAL FACEBOOK'));
+    });
+
+    test('a Fawri credit is income, not an ambiguity', () {
+      // The regression that mattered most: "payment" and "credited" in one
+      // sentence refused the whole thing, so nothing coming IN was recorded.
+      final out = parse(fawriCredit);
+      expect(out.parsed, isTrue, reason: out.reasonCode);
+      expect(out.candidate!.direction, KaiCashImportDirection.income);
+      expect(out.candidate!.amount, 73.855);
+    });
+
+    test('every shape yields a balance to reconcile against', () {
+      expect(balance(cardPurchase)?.balance, 354.620);
+      expect(balance(plainDebit)?.balance, 208.050);
+      expect(balance(noSpaceAmount)?.balance, 289.467);
+      expect(balance(fawriCredit)?.balance, 338.653);
+    });
+
+    test('the two accounts stay distinct', () {
+      // Spending runs through ...94150000 and Fawri credits land in
+      // ...55100100. Reconciling them as one balance would let a healthy
+      // account mask an overdrawn one.
+      expect(balance(cardPurchase)?.account, '94150000');
+      expect(balance(fawriCredit)?.account, '55100100');
+    });
+  });
+
   group('nothing is silently dropped', () {
     test('an alert with no amount says so', () {
       final out = ingestWith().ingest(alert('Your statement is ready'));

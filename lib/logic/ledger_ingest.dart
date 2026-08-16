@@ -169,16 +169,30 @@ class KaiLedgerIngest {
     caseSensitive: false,
   );
 
+  // ── Strong signals, checked first ─────────────────────────────────────────
+  //
+  // Real Al Salam credits read: "Fawri payment BHD 73.855 ... received from
+  // IBAN EAZY FINANCIAL SERVICE credited to your account". That contains
+  // "payment" — an expense word — AND "credited" and "received". Weighing them
+  // equally made every Fawri credit ambiguous, so all incoming money was
+  // silently refused while spending sailed through. A ledger that records only
+  // what leaves is worse than none.
+  //
+  // "debited from" and "credited to" are unambiguous statements of direction in
+  // a way that a bare verb is not, so they win outright.
+  static const _strongExpense = ['debited from', 'debit from'];
+  static const _strongIncome = ['credited to', 'credit to'];
+
   static const _expenseWords = [
     'spent', 'purchase', 'debit', 'debited', 'withdrawn', 'withdrawal',
-    'payment', 'paid', 'pos ', 'atm',
+    'paid', 'pos ', 'atm',
   ];
   static const _incomeWords = [
     'credited', 'credit of', 'deposit', 'received', 'salary', 'refund',
   ];
 
   static final _merchant = RegExp(
-    r'\b(?:at|to|from)\s+([A-Za-z0-9][A-Za-z0-9 &._\-]{2,40}?)(?=\s+(?:on|using|via|card|acct|account|ref|bal|balance)\b|[.,]|$)',
+    r'\bat\s+([A-Za-z][A-Za-z0-9 &\-]{2,45}?)(?=\s+on\b|\s*\.|\s*$)',
     caseSensitive: false,
   );
 
@@ -284,12 +298,12 @@ class KaiLedgerIngest {
   double confirmedToday(String ruleId) => _spentToday[ruleId] ?? 0;
 
   static final _balance = RegExp(
-    r'(?:bal|balance|avail(?:able)?(?:\s+bal(?:ance)?)?)\s*[:.]?\s*(?:bhd|bd)?\s*([0-9]+(?:[.,][0-9]{1,3})?)',
+    r'(?:bal|balance)\s*(?:is|of)?\s*[:.]?\s*(?:bhd|bd)?\s*([0-9]+(?:[.,][0-9]{1,3})?)',
     caseSensitive: false,
   );
 
   static final _account = RegExp(
-    r'(?:card|acct|account|a/c)\s*(?:ending|no\.?|number|xx+)?\s*[:# ]?\s*[xX*]*([0-9]{3,4})\b',
+    r'(?:card|acc|acct|account|a/c)\.?\s*(?:ending|no\.?|number)?\s*[:# ]?\s*[xX*]*([0-9]{3,12})',
     caseSensitive: false,
   );
 
@@ -324,6 +338,15 @@ class KaiLedgerIngest {
 
   static KaiCashImportDirection? _extractDirection(String text) {
     final lower = text.toLowerCase();
+
+    final strongOut = _strongExpense.any(lower.contains);
+    final strongIn = _strongIncome.any(lower.contains);
+    if (strongOut != strongIn) {
+      return strongOut
+          ? KaiCashImportDirection.expense
+          : KaiCashImportDirection.income;
+    }
+
     final expense = _expenseWords.any(lower.contains);
     final income = _incomeWords.any(lower.contains);
     // Both or neither is ambiguous. "Refund of a purchase" genuinely is.
