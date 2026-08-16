@@ -289,6 +289,134 @@ My goggles are off, so I’m not diving into the machinery.
     );
   });
 
+  // ── The write side was the optimistic one ───────────────────────────────────
+  //
+  // Every read control in this file fails closed. The write default did not: it
+  // was `if (route == fastChat) return sharedLife`, and fastChat is what
+  // KaiRouterService returns when NOTHING MATCHED. So the rule read "anything I
+  // could not classify is shared life", and sharedLife is Messenger-visible.
+  //
+  // It survived because nothing tested it. Before this group, every sharedLife
+  // assertion in this file was on the READ side — policy.allows and shard
+  // fixtures. Not one asserted what a turn writes. The branch that ran on every
+  // ordinary desktop turn had no coverage at all.
+  group('an unclassified turn is private, not shared', () {
+    test('the router shrugging is not evidence of intimacy', () {
+      // Desktop, goggles permanently on, nothing matched. The old rule made
+      // this sharedLife and put it on Messenger forever.
+      expect(
+        scopeForTurn(
+          context: KaiSurfaceContext.desktop,
+          route: KaiRoute.fastChat,
+        ),
+        KaiMemoryScope.privateCore,
+      );
+    });
+
+    test('a turn the router could not place is offered to the classifier', () {
+      final decision = scopeDecisionForTurn(
+        context: KaiSurfaceContext.desktop,
+        route: KaiRoute.fastChat,
+        userText: 'my sister is coming to stay next week',
+      );
+      expect(decision.scope, KaiMemoryScope.privateCore,
+          reason: 'the safe answer is always what gets returned');
+      expect(decision.marginal, isTrue);
+      expect(decision.promotion, KaiMemoryScope.sharedLife);
+      expect(decision.reasonCode, 'unrouted_margin');
+    });
+
+    test('sharedLife is the only thing a classifier may reach', () {
+      final decision = scopeDecisionForTurn(
+        context: KaiSurfaceContext.desktop,
+        route: KaiRoute.fastChat,
+        userText: 'we should go back to that place by the water',
+      );
+      // Not identity, not relationship, not creative. One promotion, one target.
+      expect(decision.promotion, KaiMemoryScope.sharedLife);
+    });
+
+    test('technical content is closed on evidence and cannot be argued with',
+        () {
+      final decision = scopeDecisionForTurn(
+        context: KaiSurfaceContext.desktop,
+        route: KaiRoute.fastChat,
+        userText: 'the firebase database rules are rejecting my write',
+      );
+      expect(decision.scope, KaiMemoryScope.privateCore);
+      expect(decision.marginal, isFalse,
+          reason: 'a model does not get to reopen a decision made on evidence');
+      expect(decision.reasonCode, 'technical_content');
+    });
+
+    test('a work request collapsed to chat stays off the margin', () {
+      // The capability broker collapses a forbidden coding request to fastChat
+      // so Kai can refuse politely. The subject is still work.
+      final decision = scopeDecisionForTurn(
+        context: KaiSurfaceContext.desktop,
+        route: KaiRoute.fastChat,
+        requestedRoute: KaiRoute.coding,
+        userText: 'can you refactor that for me',
+      );
+      expect(decision.marginal, isFalse);
+      expect(decision.reasonCode, 'work_intent');
+    });
+
+    test('decisions made by a positive rule are never revisited', () {
+      // An emotional turn is already relationship on evidence. The margin is
+      // only ever the branch the fail-open default used to cover.
+      final emotional = scopeDecisionForTurn(
+        context: KaiSurfaceContext.desktop,
+        route: KaiRoute.emotional,
+      );
+      expect(emotional.scope, KaiMemoryScope.relationship);
+      expect(emotional.marginal, isFalse);
+      expect(emotional.reasonCode, 'positive_rule');
+
+      final guest = scopeDecisionForTurn(
+        context: KaiSurfaceContext.arPublic(),
+        route: KaiRoute.fastChat,
+      );
+      expect(guest.scope, KaiMemoryScope.ephemeral);
+      expect(guest.marginal, isFalse);
+    });
+
+    test('no surface still means no authority, and no margin', () {
+      final decision = scopeDecisionForTurn(
+        context: null,
+        route: KaiRoute.fastChat,
+      );
+      expect(decision.scope, KaiMemoryScope.privateCore);
+      expect(decision.marginal, isFalse);
+    });
+
+    test('a routed non-work turn is private without being marginal', () {
+      final decision = scopeDecisionForTurn(
+        context: KaiSurfaceContext.desktop,
+        route: KaiRoute.contemplate,
+      );
+      expect(decision.scope, KaiMemoryScope.privateCore);
+      expect(decision.marginal, isFalse,
+          reason: 'contemplate is a work posture, not personal musing');
+    });
+
+    test('ignoring the decision type entirely is still correct', () {
+      // The property that makes it safe to put a model near this at all: a
+      // caller that never reads `marginal` behaves correctly, just privately.
+      for (final route in KaiRoute.values) {
+        final plain = scopeForTurn(
+          context: KaiSurfaceContext.desktop,
+          route: route,
+        );
+        final decision = scopeDecisionForTurn(
+          context: KaiSurfaceContext.desktop,
+          route: route,
+        );
+        expect(decision.scope, plain, reason: '$route');
+      }
+    });
+  });
+
   test('turn scoping keeps technical core memories out of friend surfaces', () {
     expect(
       scopeForTurn(

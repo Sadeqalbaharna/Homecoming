@@ -339,6 +339,120 @@ KaiMemoryScope scopeForTurn({
         ? KaiMemoryScope.relationship
         : KaiMemoryScope.creative;
   }
-  if (route == KaiRoute.fastChat) return KaiMemoryScope.sharedLife;
+  // ── The fail-open default, inverted ─────────────────────────────────────────
+  //
+  // This used to be `if (route == fastChat) return sharedLife`. Read it against
+  // what fastChat actually means: KaiRouterService returns fastChat when NOTHING
+  // MATCHED. It is the router's shrug, not a finding of personal content.
+  //
+  // So the rule said "anything I could not classify is shared life" — and
+  // sharedLife is Messenger-visible. Every reads-side control in this file is
+  // conservative and fails closed; the write side was optimistic and failed
+  // open, on the one branch that runs for every ordinary desktop turn. A
+  // technical question phrased without a keyword the router knows became
+  // readable on the friend surface, permanently, with no event to notice.
+  //
+  // The router was never built as a security boundary. It is a latency
+  // optimisation that picks a prompt shape, and its keyword list is openly
+  // under-inclusive — 'why did that break' matches nothing at all.
+  //
+  // Now: privateCore unless something positive says otherwise. An absent signal
+  // is not evidence of intimacy.
   return KaiMemoryScope.privateCore;
+}
+
+/// The scope decision, plus whether anything is allowed to widen it.
+///
+/// [scope] is always safe to persist as-is. [marginal] means only that a
+/// classifier MAY promote this turn to [promotion]; it never means the closed
+/// answer was wrong. A caller that ignores this whole type entirely still
+/// behaves correctly, just more privately — which is the property that makes it
+/// safe to put a model anywhere near this decision.
+class KaiMemoryScopeDecision {
+  const KaiMemoryScopeDecision({
+    required this.scope,
+    required this.reasonCode,
+    this.marginal = false,
+    this.promotion,
+  });
+
+  /// The fail-closed scope. Persist this if anything at all goes wrong.
+  final KaiMemoryScope scope;
+
+  /// Why, for the audit line. Never contains message content.
+  final String reasonCode;
+
+  /// True when a memory-worthiness classifier is permitted to run.
+  final bool marginal;
+
+  /// The only scope a classifier may promote this turn to. Null when none.
+  final KaiMemoryScope? promotion;
+}
+
+/// Whether a turn is even eligible for promotion, and to what.
+///
+/// Deliberately narrow: the margin is exactly the branch the old fail-open rule
+/// used to cover — Sadeq, goggles on, non-technical, unroutable. Everything the
+/// pure function already decides positively (an emotional turn, a guest turn, a
+/// VR experience, anything technical) is returned closed and un-promotable, so
+/// no model call can revisit a decision that was already made on evidence.
+KaiMemoryScopeDecision scopeDecisionForTurn({
+  required KaiSurfaceContext? context,
+  required KaiRoute route,
+  KaiRoute? requestedRoute,
+  String? userText,
+  String? kaiReply,
+}) {
+  final scope = scopeForTurn(
+    context: context,
+    route: route,
+    requestedRoute: requestedRoute,
+    userText: userText,
+    kaiReply: kaiReply,
+  );
+
+  // Anything that did not land on the inverted default was decided by a
+  // positive rule. Leave it alone.
+  if (scope != KaiMemoryScope.privateCore) {
+    return KaiMemoryScopeDecision(scope: scope, reasonCode: 'positive_rule');
+  }
+  if (context == null) {
+    return const KaiMemoryScopeDecision(
+      scope: KaiMemoryScope.privateCore,
+      reasonCode: 'no_surface',
+    );
+  }
+  if (!context.isSadeq) {
+    return const KaiMemoryScopeDecision(
+      scope: KaiMemoryScope.privateCore,
+      reasonCode: 'not_sadeq',
+    );
+  }
+  // Technical material is closed on evidence, not on absence. A classifier does
+  // not get to argue with it — that is the leak this whole file exists to stop.
+  if (looksLikeTechnicalContent('${userText ?? ''}\n${kaiReply ?? ''}')) {
+    return const KaiMemoryScopeDecision(
+      scope: KaiMemoryScope.privateCore,
+      reasonCode: 'technical_content',
+    );
+  }
+  if (requestedRoute == KaiRoute.coding || requestedRoute == KaiRoute.tool) {
+    return const KaiMemoryScopeDecision(
+      scope: KaiMemoryScope.privateCore,
+      reasonCode: 'work_intent',
+    );
+  }
+  // Only an unroutable, non-technical turn from Sadeq reaches the margin.
+  if (route == KaiRoute.fastChat) {
+    return const KaiMemoryScopeDecision(
+      scope: KaiMemoryScope.privateCore,
+      reasonCode: 'unrouted_margin',
+      marginal: true,
+      promotion: KaiMemoryScope.sharedLife,
+    );
+  }
+  return const KaiMemoryScopeDecision(
+    scope: KaiMemoryScope.privateCore,
+    reasonCode: 'routed_work',
+  );
 }
