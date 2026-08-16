@@ -7,6 +7,9 @@ import 'services/core/secure_storage_service.dart';
 import 'services/core/gumroad_cli_service.dart';
 import 'services/ai/google_search_service.dart';
 import 'services/ai/ai_config.dart';
+import 'services/core/kai_secret_inventory.dart';
+import 'logic/secret_registry.dart';
+import 'widgets/kai_key_status_strip.dart';
 
 /// Screen for setting up API keys on first launch
 class ApiKeySetupScreen extends StatefulWidget {
@@ -49,6 +52,70 @@ class _ApiKeySetupScreenState extends State<ApiKeySetupScreen> {
     _loadExistingKeys();
   }
 
+  /// What was on disk when the screen opened.
+  ///
+  /// A save is only a ROTATION if the value actually changed. Recording one on
+  /// every save would reset the clock whenever the screen is opened and closed,
+  /// hiding a stale key for another ninety days — which is exactly the failure
+  /// the whole panel exists to prevent. The app knows the difference, so it
+  /// should not have to ask.
+  final Map<String, String> _loadedValues = {};
+
+  KaiSecretRegistry? _registry;
+
+  Future<void> _refreshRegistry() async {
+    final registry = await KaiSecretInventory.load();
+    if (mounted) setState(() => _registry = registry);
+  }
+
+  /// The age line for one editable key, shown beside its field.
+  ///
+  /// Silent when nothing is recorded AND the field is empty: a key that has
+  /// never been set does not need a rotation warning, it needs filling in.
+  Widget _ageFor(String id, TextEditingController controller) {
+    final reg = _registry;
+    if (reg == null) return const SizedBox.shrink();
+    KaiSecret? secret;
+    for (final s in reg.secrets) {
+      if (s.id == id) secret = s;
+    }
+    if (secret == null) return const SizedBox.shrink();
+    if (secret.lastRotated == null && controller.text.trim().isEmpty) {
+      return const SizedBox.shrink();
+    }
+    final now = DateTime.now();
+    final colour = KaiKeyStatusStrip.colourFor(secret.urgency(now));
+    return Padding(
+      padding: const EdgeInsets.only(top: 4, bottom: 2),
+      child: Row(
+        children: [
+          Container(
+            width: 5,
+            height: 5,
+            decoration: BoxDecoration(shape: BoxShape.circle, color: colour),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            KaiKeyStatusStrip.ageLabel(secret, now),
+            style: TextStyle(color: colour, fontSize: 10.5),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _recordChangedRotations(Map<String, String> now) async {
+    final at = DateTime.now();
+    for (final entry in now.entries) {
+      if (!KaiSecretInventory.editableIds.contains(entry.key)) continue;
+      if (entry.value.isEmpty) continue;
+      if (_loadedValues[entry.key] == entry.value) continue;
+      await KaiSecretInventory.recordRotation(entry.key, at);
+      _loadedValues[entry.key] = entry.value;
+    }
+    await _refreshRegistry();
+  }
+
   Future<void> _loadExistingKeys() async {
     final openai = await _secureStorage.getOpenAIKey();
     final elevenlabs = await _secureStorage.getElevenLabsKey();
@@ -80,6 +147,14 @@ class _ApiKeySetupScreenState extends State<ApiKeySetupScreen> {
     if (voiceId.isNotEmpty) {
       _voiceIdController.text = voiceId;
     }
+
+    _loadedValues
+      ..['openai'] = _openaiController.text.trim()
+      ..['elevenlabs'] = _elevenlabsController.text.trim()
+      ..['anthropic'] = _anthropicController.text.trim()
+      ..['gumroad'] = _gumroadController.text.trim()
+      ..['google_api'] = _googleKeyController.text.trim();
+    await _refreshRegistry();
   }
 
   Future<void> _saveKeys() async {
@@ -134,6 +209,13 @@ class _ApiKeySetupScreenState extends State<ApiKeySetupScreen> {
         await prefs.setString('selected_voice_id', voiceId);
       }
 
+      await _recordChangedRotations({
+        'openai': openaiKey,
+        'elevenlabs': elevenlabsKey,
+        'anthropic': anthropicKey,
+        'gumroad': gumroadToken,
+        'google_api': googleKey,
+      });
       AIConfig.clearCache();
       widget.onComplete();
     } catch (e) {
@@ -247,7 +329,10 @@ class _ApiKeySetupScreenState extends State<ApiKeySetupScreen> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               const SizedBox(height: 40),
-              
+
+              // Which of these needs doing, before scrolling to the fields.
+              KaiKeyStatusStrip(registry: _registry),
+
               // Header
               const Icon(
                 Icons.key,
@@ -286,6 +371,7 @@ class _ApiKeySetupScreenState extends State<ApiKeySetupScreen> {
                 ),
               ),
               const SizedBox(height: 8),
+              _ageFor('openai', _openaiController),
               TextField(
                 controller: _openaiController,
                 obscureText: !_showOpenAI,
@@ -329,6 +415,7 @@ class _ApiKeySetupScreenState extends State<ApiKeySetupScreen> {
                 ),
               ),
               const SizedBox(height: 8),
+              _ageFor('elevenlabs', _elevenlabsController),
               TextField(
                 controller: _elevenlabsController,
                 obscureText: !_showElevenLabs,
@@ -407,6 +494,7 @@ class _ApiKeySetupScreenState extends State<ApiKeySetupScreen> {
                 ),
               ),
               const SizedBox(height: 8),
+              _ageFor('anthropic', _anthropicController),
               TextField(
                 controller: _anthropicController,
                 obscureText: !_showAnthropic,
@@ -453,6 +541,7 @@ class _ApiKeySetupScreenState extends State<ApiKeySetupScreen> {
                 ),
               ),
               const SizedBox(height: 8),
+              _ageFor('google_api', _googleKeyController),
               TextField(
                 controller: _googleKeyController,
                 obscureText: !_showGoogle,
@@ -555,6 +644,7 @@ class _ApiKeySetupScreenState extends State<ApiKeySetupScreen> {
                 ),
               ),
               const SizedBox(height: 8),
+              _ageFor('gumroad', _gumroadController),
               TextField(
                 controller: _gumroadController,
                 obscureText: !_showGumroad,

@@ -62,7 +62,8 @@ class KaiSecretInventory {
       store: KaiSecretStore.sourceLocal,
       location: 'lib/secrets.dart · kPicovoiceKey',
       consoleUrl: 'https://console.picovoice.ai/',
-      note: 'Wake word. Failure here is silent — he simply stops waking.',
+      note: 'Compile-time only. Changing it needs an edit and a rebuild, not '
+          'this screen — which is why it is listed rather than editable.',
     ),
     KaiSecret(
       id: 'google_api',
@@ -73,12 +74,21 @@ class KaiSecretInventory {
       consoleUrl: 'https://console.cloud.google.com/apis/credentials',
     ),
     KaiSecret(
+      id: 'gumroad',
+      label: 'Gumroad',
+      provider: 'Gumroad',
+      store: KaiSecretStore.secureStorage,
+      location: 'secure storage · gumroad token',
+      consoleUrl: 'https://app.gumroad.com/settings/advanced',
+    ),
+    KaiSecret(
       id: 'etsy',
       label: 'Etsy',
       provider: 'Etsy',
       store: KaiSecretStore.secureStorage,
       location: 'secure storage · etsy_api_key',
       consoleUrl: 'https://www.etsy.com/developers/your-apps',
+      note: 'Has a setter but no field on the keys screen — set elsewhere.',
     ),
     KaiSecret(
       id: 'tavern_console_web',
@@ -104,6 +114,20 @@ class KaiSecretInventory {
       note: 'Ships in every client by design.',
     ),
   ];
+
+  /// The ids this app can change from the keys screen.
+  ///
+  /// Everything else is compile-time or lives in a console, so the panel can
+  /// report its age and link out but cannot record a rotation on its own. Being
+  /// explicit about the difference is what stops the screen claiming credit for
+  /// a key it never touched.
+  static const editableIds = <String>{
+    'openai',
+    'anthropic',
+    'elevenlabs',
+    'google_api',
+    'gumroad',
+  };
 
   /// Rotation dates, keyed by secret id.
   ///

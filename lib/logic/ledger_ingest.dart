@@ -189,7 +189,20 @@ class KaiLedgerIngest {
   });
 
   /// Enrolled bank senders. The allowlist IS the trust boundary.
+  ///
+  /// Compared case-insensitively, because case is not identity for a sender id
+  /// and the two sides disagreed: the registry normalises to upper case for the
+  /// phone filter, while a real alert arrives titled "Alsalambank". Comparing
+  /// raw meant no alert ever matched, so auto-confirm could never fire and
+  /// every transaction would have sat pending forever — a trust boundary
+  /// failing as silence, again.
   final Set<String> trustedSenders;
+
+  late final Set<String> _trustedUpper =
+      trustedSenders.map((s) => s.trim().toUpperCase()).toSet();
+
+  bool _isTrusted(String sender) =>
+      _trustedUpper.contains(sender.trim().toUpperCase());
 
   final List<KaiAutoConfirmRule> rules;
 
@@ -266,10 +279,20 @@ class KaiLedgerIngest {
       // is promoted only below, deliberately, so the default of an unknown path
       // is always "waiting for Sadeq".
       selected: false,
-      importIdentity: alert.sender,
+      // The sender ALONE is not enough to make a row unique. Two real coffees
+      // from Sadeq's inbox — same merchant, same 1.500, same day — produced
+      // identical fingerprints, and the card dedups on that fingerprint when
+      // importing, so it would have merged two genuine payments into one and
+      // lost 1.500 BHD silently.
+      //
+      // The balance the bank stated afterwards is what separates them, because
+      // two movements on an account cannot leave it at the same balance. It
+      // also stays IDENTICAL when the same payment is reported twice, which is
+      // exactly the property a fingerprint needs.
+      importIdentity: _importIdentityFor(alert),
     );
 
-    if (!trustedSenders.contains(alert.sender)) {
+    if (!_isTrusted(alert.sender)) {
       // Parsed, kept, and powerless. Spoofing buys one line in a review queue.
       return KaiIngestOutcome(
         candidate: candidate,
@@ -413,6 +436,15 @@ class KaiLedgerIngest {
       DateTime(year, month, day, hour, minute),
       KaiAlertTimePrecision.exact,
     );
+  }
+
+  /// Sender plus the stated balance, so a fingerprint separates two genuine
+  /// same-amount payments while still collapsing one payment reported twice.
+  static String _importIdentityFor(KaiBankAlert alert) {
+    final reading = readBalance(alert);
+    if (reading == null) return alert.sender;
+    return '${alert.sender}|${reading.account}|'
+        '${reading.balance.toStringAsFixed(3)}';
   }
 
   static double? _extractAmount(String text) {
