@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:homecoming_app/services/core/kai_context_block.dart';
 import 'package:homecoming_app/services/core/kai_project_service.dart';
@@ -41,6 +42,90 @@ void main() {
     expect(charsSaved, greaterThan(6000));
     expect(_approxTokens(charsSaved), greaterThan(1500));
     expect(coding.length, lessThan(full.length * 0.65));
+  });
+
+  // ── The silent cache miss ──────────────────────────────────────────────────
+  //
+  // staticPreamble carries a warning: anything that varies per turn "silently
+  // destroys caching for the whole prompt and nothing will tell you." That is
+  // exactly what had happened one block later, in liveState.
+  //
+  // Emission ran in index order, so `identity` was written first — and it is
+  // built from `message`, `mood` and `personality`, so it differs on every
+  // turn. Caching matches a stable PREFIX, so a change in the first block
+  // invalidates all fourteen after it. The 20k preamble was cached and the
+  // whole of liveState was then billed at full rate, permanently, with no
+  // symptom other than the bill.
+  //
+  // These tests pin the volatility ordering rather than the wording, because
+  // the wording is meant to keep changing and the ordering is not.
+  group('the cached prefix is not thrown away on the first block', () {
+    test('per-turn material comes last, not first', () async {
+      final live = await KaiContextBlock.liveState('kai_test_budget');
+      final stable = live.indexOf('=== What stays true ===');
+      final volatile = live.indexOf('=== Who I am right now ===');
+
+      expect(stable, greaterThanOrEqualTo(0),
+          reason: 'the slow-changing half must exist and be labelled');
+      expect(volatile, greaterThan(stable),
+          reason: 'volatile material after stable, or the prefix ends at byte 0');
+    });
+
+    test('the slow half is byte-identical across turns that differ', () async {
+      // Same persona, different message and mood — the inputs that make the
+      // identity block volatile. Everything before the volatile marker must be
+      // unchanged, or the prefix is not cacheable in practice.
+      final a = await KaiContextBlock.liveState(
+        'kai_test_budget',
+        message: 'why did that break',
+        mood: const {'joy': 10},
+      );
+      final b = await KaiContextBlock.liveState(
+        'kai_test_budget',
+        message: 'my sister is visiting next week',
+        mood: const {'joy': 90},
+      );
+
+      String stableHalf(String s) =>
+          s.substring(0, s.indexOf('=== Who I am right now ==='));
+
+      expect(stableHalf(a), stableHalf(b),
+          reason: 'a differing turn must not alter one byte of the prefix');
+    });
+
+    test('all fifteen blocks are still emitted, exactly once each', () {
+      // Asserted against the source, not the output: every block in liveState
+      // is read from Firebase, so offline they all render empty and a content
+      // check would pass vacuously no matter what was deleted. (Several
+      // `isNot(contains(...))` assertions elsewhere in this file are vacuous
+      // for the same reason — worth knowing before trusting them.)
+      //
+      // The reorder is only free if it is PURELY an ordering change, so this
+      // checks the one thing that makes it free.
+      final source = File('lib/services/core/kai_context_block.dart')
+          .readAsStringSync();
+      final body = source.substring(source.indexOf('final b = StringBuffer()'));
+      for (var i = 0; i < 15; i++) {
+        final writes = RegExp(r'b\.write\(\s*parts\[' + i.toString() + r'\]')
+            .allMatches(body)
+            .length;
+        expect(writes, 1,
+            reason: 'parts[$i] is written $writes times, expected exactly 1');
+      }
+    });
+
+    test('fast-chat still trims, and still ends with the volatile half',
+        () async {
+      final fast = await KaiContextBlock.liveState(
+        'kai_test_budget',
+        route: KaiRoute.fastChat,
+      );
+      expect(fast, contains('=== Who I am right now ==='));
+      expect(
+        fast.indexOf('=== Who I am right now ==='),
+        greaterThan(fast.indexOf('=== What stays true ===')),
+      );
+    });
   });
 
   test('fast-chat liveState skips rich self-maintenance payloads', () async {

@@ -332,23 +332,63 @@ words are instructions is Sadeq.''';
       skippable(14, () => _selfNotesBlock(personaId).catchError((_) => '')),
     ]);
 
-    final b = StringBuffer('\n\n=== Who I am right now ===\n');
-    b.write(parts[0]); // identity
-    b.write(parts[1]); // mood
-    b.write(parts[2]); // user model
+    // ── Emission order is a caching decision, same as staticPreamble ──────────
+    //
+    // The note at the top of this file says it exactly: "If you add anything
+    // here that varies per turn (a timestamp, a mood, a counter) you silently
+    // destroy caching for the whole prompt and nothing will tell you."
+    //
+    // That is what had happened, one block later. Emission used to run in index
+    // order, so `identity` went first — and `_loadSelfContext` takes `message`,
+    // `mood` and `personality`, which means it is message-relevant and differs
+    // on EVERY turn. Caching matches on a stable prefix, so a difference in the
+    // first block of liveState invalidates every block after it. The 20k
+    // preamble was cached and then everything else was paid at full rate, all
+    // day, and nothing said so.
+    //
+    // So: split by how fast a thing changes, not by what it is about.
+    //
+    // The stable half is identical between turns whenever his projects, bond,
+    // workspace and earned rules have not changed — which is most of the time,
+    // and it extends the cached prefix instead of ending it. The volatile half
+    // is the genuinely per-turn material and goes last, where it costs full
+    // price on its own rather than dragging ten other blocks with it.
+    //
+    // Two side effects, both good:
+    //
+    //  1. `noticed` carries a `carried` counter that increments every time the
+    //     list is DISPLAYED, so its text changed on every single turn even when
+    //     nothing was noticed. In the volatile tail that no longer invalidates
+    //     anything upstream.
+    //  2. Mood, his current agenda and his last idle thought now sit adjacent to
+    //     soul() at the end of the prompt, in the highest-attention region.
+    //     That is where "who he is right now" belongs anyway — the old order put
+    //     it above ten blocks of scaffolding.
+    //
+    // Nothing is dropped and nothing is added. Same fifteen blocks, reordered.
+    final b = StringBuffer();
+
+    // ── Slow-changing: extends the cacheable prefix ──────────────────────────
+    b.write('\n\n=== What stays true ===\n');
+    b.write(parts[13]); // what he's learned the hard way — earned rules
+    b.write(parts[2]); // user model — who Sadeq is
     b.write(parts[3]); // goals
-    b.write(parts[4]); // in-flight job — his inertia
-    b.write(parts[5]); // noticed — HIS OWN AGENDA, distinct from the job
     b.write(parts[6]); // MY HANDS — where his code workspace is
     b.write(parts[7]); // the 7-layer plan, goals frozen — his awareness of it
     b.write(
         parts[8]); // the shared roadmap — what we're building, broad strokes
     b.write(parts[9]); // bond — our shared bits
     b.write(parts[10]); // worlds — the god-registry
-    b.write(parts[11]); // last idle thought
     b.write(parts[12]); // his body — what he can feel, what he's reaching for
-    b.write(parts[13]); // what he's learned the hard way — earned rules
     b.write(parts[14]); // notes he left himself, and how he's changed
+
+    // ── Per-turn: paid in full, and only for itself ──────────────────────────
+    b.write('\n\n=== Who I am right now ===\n');
+    b.write(parts[0]); // identity — message-relevant, so volatile by design
+    b.write(parts[4]); // in-flight job — his inertia
+    b.write(parts[1]); // mood
+    b.write(parts[5]); // noticed — HIS OWN AGENDA, distinct from the job
+    b.write(parts[11]); // last idle thought
     return b.toString();
   }
 
