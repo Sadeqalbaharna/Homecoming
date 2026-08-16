@@ -171,29 +171,40 @@ class _TinyText extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = color ?? Colors.white.withOpacity(0.52);
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          label,
-          style: TextStyle(
-            color: Colors.white.withOpacity(0.46),
-            fontSize: 8.5,
-            fontWeight: FontWeight.w800,
-            letterSpacing: 0.4,
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 76),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: Colors.white.withOpacity(0.46),
+                fontSize: 8.5,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.4,
+              ),
+            ),
           ),
-        ),
-        const SizedBox(width: 3),
-        Text(
-          value,
-          style: TextStyle(
-            color: c,
-            fontSize: 9,
-            fontWeight: FontWeight.w900,
-            fontFamily: 'monospace',
+          const SizedBox(width: 3),
+          Flexible(
+            child: Text(
+              value,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: c,
+                fontSize: 9,
+                fontWeight: FontWeight.w900,
+                fontFamily: 'monospace',
+              ),
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }

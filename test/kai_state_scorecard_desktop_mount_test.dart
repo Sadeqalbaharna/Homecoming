@@ -17,10 +17,11 @@ void main() {
   test('desktop shell renders the live hands-state indicator', () {
     final source = File('lib/screens/kai_desktop_shell.dart').readAsStringSync();
 
-    expect(source, contains('_HandsLight(state: _handsState)'));
+    expect(source, contains('_HandsLight(state: _handsState, compact: true)'));
     expect(source, contains("KaiHandsState.on => ('HANDS ON'"));
-    expect(source, contains("KaiHandsState.activating => ('HANDS ACTIVATING'"));
+    expect(source, contains("KaiHandsState.activating => (compact ? 'HANDS…' : 'HANDS ACTIVATING'"));
     expect(source, contains("KaiHandsState.off => ('HANDS OFF'"));
+    expect(source, isNot(contains('children: [\r\n                        _HandsLight(state: _handsState)')));
     expect(source, contains('onHandsState: (state)'));
   });
 }

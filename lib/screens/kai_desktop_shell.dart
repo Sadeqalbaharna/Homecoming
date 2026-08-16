@@ -34,6 +34,7 @@ import '../services/core/tool_executor_service.dart';
 import '../widgets/kai_project_portfolio.dart';
 import '../widgets/kai_factory_conveyor.dart';
 import '../widgets/kai_state_scorecard_card.dart';
+import '../widgets/kai_growth_tracker_card.dart';
 import '../services/core/code_workspace_service.dart';
 import '../services/core/kai_surface_context.dart';
 import '../services/core/engineer_status_bus.dart';
@@ -1977,7 +1978,7 @@ FACTORY_NEXT: continue
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        _HandsLight(state: _handsState),
+                        _HandsLight(state: _handsState, compact: true),
                         const SizedBox(height: 8),
                         KaiTelemetry(lines: _toolLog, active: _sending),
                       ],
@@ -2867,6 +2868,8 @@ FACTORY_NEXT: continue
               children: [
                 _productFactoryOpsCard(),
                 const SizedBox(height: 12),
+                const KaiGrowthTrackerCard(),
+                const SizedBox(height: 12),
                 // The real portfolio, against each project's own governed
                 // gates. The workspace root is passed READ-ONLY so the project
                 // you are standing in sorts first; opening a card never moves
@@ -3119,6 +3122,8 @@ FACTORY_NEXT: continue
                       child: ListView(
                         padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
                         children: [
+                          const KaiGrowthTrackerCard(),
+                          const SizedBox(height: 8),
                           KaiProjectPortfolio(
                             personaId: _kPersona,
                             workspaceRoot: CodeWorkspaceService.instance.root,
@@ -3866,19 +3871,27 @@ FACTORY_NEXT: continue
 class _HandsLight extends StatelessWidget {
   final KaiHandsState state;
 
-  const _HandsLight({required this.state});
+  /// Narrow rails cannot hold "HANDS ACTIVATING" without pushing the row wider
+  /// than the pane. Compact shortens only the transient label — the two states
+  /// you read at a glance keep their full words.
+  final bool compact;
+
+  const _HandsLight({required this.state, this.compact = false});
 
   @override
   Widget build(BuildContext context) {
     final (label, color) = switch (state) {
       KaiHandsState.on => ('HANDS ON', const Color(0xFF54F6A3)),
-      KaiHandsState.activating => ('HANDS ACTIVATING', const Color(0xFFFFB84D)),
+      KaiHandsState.activating => (compact ? 'HANDS…' : 'HANDS ACTIVATING', const Color(0xFFFFB84D)),
       KaiHandsState.off => ('HANDS OFF', const Color(0xFF718294)),
     };
     final live = state != KaiHandsState.off;
     return AnimatedContainer(
       duration: const Duration(milliseconds: 220),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 8 : 10,
+        vertical: compact ? 5 : 7,
+      ),
       decoration: BoxDecoration(
         color: const Color(0xFF06111C).withOpacity(0.9),
         borderRadius: BorderRadius.circular(999),

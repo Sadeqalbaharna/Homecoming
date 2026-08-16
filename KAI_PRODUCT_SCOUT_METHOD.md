@@ -55,7 +55,7 @@ Every candidate gets scored on four axes. **Score distribution FIRST** — it's 
 
 ## Stage 3 — SPEC → Stage 4 — BUILD → Stage 5 — SHIP & LEARN
 
-Spec the winner (MVP scope, what to deliberately cut, price, listing copy), build it, ship it, then **feed real sales data back in to grade the scout's own picks.**
+Spec the winner (MVP scope, what to deliberately cut, price, listing copy), build it, ship it, then **feed real sales and reconciled bank-settlement data back in to grade the scout's own picks.** A sale notification or pending processor balance is not success; the Factory Northstar is actual customer money settled into the bank account.
 
 The scoreboard is **dollars from products it chose** — not elegance of analysis. Without stage 5 it's a generator, not a machine.
 

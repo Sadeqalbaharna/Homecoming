@@ -34,6 +34,8 @@ dependencies:
   image: ^4.3.0
   # Smart home — WebSocket TV control + SSDP discovery
   web_socket_channel: ^3.0.1
+  # HMAC-SHA256 for TavernKaiSession token validation
+  crypto: ^3.0.0
   # Firebase
   firebase_core: ^3.6.0
   firebase_auth: ^5.3.1

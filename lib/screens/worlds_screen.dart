@@ -449,6 +449,7 @@ class _WorldCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final graduated = entry.status == 'graduated';
+    final showLionheartTag = entry.name.trim().toLowerCase() == 'fitness';
     return InkWell(
       borderRadius: BorderRadius.circular(16),
       onTap: onTap,
@@ -465,12 +466,28 @@ class _WorldCard extends StatelessWidget {
             Row(
               children: [
                 Expanded(
-                  child: Text(
-                    entry.name,
-                    style: const TextStyle(
-                        color: _stroke,
-                        fontSize: 17,
-                        fontWeight: FontWeight.w700),
+                  child: Wrap(
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    spacing: 8,
+                    runSpacing: 4,
+                    children: [
+                      Text(
+                        entry.name,
+                        style: const TextStyle(
+                            color: _stroke,
+                            fontSize: 17,
+                            fontWeight: FontWeight.w700),
+                      ),
+                      if (showLionheartTag)
+                        Text(
+                          'Project Lionheart',
+                          style: TextStyle(
+                              color: Colors.white.withOpacity(0.62),
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.2),
+                        ),
+                    ],
                   ),
                 ),
                 _StatusChip(graduated: graduated),

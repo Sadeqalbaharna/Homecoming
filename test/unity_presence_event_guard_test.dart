@@ -18,11 +18,24 @@ void main() {
       'lib/services/embodiment/kai_embodiment_gateway_service.dart',
     ).readAsStringSync();
 
-    expect(source, contains('turn.surfaceContext.isPresenceEvent'));
     expect(source, contains('useWebSearch: false'));
-    expect(source, contains('surfaceContext: turn.surfaceContext'));
     expect(source, contains('KaiContinuityTurnRequest.fromJson'));
-    expect(source, contains('availableCapabilitiesFor(turn.surfaceContext)'));
+
+    // The surface must come from the CHANNEL, never from the payload.
+    //
+    // This deliberately does not name the variable holding it. The earlier
+    // version asserted `turn.surfaceContext.isPresenceEvent` and
+    // `availableCapabilitiesFor(turn.surfaceContext)` — pinning the payload-
+    // supplied surface by name. When the gateway was hardened to derive the
+    // surface itself, those assertions failed on the fix and pointed back at
+    // the weaker form. A tripwire that resists a security improvement is worse
+    // than no tripwire. So: require the clamp, and forbid the payload surface
+    // being consulted for permissions.
+    expect(source, contains('authoritativeSurface: _channelSurface'));
+    expect(source,
+        isNot(contains('availableCapabilitiesFor(turn.surfaceContext)')),
+        reason:
+            'capabilities follow the channel-derived surface, not the payload');
 
     // A presence event now short-circuits and returns BEFORE sendMessage is
     // reached at all, so there is no model call to disable memory on.
@@ -43,6 +56,12 @@ void main() {
       lessThan(sendMessage),
       reason: 'a presence greeting must never reach the model call',
     );
+
+    // And the branch must actually leave the handler, not merely be entered.
+    final returnAfter = normalized.indexOf('return; }', shortCircuit);
+    expect(returnAfter, greaterThan(-1));
+    expect(returnAfter, lessThan(sendMessage),
+        reason: 'the presence branch must return before any model call');
   });
 
   test('the headset transport clamps which bodies it will host', () {
