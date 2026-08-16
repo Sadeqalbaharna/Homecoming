@@ -64,6 +64,27 @@ class KaiBankAlert {
   final DateTime receivedAt;
 }
 
+/// A balance the bank stated in passing, inside a transaction alert.
+///
+/// Free, authoritative, point-in-time — and the only thing that can tell a
+/// ledger it is incomplete.
+class KaiBalanceReading {
+  const KaiBalanceReading({
+    required this.account,
+    required this.balance,
+    required this.at,
+  });
+
+  /// Usually the last four digits. 'unknown' when the alert did not say, which
+  /// is kept rather than dropped: an unattributed balance is still evidence
+  /// that SOME account had that value, and forcing it into a named account
+  /// would be the guess this file exists to avoid.
+  final String account;
+
+  final double balance;
+  final DateTime at;
+}
+
 /// What ingestion concluded, including when it concluded nothing.
 class KaiIngestOutcome {
   const KaiIngestOutcome({
@@ -261,6 +282,38 @@ class KaiLedgerIngest {
   }
 
   double confirmedToday(String ruleId) => _spentToday[ruleId] ?? 0;
+
+  static final _balance = RegExp(
+    r'(?:bal|balance|avail(?:able)?(?:\s+bal(?:ance)?)?)\s*[:.]?\s*(?:bhd|bd)?\s*([0-9]+(?:[.,][0-9]{1,3})?)',
+    caseSensitive: false,
+  );
+
+  static final _account = RegExp(
+    r'(?:card|acct|account|a/c)\s*(?:ending|no\.?|number|xx+)?\s*[:# ]?\s*[xX*]*([0-9]{3,4})\b',
+    caseSensitive: false,
+  );
+
+  /// The balance the bank stated, if it stated one.
+  ///
+  /// This is the half that makes a ledger checkable. A derived balance can only
+  /// ever be as complete as the rows; an observed one is what the bank actually
+  /// thinks, so the difference between them is the amount unaccounted for. See
+  /// KaiLedgerReconciler.
+  ///
+  /// Returns null rather than guessing. A wrong balance is worse than none: it
+  /// would reconcile a ledger that should have raised its hand.
+  static KaiBalanceReading? readBalance(KaiBankAlert alert) {
+    final m = _balance.firstMatch(alert.body);
+    if (m == null) return null;
+    final raw = m.group(1)?.replaceAll(',', '.');
+    final value = raw == null ? null : double.tryParse(raw);
+    if (value == null) return null;
+    return KaiBalanceReading(
+      account: _account.firstMatch(alert.body)?.group(1) ?? 'unknown',
+      balance: value,
+      at: alert.receivedAt,
+    );
+  }
 
   static double? _extractAmount(String text) {
     final m = _amount.firstMatch(text);
