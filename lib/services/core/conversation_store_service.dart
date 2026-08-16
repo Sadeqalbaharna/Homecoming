@@ -22,19 +22,33 @@ library;
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
-import 'package:firebase_database/firebase_database.dart';
 import 'kai_db.dart';
 import 'firebase_service.dart';
+import 'kai_scheduled_commitment.dart';
 
 class ConversationLine {
   final String text;
   final bool fromKai;
   final int timestampMillis;
 
+  /// Stable identity of the stored record this line came from, when it has one.
+  ///
+  /// Ordinary turns are written under a `push()` id and carry no meaningful
+  /// identity, so this stays null for them. Records written under a
+  /// DETERMINISTIC key — currently Core outbound reminders — carry that key
+  /// here, and it is what lets the desktop tell "this reminder is already on
+  /// screen" apart from "a second reminder that happens to say the same thing".
+  ///
+  /// Text equality cannot answer that question. "Chase the invoice" scheduled
+  /// twice for two different days is two promises, and suppressing the second
+  /// because it reads like the first would silently drop one.
+  final String? recordId;
+
   const ConversationLine({
     required this.text,
     required this.fromKai,
     required this.timestampMillis,
+    this.recordId,
   });
 
   String get speaker => fromKai ? 'Kai' : 'User';
@@ -68,6 +82,7 @@ class ConversationStoreService {
   void resetSessionForTesting() {
     _sessionBuffer.clear();
     _loaded.clear();
+    _sessionOutboundIds.clear();
   }
 
   @visibleForTesting
@@ -140,8 +155,8 @@ class ConversationStoreService {
     // "(proactive)" turns are Kai reaching out unprompted — the seed is an
     // instruction to himself, so we store a neutral marker instead. Otherwise he
     // reads his own nudge back later and thinks Sadeq wrote it.
-    final storedUser = hasUser ? _sanitiseUser(userMessage!) : '';
-    final storedKai = hasKai ? aiReply! : '';
+    final storedUser = hasUser ? _sanitiseUser(userMessage) : '';
+    final storedKai = hasKai ? aiReply : '';
 
     // Append to the matching surface session buffer immediately (no await).
     final key = _key(personaId, surfaceId);
@@ -176,6 +191,9 @@ class ConversationStoreService {
     final key = _key(personaId, surfaceId);
     _sessionBuffer.remove(key);
     _loaded.remove(key);
+    // Identities track buffer contents, so they die with it. Left behind, they
+    // would suppress a reminder whose line no longer exists.
+    _sessionOutboundIds.remove(key);
   }
 
   // ── Private ────────────────────────────────────────────────────────────────
@@ -258,7 +276,7 @@ class ConversationStoreService {
       if (!snap.exists || snap.value == null) return const [];
 
       final root = Map<String, dynamic>.from(snap.value as Map);
-      final records = legacyRootRecordsForTesting(root, surfaceId: surfaceId);
+      final records = _legacyRootRecords(root, surfaceId: surfaceId);
       if (records.isNotEmpty) {
         print(
           '📬 [ConvStore] Loaded ${records.length} legacy $surfaceId turns for $personaId',
@@ -273,19 +291,19 @@ class ConversationStoreService {
 
   @visibleForTesting
   List<String> legacyMessengerHistoryForTesting(Map<String, dynamic> root) {
-    final records = legacyRootRecordsForTesting(root, surfaceId: 'messenger')
+    final records = _legacyRootRecords(root, surfaceId: 'messenger')
       ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
     return _formatRecords(records);
   }
 
   @visibleForTesting
   List<String> legacyInPersonHistoryForTesting(Map<String, dynamic> root) {
-    final records = legacyRootRecordsForTesting(root, surfaceId: 'in_person')
+    final records = _legacyRootRecords(root, surfaceId: 'in_person')
       ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
     return _formatRecords(records);
   }
 
-  List<_ConvRecord> legacyRootRecordsForTesting(
+  List<_ConvRecord> _legacyRootRecords(
     Map<String, dynamic> root, {
     required String surfaceId,
   }) {
@@ -317,7 +335,7 @@ class ConversationStoreService {
   }) {
     final records = _dedupeRecords([
       ..._recordsFromRaw(scoped),
-      ...legacyRootRecordsForTesting(legacy, surfaceId: surfaceId),
+      ..._legacyRootRecords(legacy, surfaceId: surfaceId),
     ])
       ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
     return _formatRecords(records);
@@ -327,12 +345,18 @@ class ConversationStoreService {
     final seen = <String>{};
     final out = <_ConvRecord>[];
     for (final record in records) {
-      final fingerprint = [
-        record.timestamp,
-        record.surfaceId ?? '',
-        record.userMessage,
-        record.aiResponse,
-      ].join('\u001F');
+      // A record with a declared identity dedupes on THAT and nothing else.
+      // Two reminders can legitimately carry the same text at the same
+      // millisecond; they are still two promises, and folding them together
+      // here would deliver one and silently drop the other. Records without
+      // identity keep the original content fingerprint exactly.
+      final fingerprint = record.recordId ??
+          [
+            record.timestamp,
+            record.surfaceId ?? '',
+            record.userMessage,
+            record.aiResponse,
+          ].join('\u001F');
       if (seen.add(fingerprint)) out.add(record);
     }
     return out;
@@ -349,6 +373,7 @@ class ConversationStoreService {
           text: r.userMessage,
           fromKai: false,
           timestampMillis: r.timestamp,
+          recordId: r.recordId,
         ));
       }
       if (r.aiResponse.isNotEmpty) {
@@ -356,6 +381,7 @@ class ConversationStoreService {
           text: r.aiResponse,
           fromKai: true,
           timestampMillis: r.timestamp,
+          recordId: r.recordId,
         ));
       }
     }
@@ -369,23 +395,6 @@ class ConversationStoreService {
     if (value is! Map) return;
     final raw = Map<String, dynamic>.from(value);
     out.addAll(_linesFromRecords(_recordsFromRaw(raw)));
-  }
-
-  void _collectConversationLines(
-    Object? value, {
-    required String surfaceId,
-    required List<ConversationLine> out,
-    required bool allowUntagged,
-  }) {
-    if (value is! Map) return;
-
-    final raw = Map<String, dynamic>.from(value);
-    final records = _recordsFromRaw(raw)
-        .where((record) => allowUntagged
-            ? record.surfaceId == null || record.surfaceId == surfaceId
-            : record.surfaceId == surfaceId)
-        .toList();
-    out.addAll(_linesFromRecords(records));
   }
 
   @visibleForTesting
@@ -405,20 +414,25 @@ class ConversationStoreService {
   List<_ConvRecord> _recordsFromRaw(Map<String, dynamic> raw) {
     final records = <_ConvRecord>[];
 
-    void collect(Map<String, dynamic> node) {
+    // The child key is carried down the walk, because for deterministic
+    // records the KEY is the identity. A record written under
+    // `commitment-<outboundId>` must come back out knowing that, or restore
+    // and watch cannot recognise a reminder that is already on screen.
+    void collect(Map<String, dynamic> node, String? key) {
       if (_looksLikeTurnRecord(node)) {
-        records.add(_convRecordFromMap(node));
+        records.add(_convRecordFromMap(node, childKey: key));
         return;
       }
 
-      for (final value in node.values) {
+      for (final entry in node.entries) {
+        final value = entry.value;
         if (value is Map) {
-          collect(Map<String, dynamic>.from(value));
+          collect(Map<String, dynamic>.from(value), entry.key);
         }
       }
     }
 
-    collect(raw);
+    collect(raw, null);
     return records;
   }
 
@@ -439,7 +453,18 @@ class ConversationStoreService {
     return hasText && hasSpeaker;
   }
 
-  _ConvRecord _convRecordFromMap(Map<String, dynamic> value) {
+  _ConvRecord _convRecordFromMap(
+    Map<String, dynamic> value, {
+    String? childKey,
+  }) {
+    // Identity is only claimed when the record declares one. An ordinary
+    // `push()` turn has an auto id that means nothing, and treating it as
+    // identity would invent stable-looking keys that are not stable.
+    final declared = value['recordId'];
+    final recordId = declared is String && declared.trim().isNotEmpty
+        ? declared
+        : (value['outboundId'] is String && childKey != null ? childKey : null);
+
     final pairedUserMessage = value['userMessage'] as String?;
     final pairedAiResponse = value['aiResponse'] as String?;
     if (pairedUserMessage != null || pairedAiResponse != null) {
@@ -448,6 +473,7 @@ class ConversationStoreService {
         aiResponse: pairedAiResponse ?? '',
         timestamp: (value['timestamp'] as num?)?.toInt() ?? 0,
         surfaceId: value['surfaceId'] as String?,
+        recordId: recordId,
       );
     }
 
@@ -469,8 +495,112 @@ class ConversationStoreService {
       aiResponse: fromKai ? text : '',
       timestamp: (value['timestamp'] as num?)?.toInt() ?? 0,
       surfaceId: value['surfaceId'] as String?,
+      recordId: recordId,
     );
   }
+
+  /// Persist one exact Core outbound reminder as an assistant-only turn.
+  ///
+  /// Differs from [saveTurn] in three ways that all exist for the same reason —
+  /// this record is a PROMISE, and a promise must not be quietly lost:
+  ///
+  ///  1. The child key is deterministic ([KaiScheduledCommitment.transcriptKey]),
+  ///     never `push()`. A retry after a crash rewrites the same child instead
+  ///     of adding a second identical bubble to the conversation.
+  ///  2. The database write is AWAITED and its failure is THROWN. `saveTurn`
+  ///     fires and forgets, which is tolerable for chat that the user just
+  ///     watched themselves type; it is not tolerable here, because the caller
+  ///     uses the outcome to decide whether to acknowledge Core.
+  ///  3. The session buffer is only touched AFTER the write lands. Appending
+  ///     first would leave the reminder visible in this process while Core
+  ///     still has it pending and the database has nothing — the app would
+  ///     look correct and be wrong.
+  ///
+  /// Returns the line as it will be read back, including its [recordId].
+  Future<ConversationLine> saveAssistantOutbound({
+    required String personaId,
+    required String surfaceId,
+    required String outboundId,
+    required String exactText,
+    required int timestampMillis,
+  }) async {
+    final trimmedId = outboundId.trim();
+    if (trimmedId.isEmpty) {
+      throw ArgumentError.value(outboundId, 'outboundId', 'must not be empty');
+    }
+    if (exactText.isEmpty) {
+      throw ArgumentError.value(exactText, 'exactText', 'must not be empty');
+    }
+
+    final recordId = KaiScheduledCommitment.transcriptKey(trimmedId);
+    final payload = <String, dynamic>{
+      // Assistant-only: no user half exists for a reminder nobody asked for
+      // in this conversation.
+      'userMessage': '',
+      'aiResponse': exactText,
+      'timestamp': timestampMillis,
+      'surfaceId': surfaceId,
+      // Identity stored explicitly as well as being the key, so restore and
+      // watch recover it even through the recursive parser.
+      'recordId': recordId,
+      'outboundId': trimmedId,
+    };
+
+    final writer = debugOutboundWriter;
+    if (writer != null) {
+      await writer('${_path(personaId, surfaceId)}/$recordId', payload);
+    } else {
+      final db = _db;
+      if (db == null) {
+        // Not silently skipped, unlike an ordinary turn. An unavailable
+        // database means the promise is NOT durable, and the caller must not
+        // acknowledge Core.
+        throw StateError('conversation_database_unavailable');
+      }
+      await db.ref('${_path(personaId, surfaceId)}/$recordId').set(payload);
+    }
+
+    final key = _key(personaId, surfaceId);
+    final line = ConversationLine(
+      text: exactText,
+      fromKai: true,
+      timestampMillis: timestampMillis,
+      recordId: recordId,
+    );
+
+    // Idempotency keyed on IDENTITY, never on the rendered string.
+    //
+    // Two reminders can carry identical text at an identical millisecond and
+    // still be two separate promises — deduping on `line.formatted` collapsed
+    // them into one, which is the same text-equality mistake this whole record
+    // identity exists to avoid. Only a repeat of the SAME outbound id is a
+    // repeat.
+    //
+    // Reached only after the durable write succeeded, so a failed write leaves
+    // neither the identity nor the line behind.
+    final identities = _sessionOutboundIds.putIfAbsent(key, () => <String>{});
+    if (identities.add(recordId)) {
+      final buffer = _sessionBuffer.putIfAbsent(key, () => []);
+      buffer.add(line.formatted);
+      if (buffer.length > 60) buffer.removeRange(0, buffer.length - 60);
+    }
+    return line;
+  }
+
+  /// Outbound record identities already in each session buffer.
+  ///
+  /// Keyed exactly like [_sessionBuffer], and cleared wherever that is, so a
+  /// reset never leaves identities claiming lines that are no longer there.
+  final Map<String, Set<String>> _sessionOutboundIds = {};
+
+  /// Test seam for [saveAssistantOutbound] only.
+  ///
+  /// Deliberately narrow: it replaces the single durable write so success and
+  /// failure can both be exercised, and it cannot affect [saveTurn] or any read
+  /// path. Tests must never reach the real conversation database.
+  @visibleForTesting
+  static Future<void> Function(String path, Map<String, dynamic> value)?
+      debugOutboundWriter;
 
   Future<void> _writeToFirebase({
     required String personaId,
@@ -496,11 +626,13 @@ class _ConvRecord {
   final String aiResponse;
   final int timestamp;
   final String? surfaceId;
+  final String? recordId;
 
   _ConvRecord({
     required this.userMessage,
     required this.aiResponse,
     required this.timestamp,
     this.surfaceId,
+    this.recordId,
   });
 }

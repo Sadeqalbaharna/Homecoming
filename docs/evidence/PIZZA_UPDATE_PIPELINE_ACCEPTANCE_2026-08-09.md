@@ -239,3 +239,26 @@ SHA-256 remained
 Verdict: **CLAUDE BRIDGE BLOCKED / H019A REJECTED / 019B LOCKED**. Codex did
 not duplicate the product-code repair. The next eligible implementation packet
 is the frozen H019A-5 canonical binding repair after the provider limit clears.
+
+## Codex-authorized H019A and H019B acceptance
+
+The later sponsor directive removed the Opus-only implementation constraint for
+safe bounded local boxes. Codex repaired the canonical binding computation in
+`scripts/tools/kai_pizza_update_pipeline.ps1` without changing the oracle. The
+frozen suite then produced the exact H019A gate: **10 PASS / 4 FAIL**, with only
+the four capture-script cases 10-13 failing. H019A is therefore **ACCEPTED**.
+
+Codex next implemented the frozen Brief 019B one-file capture-script box in
+`scripts/tools/kai_real_pizza_capture.ps1`. Independent execution of the same
+frozen suite produced **14 PASS / 0 FAIL**. The capture command now fails closed
+on missing authority, output root, failure ledger, build/runtime identity,
+payload binding, process freshness, DPI state, semantic labels, readable label
+geometry, duplicate retry fingerprint, and out-of-band manifest binding.
+
+Pipeline SHA-256: `B1344A21CDF9E07D594BD6136946F03F72EEFC9FAFA0B153D82B69896C297529`.
+Capture-script SHA-256: `666F65CD45E26BAA97E4508C1C8D5C9B409BCDDDA6159D96505C22ABC5622F8F`.
+
+Verdict: **H019A ACCEPTED / H019B TESTED**. No command was invoked against PID
+27260, no GUI was controlled, no process was restarted, and no live service was
+accessed. A fresh real-desktop screenshot remains **UNVERIFIED** until a later
+explicitly authorized build/runtime handover and attended capture.

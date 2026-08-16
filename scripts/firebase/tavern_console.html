@@ -4439,6 +4439,44 @@ function applyOrderOverrides(){
   }
 }
 
+/* An RTDB kitchen_orders record that carries `firestoreId` is a MIRROR of a
+   canonical Firestore order written by createOrder. It must be treated as the
+   Firestore order from the instant it arrives, not from the next ordersPoll().
+
+   Without this, there is a window — the kitchen SSE fires immediately, while
+   ordersPoll() is event-driven (boot, guest-stream change, manual refresh) —
+   in which the mirror is the actionable ticket while looking RTDB-native.
+   Serving it in that window took the console's LOCAL revenue patch (which has
+   no creditedOrders guard) and left the canonical order at 'pending', so the
+   ticket reappeared on the next poll and serving it again credited the visit a
+   SECOND time via onOrderStatusChanged. Tagging the mirror here routes status
+   changes to Firestore and suppresses the local patch, so the server's
+   idempotent accounting path is the only one that ever credits an app order. */
+function _normalizeKitchenOrder(v){
+  if(v&&v.firestoreId)return{...v,_source:'app',_fsId:v.firestoreId};
+  return{...v,_source:'rtdb'};
+}
+
+/* Whether THIS console must credit the visit itself when the order is served.
+
+   App orders must answer false: their revenue is credited by the server
+   trigger (onOrderStatusChanged), which holds a creditedOrders guard so a
+   retry cannot double-charge. Crediting here as well would charge the visit
+   twice. Walk-in tickets staff created directly in RTDB have no canonical
+   Firestore record to defer to, so they keep the local accounting path. */
+function _takesLocalCreditPath(o){
+  return !!(o&&o.visitId&&o.items&&!(o._source==='app'&&o._fsId));
+}
+
+/* Remove any RTDB mirror of a canonical Firestore order, so staff are left
+   with exactly one actionable ticket. createOrder writes the canonical id into
+   the mirror as `firestoreId`, which is what pairs the two. */
+function _dropMirrorsOf(canonicalOrderId){
+  for(const [existingId,existingOrder] of Object.entries(ordersData)){
+    if(existingOrder&&existingOrder.firestoreId===canonicalOrderId)delete ordersData[existingId];
+  }
+}
+
 /* ── Poll kitchen orders (RTDB + Firestore app orders) ───── */
 async function ordersPoll(){
   try{
@@ -4448,7 +4486,12 @@ async function ordersPoll(){
     const rtdbQ=rtdbTok?'?auth='+rtdbTok:'';
     const r=await fetch(RTDB+'/kitchen_orders.json'+rtdbQ);
     const raw=await r.json();
-    ordersData=raw||{};
+    // Normalize here too: if the Firestore fetch below fails, mirrors must
+    // still route to Firestore rather than falling back to the local revenue
+    // patch. The raw record carries `_source:'app'` but no `_fsId`, which is
+    // exactly the combination the served-handler treats as RTDB-native.
+    ordersData={};
+    for(const [k,v] of Object.entries(raw||{})){ordersData[k]=_normalizeKitchenOrder(v);}
 
     // ── 2. Firestore orders (from kingdom app) ──
     try{
@@ -4474,6 +4517,11 @@ async function ordersPoll(){
           return{name:s('name'),qty:n('quantity')||1,price:n('price')||0,emoji:s('emoji')};
         });
         const fsId='fs_'+d.name.split('/').pop();
+        const canonicalOrderId=d.name.split('/').pop();
+        // createOrder mirrors its canonical Firestore record into RTDB for the
+        // kitchen. Keep one actionable console ticket, preferring Firestore so
+        // status changes flow through the server's idempotent accounting path.
+        _dropMirrorsOf(canonicalOrderId);
         // Map Firestore 'preparing' → display as 'pending' in console
         const rawStatus=str('status');
         const status=rawStatus==='preparing'?'pending':rawStatus;
@@ -4482,7 +4530,11 @@ async function ordersPoll(){
         const tableName=tableId||str('tableNote')||'App';
         ordersData[fsId]={
           _source:'app',
+          _fsOnly:true,
           _fsId:d.name.split('/').pop(),
+          uid:str('uid'),
+          nfcUid:str('nfcUid'),
+          visitId:str('visitId'),
           guestName:str('username')||'App Order',
           tableName,
           tableId,
@@ -5949,7 +6001,7 @@ async function orderStatus(id,status){
   if(status==='ready')patch.readyAt=Date.now();
   if(status==='served'){patch.servedAt=Date.now();
     if(o&&o.nfcUid&&o.items)afterServed(o.nfcUid,o.items);
-    if(o&&o.visitId&&o.items){
+    if(_takesLocalCreditPath(o)){
       const amt=o.items.reduce((s,i)=>s+(i.price||0)*(i.qty||1),0);
       try{
         const tok=await getFirebaseToken();const q=tok?'?auth='+tok:'';
@@ -5971,7 +6023,7 @@ async function orderStatus(id,status){
       // (Firestore creates it on PATCH) while the real record never gets
       // touched — the actual cause of an order that "never cancels".
       // 'pending' in console = 'preparing' in Firestore app
-      const fsStatus=status==='pending'?'preparing':status;
+      const fsStatus=status==='pending'?'preparing':(status==='served'?'completed':status);
       const tok=await getFirebaseToken();
       const headers={'Content-Type':'application/json',...(tok?{Authorization:'Bearer '+tok}:{})};
       res=await fetch(FSBASE+'/orders/'+o._fsId+'?updateMask.fieldPaths=status',{
@@ -6480,6 +6532,7 @@ function updateFeedback(){
 
 <script>
 /* ════════ FIREBASE INIT ════════ */
+const USE_FIREBASE_EMULATORS=new URLSearchParams(location.search).get('emulator')==='1';
 firebase.initializeApp({
   apiKey:            'AIzaSyB5K8_jbh-95R78mz8mp2YunY7wHnIbxWk',
   authDomain:        'kingdom-ac44f.firebaseapp.com',
@@ -6489,6 +6542,12 @@ firebase.initializeApp({
   messagingSenderId: '968566097636',
   appId:             '1:968566097636:android:f561d9a981d215d25a0ef1',
 });
+if(USE_FIREBASE_EMULATORS){
+  // Explicit local QA mode. Production behavior is unchanged unless the URL
+  // deliberately carries ?emulator=1.
+  firebase.auth().useEmulator('http://127.0.0.1:9099');
+  firebase.database().useEmulator('127.0.0.1',9000);
+}
 /* ── Staff login gate ────────────────────────────────────── */
 (function(){
   const overlay=document.createElement('div');
@@ -6579,8 +6638,12 @@ function showScreen(w){
 }
 
 /* ════════ FLOOR VIEW ════════ */
-const RTDB='https://kingdom-ac44f-default-rtdb.europe-west1.firebasedatabase.app';
-const FSBASE='https://firestore.googleapis.com/v1/projects/kingdom-ac44f/databases/(default)/documents';
+const RTDB=USE_FIREBASE_EMULATORS
+  ?'http://127.0.0.1:9000'
+  :'https://kingdom-ac44f-default-rtdb.europe-west1.firebasedatabase.app';
+const FSBASE=USE_FIREBASE_EMULATORS
+  ?'http://127.0.0.1:8080/v1/projects/kingdom-ac44f/databases/(default)/documents'
+  :'https://firestore.googleapis.com/v1/projects/kingdom-ac44f/databases/(default)/documents';
 
 const canvas=document.getElementById('c');
 const ctx=canvas.getContext('2d');
@@ -8202,12 +8265,16 @@ async function startOrdersStream(){
       const d=JSON.parse(e.data);
       if(d.path==='/'){
         for(const k of Object.keys(ordersData)){if(!ordersData[k]._fsOnly)delete ordersData[k];}
-        for(const [k,v] of Object.entries(d.data||{}))ordersData[k]={...v,_source:'rtdb'};
+        for(const [k,v] of Object.entries(d.data||{})){
+          if(v&&v.firestoreId&&ordersData['fs_'+v.firestoreId])continue;
+          ordersData[k]=_normalizeKitchenOrder(v);
+        }
       } else if(d.path&&d.path.length>1){
         const parts=d.path.slice(1).split('/');
         const key=parts[0];
+        if(key.startsWith('app_')&&ordersData['fs_'+key.slice(4)])return;
         if(d.data===null){delete ordersData[key];}
-        else if(parts.length===1&&typeof d.data==='object'){ordersData[key]={...d.data,_source:'rtdb'};}
+        else if(parts.length===1&&typeof d.data==='object'){ordersData[key]=_normalizeKitchenOrder(d.data);}
         else if(parts.length>1){if(!ordersData[key])ordersData[key]={_source:'rtdb'};ordersData[key][parts[1]]=d.data;}
       }
       // Guard against the classic reconnect race: a stream reconnect (wifi

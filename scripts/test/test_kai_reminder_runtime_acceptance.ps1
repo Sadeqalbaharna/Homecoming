@@ -18,7 +18,9 @@ function Hash-Text {
 
 function Set-ManifestBinding {
     param([object]$Value)
-    $keys = @('schemaVersion','governedRoot','sourceCommit','sourceStatusSha256','maxSourceLastWriteUtc','buildCredentialProfile','buildCredentialStubSha256','executableRelativePath','executableSha256','executableLength','payloadRelativePath','payloadSha256','payloadLength','payloadLastWriteUtc','acceptedAtUtc')
+    $keys = @('schemaVersion','governedRoot','sourceCommit','sourceStatusSha256','maxSourceLastWriteUtc')
+    if ([int]$Value.schemaVersion -eq 2) { $keys += @('maxDartSourceLastWriteUtc','maxNativeSourceLastWriteUtc') }
+    $keys += @('buildCredentialProfile','buildCredentialStubSha256','executableRelativePath','executableSha256','executableLength','payloadRelativePath','payloadSha256','payloadLength','payloadLastWriteUtc','acceptedAtUtc')
     $canonical = @($keys | ForEach-Object { "$_=$($Value.$_)" }) -join [char]31
     $binding = Hash-Text $canonical
     if ($Value -is [System.Collections.IDictionary]) { $null = ($Value.bindingId = $binding) }
@@ -63,11 +65,13 @@ try {
     $exeHash = '1' * 64
     $payloadHash = '2' * 64
     $manifestValue = [ordered]@{
-        schemaVersion = 1
+        schemaVersion = 2
         governedRoot = $acceptedRoot
         sourceCommit = 'b' * 40
         sourceStatusSha256 = 'c' * 64
         maxSourceLastWriteUtc = '2026-08-08T09:00:00Z'
+        maxDartSourceLastWriteUtc = '2026-08-08T09:00:00Z'
+        maxNativeSourceLastWriteUtc = '2026-08-08T09:00:00Z'
         buildCredentialProfile = 'empty-local-build-stub-v1'
         buildCredentialStubSha256 = 'd' * 64
         executableRelativePath = 'build\windows\x64\runner\Release\Kai.exe'
@@ -186,10 +190,10 @@ try {
 
     $staleSourceManifest = Join-Path $temp 'stale-source-manifest.json'
     $manifestVariant = $manifestValue | ConvertTo-Json -Depth 5 | ConvertFrom-Json
-    $manifestVariant.maxSourceLastWriteUtc = '2026-08-08T10:00:01Z'
+    $manifestVariant.maxDartSourceLastWriteUtc = '2026-08-08T10:00:01Z'
     $manifestVariant = Set-ManifestBinding $manifestVariant
     Write-Json $staleSourceManifest $manifestVariant
-    Invoke-Case 'payload-older-than-source' @('-Mode','Preflight','-HealthPath',$health,'-CommitmentsPath',$created,'-AcceptedArtifactPath',$staleSourceManifest,'-ExpectedBindingId',$manifestVariant.bindingId,'-RuntimeIdentityPath',$identity) 1 'older than a compiled source input' | Out-Null
+    Invoke-Case 'payload-older-than-source' @('-Mode','Preflight','-HealthPath',$health,'-CommitmentsPath',$created,'-AcceptedArtifactPath',$staleSourceManifest,'-ExpectedBindingId',$manifestVariant.bindingId,'-RuntimeIdentityPath',$identity) 1 'older than a Dart build input' | Out-Null
 
     $createdArgs = @('-Mode','Created','-HealthPath',$health,'-CommitmentsPath',$created,'-CommitmentId','brief018-test','-ExpectedTextSha256',$textHash,'-Marker','TEXTMARKER-UNIQUE','-ExpectedRuntimeIdentityId',$runtimeId) + $boundary
     $createdOutput = Invoke-Case 'created' $createdArgs 0 '[PASS]'

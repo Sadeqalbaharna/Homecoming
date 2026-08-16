@@ -92,7 +92,8 @@ class _KaiCostMeterState extends State<KaiCostMeter> {
     final cost = UsageTrackingService.formatCost(_sessionCost);
     final toks = UsageTrackingService.formatTokens(_sessionTokens);
 
-    final semantic = 'Kai usage this session: $cost across $_sessionCalls calls '
+    final semantic =
+        'Kai usage this session: $cost across $_sessionCalls calls '
         'and $_sessionTokens tokens. All time: '
         '${UsageTrackingService.formatCost(_totalCost)}.';
 
@@ -122,54 +123,67 @@ class _KaiCostMeterState extends State<KaiCostMeter> {
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const UsageStatsScreen()),
             ),
-            child: Container(
-            padding: const EdgeInsets.fromLTRB(9, 4, 9, 4),
-            decoration: BoxDecoration(
-              color: const Color(0xFF0D1826),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: const Color(0xFF24384C)),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 5,
-                  height: 5,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: _costColor,
-                    boxShadow: [
-                      BoxShadow(color: _costColor.withOpacity(0.7), blurRadius: 6),
-                    ],
-                  ),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 250),
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(9, 4, 9, 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0D1826),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: const Color(0xFF24384C)),
                 ),
-                const SizedBox(width: 7),
-                Text(cost,
-                    style: TextStyle(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 5,
+                      height: 5,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
                         color: _costColor,
-                        fontSize: 10.5,
-                        fontFamily: 'monospace',
-                        fontWeight: FontWeight.w700)),
-                const SizedBox(width: 8),
-                Text(toks,
-                    style: const TextStyle(
-                        color: Color(0xFF9FD0E8),
-                        fontSize: 10,
-                        fontFamily: 'monospace')),
-                const SizedBox(width: 6),
-                const Text('tok',
-                    style: TextStyle(
-                        color: Color(0xFF5B7183),
-                        fontSize: 9,
-                        fontFamily: 'monospace')),
-                const SizedBox(width: 5),
-                // Affordance. Without it nobody discovers the door exists —
-                // which is how a 787-line screen goes unopened for months.
-                Icon(Icons.unfold_more,
-                    size: 11, color: Colors.white.withOpacity(0.22)),
-              ],
+                        boxShadow: [
+                          BoxShadow(
+                              color: _costColor.withOpacity(0.7),
+                              blurRadius: 6),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 7),
+                    Flexible(
+                      child: Text(cost,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                              color: _costColor,
+                              fontSize: 10.5,
+                              fontFamily: 'monospace',
+                              fontWeight: FontWeight.w700)),
+                    ),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(toks,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              color: Color(0xFF9FD0E8),
+                              fontSize: 10,
+                              fontFamily: 'monospace')),
+                    ),
+                    const SizedBox(width: 6),
+                    const Text('tok',
+                        style: TextStyle(
+                            color: Color(0xFF5B7183),
+                            fontSize: 9,
+                            fontFamily: 'monospace')),
+                    const SizedBox(width: 5),
+                    // Affordance. Without it nobody discovers the door exists —
+                    // which is how a 787-line screen goes unopened for months.
+                    Icon(Icons.unfold_more,
+                        size: 11, color: Colors.white.withOpacity(0.22)),
+                  ],
+                ),
+              ),
             ),
-          ),
           ),
         ),
       );
@@ -184,7 +198,8 @@ class _KaiCostMeterState extends State<KaiCostMeter> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _row('SESSION', cost, '$toks tok · $_sessionCalls calls', _costColor),
+            _row('SESSION', cost, '$toks tok · $_sessionCalls calls',
+                _costColor),
             const SizedBox(height: 4),
             _row(
                 'TOTAL',
@@ -208,9 +223,11 @@ class _KaiCostMeterState extends State<KaiCostMeter> {
                   color: Color(0xFF5B7183), fontSize: 8.5, letterSpacing: 1.2)),
         ),
         Text(cost,
-            style: TextStyle(color: c, fontWeight: FontWeight.w700, fontSize: 11)),
+            style:
+                TextStyle(color: c, fontWeight: FontWeight.w700, fontSize: 11)),
         const SizedBox(width: 8),
-        Text(sub, style: const TextStyle(color: Color(0xFF6B8194), fontSize: 9)),
+        Text(sub,
+            style: const TextStyle(color: Color(0xFF6B8194), fontSize: 9)),
       ],
     );
   }

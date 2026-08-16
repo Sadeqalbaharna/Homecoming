@@ -1,0 +1,55 @@
+{
+  "kind": "pizza_tracker_reconciliation",
+  "recorded_at": "2026-08-15T00:00:00+03:00",
+  "scope": "tracker truth, tests, and governing evidence only",
+  "runtime_actions": [],
+  "projects": {
+    "homecoming": {
+      "accepted_phases": [0],
+      "active_phase": 3,
+      "evidence_phases": [3],
+      "proof": "WIRED_WITH_VERIFIED_LIVE_SUBBOXES",
+      "open": [
+        "Brief 018 reminder survival and exactly-once Desktop delivery",
+        "seven-day Central Attention observation"
+      ]
+    },
+    "hoard": {
+      "accepted_phases": [0, 1],
+      "active_phase": 2,
+      "evidence_phases": [2],
+      "proof": "PHASE_1_VERIFIED_LIVE",
+      "source_commit": "2621afd",
+      "open": ["60-90 day real venue close"]
+    },
+    "kingdom": {
+      "accepted_phases": [],
+      "active_phase": 1,
+      "parallel_reservations": {
+        "reported_state": "shadow-ready 6/6",
+        "reported_commit": "efb6aa2",
+        "proof": "UNVERIFIED_IN_HOMECOMING_WORKSPACE",
+        "next_gate": "sponsor approval and clean 14-day parallel shadow"
+      }
+    },
+    "factory": {
+      "accepted_phases": [0, 1, 2, 3, 4, 5, 6],
+      "active_phase": 7,
+      "evidence_phases": [7],
+      "leading_product": "boothsignal",
+      "public_url": "https://salbaharna.gumroad.com/l/boothsignal",
+      "price_usd": 9,
+      "tags": 10,
+      "daily_product": {
+        "listing": "VERIFIED_LIVE",
+        "first_payment": "ACTIVE_UNVERIFIED",
+        "revenue": "UNVERIFIED"
+      },
+      "preserved_product_lanes": {
+        "find_my_table": "BLUEPRINT; internal Assembly component TESTED 88/88; full Assembly exit UNVERIFIED"
+      }
+    }
+  },
+  "tiktok_slice_created": false,
+  "screenshot": "UNVERIFIED: Brief 018 UI observation was explicitly excluded and no Desktop process was touched"
+}

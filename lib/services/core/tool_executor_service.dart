@@ -10,6 +10,7 @@
 
 import 'dart:async'; // unawaited — recording a failure must never cause one
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_database/firebase_database.dart';
 import '../ai/ai_config.dart';
@@ -38,6 +39,8 @@ import 'kai_self_improvement_runner.dart';
 import 'kai_bond_service.dart';
 import 'kai_embodiment_service.dart';
 import 'kai_db.dart';
+import 'kai_core_client.dart';
+import 'kai_desktop_reminder_tool.dart';
 import 'kai_factory_service.dart';
 import 'gumroad_cli_service.dart';
 import '../../logic/product_factory.dart';
@@ -65,6 +68,45 @@ enum ToolOutcome {
 class ToolExecutorService {
   static const _channel = MethodChannel('com.homecoming.app/kai_tools');
 
+  // ── Desktop reminder seam ──────────────────────────────────────────────────
+  //
+  // Platform authority, resolved once from the same signal that decides whether
+  // the native plugins exist at all. `kaiDbUsesRest` is true on Windows, Linux
+  // and macOS. It is a platform fact, not an argument, so no model output can
+  // steer which implementation runs.
+  //
+  // Both fields are overridable ONLY so tests can drive the real production
+  // path against a temporary Core instead of a live one. Nothing in the app
+  // sets them.
+
+  @visibleForTesting
+  static bool? debugIsDesktopPlatform;
+
+  /// The single platform authority for this class.
+  ///
+  /// Used both to choose the reminder implementation and to guard the native
+  /// channel, so the two can never disagree about which body this is.
+  static bool get isDesktopPlatform => debugIsDesktopPlatform ?? kaiDbUsesRest;
+
+  @visibleForTesting
+  static KaiDesktopReminderTool? debugDesktopReminderTool;
+
+  static KaiDesktopReminderTool get desktopReminderTool =>
+      debugDesktopReminderTool ??
+      (_desktopReminderTool ??= KaiDesktopReminderTool(
+        client: KaiCoreClient(),
+        now: DateTime.now,
+      ));
+
+  static KaiDesktopReminderTool? _desktopReminderTool;
+
+  /// Restore real platform behaviour after a test.
+  @visibleForTesting
+  static void resetDesktopReminderSeamForTesting() {
+    debugIsDesktopPlatform = null;
+    debugDesktopReminderTool = null;
+  }
+
   static int inputBreakdownScanLimitFor(int limit) =>
       (limit * 25).clamp(100, 500).toInt();
 
@@ -85,10 +127,14 @@ class ToolExecutorService {
   // an "all-powerful assistant" that confidently reaches for your alarms and
   // faceplants looks incompetent. Better to not claim a power than to claim it
   // and fail. (Kai's desktop reach is the engineer/web/memory toolset instead.)
+  // `set_reminder` is deliberately NOT in this set any more. It is the one
+  // device-shaped tool with a real desktop implementation — a durable Central
+  // Core commitment rather than a native plugin call — so offering it on the
+  // workbench claims a power Kai genuinely has. Everything else here still
+  // throws MissingPluginException off Android and stays filtered.
   static const Set<String> androidOnlyTools = {
     'set_alarm',
     'set_timer',
-    'set_reminder',
     'read_calendar',
     'create_calendar_event',
     'open_app',
@@ -261,6 +307,11 @@ Never claim a tool that is absent from this exact list.$workspaceRecovery''';
   };
 
   /// Phone/body actions.
+  ///
+  /// `set_reminder` is absent on purpose. It is no longer a phone action — it
+  /// is a promise, durable in Core and delivered by whichever body Sadeq is at.
+  /// Leaving it here would strip it from the coding and contemplate routes,
+  /// which are exactly the moments he says "remind me to push this at five".
   static const _deviceTools = <String>{
     'read_screen',
     'read_notifications',
@@ -268,7 +319,6 @@ Never claim a tool that is absent from this exact list.$workspaceRecovery''';
     'create_calendar_event',
     'set_alarm',
     'set_timer',
-    'set_reminder',
     'open_app',
     'send_whatsapp',
     'send_sms',
@@ -1813,7 +1863,7 @@ Never claim a tool that is absent from this exact list.$workspaceRecovery''';
       'function': {
         'name': 'factory_record',
         'description':
-            "Record evidence a factory run has EARNED — a real artifact path, a passing test run, a live URL, observed sales. Never a claim that a stage is finished; the gates check these facts themselves. Only pass what actually happened.",
+            "Record evidence a factory run has EARNED — a real artifact path, a passing test run, a live URL, observed sales, or reconciled money actually settled in the bank. Never a claim that a stage is finished; the gates check these facts themselves. Only pass what actually happened.",
         'parameters': {
           'type': 'object',
           'properties': {
@@ -1849,6 +1899,16 @@ Never claim a tool that is absent from this exact list.$workspaceRecovery''';
             },
             'views': {'type': 'integer'},
             'sales': {'type': 'integer'},
+            'bankedRevenue': {
+              'type': 'number',
+              'description':
+                  'Positive customer revenue only after it has actually settled into Sadeq\'s bank account.'
+            },
+            'bankSettlementReference': {
+              'type': 'string',
+              'description':
+                  'Bank or processor settlement reference that reconciles the banked money to the real order.'
+            },
             'observedDays': {
               'type': 'integer',
               'description': 'Days of live data collected. Under 7 is noise.'
@@ -2851,6 +2911,9 @@ Never claim a tool that is absent from this exact list.$workspaceRecovery''';
               liveUrl: (args['liveUrl'] as String?)?.trim(),
               views: (args['views'] as num?)?.toInt(),
               sales: (args['sales'] as num?)?.toInt(),
+              bankedRevenue: args['bankedRevenue'] as num?,
+              bankSettlementReference:
+                  (args['bankSettlementReference'] as String?)?.trim(),
               observedDays: (args['observedDays'] as num?)?.toInt(),
               predictedScores: () {
                 final p = args['predictedScores'];
@@ -3137,6 +3200,23 @@ Never claim a tool that is absent from this exact list.$workspaceRecovery''';
           });
 
         case 'set_reminder':
+          // The ONE tool with two real implementations.
+          //
+          // Android keeps its native plugin exactly as it was. Desktop has no
+          // such plugin, so the same words become a durable Core commitment
+          // that the coordinator and desktop inbox already know how to deliver.
+          //
+          // The branch is platform authority, never an argument: a model that
+          // asked for `platform: android` would be choosing its own execution
+          // path, and this is the seam where a promise gets made.
+          if (isDesktopPlatform) {
+            final result = await desktopReminderTool.create(args);
+            // Thrown, not returned as text, so the executor's existing
+            // outcome classification and trace receipts see a real failure
+            // rather than a sentence that happens to contain an apology.
+            if (!result.ok) throw Exception(result.message);
+            return result.message;
+          }
           return await _invokeAndroid('setReminder', args);
 
         case 'read_calendar':
@@ -3767,7 +3847,7 @@ Never claim a tool that is absent from this exact list.$workspaceRecovery''';
       String method, Map<String, dynamic> args) async {
     // Safety net: these are filtered out of toolDefinitions on desktop, but if
     // one is ever called anyway, say something true instead of crashing.
-    if (kaiDbUsesRest) {
+    if (isDesktopPlatform) {
       return "That one only works from my phone body — I'm on the desktop right "
           "now, so I can't reach it from here. Ask me on your phone and it's done.";
     }

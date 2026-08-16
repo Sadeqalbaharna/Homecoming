@@ -1,0 +1,10 @@
+﻿{
+    "verdict":  "FAIL",
+    "mode":  "Artifact",
+    "reason":  "Accepted payload is older than a compiled source input.",
+    "checkedAt":  "2026-08-15T14:05:50.6963779Z",
+    "coreBaseUri":  "http://127.0.0.1:8790",
+    "evidence":  {
+                     "bindingId":  "2bfa507cf6c5cd54ce8e2a5e91bf2b455dd615f0f65fd7df10e06701009fdf13"
+                 }
+}

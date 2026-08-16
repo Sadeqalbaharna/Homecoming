@@ -1,0 +1,39 @@
+﻿{
+    "verdict":  "PASS",
+    "mode":  "Preflight",
+    "reason":  "Rebuilt Core supports scheduled commitments.",
+    "checkedAt":  "2026-08-15T14:08:06.5104318Z",
+    "coreBaseUri":  "http://127.0.0.1:8790",
+    "evidence":  {
+                     "journalAnchor":  {
+                                           "length":  1810836,
+                                           "sha256":  "92fc937b7bb67923a7e8f3d59ec99cdb684bf0f9f6ceb3609021e9c4d28ef8e3"
+                                       },
+                     "capabilities":  [
+                                          "presence",
+                                          "handoffs",
+                                          "runtime_tasks",
+                                          "outbound_inbox",
+                                          "scheduled_commitments"
+                                      ],
+                     "statusCounts":  {
+
+                                      },
+                     "commitmentCount":  0,
+                     "persistedStateStartedAt":  "2026-08-07T15:32:30.045882Z",
+                     "runtime":  {
+                                     "bindingId":  "4e2baa9e93fafffeabd77e90539bb60d3f6640044b0f46fc830641a7870d34ec",
+                                     "governedRoot":  "C:\\Users\\sadeq\\.codex\\worktrees\\3740\\homecoming_app",
+                                     "sourceCommit":  "2ea659b1b5d23b9a30ab9b9be5c99512517d3741",
+                                     "corePid":  51104,
+                                     "watchdogPid":  51156,
+                                     "kaiProcessCount":  2,
+                                     "executablePath":  "C:\\Users\\sadeq\\.codex\\worktrees\\3740\\homecoming_app\\build-graceful-shutdown\\windows\\x64\\runner\\Release\\Kai.exe",
+                                     "executableSha256":  "779735cf82b40cb6ec6eaea85b53f851015241338873ab4a947d0434d346c232",
+                                     "payloadSha256":  "01bbed5a2e748c38b068367bcc37ab74e72d4d882e5d5a723fe7884a83c0d1e7",
+                                     "processCreationUtc":  "2026-08-15T14:07:44.0226290Z",
+                                     "acceptedAtUtc":  "2026-08-15T14:06:50.6942729Z",
+                                     "runtimeIdentityId":  "d99ad53a4b2fcc41a30be255babd0713017c5b08c6d7f9f249cee4ce39690fc8"
+                                 }
+                 }
+}

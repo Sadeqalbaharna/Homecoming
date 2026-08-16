@@ -1,0 +1,36 @@
+﻿{
+    "verdict":  "PASS",
+    "mode":  "Survived",
+    "reason":  "The exact promise survived restart unchanged.",
+    "checkedAt":  "2026-08-15T14:14:51.8799601Z",
+    "coreBaseUri":  "http://127.0.0.1:8790",
+    "evidence":  {
+                     "persistedStateStartedAt":  "2026-08-07T15:32:30.045882Z",
+                     "runtime":  {
+                                     "bindingId":  "4e2baa9e93fafffeabd77e90539bb60d3f6640044b0f46fc830641a7870d34ec",
+                                     "governedRoot":  "C:\\Users\\sadeq\\.codex\\worktrees\\3740\\homecoming_app",
+                                     "sourceCommit":  "2ea659b1b5d23b9a30ab9b9be5c99512517d3741",
+                                     "corePid":  19772,
+                                     "watchdogPid":  37884,
+                                     "kaiProcessCount":  3,
+                                     "executablePath":  "C:\\Users\\sadeq\\.codex\\worktrees\\3740\\homecoming_app\\build-graceful-shutdown\\windows\\x64\\runner\\Release\\Kai.exe",
+                                     "executableSha256":  "779735cf82b40cb6ec6eaea85b53f851015241338873ab4a947d0434d346c232",
+                                     "payloadSha256":  "01bbed5a2e748c38b068367bcc37ab74e72d4d882e5d5a723fe7884a83c0d1e7",
+                                     "processCreationUtc":  "2026-08-15T14:13:47.3208230Z",
+                                     "acceptedAtUtc":  "2026-08-15T14:06:50.6942729Z",
+                                     "runtimeIdentityId":  "5426e42c446dfd21e55a32ed2ac0fed9167fea0875aa2d5e3cd603a88e388035"
+                                 },
+                     "commitmentId":  "commit-ec78fa071d43c640570747c7303b797b",
+                     "runCommitmentCount":  1,
+                     "textSha256":  "f2122303487eeb4b5c4aa538d80f9b3c3b385154125d16dae0d05d72fdd45401",
+                     "promiseFingerprint":  "335bc8e8eba0394d52b6025739285701293ff2cd0027d9290321fcedba5ec006",
+                     "status":  "scheduled",
+                     "dueAt":  "2026-08-15T14:22:00.000Z",
+                     "dueWallClock":  "2026-08-15T17:22:00",
+                     "nextEvaluationAt":  "2026-08-15T14:22:00.000Z",
+                     "outboundId":  "",
+                     "targetBodyId":  "",
+                     "dispatchedAt":  "",
+                     "acknowledgedAt":  ""
+                 }
+}

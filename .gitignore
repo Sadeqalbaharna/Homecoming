@@ -77,3 +77,10 @@ build/
 # scratch
 _probe.txt
 tmp_*.patch
+
+# Per-feature build output directories. `flutter build` was pointed at these
+# so several branches could hold Release artifacts at once; they are outputs,
+# not source, and they were showing up as untracked work on every status.
+/build-*/
+/tmp/
+/.tool-home/

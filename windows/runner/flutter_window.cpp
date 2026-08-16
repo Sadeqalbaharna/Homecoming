@@ -6,6 +6,11 @@
 #include <shellapi.h>
 
 #include "flutter/generated_plugin_registrant.h"
+#include <firebase_auth/firebase_auth_plugin_c_api.h>
+#include <firebase_core/firebase_core_plugin_c_api.h>
+#include <flutter_secure_storage_windows/flutter_secure_storage_windows_plugin.h>
+#include <pasteboard/pasteboard_plugin.h>
+#include <permission_handler_windows/permission_handler_windows_plugin.h>
 #include "resource.h"
 
 namespace {
@@ -13,10 +18,28 @@ constexpr UINT_PTR kKaiHeartbeatTimer = 0x4B4149;
 constexpr UINT kKaiHeartbeatTickMs = 140;
 constexpr int kHeartIconSize = 24;
 constexpr UINT kKaiTrayMessage = WM_APP + 0x4B;
+constexpr UINT kKaiGracefulQuitMessage = WM_APP + 0x4C;
 constexpr UINT kTrayOpen = 0x4B01;
 constexpr UINT kTrayQuit = 0x4B02;
 const UINT kTaskbarButtonCreated =
     RegisterWindowMessageW(L"TaskbarButtonCreated");
+
+// The headless coordinator never plays audio. Avoid instantiating the Windows
+// audio plugin in that process: its engine-teardown destructor can fault after
+// Dart has already completed a durable graceful drain. Desktop rooms retain the
+// generated full plugin set, including audio.
+void RegisterCoordinatorPlugins(flutter::PluginRegistry* registry) {
+  FirebaseAuthPluginCApiRegisterWithRegistrar(
+      registry->GetRegistrarForPlugin("FirebaseAuthPluginCApi"));
+  FirebaseCorePluginCApiRegisterWithRegistrar(
+      registry->GetRegistrarForPlugin("FirebaseCorePluginCApi"));
+  FlutterSecureStorageWindowsPluginRegisterWithRegistrar(
+      registry->GetRegistrarForPlugin("FlutterSecureStorageWindowsPlugin"));
+  PasteboardPluginRegisterWithRegistrar(
+      registry->GetRegistrarForPlugin("PasteboardPlugin"));
+  PermissionHandlerWindowsPluginRegisterWithRegistrar(
+      registry->GetRegistrarForPlugin("PermissionHandlerWindowsPlugin"));
+}
 }  // namespace
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project,
@@ -43,7 +66,11 @@ bool FlutterWindow::OnCreate() {
   if (!flutter_controller_->engine() || !flutter_controller_->view()) {
     return false;
   }
-  RegisterPlugins(flutter_controller_->engine());
+  if (coordinator_worker_) {
+    RegisterCoordinatorPlugins(flutter_controller_->engine());
+  } else {
+    RegisterPlugins(flutter_controller_->engine());
+  }
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
   if (coordinator_worker_) AddTrayIcon();
 
@@ -70,6 +97,30 @@ bool FlutterWindow::OnCreate() {
         result->Success();
       });
 
+  lifecycle_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_controller_->engine()->messenger(),
+          "kai.homecoming/lifecycle",
+          &flutter::StandardMethodCodec::GetInstance());
+  lifecycle_channel_->SetMethodCallHandler(
+      [this](const flutter::MethodCall<flutter::EncodableValue>& call,
+             std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
+                 result) {
+        if (call.method_name() != "quitCoordinator") {
+          result->NotImplemented();
+          return;
+        }
+        if (!coordinator_worker_ || quitting_) {
+          result->Error("quit_refused",
+                        "Only the active coordinator can exit normally");
+          return;
+        }
+        // Complete the Dart method call before the window is destroyed. The
+        // local HTTP seam has already replied and flushed its durable writers.
+        result->Success();
+        PostMessageW(GetHandle(), kKaiGracefulQuitMessage, 0, 0);
+      });
+
   flutter_controller_->engine()->SetNextFrameCallback([this]() {
     if (!start_hidden_) this->Show();
   });
@@ -86,6 +137,7 @@ void FlutterWindow::OnDestroy() {
   RemoveTrayIcon();
   ReleaseTaskbarHeartbeat();
   taskbar_channel_.reset();
+  lifecycle_channel_.reset();
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }
@@ -116,6 +168,11 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   }
 
   switch (message) {
+    case kKaiGracefulQuitMessage:
+      if (coordinator_worker_ && !quitting_) {
+        QuitFromTray();
+      }
+      return 0;
     case WM_CLOSE:
       if (coordinator_worker_ && !quitting_) {
         // Closing the visible room must not kill the coordinator living behind

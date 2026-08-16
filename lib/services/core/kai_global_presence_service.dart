@@ -10,6 +10,23 @@ import 'kai_db.dart';
 const String kKaiPresencePersona = 'truekai';
 const Duration kKaiGlobalPresenceLease = Duration(seconds: 90);
 
+enum KaiCoordinatorLeaseAction { none, expire, renew }
+
+/// Decides whether this process may mutate Kai's one central heartbeat.
+///
+/// Visible bodies are observers even when they run on the owner desktop. This
+/// default-deny decision prevents a desktop-body timer from racing the hidden
+/// coordinator and briefly declaring Central Kai asleep.
+KaiCoordinatorLeaseAction resolveKaiCoordinatorLeaseAction({
+  required bool managesCoordinatorLease,
+  required bool requestedAwake,
+}) {
+  if (!managesCoordinatorLease) return KaiCoordinatorLeaseAction.none;
+  return requestedAwake
+      ? KaiCoordinatorLeaseAction.renew
+      : KaiCoordinatorLeaseAction.expire;
+}
+
 class KaiGlobalBody {
   const KaiGlobalBody({
     required this.bodyId,
@@ -157,6 +174,7 @@ class KaiGlobalPresenceService {
   String? _sessionId;
   String? _uid;
   bool _publishBodyLease = true;
+  bool _managesCoordinatorLease = false;
   bool _foreground = true;
   bool _gogglesOn = false;
   String _status = 'idle';
@@ -175,6 +193,7 @@ class KaiGlobalPresenceService {
     required String surface,
     required bool canBootstrapOwner,
     bool publishBodyLease = true,
+    bool managesCoordinatorLease = false,
     String? sessionId,
     bool foreground = true,
     bool gogglesOn = false,
@@ -182,8 +201,9 @@ class KaiGlobalPresenceService {
   }) async {
     if (_started) return;
     final user = FirebaseAuth.instance.currentUser;
-    if (!kaiDbUsesRest && user == null)
+    if (!kaiDbUsesRest && user == null) {
       throw const KaiPairingException('Firebase sign-in missing');
+    }
     _started = true;
     _uid = kaiDbUsesRest ? await KaiDb.instance.stableRestUid() : user!.uid;
     _surface = surface;
@@ -192,6 +212,7 @@ class KaiGlobalPresenceService {
     _sessionId = sessionId ??
         '$surface-${DateTime.now().toUtc().microsecondsSinceEpoch}';
     _publishBodyLease = publishBodyLease;
+    _managesCoordinatorLease = managesCoordinatorLease;
     _foreground = foreground;
     _gogglesOn = gogglesOn;
     _status = status;
@@ -357,13 +378,18 @@ class KaiGlobalPresenceService {
 
   Future<void> _renewCoordinatorIfOwner() async {
     if (!_started || !_firebaseConnected || _surface != 'desktop') return;
+    final action = resolveKaiCoordinatorLeaseAction(
+      managesCoordinatorLease: _managesCoordinatorLease,
+      requestedAwake: _coordinatorRequestedAwake,
+    );
+    if (action == KaiCoordinatorLeaseAction.none) return;
     final uid = _uid;
     if (uid == null) return;
     final owner =
         await KaiDb.instance.ref('kai_core/owner/$kKaiPresencePersona').get();
     if (owner.value != uid) return;
     final ref = KaiDb.instance.ref('kai_core/coordinator/$kKaiPresencePersona');
-    if (!_coordinatorRequestedAwake) {
+    if (action == KaiCoordinatorLeaseAction.expire) {
       await ref.update({'leaseExpiresAt': ServerValue.timestamp});
       return;
     }
@@ -560,7 +586,7 @@ class KaiGlobalPresenceService {
         }
       } catch (_) {}
     }
-    if (_surface == 'desktop') {
+    if (_managesCoordinatorLease) {
       _coordinatorRequestedAwake = false;
       try {
         await _renewCoordinatorIfOwner();

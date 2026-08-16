@@ -47,6 +47,8 @@ class FlutterWindow : public Win32Window {
   std::unique_ptr<flutter::FlutterViewController> flutter_controller_;
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
       taskbar_channel_;
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
+      lifecycle_channel_;
   ITaskbarList3* taskbar_ = nullptr;
   HICON taskbar_heart_small_ = nullptr;
   HICON taskbar_heart_large_ = nullptr;

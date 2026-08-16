@@ -3,15 +3,18 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('desktop shell mounts the Kai State Scorecard card in its side rail', () {
+  test('desktop moves the scorecard behind the header efficiency meter', () {
     final source = File('lib/screens/kai_desktop_shell.dart').readAsStringSync();
+    final meter = File('lib/widgets/kai_efficiency_delta_meter.dart')
+        .readAsStringSync();
 
-    expect(source, contains("import '../widgets/kai_state_scorecard_card.dart';"));
-    expect(source, contains('const KaiStateScorecardCard(limit: 40)'));
-    expect(source.indexOf('const KaiStateScorecardCard(limit: 40)'),
-        greaterThan(source.indexOf('KaiProjectService.sentienceId')));
-    expect(source.indexOf('const KaiStateScorecardCard(limit: 40)'),
-        lessThan(source.indexOf('_desktopWorkQueueCard()')));
+    expect(source,
+        isNot(contains("import '../widgets/kai_state_scorecard_card.dart';")));
+    expect(source, isNot(contains('const KaiStateScorecardCard(limit: 40)')));
+    expect(source, contains('const KaiEfficiencyDeltaMeter()'));
+    expect(meter, contains("import 'kai_state_scorecard_card.dart';"));
+    expect(meter, contains("Key('kai-efficiency-scorecard-toggle')"));
+    expect(meter, contains('KaiStateScorecardCard('));
   });
 
   test('desktop shell renders the live hands-state indicator', () {

@@ -134,7 +134,7 @@ function Read-AcceptedArtifact {
     }
     try { $manifest = Read-JsonFile -Path $AcceptedArtifactPath -Label 'accepted artifact' }
     catch { Write-Result -Verdict FAIL -Reason 'Accepted artifact manifest is unavailable or invalid.' -Evidence @{ error = $_.Exception.Message } -ExitCode 1 }
-    if ([int]$manifest.schemaVersion -ne 1 -or
+    if ([int]$manifest.schemaVersion -notin @(1, 2) -or
         [string]$manifest.bindingId -notmatch '^[0-9a-f]{64}$' -or
         [string]$manifest.sourceCommit -notmatch '^[0-9a-f]{40}$' -or
         [string]$manifest.sourceStatusSha256 -notmatch '^[0-9a-f]{64}$' -or
@@ -151,11 +151,23 @@ function Read-AcceptedArtifact {
         Write-Result -Verdict FAIL -Reason 'Accepted artifact manifest timestamps are invalid.' -Evidence @{ bindingId = $manifest.bindingId } -ExitCode 1
     }
     $sourceAt = [datetime]::MinValue
-    if (-not [datetime]::TryParse([string]$manifest.maxSourceLastWriteUtc, [ref]$sourceAt) -or
-        $payloadAt.ToUniversalTime() -lt $sourceAt.ToUniversalTime()) {
+    $dartSourceAt = [datetime]::MinValue
+    $nativeSourceAt = [datetime]::MinValue
+    if (-not [datetime]::TryParse([string]$manifest.maxSourceLastWriteUtc, [ref]$sourceAt)) {
+        Write-Result -Verdict FAIL -Reason 'Accepted artifact source timestamp is invalid.' -Evidence @{ bindingId = $manifest.bindingId } -ExitCode 1
+    }
+    if ([int]$manifest.schemaVersion -eq 2) {
+        if (-not [datetime]::TryParse([string]$manifest.maxDartSourceLastWriteUtc, [ref]$dartSourceAt) -or
+            -not [datetime]::TryParse([string]$manifest.maxNativeSourceLastWriteUtc, [ref]$nativeSourceAt) -or
+            $payloadAt.ToUniversalTime() -lt $dartSourceAt.ToUniversalTime()) {
+            Write-Result -Verdict FAIL -Reason 'Accepted payload is older than a Dart build input.' -Evidence @{ bindingId = $manifest.bindingId } -ExitCode 1
+        }
+    } elseif ($payloadAt.ToUniversalTime() -lt $sourceAt.ToUniversalTime()) {
         Write-Result -Verdict FAIL -Reason 'Accepted payload is older than a compiled source input.' -Evidence @{ bindingId = $manifest.bindingId } -ExitCode 1
     }
-    $bindingKeys = @('schemaVersion','governedRoot','sourceCommit','sourceStatusSha256','maxSourceLastWriteUtc','buildCredentialProfile','buildCredentialStubSha256','executableRelativePath','executableSha256','executableLength','payloadRelativePath','payloadSha256','payloadLength','payloadLastWriteUtc','acceptedAtUtc')
+    $bindingKeys = @('schemaVersion','governedRoot','sourceCommit','sourceStatusSha256','maxSourceLastWriteUtc')
+    if ([int]$manifest.schemaVersion -eq 2) { $bindingKeys += @('maxDartSourceLastWriteUtc','maxNativeSourceLastWriteUtc') }
+    $bindingKeys += @('buildCredentialProfile','buildCredentialStubSha256','executableRelativePath','executableSha256','executableLength','payloadRelativePath','payloadSha256','payloadLength','payloadLastWriteUtc','acceptedAtUtc')
     $canonical = @($bindingKeys | ForEach-Object { "$_=$($manifest.$_)" }) -join [char]31
     if ((Get-Sha256 -Value $canonical) -ne [string]$manifest.bindingId) {
         Write-Result -Verdict FAIL -Reason 'Accepted artifact manifest binding does not match its contents.' -Evidence @{} -ExitCode 1
@@ -190,6 +202,12 @@ function Assert-AcceptedArtifactFiles {
     }
     $accepted = [datetime]::Parse([string]$Manifest.acceptedAtUtc).ToUniversalTime()
     $payloadWrite = $payload.LastWriteTimeUtc.ToUniversalTime()
+    if ([int]$Manifest.schemaVersion -eq 2) {
+        $nativeSource = [datetime]::Parse([string]$Manifest.maxNativeSourceLastWriteUtc).ToUniversalTime()
+        if ($exe.LastWriteTimeUtc.ToUniversalTime() -lt $nativeSource) {
+            Write-Result -Verdict FAIL -Reason 'Accepted executable is older than a native build input.' -Evidence @{ bindingId = $Manifest.bindingId } -ExitCode 1
+        }
+    }
     if ($accepted -lt $payloadWrite) {
         Write-Result -Verdict FAIL -Reason 'Artifact binding predates the payload currently on disk.' -Evidence @{ acceptedAtUtc = $accepted.ToString('o'); payloadLastWriteUtc = $payloadWrite.ToString('o') } -ExitCode 1
     }

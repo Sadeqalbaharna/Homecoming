@@ -111,7 +111,10 @@ class KaiDeliveryBoxCatalog {
             'Observe one exact desktop reminder survive restart and restore once',
             owner: KaiDeliveryBoxOwner.sponsor,
             risk: KaiDeliveryRisk.liveExternal,
-            state: KaiDeliveryBoxState.awaitingSponsor),
+            state: KaiDeliveryBoxState.active,
+            evidence: [
+              'Brief 018 exact reminder survival, graceful restart, and exactly-once desktop delivery evidence remains open'
+            ]),
         _BoxSpec('seven_day_attention_run',
             'Observe seven days without spam or dropped commitments',
             owner: KaiDeliveryBoxOwner.sponsor,
@@ -207,8 +210,14 @@ class KaiDeliveryBoxCatalog {
             'Observe one attended same-scope recovery with protected parity',
             owner: KaiDeliveryBoxOwner.sponsor,
             risk: KaiDeliveryRisk.destructive,
-            state: KaiDeliveryBoxState.awaitingSponsor,
-            dependencies: ['hoard.p1.b01', 'hoard.p1.b03']),
+            state: KaiDeliveryBoxState.verified,
+            evidence: [
+              'Brief 024 accepted without waivers at commit 2621afd; b07c Verified live; G3 4/4; G4 PASS'
+            ],
+            dependencies: [
+              'hoard.p1.b01',
+              'hoard.p1.b03'
+            ]),
         _BoxSpec(
             'hoard.p1.b03', 'Pin the staging release and rollback checklist',
             state: KaiDeliveryBoxState.verified,
@@ -233,8 +242,14 @@ class KaiDeliveryBoxCatalog {
             'Accept the hardened Functions candidate in an authorized live surface',
             owner: KaiDeliveryBoxOwner.sponsor,
             risk: KaiDeliveryRisk.liveExternal,
-            state: KaiDeliveryBoxState.awaitingSponsor,
-            dependencies: ['hoard.p1.b02', 'hoard.p1.b04b']),
+            state: KaiDeliveryBoxState.verified,
+            evidence: [
+              'Brief 024 accepted without waivers at commit 2621afd; governance 13/13 PASS'
+            ],
+            dependencies: [
+              'hoard.p1.b02',
+              'hoard.p1.b04b'
+            ]),
         _BoxSpec('hoard.p1.b05a',
             'Freeze local recovery signal, redaction, threshold, and response contracts',
             state: KaiDeliveryBoxState.verified,
@@ -254,7 +269,10 @@ class KaiDeliveryBoxCatalog {
             'Deliver approved signals through external monitoring',
             owner: KaiDeliveryBoxOwner.sponsor,
             risk: KaiDeliveryRisk.liveExternal,
-            state: KaiDeliveryBoxState.awaitingSponsor,
+            state: KaiDeliveryBoxState.verified,
+            evidence: [
+              'Brief 024 accepted without waivers at commit 2621afd; G4 PASS'
+            ],
             dependencies: [
               'hoard.p1.b02',
               'hoard.p1.b04b',
@@ -263,7 +281,10 @@ class KaiDeliveryBoxCatalog {
         _BoxSpec('hoard.p1.b06', 'Accept the complete pilot safety baseline',
             owner: KaiDeliveryBoxOwner.sponsor,
             risk: KaiDeliveryRisk.liveExternal,
-            state: KaiDeliveryBoxState.awaitingSponsor,
+            state: KaiDeliveryBoxState.verified,
+            evidence: [
+              'Phase 1 accepted without waivers at commit 2621afd; governance 13/13 PASS'
+            ],
             dependencies: [
               'hoard.p1.b02',
               'hoard.p1.b04a',
@@ -279,6 +300,7 @@ class KaiDeliveryBoxCatalog {
             'Approve the pilot venue, operator, period, and privacy boundary',
             owner: KaiDeliveryBoxOwner.sponsor,
             risk: KaiDeliveryRisk.productDecision,
+            state: KaiDeliveryBoxState.awaitingSponsor,
             dependencies: ['hoard.p1.b06']),
         _BoxSpec('hoard.p2.b02',
             'Expose ingestion provenance, freshness, coverage, and rejects',
@@ -462,7 +484,7 @@ class KaiDeliveryBoxCatalog {
       1: [
         _BoxSpec('offer_scope',
             'Freeze the smallest sellable offer and explicit cuts',
-            state: KaiDeliveryBoxState.active,
+            state: KaiDeliveryBoxState.verified,
             evidence: [
               'Find My Table packet FSC-LEGACY-YES-001-BP-IC-v3 is Tested by 8/8 operating-evidence checks at commit 76dd3ade; Blueprint remains active'
             ]),
@@ -470,54 +492,104 @@ class KaiDeliveryBoxCatalog {
             'Choose price, channel, fulfilment, refunds, and margin',
             owner: KaiDeliveryBoxOwner.sponsor,
             risk: KaiDeliveryRisk.productDecision,
-            state: KaiDeliveryBoxState.awaitingSponsor),
+            state: KaiDeliveryBoxState.verified,
+            evidence: [
+              'BoothSignal accepted \$9 Gumroad offer and public product lane'
+            ]),
         _BoxSpec('blueprint_acceptance', 'Accept the run-bound Blueprint',
             owner: KaiDeliveryBoxOwner.sponsor,
             risk: KaiDeliveryRisk.productDecision,
-            state: KaiDeliveryBoxState.awaitingSponsor),
+            state: KaiDeliveryBoxState.verified,
+            evidence: ['BoothSignal Blueprint and public offer accepted']),
       ],
       2: [
-        _BoxSpec('artifact_build', 'Produce the exact sellable artifact'),
+        _BoxSpec('artifact_build', 'Produce the exact sellable artifact',
+            state: KaiDeliveryBoxState.verified,
+            evidence: ['BoothSignal buyer ZIP and app accepted']),
         _BoxSpec(
-            'artifact_durability', 'Prove the artifact path and offer match'),
+            'artifact_durability', 'Prove the artifact path and offer match',
+            state: KaiDeliveryBoxState.verified,
+            evidence: [
+              'Buyer ZIP, Start Here guide, and storefront offer match'
+            ]),
       ],
       3: [
-        _BoxSpec('quality_suite', 'Run build and focused product tests'),
+        _BoxSpec('quality_suite', 'Run build and focused product tests',
+            state: KaiDeliveryBoxState.verified,
+            evidence: [
+              'BoothSignal SKIP/CAUTION/GO scenarios reconcile and console is clean at 1bbc936'
+            ]),
         _BoxSpec('delivery_simulation',
-            'Prove purchase-to-delivery locally without publishing'),
+            'Prove purchase-to-delivery locally without publishing',
+            state: KaiDeliveryBoxState.verified,
+            evidence: ['BoothSignal buyer package and delivery path accepted']),
         _BoxSpec('support_refund', 'Accept support and refund handling',
             owner: KaiDeliveryBoxOwner.sponsor,
-            risk: KaiDeliveryRisk.productDecision),
+            risk: KaiDeliveryRisk.productDecision,
+            state: KaiDeliveryBoxState.verified,
+            evidence: ['Sponsor-approved BoothSignal customer offer']),
       ],
       4: [
         _BoxSpec('listing_assets',
-            'Prepare truthful listing copy, assets, and files'),
+            'Prepare truthful listing copy, assets, and files',
+            state: KaiDeliveryBoxState.verified,
+            evidence: [
+              'Cover, thumbnail, copy, 10 tags, and buyer ZIP accepted'
+            ]),
         _BoxSpec('price_route', 'Approve price and payment route',
-            owner: KaiDeliveryBoxOwner.sponsor, risk: KaiDeliveryRisk.costly),
-        _BoxSpec('package_review', 'Review the exact customer package'),
+            owner: KaiDeliveryBoxOwner.sponsor,
+            risk: KaiDeliveryRisk.costly,
+            state: KaiDeliveryBoxState.verified,
+            evidence: ['Sponsor-approved \$9 Gumroad listing']),
+        _BoxSpec('package_review', 'Review the exact customer package',
+            state: KaiDeliveryBoxState.verified,
+            evidence: [
+              'BoothSignal package and listing visuals inspected at 1bbc936'
+            ]),
       ],
       5: [
         _BoxSpec('release_packet',
-            'Assemble the immutable run-bound public release packet'),
+            'Assemble the immutable run-bound public release packet',
+            state: KaiDeliveryBoxState.verified,
+            evidence: [
+              'BoothSignal buyer and storefront release packet accepted'
+            ]),
         _BoxSpec('public_approval',
             'Approve the exact public offer and release terms',
             owner: KaiDeliveryBoxOwner.sponsor,
-            risk: KaiDeliveryRisk.productDecision),
+            risk: KaiDeliveryRisk.productDecision,
+            state: KaiDeliveryBoxState.verified,
+            evidence: [
+              'Sponsor authorized and created the BoothSignal listing'
+            ]),
       ],
       6: [
         _BoxSpec('dispatch_preflight',
-            'Prove the approved package is ready to publish'),
+            'Prove the approved package is ready to publish',
+            state: KaiDeliveryBoxState.verified,
+            evidence: [
+              'BoothSignal publication-ready package accepted at 1bbc936'
+            ]),
         _BoxSpec('public_dispatch',
             'Publish the approved offer and verify its live URL',
             owner: KaiDeliveryBoxOwner.sponsor,
-            risk: KaiDeliveryRisk.liveExternal),
+            risk: KaiDeliveryRisk.liveExternal,
+            state: KaiDeliveryBoxState.verified,
+            evidence: [
+              'Verified public URL https://salbaharna.gumroad.com/l/boothsignal'
+            ]),
       ],
       7: [
         _BoxSpec('telemetry_contract',
-            'Bind views, sales, delivery, and refunds to the prediction'),
+            'Bind views, sales, delivery, and refunds to the prediction',
+            state: KaiDeliveryBoxState.ready,
+            evidence: [
+              'No accepted seven-day observation exists; bind the measurement contract next'
+            ]),
         _BoxSpec('seven_day_observation', 'Observe at least seven real days',
             owner: KaiDeliveryBoxOwner.sponsor,
-            risk: KaiDeliveryRisk.liveExternal),
+            risk: KaiDeliveryRisk.liveExternal,
+            state: KaiDeliveryBoxState.awaitingSponsor),
       ],
       8: [
         _BoxSpec('settlement_observation',

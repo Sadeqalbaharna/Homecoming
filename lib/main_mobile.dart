@@ -63,6 +63,7 @@ import 'widgets/plan_card.dart';
 import 'constants.dart';
 import 'services/core/kai_surface_context.dart';
 import 'services/core/kai_headless_coordinator.dart';
+import 'services/core/kai_graceful_shutdown_service.dart';
 
 /// ===== Layout / Window =====
 /// Local to this file on purpose — nothing else lays out the avatar. These used
@@ -157,9 +158,15 @@ Future<void> main([List<String> args = const []]) async {
   }
 
   if (coordinatorMode) {
-    await KaiHeadlessCoordinator.instance.start(
+    final coordinator = KaiHeadlessCoordinator.instance;
+    await coordinator.start(
       recovered: recoveredCoordinator,
     );
+    final shutdownService = KaiGracefulShutdownService(
+      onDrain: coordinator.gracefulStop,
+      audit: coordinator.auditShutdownEvent,
+    );
+    await shutdownService.start();
     return;
   }
 

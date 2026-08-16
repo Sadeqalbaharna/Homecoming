@@ -22,9 +22,15 @@
 // ratchet — and this one had been holding "FULL STACK ONLINE" in place against
 // a codebase that was 3/7.
 //
-// So it now asserts the inverse. The fossil must STAY dead, and the live card
-// — KaiProjectCard, which reads KaiProjectService and reports real numbers —
-// must be the thing that's mounted.
+// So it now asserts the inverse. The fossil must STAY dead, and the live
+// surface — which reads KaiProjectService and reports real state — must be the
+// thing that's mounted.
+//
+// Updated again under Brief 005: the live surface is now KaiProjectPortfolio,
+// tracking Homecoming and Hoard against their own governed phases. The earlier
+// version of this test required the two Kai-improvement boards to be mounted,
+// which had quietly become the same fault at a higher level — a test holding
+// the wrong subject in place. The propaganda guards below are untouched.
 
 import 'dart:io';
 
@@ -40,7 +46,8 @@ void main() {
   group('the propaganda card stays dead', () {
     test('no hardcoded layer list', () {
       expect(source, isNot(contains('_smartProjectCard')),
-          reason: 'the fossil is back — ~200 lines of const layers, all "done"');
+          reason:
+              'the fossil is back — ~200 lines of const layers, all "done"');
       expect(source, isNot(contains('_smartLayerTab')));
       expect(source, isNot(contains('_openSmarterLayer')),
           reason: 'state field that existed only to expand the fake card');
@@ -62,18 +69,35 @@ void main() {
   });
 
   group('the real surface is what is mounted', () {
-    test('both progress pies are wired into the shell', () {
-      // The dashboard now tracks two frozen-goal projects as interactive pies:
-      // Kai Smarter and the Sentience Ladder. The project ids must be explicit
-      // so a second card cannot accidentally render the same truth twice.
-      expect(source, contains('projectId: KaiProjectService.smarterId'));
-      expect(source, contains('projectId: KaiProjectService.sentienceId'));
-      expect('KaiProjectCard'.allMatches(source).length, greaterThanOrEqualTo(2));
+    test('the real portfolio is mounted, not the Kai-improvement boards', () {
+      // This test used to require `projectId: KaiProjectService.smarterId` and
+      // `sentienceId` to be mounted in the shell. That was the same shape of
+      // fault this file was written to prevent, one level up: it pinned two
+      // Kai-improvement boards into the dashboard while the actual work was
+      // Homecoming and Hoard, and it would have gone red the moment anyone
+      // showed the real portfolio.
+      //
+      // The rails now mount KaiProjectPortfolio, which reads each project's own
+      // governed phases, gate, proof state and blockers.
+      expect('KaiProjectPortfolio('.allMatches(source).length,
+          greaterThanOrEqualTo(2),
+          reason: 'both the normal rail and the Persona-expanded rail');
+
+      // The fixed cards are gone from the rails.
+      expect(source, isNot(contains('projectId: KaiProjectService.smarterId')));
+      expect(
+          source, isNot(contains('projectId: KaiProjectService.sentienceId')));
+
+      // Selecting any portfolio project opens the data-driven full HTML map.
+      expect(source, contains('KaiProjectFlowchartService'));
+      expect(source, contains('_openProjectFlowchart'));
+      expect(source, isNot(contains('_openProjectDetails')));
     });
 
     test('desktop left rail can expand for the Persona messenger surface', () {
       expect(source, isNot(contains('width: 210,')),
-          reason: 'a fixed 210px rail miniaturises the mobile messenger mockup');
+          reason:
+              'a fixed 210px rail miniaturises the mobile messenger mockup');
       expect(source, contains('MediaQuery.sizeOf(context).width'));
       expect(source, contains('380.0'));
       expect(source, contains('340.0'));

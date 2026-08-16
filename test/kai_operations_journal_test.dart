@@ -60,4 +60,36 @@ void main() {
       isFalse,
     );
   });
+
+  test('redacts credentials from keys, authenticated URLs, and error text',
+      () async {
+    final journal = KaiOperationsJournal(directory: directory);
+    const fakeJwt =
+        'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJrYWkifQ.fake-signature-value';
+    const fakeGoogleKey = 'AIzaSyabcdefghijklmnopqrstuvwxyz123456';
+    const fakeProviderKey = 'sk-ant-abcdefghijklmnopqrstuvwxyz123456';
+    await journal.record(
+      'request_stream_unavailable',
+      requestId: 'safe-correlation-id',
+      details: const {
+        'error': 'GET https://example.test/data.json?auth=$fakeJwt&key='
+            '$fakeGoogleKey Authorization: Bearer $fakeJwt '
+            'provider=$fakeProviderKey',
+        'apiKey': fakeGoogleKey,
+        'nested': {
+          'refresh_token': 'refresh-secret-value',
+          'status': 'offline',
+        },
+      },
+    );
+
+    final raw = await journal.currentFile.readAsString();
+    expect(raw, isNot(contains(fakeJwt)));
+    expect(raw, isNot(contains(fakeGoogleKey)));
+    expect(raw, isNot(contains(fakeProviderKey)));
+    expect(raw, isNot(contains('refresh-secret-value')));
+    expect(raw, contains('[REDACTED]'));
+    expect(raw, contains('safe-correlation-id'));
+    expect(raw, contains('offline'));
+  });
 }

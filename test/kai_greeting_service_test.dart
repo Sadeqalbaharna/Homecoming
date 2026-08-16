@@ -3,6 +3,36 @@ import 'package:homecoming_app/services/core/kai_greeting_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  test('overnight greeting cannot leak an ordinary private inner thought', () {
+    expect(
+      KaiGreetingService.debugShareableGreetingThought({
+        'text': 'I am still thinking about the two Kai headers.',
+        'origin': 'model_generated',
+      }),
+      isNull,
+    );
+  });
+
+  test('overnight greeting accepts only explicit genuine shareable thought', () {
+    expect(
+      KaiGreetingService.debugShareableGreetingThought({
+        'text': 'A small thought worth sharing.',
+        'origin': 'model_generated',
+        'shareable': true,
+      }),
+      'A small thought worth sharing.',
+    );
+    expect(
+      KaiGreetingService.debugShareableGreetingThought({
+        'text': 'A canned fallback.',
+        'origin': 'model_generated',
+        'shareable': true,
+        'synthetic': true,
+      }),
+      isNull,
+    );
+  });
+
   TestWidgetsFlutterBinding.ensureInitialized();
 
   setUp(() {

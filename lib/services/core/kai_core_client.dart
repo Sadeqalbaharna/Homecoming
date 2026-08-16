@@ -31,6 +31,7 @@ class KaiCoreClient {
     required bool audioAvailable,
     String? worldId,
     bool gogglesOn = false,
+    String status = 'idle',
     DateTime? lastInteractionAt,
   }) async {
     final result = await _request(
@@ -43,6 +44,7 @@ class KaiCoreClient {
         'audioAvailable': audioAvailable,
         if (worldId != null) 'worldId': worldId,
         'gogglesOn': gogglesOn,
+        'status': status,
         if (lastInteractionAt != null)
           'lastInteractionAt': lastInteractionAt.toUtc().toIso8601String(),
       },
@@ -97,6 +99,161 @@ class KaiCoreClient {
       'POST',
       '/v1/handoffs/${Uri.encodeComponent(handoffId)}/ack',
       body: const {},
+    );
+    _requireSuccess(result);
+    return result.body;
+  }
+
+  Future<Map<String, dynamic>> createOutbound({
+    required String outboundId,
+    required String kind,
+    required String fromSurface,
+    required String toSurface,
+    required String text,
+    required DateTime expiresAt,
+    required String targetBodyId,
+    String? conversationId,
+    String? correlationId,
+    String gesture = 'none',
+  }) async {
+    final result = await _request('POST', '/v1/outbound', body: {
+      'outboundId': outboundId,
+      'kind': kind,
+      'fromSurface': fromSurface,
+      'toSurface': toSurface,
+      'targetBodyId': targetBodyId,
+      if (conversationId != null) 'conversationId': conversationId,
+      if (correlationId != null) 'correlationId': correlationId,
+      'text': text,
+      'gesture': gesture,
+      'expiresAt': expiresAt.toUtc().toIso8601String(),
+    });
+    _requireSuccess(result);
+    return result.body;
+  }
+
+  Future<List<Map<String, dynamic>>> pendingOutbound({
+    required String toSurface,
+    required String bodyId,
+  }) async {
+    final query = Uri(queryParameters: {
+      'toSurface': toSurface,
+      'bodyId': bodyId,
+    }).query;
+    final result = await _request('GET', '/v1/outbound?$query');
+    _requireSuccess(result);
+    return (result.body['outbound'] as List? ?? const [])
+        .whereType<Map>()
+        .map((item) => Map<String, dynamic>.from(item))
+        .toList(growable: false);
+  }
+
+  Future<Map<String, dynamic>> acknowledgeOutbound(
+    String outboundId, {
+    required String bodyId,
+    required String surface,
+  }) async {
+    final result = await _request(
+      'POST',
+      '/v1/outbound/${Uri.encodeComponent(outboundId)}/ack',
+      body: {'bodyId': bodyId, 'surface': surface},
+    );
+    _requireSuccess(result);
+    return result.body;
+  }
+
+  // ── Scheduled commitments ──────────────────────────────────────────────────
+  //
+  // The coordinator and desktop talk to the ledger ONLY through these. They do
+  // not build payloads themselves: every rule Brief 013 established — canonical
+  // Bahrain provenance, desktop-only dispatch, exact stored text — is enforced
+  // server-side, and a caller that hand-rolls JSON is a caller that will
+  // eventually get one of them subtly wrong.
+
+  /// Create one commitment, idempotently.
+  ///
+  /// [dueAt] is the UTC instant. [dueWallClock] is the canonical
+  /// `yyyy-MM-ddTHH:mm:ss` Bahrain reading that produced it, and Core refuses
+  /// the pair if one does not actually convert to the other — so provenance
+  /// cannot quietly become decorative.
+  ///
+  /// An identical retry returns the stored record rather than a duplicate.
+  Future<Map<String, dynamic>> createCommitment({
+    required String commitmentId,
+    required String personaId,
+    required String text,
+    required DateTime dueAt,
+    required String dueWallClock,
+    required int dueWallOffsetMinutes,
+  }) async {
+    final result = await _request('POST', '/v1/commitments', body: {
+      'commitmentId': commitmentId,
+      'personaId': personaId,
+      'text': text,
+      'dueAt': dueAt.toUtc().toIso8601String(),
+      'dueWallClock': dueWallClock,
+      'dueWallOffsetMinutes': dueWallOffsetMinutes,
+    });
+    _requireSuccess(result);
+    return result.body;
+  }
+
+  /// Every commitment, or — with [dueOnly] — just the scheduler's work.
+  ///
+  /// Due-only returns records that are still `scheduled` AND whose persisted
+  /// evaluation instant has arrived. A dispatched promise is deliberately not
+  /// work: it is waiting on its body to acknowledge, not on the scheduler.
+  Future<List<Map<String, dynamic>>> commitments({bool dueOnly = false}) async {
+    final result =
+        await _request('GET', '/v1/commitments${dueOnly ? '?due=true' : ''}');
+    _requireSuccess(result);
+    return (result.body['commitments'] as List? ?? const [])
+        .whereType<Map>()
+        .map((item) => Map<String, dynamic>.from(item))
+        .toList(growable: false);
+  }
+
+  /// Move one scheduled commitment's next evaluation later, durably.
+  ///
+  /// The only field this can change. There is no parameter for an earlier
+  /// instant because Core refuses one; passing the currently stored value is
+  /// idempotent and also repairs a previously failed write.
+  Future<Map<String, dynamic>> deferCommitment(
+    String commitmentId, {
+    required DateTime nextEvaluationAt,
+  }) async {
+    final result = await _request(
+      'PUT',
+      '/v1/commitments/${Uri.encodeComponent(commitmentId)}/next-evaluation',
+      // Canonical UTC. Core compares the exact string, so the client must not
+      // invent its own formatting.
+      body: {'nextEvaluationAt': nextEvaluationAt.toUtc().toIso8601String()},
+    );
+    _requireSuccess(result);
+    return result.body;
+  }
+
+  /// Hand one due commitment to one exact desktop body.
+  ///
+  /// There is no `toSurface` parameter on purpose. v1 work reminders go to the
+  /// desktop workbench and nowhere else; exposing the surface would let a
+  /// caller ask for Messenger and receive a 409 it then has to understand,
+  /// when the honest API is simply not to offer the choice.
+  Future<Map<String, dynamic>> dispatchCommitment(
+    String commitmentId, {
+    required String outboundId,
+    required String targetBodyId,
+    required String conversationId,
+  }) async {
+    final result = await _request(
+      'POST',
+      '/v1/commitments/${Uri.encodeComponent(commitmentId)}/dispatch',
+      body: {
+        'outboundId': outboundId,
+        'targetBodyId': targetBodyId,
+        'toSurface': 'desktop',
+        'conversationId': conversationId,
+      },
     );
     _requireSuccess(result);
     return result.body;
@@ -415,6 +572,105 @@ class KaiCoreHeartbeatStatus {
   final KaiCoreHeartbeatPhase phase;
   final DateTime? lastSuccessAt;
   final int consecutiveFailures;
+}
+
+typedef KaiCoreOutboundReceiver = Future<bool> Function(
+  Map<String, dynamic> outbound,
+);
+
+/// Polling inbox for the outbound queue of ONE exact body.
+///
+/// Unlike [KaiCoreHandoffInbox], which is scoped by surface alone, this is
+/// scoped by `(surface, bodyId)`. A reminder is owed to the machine Sadeq is
+/// actually sitting at — delivering it to "some desktop" would let a second
+/// window acknowledge a promise it never showed anyone, and the record would be
+/// closed with nothing on screen.
+///
+/// Ordering is the whole contract: the callback persists and renders, and only
+/// when it returns true is Core told the promise was kept. Anything else —
+/// a throw, a false, a closing window, a dead database — leaves the record
+/// pending, because pending work that arrives late is recoverable and a
+/// prematurely acknowledged promise is not.
+class KaiCoreOutboundInbox {
+  KaiCoreOutboundInbox({
+    required this.client,
+    required this.surface,
+    required this.bodyId,
+    required this.onOutbound,
+    this.interval = const Duration(seconds: 3),
+  });
+
+  final KaiCoreClient client;
+  final String surface;
+
+  /// The authoritative body identity. Must be byte-for-byte the same string
+  /// Core recorded as `targetBodyId`, and the same one used to acknowledge.
+  final String bodyId;
+
+  final KaiCoreOutboundReceiver onOutbound;
+  final Duration interval;
+
+  Timer? _timer;
+  bool _draining = false;
+  final Set<String> _processing = {};
+
+  bool get isRunning => _timer != null;
+
+  void start() {
+    if (_timer != null) return;
+    unawaited(poll());
+    _timer = Timer.periodic(interval, (_) => unawaited(poll()));
+  }
+
+  /// One drain. Safe to call directly; overlapping calls collapse into one.
+  ///
+  /// The guard is not an optimisation. Two concurrent drains would each see the
+  /// same pending record, and both would render it — one promise, two bubbles.
+  Future<void> poll() async {
+    if (_draining) return;
+    _draining = true;
+    try {
+      final pending =
+          await client.pendingOutbound(toSurface: surface, bodyId: bodyId);
+      for (final record in pending) {
+        final id = record['outboundId']?.toString() ?? '';
+        if (id.isEmpty) continue;
+
+        // Defence in depth. Core already filters by target, but this callback
+        // writes to a visible transcript, so a routing mistake anywhere would
+        // put someone else's reminder in Sadeq's conversation.
+        if (record['toSurface'] != surface ||
+            (record['targetBodyId']?.toString() ?? '') != bodyId) {
+          continue;
+        }
+
+        if (!_processing.add(id)) continue;
+        try {
+          final accepted = await onOutbound(record);
+          if (accepted) {
+            await client.acknowledgeOutbound(
+              id,
+              bodyId: bodyId,
+              surface: surface,
+            );
+          }
+        } catch (_) {
+          // Left pending on purpose. The next drain tries again.
+        } finally {
+          _processing.remove(id);
+        }
+      }
+    } catch (_) {
+      // Core unreachable or mid-restart. Records stay durable there.
+    } finally {
+      _draining = false;
+    }
+  }
+
+  void stop() {
+    _timer?.cancel();
+    _timer = null;
+  }
 }
 
 typedef KaiCoreHandoffReceiver = Future<bool> Function(

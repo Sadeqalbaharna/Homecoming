@@ -32,6 +32,7 @@ import '../../logic/product_factory.dart';
 import 'kai_db.dart';
 import 'kai_delivery_box.dart';
 import 'kai_delivery_box_catalog.dart';
+import 'kai_factory_daily_lane.dart';
 import 'kai_work_request_service.dart';
 
 /// How far a capability has ACTUALLY come — Kai's model, because a percentage
@@ -372,11 +373,16 @@ class KaiProjectService {
   static const factoryId = 'factory_northstar';
   static const _homecomingGovernedAcceptedPhases = <int>[0];
   static const _homecomingEvidencePhases = <int>[3];
-  static const _hoardGovernedAcceptedPhases = <int>[0];
-  static const _hoardEvidencePhases = <int>[1];
+  static const _hoardGovernedAcceptedPhases = <int>[0, 1];
+  static const _hoardEvidencePhases = <int>[2];
   static const _factoryPacketAcceptedPhases = <int>[0];
   static const _factoryBlueprintEvidencePhases = <int>[1];
   static const _factoryPacketProjectionOnly = true;
+  static final KaiFactoryLineMaturity _factoryLineMaturity =
+      deriveFactoryLineMaturity([
+    findMyTableFactoryMaturity,
+    boothSignalFactoryDailyLane.factoryMaturity,
+  ]);
 
   // ── Frozen phases, transcribed from the governing documents ────────────────
   //
@@ -683,9 +689,9 @@ class KaiProjectService {
     ],
     3: [
       0,
-      'Reminder integrity, Core client, desktop acceptance, coordinator scheduling, and desktop set_reminder are accepted and tested/wired; the fresh Release still needs an attended clean restart and exactly-once walkthrough',
+      'Brief 024 subject, quiet-hours, and single-room repair is live with 47/47 focused and 115/115 shared checks plus a passing build. Brief 018A authenticated graceful Core shutdown is accepted and Verified live after the Windows audio-plugin crash was repaired; 22/22 focused and 187/187 proportional checks pass. Brief 018 exact reminder survival and exactly-once desktop delivery remains open, as does the required seven-day observation.',
       'wired',
-      'Briefs 013-017 are accepted. Brief 018 is blocked only on the attended tray restart; the seven-day phase gate remains open.',
+      'Central Attention has stronger live evidence, but its seven-day exit gate is not accepted.',
     ],
     4: [0, 'Not started.', 'absent', ''],
     5: [0, 'Not started.', 'absent', ''],
@@ -712,10 +718,10 @@ class KaiProjectService {
       'ACCEPTED by sponsor. Deferred migrated-original, destructive-merge, multi-role, and soak probes remain visible risks.',
     ],
     1: [
-      0,
-      'Fail-closed resumable restore and atomic reset safety are accepted at tested level: 16 reset-safety tests, 41 backup tests, two fresh emulator drills, 130 authorization tests, typechecks, and build passed; attended same-scope staging recovery remains open.',
-      'tested',
-      'Brief 005A is accepted at Tested level on 5821f73. Phase 1 remains open until the real baseline, reviewed dry-run, restore, conflict, exclusion, and parity evidence passes.',
+      100,
+      'Phase 1 accepted without waivers at commit 2621afd: Brief 024 PASS, b07c Verified live, G3 4/4, G4 PASS, and governance 13/13 PASS.',
+      'usedLive',
+      'ACCEPTED. Pilot safety baseline is closed; no later pilot outcome is inherited.',
     ],
     2: [
       0,
@@ -775,22 +781,52 @@ class KaiProjectService {
   static const _factoryBaseline = <int, List<dynamic>>{
     0: [
       100,
-      'Find My Table is bound to run, scan, candidate, and sponsor authorization identities in packet FSC-LEGACY-YES-001-BP-IC-v3.',
+      'Reached at line level: Find My Table and BoothSignal retain product-specific signal evidence.',
       'trusted',
-      'SIGNAL SCAN ACCEPTED for this named candidate only; no other YES candidate receives Blueprint authority.',
+      'LINE CAPABILITY REACHED; individual candidate authority remains product-bound.',
     ],
     1: [
-      0,
-      'Find My Table Blueprint v3 packet is Tested at 76dd3ade; scope and cuts are frozen, while commercial assumptions and the sponsor Shark verdict remain open.',
+      100,
+      'Reached at line level from typed product-lane evidence; Find My Table remains separately preserved at Blueprint.',
       'tested',
-      'BLUEPRINT ACTIVE. Assembly, customer data, outreach, publishing, payment, and spend are not authorized.',
+      'LINE CAPABILITY REACHED; this does not grant Assembly authority to another product.',
     ],
-    2: [0, 'No accepted factory run evidence.', 'absent', ''],
-    3: [0, 'No accepted factory run evidence.', 'absent', ''],
-    4: [0, 'No accepted factory run evidence.', 'absent', ''],
-    5: [0, 'No run-bound sponsor approval recorded.', 'absent', ''],
-    6: [0, 'No verified live product URL recorded.', 'absent', ''],
-    7: [0, 'No accepted seven-day market observation recorded.', 'absent', ''],
+    2: [
+      100,
+      'BoothSignal has a Tested offline product core and buyer artifact.',
+      'tested',
+      'LINE CAPABILITY REACHED from BoothSignal Build evidence.',
+    ],
+    3: [
+      100,
+      'BoothSignal QA and buyer-package evidence are Tested.',
+      'tested',
+      'LINE CAPABILITY REACHED from BoothSignal QA evidence.',
+    ],
+    4: [
+      100,
+      'BoothSignal buyer ZIP, storefront assets, copy, and launch packet are Tested/package-ready.',
+      'tested',
+      'LINE CAPABILITY REACHED from BoothSignal Packaging evidence.',
+    ],
+    5: [
+      100,
+      'The sponsor reports BoothSignal\'s exact public-action gate completed.',
+      'tested',
+      'LINE CAPABILITY REACHED from sponsor-confirmed BoothSignal approval.',
+    ],
+    6: [
+      100,
+      'BoothSignal is publicly purchasable for \$9 at https://salbaharna.gumroad.com/l/boothsignal; the accepted package includes buyer ZIP, app, Start Here guide, storefront copy, cover, thumbnail, QA, and 10 saved tags.',
+      'usedLive',
+      'DISPATCH ACCEPTED / VERIFIED LIVE for BoothSignal. No sale or revenue is implied.',
+    ],
+    7: [
+      0,
+      'No accepted seven-day market observation is recorded; discovery, sales, delivery, and refund telemetry remain open.',
+      'wired',
+      'ACTIVE / UNVERIFIED. Telemetry is the current Factory line gate.',
+    ],
     8: [
       0,
       'No positive reconciled bank settlement recorded.',
@@ -1182,6 +1218,8 @@ class KaiProjectService {
       _factoryPacketAcceptedPhases;
   static List<int> get factoryBlueprintEvidencePhasesForTest =>
       _factoryBlueprintEvidencePhases;
+  static KaiFactoryLineMaturity get factoryLineMaturityForTest =>
+      _factoryLineMaturity;
 
   /// A run is currently inside its reported stage. Earlier stations are
   /// accepted; the current station is active. Entering the terminal stage
@@ -1211,6 +1249,17 @@ class KaiProjectService {
     };
   }
 
+  static const String _factoryProjectionLatest =
+      'The Factory line has accepted P0-P6 through typed BoothSignal evidence. '
+      'The \$9 listing is publicly purchasable at '
+      'https://salbaharna.gumroad.com/l/boothsignal with 10 saved tags, so '
+      'Dispatch is accepted and Verified live. P7 Telemetry is current and '
+      'UNVERIFIED until an accepted seven-day market observation closes. '
+      'Money in Bank remains future: no sale, fee, refund, receipt, settled '
+      'payment, or revenue is evidenced.';
+
+  static String get factoryProjectionLatestForTest => _factoryProjectionLatest;
+
   /// Homecoming's own nine governed phases, from its source of truth.
   Future<void> ensureHomecomingProject(String personaId) => _ensureProject(
         personaId,
@@ -1231,9 +1280,10 @@ class KaiProjectService {
         governedAcceptedPhases: _homecomingGovernedAcceptedPhases,
         evidencePhases: _homecomingEvidencePhases,
         latestAdvance:
-            'The 37/37 tracker regressions pass. Brief 019A remains REJECTED at 9/14: case 7 has a canonical capture-binding mismatch, while cases 10-13 remain future Brief 019B scope. H019A-5 made no file change because the verified Opus 5 session hit its provider limit; 019B stays locked.',
+            'Phase 0 remains the only accepted macro. Central Attention has stronger evidence: Brief 024 is live with 47/47 focused and 115/115 shared checks plus a passing build; Brief 018A authenticated graceful shutdown is accepted and Verified live with 22/22 focused and 187/187 proportional checks. Brief 018 reminder survival/exactly-once desktop delivery and the seven-day run remain open.',
         blockers: const [
-          'Replacing the old runtime now requires explicit authority for one supported human tray quit; forced termination, logoff, and reboot remain forbidden',
+          'Brief 018 still needs one exact reminder to survive graceful restart and deliver exactly once on Desktop with accepted evidence',
+          'The Central Attention seven-day observed run remains open',
           'Standalone device transport does not exist — Unity and the embodiment servers are loopback-only',
           'Core depends on the current laptop; the watchdog recovers a process, not a lost machine',
           'Unity outbound presentation is not accepted — no observed domain reload, Play Mode, or headset behaviour',
@@ -1256,17 +1306,17 @@ class KaiProjectService {
         baseline: _hoardBaseline,
         sourceOfTruthPath: r'C:\code\Hoard\docs\PROJECT_SOURCE_OF_TRUTH.md',
         repositoryPath: r'C:\code\Hoard',
-        activePhase: 1,
+        activePhase: 2,
         governedAcceptedPhases: _hoardGovernedAcceptedPhases,
         evidencePhases: _hoardEvidencePhases,
         latestAdvance:
-            'Phase 0 is accepted and Phase 1 retains exactly 10 verified boxes. Brief 014A reviewer acceptance is REJECTED because the contract exposes 25 keys instead of the frozen exact 18; a focused Opus repair is ACTIVE and 014B remains queued.',
+            'Phases 0 Authorization contract and 1 Pilot safety baseline are accepted. Commit 2621afd records Brief 024 PASS, b07c Verified live, G3 4/4, G4 PASS, and governance 13/13 without waivers. Phase 2 Real venue close is current; no 60-90 day reconciled close exists.',
         blockers: const [
-          'hoard.p1.b02 attended recovery remains UNVERIFIED and requires a fresh sponsor/live window',
-          'Functions operational acceptance and external alert delivery remain sponsor/live gates',
-          'No accepted 60–90 day real-venue pilot evidence or BD 500 verified outcome exists',
+          'hoard.p2.b01 requires sponsor acceptance of the pilot venue, operator, period, and privacy boundary',
+          'No accepted 60–90 day real-venue close or reconciled settlement exists',
+          'No BD 500 verified savings, repeatability, or growth outcome exists',
         ],
-        proofState: ProjectProofState.tested,
+        proofState: ProjectProofState.verifiedLive,
       );
 
   /// Kingdom's six governed phases. Homecoming displays its evidence but never
@@ -1288,43 +1338,40 @@ class KaiProjectService {
         repositoryPath: r'C:\code\kingdom_working3.0\kingdom_working\kingdom',
         activePhase: 1,
         latestAdvance:
-            'Ledger Safety remains active. K1.6-M1 is Tested in isolated commit 64997ad after 10/10 static safeguards and 15/15 local emulator behaviors passed; the authenticated-identity override defect is closed in that artifact. Adoption, authoritative registration, and live proof remain UNVERIFIED.',
+            'The loyalty/economic roadmap remains unchanged with Ledger Safety active and no accepted macro. A separate reservation stream is task-reported shadow-ready 6/6 at efb6aa2 with staging public/staff surfaces; its primary commit could not be inspected from this Homecoming workspace, so that parallel readiness remains UNVERIFIED here and cannot close loyalty gates.',
         blockers: const [
-          'K1.6-M1 isolated commit 64997ad is not adopted or registered in the authoritative Kingdom repository; independent integration review remains required',
-          'Adjacent callable wrappers using the caller-data spread pattern remain UNVERIFIED and require a bounded audit',
-          'Quest-board publishing, real Google Reviews integration, and Raspberry Pi station behavior remain unverified',
+          'Reservation shadow requires sponsor approval to replace the public booking link and begin a 14-day parallel run while Eat App remains authoritative; any mismatch restarts the clock',
+          'Reservation evidence belongs to a separate product contract and cannot close loyalty Product/authority, Ledger safety, Trusted core loop, or Tavern pilot gates',
           'Pilot cohort, start date, and repeat-visit success target are not accepted',
         ],
         proofState: ProjectProofState.wired,
       );
 
-  /// Product Factory as a governed commercial project. Its slice follows the
-  /// same live run that drives the conveyor; a new UI cannot award itself
-  /// progress, and a storefront sale cannot close the final bank gate.
+  /// Product Factory as a governed commercial project. The wheel shows the
+  /// maximum evidence-backed maturity reached by an individual product lane.
+  /// Each product keeps its own authority and proof; the UI cannot award itself
+  /// progress, and a storefront listing cannot close Telemetry or Money in Bank.
   Future<void> ensureFactoryProject(String personaId, {FactoryRun? run}) {
-    // The accepted Find My Table packet advances the evidence projection to
-    // Blueprint without reviving a parked legacy run. It does not authorize
-    // Assembly, customer data, outreach, publishing, spending, or payment.
     final governedRun = _factoryPacketProjectionOnly ? null : run;
-    // The run-bound Blueprint packet is authoritative for this projection even
-    // before an operational FactoryRun exists. Factory execution remains bound
-    // to the durable run service and cannot be simulated here.
     final stageIndex = governedRun == null
-        ? 1
+        ? _factoryLineMaturity.activePhase
         : FactoryStage.values.indexOf(governedRun.stage);
-    final accepted = factoryAcceptedPhasesForRun(governedRun);
+    final accepted = governedRun == null
+        ? _factoryLineMaturity.reachedPhases
+        : factoryAcceptedPhasesForRun(governedRun);
     final banked = governedRun?.evidence.bankedRevenue;
     final settlement = governedRun?.evidence.bankSettlementReference?.trim();
     final latest = governedRun == null
-        ? 'Find My Table Blueprint remains Tested; its operator-facing nine-artifact copy/form box is ACTIVE and the Flutter generator regression is UNVERIFIED. Factory Daily critic scaffold and v1.1 package remain Tested; CakeOrder Signal and GroomQuote are KILLED by contradiction evidence, and WholesaleOrder Gate scan is ACTIVE. Live use and revenue remain locked.'
+        ? _factoryProjectionLatest
         : governedRun.stage == FactoryStage.learned
             ? 'Northstar reached: ${banked ?? 0} is recorded as settled bank revenue under ${settlement ?? 'an unrecorded reference'}.'
             : 'Run ${governedRun.id} is at ${governedRun.stage.name}: ${accepted.length} of 9 commercial gates are accepted. No banked-revenue success is claimed.';
     final blockers = governedRun == null
         ? const <String>[
             'The private table-fill pilot is Conceptual only; BHD4.20 is modeled contribution, not evidenced revenue or Assembly authority',
-            'The operator-facing nine-artifact Blueprint box cannot close until its Flutter generator regression is proven',
-            'Table Ready, BoothSignal, and the Daily Product v1.1 package still require seller identity, payout, tax/legal completion, and final public publish authority',
+            'Find My Table remains its own Blueprint lane; its Tested 88/88 Assembly component does not close the full Assembly exit or authorize an operator console',
+            'Factory Telemetry has no accepted seven-day market observation',
+            'BoothSignal First Payment is open; no evidenced sale receipt, fee, refund, or settled payment exists',
             'No genuine external customer bank settlement exists',
           ]
         : governedRun.stage == FactoryStage.learned
@@ -1341,7 +1388,7 @@ class KaiProjectService {
       projectId: factoryId,
       name: 'Factory',
       why:
-          'Turn one evidence-backed product idea into actual customer money settled in the bank account.',
+          'Move individual evidence-backed product lanes through one governed commercial line until actual customer money settles in the bank account.',
       sourceLayers: _withDeliveryBoxes(
         factoryId,
         r'docs\FACTORY_PROJECT_SOURCE_OF_TRUTH.md',
@@ -1352,13 +1399,12 @@ class KaiProjectService {
       repositoryPath: r'C:\code\homecoming_app',
       activePhase: stageIndex,
       blockers: blockers,
-      governedAcceptedPhases:
-          governedRun == null ? _factoryPacketAcceptedPhases : accepted,
+      governedAcceptedPhases: accepted,
       evidencePhases:
-          governedRun == null ? _factoryBlueprintEvidencePhases : const [],
+          governedRun == null ? _factoryLineMaturity.evidencePhases : const [],
       latestAdvance: latest,
       proofState: governedRun == null
-          ? ProjectProofState.tested
+          ? ProjectProofState.verifiedLive
           : factoryProofStateForRun(governedRun),
     );
   }

@@ -122,7 +122,12 @@ class ToolPolicyService {
       risk: ToolRisk.sideEffect,
       capabilities: {ToolCapability.phone},
       requiredArgs: {'message', 'year', 'month', 'day', 'hour', 'minute'},
-      androidOnly: true,
+      // NOT android-only any more. Brief 017 gave the desktop workbench a real
+      // implementation — a durable Central Core commitment — so blocking it
+      // here would offer Kai a tool in the request manifest and then refuse it
+      // at the door. `capabilities: phone` stays: it is descriptive, gates
+      // nothing, and this is still a phone-shaped ability in spirit.
+      androidOnly: false,
     ),
     'read_calendar': ToolPolicy(
       name: 'read_calendar',

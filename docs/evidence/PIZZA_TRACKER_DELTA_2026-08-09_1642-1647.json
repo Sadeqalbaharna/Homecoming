@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "deltaId": "pizza-delta-2026-08-09T16-42-16-47-bahrain",
+  "createdAt": "2026-08-09T16:47:00+03:00",
+  "sourceOfTruthRef": "docs/NORTHSTAR_SOURCE_OF_TRUTH.md#homecoming-h019ah019b-local-acceptance--2026-08-09",
+  "claims": [
+    {
+      "claimId": "homecoming.h019a-h019b-local-acceptance",
+      "projectId": "homecoming_northstar",
+      "requestedState": "verified",
+      "authorityOwner": "agent",
+      "riskClass": "local_safe",
+      "sourceOfTruthRef": "docs/briefs/BRIEF_019B_CAPTURE_SCRIPT_MICROBOX.md",
+      "changedSurfaces": ["portfolio_projection", "capture_pipeline"],
+      "evidence": [
+        {"id": "homecoming.pipeline.acceptance-14", "kind": "test_result"},
+        {"id": "homecoming.pipeline.sha256", "kind": "file_sha256", "path": "scripts/tools/kai_pizza_update_pipeline.ps1", "sha256": "B1344A21CDF9E07D594BD6136946F03F72EEFC9FAFA0B153D82B69896C297529"},
+        {"id": "homecoming.capture.sha256", "kind": "file_sha256", "path": "scripts/tools/kai_real_pizza_capture.ps1", "sha256": "666F65CD45E26BAA97E4508C1C8D5C9B409BCDDDA6159D96505C22ABC5622F8F"}
+      ]
+    },
+    {
+      "claimId": "hoard.brief014b-tested-014c-active",
+      "projectId": "hoard_northstar",
+      "requestedState": "active",
+      "authorityOwner": "agent",
+      "riskClass": "local_safe",
+      "sourceOfTruthRef": "Hoard Brief 014B/014C evidence packet",
+      "changedSurfaces": ["portfolio_projection"],
+      "evidence": [{"id": "hoard.brief014b.report", "kind": "reported_external"}]
+    },
+    {
+      "claimId": "kingdom.k1.6b-static-only",
+      "projectId": "kingdom_northstar",
+      "requestedState": "evidence_review",
+      "authorityOwner": "agent",
+      "riskClass": "local_safe",
+      "sourceOfTruthRef": "Kingdom K1.6B wrapper audit",
+      "changedSurfaces": ["portfolio_projection"],
+      "evidence": [{"id": "kingdom.k1.6b.static-report", "kind": "reported_external"}]
+    },
+    {
+      "claimId": "factory.practice-ladder-tested-print-review",
+      "projectId": "factory_northstar",
+      "requestedState": "evidence_review",
+      "authorityOwner": "agent",
+      "riskClass": "local_safe",
+      "sourceOfTruthRef": "Factory Daily Practice Ladder local build and print QA",
+      "changedSurfaces": ["factory_nested_lane", "portfolio_projection"],
+      "evidence": [
+        {"id": "factory.practice-ladder.commit", "kind": "git_commit", "repositoryRoot": "C:\\Users\\sadeq\\Documents\\Codex\\2026-08-09\\factory-daily-products", "commit": "2d00dbed3f58df06a189c71a095f1d52841136e7"},
+        {"id": "factory.practice-ladder.tests-16", "kind": "test_result"},
+        {"id": "factory.practice-ladder.print-report", "kind": "reported_external"}
+      ]
+    }
+  ]
+}

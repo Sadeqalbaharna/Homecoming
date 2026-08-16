@@ -24,7 +24,32 @@ body that is not actually present.
 ## Remaining attended check
 
 The real Shack component now sends a metadata-only heartbeat every 25 seconds
-while idle. Unity was open but its editor log had not advanced since launch, so
-script compilation and Play Mode must be observed in the Unity console before
-calling the physical Quest body fully accepted. Do not force-close Unity before
-the scene is confirmed saved.
+while idle. Unity imported the bridge but initially logged `CS0104` in
+`KaiPushToTalkController`: `InputDevice` was ambiguous between Input System and
+XR. The current source already qualifies the field as
+`UnityEngine.XR.InputDevice`. On 2026-08-08, the complete current
+`Assembly-CSharp` compiled successfully against Unity's generated response-file
+references into an isolated temporary output. Six unrelated obsolete-API
+warnings remained and no C# error remained.
+
+This proves current source compilation, not Editor domain reload or runtime
+presentation. Unity's asset watcher did not advance after a content-preserving
+timestamp refresh. Play Mode must therefore still be observed in the Unity
+Console before Editor acceptance, and the tethered Quest brief remains a
+separate later gate. Do not force-close Unity before the scene is confirmed
+saved.
+
+## Outbound attention checkpoint
+
+Central Core now owns a durable, body-targeted outbound inbox. A proactive
+friend line aimed at VR or AR is saved to Core before conversation history says
+it was spoken. The chosen body polls its own inbox, presents the line, and then
+acknowledges it. Another body cannot read or acknowledge that envelope.
+
+Morning attended check:
+
+1. Enter Play Mode in the Shack and wait up to 25 seconds for the VR heartbeat.
+2. Run `scripts/test/kai_outbound_attention_acceptance.ps1` from the app root.
+3. PASS means the script found the live VR body, queued one model-free line,
+   and saw Unity acknowledge it within 20 seconds.
+4. Confirm the same line appeared in the Shack and Unity has no bridge errors.

@@ -2,7 +2,7 @@
 
 Owner: Homecoming Kai + persistent Claude partner
 Reviewer: supervising Kai
-Status: DRAFT — requires separate implementation authority
+Status: ACCEPTED / VERIFIED LIVE — 2026-08-15
 
 ## Goal
 
@@ -11,8 +11,8 @@ running Windows coordinator to finish its Dart teardown, flush durable evidence,
 exit with code zero, and let its paired watchdog exit without recovery.
 
 This brief creates a capability for a future built runtime. It cannot control
-the currently running `C:\code\homecoming_app` binary and must never be cited as
-proof that PID 36184 shut down gracefully.
+the currently running `build-proactive-stability` binary and must never be cited
+as proof that Core PID 5644 shut down gracefully.
 
 ## Why this is next
 
@@ -153,6 +153,35 @@ Any missing criterion is `FAIL` or `UNVERIFIED`, never a partial pass.
   overwrite the live old root as part of rollback.
 - Retain failing request receipts, process identities, exit codes, hashes, and
   journal anchors without retaining the capability itself.
+
+## Local acceptance record — 2026-08-15
+
+- The authenticated loopback service, current-user-only capability ACL,
+  cross-run/PID refusal, idempotent drain, response-before-exit ordering,
+  native normal-quit bridge, and fail-closed helper are implemented.
+- Final focused acceptance: 22/22 PASS. Proportionate Core/coordinator
+  regression: 187/187 PASS. Scoped analysis, PowerShell parse, and diff check:
+  PASS.
+- Isolated Windows Release candidate:
+  `build-graceful-shutdown/windows/x64/runner/Release/Kai.exe`.
+- Accepted executable SHA-256:
+  `779735CF82B40CB6EC6EAEA85B53F851015241338873AB4A947D0434D346C232`.
+- Candidate `data/app.so` SHA-256:
+  `01BBED5A2E748C38B068367BCC37AB74E72D4D882E5D5A723FE7884A83C0D1E7`.
+- A process-level zero-exit watchdog fixture passed: the watched process and
+  candidate watchdog both returned zero and no recovered candidate remained.
+- First live round retained a genuine failure: after durable flush, Windows
+  recorded access violation `0xc0000005` in
+  `audioplayers_windows_plugin.dll`; watchdog 34184 correctly recovered Core
+  50180. The repair excludes the unused audio plugin only from the headless
+  coordinator while retaining the generated full plugin set for desktop rooms.
+- Second live round is accepted: Core 52612 and watchdog 51820 exited, port 8790
+  closed, the capability file disappeared, no Windows crash was recorded, and
+  no recovery process appeared during a 15-second observation window.
+- Operational state was restored from the accepted artifact as exactly one
+  healthy pair: Core 47916 and watchdog 48276, with port 8790 owned by Core.
+- Detailed machine-readable evidence:
+  `docs/evidence/BRIEF_018A_AUTHENTICATED_LOCAL_GRACEFUL_SHUTDOWN_2026-08-15.json`.
 
 ## Stop and report
 

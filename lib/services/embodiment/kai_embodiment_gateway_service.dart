@@ -8,12 +8,26 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
+
 import '../ai/ai_service.dart';
 import '../core/kai_continuity_contract.dart';
 import '../core/kai_core_client.dart';
 import '../core/kai_memory_scope.dart';
 import '../core/kai_surface_context.dart';
 import '../voice/voice_service.dart';
+import 'tavern_kai_session.dart';
+
+/// Whether the AR channel runs as a personal-Kai surface or a Tavern public kiosk.
+///
+/// In [tavernAr] mode every turn requires a valid Tavern session token;
+/// requests without one are rejected before AI/memory/tool access (fail closed).
+/// In [personalAr] mode (default) the personal-Kai surface is active as normal.
+enum TavernGatewayMode {
+  personalAr,
+  tavernAr,
+}
 
 class KaiEmbodimentGatewayService {
   KaiEmbodimentGatewayService._();
@@ -62,7 +76,29 @@ class KaiEmbodimentGatewayService {
   final Map<String, _CachedKaiAudio> _audio = {};
   final KaiCoreClient _coreClient = KaiCoreClient();
 
+  // Tavern AR state — AR channel only.
+  // _tavernHmacSecret is set at start() time from Platform.environment['TAVERN_KAI_HMAC_SECRET'].
+  // Never set via --dart-define; secrets must not be compiled into client artifacts.
+  String _tavernHmacSecret = '';
+  TavernGatewayMode _tavernGatewayMode = TavernGatewayMode.personalAr;
+  // Session provisioned by Kingdom Flutter via POST /v1/tavern/provision (loopback auth).
+  // Cleared by stop() and POST /v1/tavern/end.
+  _ProvisionedSession? _activeProvisionedSession;
+  // Revocation cache: checks RTDB on each turn (30s TTL). Survives gateway restart
+  // because the authoritative state lives in RTDB, not in this in-memory set.
+  final Map<String, _RevocationCacheEntry> _revocationCache = {};
+
   bool get isRunning => _server != null;
+
+  /// Test-only override — sets the HMAC secret and gateway mode directly,
+  /// bypassing the Platform.environment read that start() would perform.
+  /// Never call in production; the [kDebugMode] guard enforces this.
+  @visibleForTesting
+  void setTavernSecretForTesting(String secret, TavernGatewayMode mode) {
+    assert(kDebugMode, 'setTavernSecretForTesting must only be called in debug builds');
+    _tavernHmacSecret = secret;
+    _tavernGatewayMode = mode;
+  }
   Uri? get endpoint =>
       _server == null ? null : Uri.parse('http://127.0.0.1:${_server!.port}');
 
@@ -73,6 +109,7 @@ class KaiEmbodimentGatewayService {
     String model = 'gpt-5.5',
     String? token,
     bool allowUnauthenticatedLoopback = false,
+    TavernGatewayMode tavernMode = TavernGatewayMode.personalAr,
   }) async {
     if (_server != null) return;
 
@@ -80,6 +117,7 @@ class KaiEmbodimentGatewayService {
     _model = model;
     _channelSurface = channelSurface;
     _allowUnauthenticatedLoopback = allowUnauthenticatedLoopback;
+    _tavernGatewayMode = tavernMode;
     if (token != null) _token = token;
     if (_token.isEmpty && !_allowUnauthenticatedLoopback) {
       _ai = null;
@@ -87,6 +125,19 @@ class KaiEmbodimentGatewayService {
         'KAI_EMBODIMENT_TOKEN is required unless unauthenticated loopback '
         'development is explicitly enabled.',
       );
+    }
+
+    if (tavernMode == TavernGatewayMode.tavernAr) {
+      final envSecret = Platform.environment['TAVERN_KAI_HMAC_SECRET'] ?? '';
+      if (envSecret.isEmpty) {
+        _ai = null;
+        throw StateError(
+          'TAVERN_KAI_HMAC_SECRET environment variable must be set before '
+          'starting the AR gateway in tavernAr mode. '
+          'Do not use --dart-define for secrets.',
+        );
+      }
+      _tavernHmacSecret = envSecret;
     }
 
     // Milestone one is Editor-on-the-same-PC only. Loopback ensures an empty
@@ -126,6 +177,8 @@ class KaiEmbodimentGatewayService {
     _server = null;
     _ai = null;
     _audio.clear();
+    _activeProvisionedSession = null;
+    _revocationCache.clear();
     if (server != null) await server.close(force: true);
   }
 
@@ -163,6 +216,36 @@ class KaiEmbodimentGatewayService {
       return;
     }
 
+    // Tavern AR session provisioning — Kingdom Flutter calls this after issueTavernKaiSession.
+    // Requires the same loopback Bearer token as Unity turns. The token delivered here
+    // came directly from the authenticated Cloud Function call — no RTDB relay.
+    if (request.method == 'POST' &&
+        request.uri.path == '/v1/tavern/provision' &&
+        _channelSurface == KaiSurface.ar) {
+      await _provisionTavernSession(request);
+      return;
+    }
+
+    // Tavern AR session bootstrap — Unity calls this to retrieve the provisioned token.
+    // Returns data from _activeProvisionedSession (in-memory, set via /v1/tavern/provision).
+    // Requires the same loopback Bearer token as Unity turns.
+    if (request.method == 'GET' &&
+        request.uri.path == '/v1/tavern/bootstrap' &&
+        _channelSurface == KaiSurface.ar) {
+      await _serveTavernBootstrap(request);
+      return;
+    }
+
+    // Tavern AR session end — call from Kingdom Flutter after announceDepart.
+    // Clears in-memory session and audio buffers immediately. Revocation authority
+    // is the RTDB tombstone written by endTavernKaiSession Cloud Function.
+    if (request.method == 'POST' &&
+        request.uri.path == '/v1/tavern/end' &&
+        _channelSurface == KaiSurface.ar) {
+      await _endTavernSession(request);
+      return;
+    }
+
     if (request.method == 'POST' && request.uri.path == '/v1/transcribe') {
       await _transcribe(request);
       return;
@@ -180,6 +263,55 @@ class KaiEmbodimentGatewayService {
         'error': 'unauthorized',
       });
       return;
+    }
+
+    // Tavern AR session validation.
+    // In tavernAr mode: missing token → 401 immediately (fail closed — no fallthrough to
+    // personal-Kai). In personalAr mode: a stray token header is still validated for
+    // defense in depth, but its absence is not an error.
+    // guestUid is taken from the HMAC-signed payload — never from the request body.
+    TavernKaiSession? tavernSession;
+    if (_channelSurface == KaiSurface.ar) {
+      final tavernToken = request.headers.value('X-Tavern-Session-Token');
+
+      if (_tavernGatewayMode == TavernGatewayMode.tavernAr &&
+          (tavernToken == null || tavernToken.isEmpty)) {
+        _writeJson(request.response, HttpStatus.unauthorized, {
+          'error': 'tavern_session_required',
+        });
+        return;
+      }
+
+      if (tavernToken != null && tavernToken.isNotEmpty) {
+        if (_tavernHmacSecret.isEmpty) {
+          _writeJson(request.response, HttpStatus.internalServerError, {
+            'error': 'tavern_not_configured',
+          });
+          return;
+        }
+        final result = validateTavernToken(
+          tavernToken,
+          _tavernHmacSecret,
+          DateTime.now().millisecondsSinceEpoch,
+        );
+        switch (result) {
+          case TavernSessionInvalid(:final reason):
+            _writeJson(request.response, HttpStatus.unauthorized, {
+              'error': 'tavern_session_invalid',
+              'reason': reason,
+            });
+            return;
+          case TavernSessionValid(:final session):
+            // Check RTDB revocation tombstone (30s cache, survives gateway restart).
+            if (await _isSessionRevoked(session.sessionId)) {
+              _writeJson(request.response, HttpStatus.unauthorized, {
+                'error': 'tavern_session_revoked',
+              });
+              return;
+            }
+            tavernSession = session;
+        }
+      }
     }
 
     if (_busy) {
@@ -227,6 +359,21 @@ class KaiEmbodimentGatewayService {
       final correlationId = turn.correlationId;
       final spatial = body['spatial'];
 
+      // For Tavern AR sessions, replace the Unity-supplied surface context with
+      // one built from the HMAC-verified guest identity. This enforces:
+      //   • speaker = knownGuest (guestUid sourced from signed token)
+      //   • memoryScopes = {identity} only (KaiSurfaceProfiles.host)
+      //   • isSadeq = false → KaiMemoryScope.ephemeral (no durable memory)
+      // Without this, Unity could supply any guestId or surface it chose.
+      final effectiveSurfaceContext = tavernSession != null
+          ? KaiSurfaceContext.arPublic(
+              guestId: tavernSession.guestUid,
+              consent: KaiGuestConsent.service,
+              deviceId: body['deviceId'] as String? ?? 'unity-ar-tavern',
+              sessionId: tavernSession.sessionId,
+            )
+          : turn.surfaceContext;
+
       if (personaId != canonicalPersona) {
         _writeJson(request.response, HttpStatus.badRequest, {
           'protocolVersion': protocolVersion,
@@ -246,15 +393,16 @@ class KaiEmbodimentGatewayService {
         return;
       }
 
+      final isPresenceEvent = effectiveSurfaceContext.isPresenceEvent;
+
       // Presence is coordination metadata, not chat authority. Report the
       // gateway-derived body after validation, but never hold up or reject a
       // Unity turn when the optional core is unavailable during migration.
       unawaited(reportEmbodiedPresenceToCore(
         client: _coreClient,
-        context: turn.surfaceContext,
+        context: effectiveSurfaceContext,
+        status: isPresenceEvent ? 'idle' : 'thinking',
       ));
-
-      final isPresenceEvent = turn.surfaceContext.isPresenceEvent;
 
       if (isPresenceEvent) {
         _writeJson(request.response, HttpStatus.ok, {
@@ -266,7 +414,7 @@ class KaiEmbodimentGatewayService {
             gesture: 'none',
             voiceAudioUri: '',
             availableCapabilities:
-                availableCapabilitiesFor(turn.surfaceContext),
+                availableCapabilitiesFor(effectiveSurfaceContext),
             memoryCandidates: const [],
             handoff: turn.handoff,
             error: '',
@@ -286,18 +434,21 @@ class KaiEmbodimentGatewayService {
         return;
       }
 
+      // Tavern turns must not read personal-Kai memory and must not save messages
+      // or extracted facts. No consent policy for durable Tavern memory exists yet.
+      final isTavernTurn = tavernSession != null;
       final response = await _ai!.sendMessage(
         text: utterance,
         personaId: canonicalPersona,
         model: _model,
-        useMemory: true,
+        useMemory: !isTavernTurn,
         useWebSearch: false,
-        saveUserMessage: true,
-        saveAssistantReply: true,
-        surfaceContext: turn.surfaceContext,
+        saveUserMessage: !isTavernTurn,
+        saveAssistantReply: !isTavernTurn,
+        surfaceContext: effectiveSurfaceContext,
         ephemeralContext: _perceptionContext(spatial),
       );
-      final visibleReply = turn.surfaceContext.allowsTechnicalConversation
+      final visibleReply = effectiveSurfaceContext.allowsTechnicalConversation
           ? response.reply
           : sanitizeGogglesOffReply(response.reply, userText: utterance);
 
@@ -344,7 +495,7 @@ class KaiEmbodimentGatewayService {
           presenceState: 'speaking',
           gesture: _gestureFor(response.tags),
           voiceAudioUri: voiceAudioUri,
-          availableCapabilities: availableCapabilitiesFor(turn.surfaceContext),
+          availableCapabilities: availableCapabilitiesFor(effectiveSurfaceContext),
           // Candidates stay empty until a scoped summarizer proposes one.
           // Never infer durable memory from Unity perception in the adapter.
           memoryCandidates: const [],
@@ -488,6 +639,140 @@ class KaiEmbodimentGatewayService {
     }
   }
 
+  // ── Tavern AR helpers ──────────────────────────────────────────────────────
+
+  static const _rtdbBase =
+      'https://kingdom-ac44f-default-rtdb.europe-west1.firebasedatabase.app';
+  static const _revocationCacheTtl = Duration(seconds: 30);
+
+  /// POST /v1/tavern/provision
+  ///
+  /// Called by Kingdom Flutter after issueTavernKaiSession succeeds.
+  /// Accepts {sessionId, sessionToken} and stores them as the active session.
+  /// Requires the same loopback Bearer token as Unity turns — no public access.
+  Future<void> _provisionTavernSession(HttpRequest request) async {
+    if (!_authorized(request)) {
+      _writeJson(request.response, HttpStatus.unauthorized,
+          {'error': 'unauthorized'});
+      return;
+    }
+    final rawBody = await utf8.decoder.bind(request).join();
+    final Map<String, dynamic> body;
+    try {
+      body = (jsonDecode(rawBody) as Map).cast<String, dynamic>();
+    } catch (_) {
+      _writeJson(request.response, HttpStatus.badRequest,
+          {'error': 'invalid_json'});
+      return;
+    }
+    final sessionToken = body['sessionToken'] as String?;
+    if (sessionToken == null || sessionToken.isEmpty) {
+      _writeJson(request.response, HttpStatus.badRequest,
+          {'error': 'sessionToken_required'});
+      return;
+    }
+    if (_tavernHmacSecret.isEmpty) {
+      _writeJson(request.response, HttpStatus.internalServerError,
+          {'error': 'tavern_not_configured'});
+      return;
+    }
+    // Validate the token before storing it — reject garbage up front.
+    final result = validateTavernToken(
+        sessionToken, _tavernHmacSecret, DateTime.now().millisecondsSinceEpoch);
+    switch (result) {
+      case TavernSessionInvalid(:final reason):
+        _writeJson(request.response, HttpStatus.badRequest, {
+          'error': 'invalid_session_token',
+          'reason': reason,
+        });
+        return;
+      case TavernSessionValid(:final session):
+        _activeProvisionedSession = _ProvisionedSession(session, sessionToken);
+        _writeJson(request.response, HttpStatus.ok, {
+          'provisioned': true,
+          'sessionId': session.sessionId,
+          'tableId': session.tableId,
+          'expiresAt': session.expiresAt,
+        });
+    }
+  }
+
+  /// GET /v1/tavern/bootstrap
+  ///
+  /// Called by Unity to retrieve the provisioned session token.
+  /// Serves from _activeProvisionedSession (set via POST /v1/tavern/provision).
+  /// Requires the same loopback Bearer token as Unity turns — no public access.
+  Future<void> _serveTavernBootstrap(HttpRequest request) async {
+    if (!_authorized(request)) {
+      _writeJson(request.response, HttpStatus.unauthorized,
+          {'error': 'unauthorized'});
+      return;
+    }
+    final provisioned = _activeProvisionedSession;
+    if (provisioned == null) {
+      _writeJson(request.response, HttpStatus.notFound,
+          {'error': 'no_active_session'});
+      return;
+    }
+    final session = provisioned.session;
+    _writeJson(request.response, HttpStatus.ok, {
+      'sessionId': session.sessionId,
+      'sessionToken': provisioned.sessionToken,
+      'tableId': session.tableId,
+      'guestUid': session.guestUid,
+      'expiresAt': session.expiresAt,
+      'personaScope': 'tavern_kai',
+      'capabilities': session.capabilities,
+    });
+  }
+
+  /// POST /v1/tavern/end
+  ///
+  /// Called by Kingdom Flutter on visit departure.
+  /// Clears the in-memory session and audio buffers immediately.
+  /// The authoritative revocation is the RTDB tombstone written by
+  /// endTavernKaiSession Cloud Function — this call provides instant local cleanup.
+  Future<void> _endTavernSession(HttpRequest request) async {
+    if (!_authorized(request)) {
+      _writeJson(request.response, HttpStatus.unauthorized,
+          {'error': 'unauthorized'});
+      return;
+    }
+    final cleared = _activeProvisionedSession != null;
+    _activeProvisionedSession = null;
+    _audio.clear();
+    _revocationCache.clear();
+    _writeJson(request.response, HttpStatus.ok, {'cleared': cleared});
+  }
+
+  /// Check whether [sessionId] has been revoked by consulting the RTDB
+  /// /tavern_kai_revocations/{sessionId} tombstone. Result is cached for
+  /// [_revocationCacheTtl] to avoid an RTDB read on every turn.
+  ///
+  /// Fails closed: any network or parse error is treated as revoked.
+  Future<bool> _isSessionRevoked(String sessionId) async {
+    final now = DateTime.now();
+    final cached = _revocationCache[sessionId];
+    if (cached != null && now.isBefore(cached.cachedUntil)) {
+      return cached.revoked;
+    }
+    try {
+      final uri =
+          Uri.parse('$_rtdbBase/tavern_kai_revocations/$sessionId.json');
+      final resp = await http.get(uri).timeout(const Duration(seconds: 5));
+      final revoked = resp.statusCode == 200 && resp.body != 'null';
+      _revocationCache[sessionId] = _RevocationCacheEntry(
+        revoked: revoked,
+        cachedUntil: now.add(_revocationCacheTtl),
+      );
+      return revoked;
+    } catch (error) {
+      print('[EmbodimentGateway] revocation check failed for $sessionId: $error');
+      // Fail closed — deny the turn if we cannot confirm revocation status.
+      return true;
+    }
+  }
+
   String _perceptionContext(dynamic spatial) {
     if (spatial is! Map) return '';
     final encoded = jsonEncode(spatial);
@@ -566,6 +851,7 @@ Use this to understand the immediate scene naturally. Do not claim to see anythi
 Future<bool> reportEmbodiedPresenceToCore({
   required KaiCoreClient client,
   required KaiSurfaceContext context,
+  String status = 'idle',
 }) async {
   if (context.surface != KaiSurface.vr && context.surface != KaiSurface.ar) {
     return false;
@@ -579,12 +865,25 @@ Future<bool> reportEmbodiedPresenceToCore({
       audioAvailable: true,
       worldId: context.worldId,
       gogglesOn: context.gogglesOn,
+      status: status,
       lastInteractionAt: DateTime.now(),
     );
     return true;
   } catch (_) {
     return false;
   }
+}
+
+class _ProvisionedSession {
+  final TavernKaiSession session;
+  final String sessionToken;
+  const _ProvisionedSession(this.session, this.sessionToken);
+}
+
+class _RevocationCacheEntry {
+  final bool revoked;
+  final DateTime cachedUntil;
+  const _RevocationCacheEntry({required this.revoked, required this.cachedUntil});
 }
 
 class _CachedKaiAudio {
