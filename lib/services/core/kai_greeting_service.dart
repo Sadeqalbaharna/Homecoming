@@ -195,6 +195,10 @@ About the thought you were having while he was gone — TWO WAYS THIS GOES WRONG
 Return ONLY the greeting itself. No quotes, no label, no explanation.''';
 
       final local = await LocalLLMService().complete(
+      // A greeting is literally what he says to Sadeq. This is the clearest
+      // voice-bearing case in the tree and it is only `draft` because turning
+      // it off today would silently start charging per greeting.
+      role: ModelRole.draft,
         system: system,
         user: situation.toString(),
         maxTokens: 90,

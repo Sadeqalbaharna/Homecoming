@@ -193,6 +193,11 @@ Hard rules, because this is exactly where it goes wrong:
 Return ONLY the raw thought. No quotes, no label, no explanation.''';
 
       final local = await LocalLLMService().complete(
+      // His inner monologue. This IS prose he encounters later as his own
+      // thought, so it is a draft, not mechanical work -- the record has to
+      // name the model. Unresolved: move to frontier, or rewrite before
+      // storage, or keep paying nothing and accept traceable drift.
+      role: ModelRole.draft,
         system: system,
         user: ctx.toString(),
         maxTokens: 90,

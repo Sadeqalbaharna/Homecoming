@@ -130,6 +130,8 @@ class KaiSchemaConsolidator {
           .ref('kai/$personaId/schema_consolidations/${cluster.fingerprint}');
       if ((await receipt.get()).exists) continue;
       final raw = await LocalLLMService().complete(
+      // Evidence clusters to a schema record. JSON in, JSON out.
+      role: ModelRole.classification,
         system: _prompt,
         user: jsonEncode({
           'lessons': cluster.reflections

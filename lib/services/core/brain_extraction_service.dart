@@ -574,6 +574,9 @@ CONNECT TO WHAT'S ALREADY THERE — this matters more than the new nodes:
 
     // ── Try local Qwen first (no token cost) ──────────────────────────────
     String? raw = await LocalLLMService().complete(
+      // Structured node/edge JSON out of an exchange that already happened. The
+      // shape matters; the wording is never surfaced as something he said.
+      role: ModelRole.classification,
       system: systemPrompt,
       user: userContent,
       maxTokens: maxTok,
@@ -1924,6 +1927,9 @@ If nothing qualifies → {"nodes":[],"edges":[]}''';
 
       // Try local Qwen first, fall back to OpenAI
       String? raw = await LocalLLMService().complete(
+      // Structured node/edge JSON out of an exchange that already happened. The
+      // shape matters; the wording is never surfaced as something he said.
+      role: ModelRole.classification,
         system: _sessionPrompt + crossRef,
         user: sessionText,
         maxTokens: 400,

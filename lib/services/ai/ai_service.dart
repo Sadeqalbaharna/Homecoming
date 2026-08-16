@@ -196,6 +196,8 @@ class AIService {
       (system, user) => LocalLLMService().complete(
             system: system,
             user: user,
+            // Structured yes/no plus a confidence. Never stored, never spoken.
+            role: ModelRole.classification,
             maxTokens: 40,
             think: false,
           ),

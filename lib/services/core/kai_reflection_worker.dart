@@ -55,6 +55,8 @@ class KaiReflectionWorker {
     int maxTokens,
   ) =>
       LocalLLMService().complete(
+      // Same contested ground as kai_reflection_service.
+      role: ModelRole.draft,
         system: system,
         user: user,
         maxTokens: maxTokens,

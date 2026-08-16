@@ -173,6 +173,8 @@ Hard rules, because this is exactly where it went wrong before:
 4. Different from yesterday. If it reads like it could be any entry, it's wrong.''';
 
       final out = await LocalLLMService().complete(
+      // His journal. The roadmap names this one explicitly as never-local.
+      role: ModelRole.draft,
         system: system,
         user: ctx.toString(),
         maxTokens: 160,

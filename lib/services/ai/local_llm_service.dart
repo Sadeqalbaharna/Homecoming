@@ -21,6 +21,9 @@ import 'dart:async';
 import 'dart:io';
 import 'package:dio/dio.dart';
 import 'ai_config.dart';
+import 'model_role.dart';
+
+export 'model_role.dart';
 
 class LocalLLMService {
   static final LocalLLMService _instance = LocalLLMService._internal();
@@ -51,11 +54,23 @@ class LocalLLMService {
   Future<String?> complete({
     required String system,
     required String user,
+    /// Which mind is allowed to do this job. Required so the question is
+    /// answered at every call site rather than inherited from whoever noticed
+    /// the local path was free. See [ModelRole].
+    required ModelRole role,
     int maxTokens = 500,
     bool jsonMode = false,
     bool think = false,
     String? model,
   }) async {
+    if (!role.allowsLocal) {
+      // Throwing, not returning null. Every caller here already treats null as
+      // "local unavailable, fall back to the paid model", so a polite refusal
+      // would be indistinguishable from Ollama being off — and a future caller
+      // would route voice-bearing work through here without anything noticing.
+      throw VoiceBearingLocalCallError('role: ${role.name}');
+    }
+
     // Resolve endpoint: saved > in-memory discovered
     String? endpoint = await AIConfig.getLocalEndpoint();
     endpoint ??= _discoveredEndpoint;

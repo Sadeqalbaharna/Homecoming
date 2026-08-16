@@ -258,6 +258,8 @@ Rules:
     if (key.isEmpty) return _fallbackBriefing(guest);
 
     final local = await LocalLLMService().complete(
+      // A guest briefing he delivers aloud. Voice-bearing with an audience.
+      role: ModelRole.draft,
       system: _briefingSystem, user: ctx, maxTokens: 80,
     );
     if (local != null && local.isNotEmpty) return local;

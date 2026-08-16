@@ -157,6 +157,10 @@ Hard rules, because this is exactly where it goes wrong:
    wrong.''';
 
       final out = await LocalLLMService().complete(
+      // The Personhood Constitution says reflection runs local BY DESIGN, and
+      // the roadmap says voice-bearing never does. Both are load-bearing, so
+      // this is marked as the debt it is rather than silently resolved.
+      role: ModelRole.draft,
         system: system,
         user: 'Think.',
         maxTokens: 90,

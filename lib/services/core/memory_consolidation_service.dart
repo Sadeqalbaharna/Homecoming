@@ -306,6 +306,9 @@ Preserve important existing memories. Return only the JSON.
 
     // ── Try local Qwen first (no token cost for this heavy JSON task) ─────
     String? raw = await LocalLLMService().complete(
+      // Rewrites a memory document as JSON. Heavy, structured, and never read
+    // back as prose.
+      role: ModelRole.classification,
       system: _systemPrompt,
       user: userMessage,
       maxTokens: 800,

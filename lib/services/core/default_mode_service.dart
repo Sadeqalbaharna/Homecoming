@@ -250,6 +250,8 @@ Return ONLY the raw thought. No quotes, no labels, no explanation.
 
     // ── Try local Qwen first (think: true — brief CoT improves wandering quality)
     final localThought = await LocalLLMService().complete(
+      // Wandering thoughts. Same debt as inner life: prose that becomes memory.
+      role: ModelRole.draft,
       system: systemPrompt,
       user: ctx.toString(),
       maxTokens: 120,
