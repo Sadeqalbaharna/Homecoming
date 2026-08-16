@@ -1485,7 +1485,16 @@ Text:
         route: routeDecision.route,
         capabilities: capabilityManifest,
         surface: activeSurface,
+        unmatched: routeDecision.unmatched,
       );
+
+      // What liveState should treat this turn as, for BUDGETS as well as for
+      // blocks. fastChat gets a 120-token self-context budget against 450 for
+      // an unrouted turn, so passing the raw route here would have fixed which
+      // blocks load and still starved them. Null is the existing "load
+      // everything generously" value; a shrug now means the same thing.
+      final effectiveContextRoute =
+          routeDecision.unmatched ? null : routeDecision.route;
 
       // ── SETUP, IN PARALLEL ────────────────────────────────────────────
       // None of these four reads the output of any other. They used to run
@@ -2482,7 +2491,7 @@ ${history.join('\n')}$memoryContext$urlContext$webContext${_pendingThought != nu
         // from here with no route for every turn. fastChat drops 10 blocks.
         systemPrompt += await KaiContextBlock.liveState(
           personaId,
-          route: routeDecision.route,
+          route: effectiveContextRoute,
           manifest: contextManifest,
           message: text,
         );

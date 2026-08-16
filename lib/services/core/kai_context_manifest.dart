@@ -50,6 +50,11 @@ class KaiContextManifest {
     required KaiRoute route,
     required KaiCapabilityManifest capabilities,
     KaiSurfaceContext? surface,
+
+    /// True when no routing rule fired, so [route] is the fallback rather than
+    /// a finding. An unmatched turn is given the full manifest — see
+    /// [forDecision] for why the asymmetry points this way.
+    bool unmatched = false,
   }) {
     if (!capabilities.allowsTechnicalConversation) {
       return KaiContextManifest(
@@ -68,8 +73,23 @@ class KaiContextManifest {
       );
     }
 
-    return forRoute(route);
+    // A shrug is not a finding of triviality — load everything.
+    return forRoute(unmatched ? null : route);
   }
+
+  /// The manifest for a routing decision, rather than for a bare route.
+  ///
+  /// `forRoute(fastChat)` drops ten of the fifteen live blocks, which is right
+  /// when the router POSITIVELY recognised small talk and wrong when it simply
+  /// failed to recognise anything. Those were the same value until
+  /// [KaiRouteDecision.unmatched] existed.
+  ///
+  /// An unmatched turn is treated exactly like a null route: load everything.
+  /// The cost of being wrong is asymmetric — a trivial turn carrying full
+  /// context is a few cached tokens, while a hard turn stripped of context is
+  /// an answer that misses, and neither Kai nor Sadeq can see why.
+  static KaiContextManifest forDecision(KaiRouteDecision? decision) =>
+      forRoute(decision == null || decision.unmatched ? null : decision.route);
 
   static KaiContextManifest forRoute(KaiRoute? route) {
     final skipped = switch (route) {

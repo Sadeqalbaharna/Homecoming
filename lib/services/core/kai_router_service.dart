@@ -22,11 +22,25 @@ class KaiRouteDecision {
     required this.route,
     required this.confidence,
     required this.reasons,
+    this.unmatched = false,
   });
 
   final KaiRoute route;
   final double confidence;
   final List<String> reasons;
+
+  /// No rule fired. [route] is the fallback, not a finding.
+  ///
+  /// Defaults to false so a hand-built decision behaves as a deliberate choice,
+  /// which is what every existing caller and test means by one.
+  final bool unmatched;
+
+  /// Whether this turn was positively identified as small talk.
+  ///
+  /// The distinction that matters downstream: `route == fastChat` answers "what
+  /// shape of prompt", and this answers "do we actually know". Only the second
+  /// one is allowed to take capability away.
+  bool get confidentlyTrivial => route == KaiRoute.fastChat && !unmatched;
 
   String get label => route.name;
 
@@ -106,20 +120,75 @@ class KaiRouterService {
       pick(KaiRoute.coding, 0.80, 'continuation of an active persisted job');
     }
 
+    // A short turn is evidence of small talk only if it is not ASKING
+    // something. "ok thanks" is nine characters and genuinely trivial; "why did
+    // that break" is nineteen and is a debugging question that needs his whole
+    // context. Length alone cannot tell them apart, and treating it as though
+    // it could is what sent the motivating example down the thin path.
+    //
+    // So the short-turn rule still picks the cheap prompt SHAPE, but it only
+    // claims to have recognised the turn when nothing is being asked.
+    var matched = reasons.isNotEmpty;
     if (text.length <= 24 && route == KaiRoute.fastChat) {
       confidence = 0.45;
-      reasons.add('short conversational turn');
+      if (_looksLikeQuestion(lower)) {
+        reasons.add('short, but asking something — not treated as small talk');
+      } else {
+        reasons.add('short conversational turn');
+        matched = true;
+      }
     }
 
     return KaiRouteDecision(
       route: route,
       confidence: confidence.clamp(0.0, 1.0),
       reasons: reasons.take(4).toList(growable: false),
+      // ── The shrug, finally named ────────────────────────────────────────────
+      //
+      // `route` starts as fastChat and only moves if some rule fires. So when
+      // nothing matched, this method returned fastChat — and downstream that is
+      // indistinguishable from "I am confident this is small talk".
+      //
+      // It is not the same claim. fastChat drops ten of the fifteen live
+      // context blocks and takes a reply ceiling, so a question the keyword
+      // list simply does not cover — "why did that break" matches nothing at
+      // all — was getting the THINNEST possible Kai precisely because it was
+      // the hardest to classify.
+      //
+      // This router is a latency optimisation that picks a prompt shape. It was
+      // never built as a security boundary, and it was never built as a
+      // capability boundary either; it became one by accident, and it fails in
+      // the wrong direction.
+      //
+      // Note the asymmetry with the memory write classifier, which was fixed
+      // the same day in the OPPOSITE direction. For privacy, an unclassified
+      // turn must fail CLOSED — absence of evidence is not evidence of
+      // intimacy. For capability, an unclassified turn must fail OPEN — absence
+      // of evidence is not evidence of triviality. Same shrug, opposite safe
+      // defaults, because the cost of being wrong points the other way.
+      unmatched: !matched,
     );
   }
 
   static bool _containsAny(String lower, List<String> needles) =>
       needles.any(lower.contains);
+
+  /// Is this turn asking for something, rather than acknowledging?
+  ///
+  /// Deliberately generous: a false positive costs a few cached context tokens,
+  /// a false negative costs a stripped-down answer to a real question. Matches
+  /// a question mark, or an interrogative opener — the second one matters
+  /// because Sadeq rarely punctuates.
+  static bool _looksLikeQuestion(String lower) {
+    if (lower.contains('?')) return true;
+    const openers = [
+      'why', 'what', 'how', 'when', 'where', 'who', 'which',
+      'did', 'does', 'do ', 'is ', 'are ', 'was ', 'were ',
+      'can ', 'could ', 'should ', 'would ', 'will ',
+    ];
+    final trimmed = lower.trimLeft();
+    return openers.any(trimmed.startsWith);
+  }
 
   static bool _looksLikeFilePath(String lower) =>
       lower.contains('.dart') ||
