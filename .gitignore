@@ -77,3 +77,7 @@ build/
 # scratch
 _probe.txt
 tmp_*.patch
+
+# Dart analysis profile cache — 11k downloaded package files, not source.
+/.tmp/
+/tmp/
