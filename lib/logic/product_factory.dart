@@ -105,7 +105,8 @@ class HumanApproval {
     this.approvedPrice,
   });
 
-  bool get isValid => approvedBy.trim().isNotEmpty && approvedAt > 0 && runId.trim().isNotEmpty;
+  bool get isValid =>
+      approvedBy.trim().isNotEmpty && approvedAt > 0 && runId.trim().isNotEmpty;
 }
 
 /// The evidence a run has accumulated. Each field is the proof required by a
@@ -134,6 +135,13 @@ class RunEvidence {
   final int? views;
   final int? sales;
 
+  /// A storefront sale is not the Northstar. This is positive only after a
+  /// genuine customer payment settles into Sadeq's bank account.
+  final num? bankedRevenue;
+
+  /// Processor/bank reference that reconciles the settlement to the order.
+  final String? bankSettlementReference;
+
   /// Days the listing has been live and observed. A single day of data is
   /// noise, and learning from noise is worse than not learning.
   final int observedDays;
@@ -156,6 +164,8 @@ class RunEvidence {
     this.liveUrl,
     this.views,
     this.sales,
+    this.bankedRevenue,
+    this.bankSettlementReference,
     this.observedDays = 0,
     this.predictedScores,
   });
@@ -215,7 +225,9 @@ class FactoryRun {
         stage: stage ?? this.stage,
         evidence: evidence ?? this.evidence,
         factoryModeOn: factoryModeOn ?? this.factoryModeOn,
-        stoppedAt: identical(stoppedAt, _unchanged) ? this.stoppedAt : stoppedAt as int?,
+        stoppedAt: identical(stoppedAt, _unchanged)
+            ? this.stoppedAt
+            : stoppedAt as int?,
         stoppedReason: identical(stoppedReason, _unchanged)
             ? this.stoppedReason
             : stoppedReason as String?,
@@ -241,13 +253,13 @@ class AdvanceResult {
 /// and always will be.
 AdvanceResult advance(FactoryRun run, {HumanApproval? approval}) {
   if (run.isStopped) {
-    return AdvanceResult.refused(
-        GateRefusal(run.stage, 'run is stopped — Sadeq must start factory mode to resume it'));
+    return AdvanceResult.refused(GateRefusal(run.stage,
+        'run is stopped — Sadeq must start factory mode to resume it'));
   }
 
   if (!run.factoryModeOn) {
-    return AdvanceResult.refused(
-        GateRefusal(run.stage, 'factory mode is off — Sadeq has not activated it'));
+    return AdvanceResult.refused(GateRefusal(
+        run.stage, 'factory mode is off — Sadeq has not activated it'));
   }
 
   final next = nextStage(run.stage);
@@ -262,12 +274,14 @@ AdvanceResult advance(FactoryRun run, {HumanApproval? approval}) {
   // its way across it, and so the refusal reason is always the honest one. ──
   if (kHumanGated.contains(next)) {
     if (approval == null || !approval.isValid) {
-      return AdvanceResult.refused(GateRefusal(run.stage,
+      return AdvanceResult.refused(GateRefusal(
+          run.stage,
           'crossing into ${next.name} requires Sadeq\'s approval — publishing '
           'puts his name on it and money behind it'));
     }
     if (approval.runId != run.id) {
-      return AdvanceResult.refused(GateRefusal(run.stage,
+      return AdvanceResult.refused(GateRefusal(
+          run.stage,
           'approval was issued for run ${approval.runId}, not ${run.id} — '
           'approvals are not transferable'));
     }
@@ -278,16 +292,19 @@ AdvanceResult advance(FactoryRun run, {HumanApproval? approval}) {
     FactoryStage.specced => e.hasSurvivingCandidate
         ? null
         : 'no surviving candidate — scouting found no defensible gap',
-    FactoryStage.building =>
-      e.specComplete ? null : 'spec incomplete: needs scope, cuts, price, channel',
-    FactoryStage.verified => (e.artifactPath == null || e.artifactPath!.trim().isEmpty)
-        ? 'no artifact was produced'
-        : null,
+    FactoryStage.building => e.specComplete
+        ? null
+        : 'spec incomplete: needs scope, cuts, price, channel',
+    FactoryStage.verified =>
+      (e.artifactPath == null || e.artifactPath!.trim().isEmpty)
+          ? 'no artifact was produced'
+          : null,
     FactoryStage.listingReady => (e.testsPassed && e.buildPassed)
         ? null
         : 'quality gates not passed — "it\'s done" is not evidence',
-    FactoryStage.awaitingApproval =>
-      e.listingPrepared ? null : 'listing not prepared: needs copy, price, files',
+    FactoryStage.awaitingApproval => e.listingPrepared
+        ? null
+        : 'listing not prepared: needs copy, price, files',
     FactoryStage.published => (e.liveUrl == null || e.liveUrl!.trim().isEmpty)
         ? null // URL appears as a RESULT of publishing, not a precondition
         : null,
@@ -299,7 +316,12 @@ AdvanceResult advance(FactoryRun run, {HumanApproval? approval}) {
             'learning from noise is worse than not learning'
         : (e.sales == null || e.views == null)
             ? 'outcome not recorded — a run with no numbers taught nothing'
-            : null,
+            : (e.bankedRevenue == null || e.bankedRevenue! <= 0)
+                ? 'no actual money has settled into the bank account'
+                : (e.bankSettlementReference == null ||
+                        e.bankSettlementReference!.trim().isEmpty)
+                    ? 'banked revenue has no reconciliation reference'
+                    : null,
     FactoryStage.scouting => null,
   };
 

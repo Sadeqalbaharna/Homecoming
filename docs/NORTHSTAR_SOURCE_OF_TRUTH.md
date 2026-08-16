@@ -128,8 +128,7 @@ standalone Quest connection.
 | Conversation history | `/conversations/truekai/{surfaceId}` | Firebase + bounded process cache | Verified live for `in_person` and `messenger` |
 | Messenger request queue | `/kai_core/conversation_requests/truekai` | Firebase claim/lease/status | Verified live |
 | Runtime task lanes | Kai Core `tasks` | Local JSON + leases | Tested and used live |
-| Outbound attention | Attention Engine + coordinator queue + Kai Core `outbound` | Local versioned attention snapshot plus Core envelope with expiry and exact-body acknowledgement | Verified live for controlled crash/resume, exactly-once desktop delivery, and one due-commitment round trip (2026-08-15); natural intake and Unity presentation unaccepted |
-| Scheduled commitments | Kai Core `commitments` + `KaiDueCommitmentScheduler` | Core ledger with monotonic `nextEvaluationAt`, work-only audience, idempotent dispatch | Verified live 2026-08-15 for create → due → one-body dispatch → durable transcript → acknowledge |
+| Outbound attention | Attention Engine + coordinator queue + Kai Core `outbound` | Local versioned attention snapshot plus Core envelope with expiry and exact-body acknowledgement | Verified live for controlled crash/resume and exactly-once desktop delivery; natural intake and Unity presentation unaccepted |
 | Long-term semantic memory | `/memory/embeddings/truekai` and related services | Firebase | Wired; historical corpus quality not accepted |
 | Life/self evidence | `/kai/truekai/life_events` plus self services | Firebase | Tested in focused suites; long-horizon acceptance incomplete |
 | Project/work ledger | `/kai/truekai/projects` and `/work_requests` | Firebase | Wired and tested |
@@ -180,16 +179,6 @@ standalone Quest connection.
    an approved tether, authenticated LAN relay, or remote gateway design.
 2. **Core depends on the current laptop.** The watchdog recovers a process, not
    a dead, sleeping, disconnected, or lost machine.
-
-   Partial progress worth recording, because it changes what remains: Core is
-   now a standalone Dart binary (`tool/kai_core.dart` → `KaiCore.exe`) with its
-   own data directory, launched opportunistically by `KaiCoreSidecarManager` and
-   treated as optional — a missing sidecar means current behavior, never a
-   failure to start. Core therefore no longer requires a Flutter engine or a UI
-   process. What still binds it to this machine is only `HttpServer.bind(
-   InternetAddress.loopbackIPv4, 8790)` and the absence of any authentication on
-   its routes. The remaining work is a credential and an interface, not a
-   rewrite.
 3. **Unity outbound presentation is not accepted.** The full current C# assembly
    passes an isolated compile against Unity's generated reference set, and Core
    is live. Unity's own domain reload, Play Mode display/voice, and physical
@@ -200,12 +189,12 @@ standalone Quest connection.
 
 ### P1 — structural risk
 
-1. ~~Historical coordinator operation logs contained authenticated Firebase URLs
-   from pre-redaction builds.~~ **CLOSED — Verified live 2026-08-16.** 106
+1. ~~Historical coordinator operation logs contained authenticated Firebase
+   URLs from pre-redaction builds.~~ **CLOSED — Verified live 2026-08-16.** 106
    affected records were sanitized on 2026-08-08 and a clean follow-up scan
    passed. The remaining condition was that the active coordinator had to
    restart on the redacting build; it has. Live journal entries written after
-   the restart carry `auth=[REDACTED]` on both the RTDB and `securetoken`
+   that restart carry `auth=[REDACTED]` on both the RTDB and `securetoken`
    failure paths, so redaction is now observed at the boundary rather than only
    tested.
 2. Desktop still contains dormant legacy Messenger-executor methods and fields.
@@ -229,34 +218,15 @@ standalone Quest connection.
    budget, retry, expiry, one-body routing, and an accepted local restart
    snapshot with observable failures, backup recovery, corruption quarantine,
    and mutation-gated persistence. Controlled coordinator crash/resume and one
-   exact desktop delivery are **Verified live**. Commitment clocks are now also
-   **Verified live** — see the Brief 018 ledger record above, which held a
-   promise across its due instant and delivered it to one exact body. Natural
-   proactive intake, completed-work/direct-reply admission, and a seven-day
-   observed run remain `UNVERIFIED`. Natural proactive intake additionally
-   carries the repetition defect recorded below, repaired but not yet observed
-   live.
+   exact desktop delivery are **Verified live**; natural proactive intake,
+   commitment clocks, completed-work/direct-reply admission, and a seven-day
+   observed run remain `UNVERIFIED`.
 2. Self-improvement plans one manual job. It lacks isolated execution,
    evaluation suites, staged rollout, automatic rollback, and promotion
    authority separation.
 3. No multi-host coordinator election or authoritative cloud deployment exists.
 4. Voice, animation, gaze, and spatial behavior are not part of the current
    software acceptance gate.
-5. **Firebase stream recovery is unbounded and unalerted.** The live journal
-   records 968 `activity_stream_unavailable` and 482 `request_stream_unavailable`
-   entries in the 48 hours to 2026-08-16, all `Failed host lookup` or socket
-   timeouts from the laptop sleeping or dropping its network. The subscriptions
-   do recover, and credentials are redacted, so this is not a correctness or
-   privacy failure. It is a flat retry with no backoff and no alert, and it is
-   the dominant contributor to a journal that has already rotated once at 2MB.
-   Real degradation is currently indistinguishable from ordinary sleep.
-6. **Bodylessness is the steady state.** Presence at 2026-08-16T07:56Z listed one
-   participant: the coordinator itself. No desktop, Messenger, VR, or AR body was
-   online. Every attention decision in that window resolved
-   `storeForLater / no_suitable_body_online`. The durability machinery is doing
-   exactly what it was built to do; there is nothing for it to reach. Phase 3's
-   seven-day observed run cannot begin from this state, and no amount of further
-   engine work substitutes for it.
 
 ## Execution roadmap and gates
 
@@ -273,14 +243,6 @@ standalone Quest connection.
 | 8. Northstar acceptance | Kai is continuously useful and recognizably one companion | Requirement-by-requirement audit against the ten Northstar conditions |
 
 ## Active phase
-
-**Reconciled 2026-08-16.** The 2026-08-08 revision of this file understated the
-project: it recorded Brief 018 as blocked when the slice had in fact shipped, and
-carried a closed credential item as open. Both are corrected above. Understating
-progress is a rarer failure than overstating it and costs the same — work already
-finished gets planned again. The governance rule stands, with one addition: an
-evidence claim is only as good as the field it was read from, so a claim sourced
-from a runtime endpoint must name the field and mean what that field means.
 
 Phase 0 is complete when this source of truth and its first acceptance brief are
 reviewable. Phase 1 remains active until the Unity Editor test is observed and a
@@ -461,141 +423,426 @@ six-file analyzer delta from six diagnostics to the same five pre-existing
 a clean diff check. All 14 criteria pass. The next separate gate is an attended
 restart and exactly-once desktop reminder walkthrough; it has not begun.
 
-Brief 018 is the active runtime gate. Read-only preflight found that the two
-currently running `Kai.exe` processes and Core are stale: health started on
-2026-08-07, omits `scheduled_commitments`, and `/v1/commitments` returns 404,
-while the accepted reminder source is newer than the Release binary. This is a
-runtime-version blocker, not a contradiction of Brief 017's code evidence. The
-next action is a fresh Release build followed by an attended, tray-controlled
-restart; no process will be force-terminated and no live Core state will be
-deleted. Only after that runtime proves create → restart → one-body delivery →
-durable transcript → acknowledgement may the reminder slice become
-`VERIFIED LIVE`.
+Brief 018 remains the active runtime gate and is now **READY FOR CLEAN-TRAY
+RE-ENTRY / LIVE UNVERIFIED**. The first attended attempt stopped before any
+process or GUI action because the live `C:\code\homecoming_app` payload did not
+match the accepted artifact. That incident also disproved the earlier use of
+`/health.startedAt` as runtime freshness: Core preserves that value in durable
+state with `??=`, so it describes state history rather than OS process identity.
 
-The fresh Windows Release build is now complete without interrupting the live
-runtime. Its authoritative Dart payload
-`build/windows/x64/runner/Release/data/app.so` was written at
-2026-08-08T16:59:38Z with SHA-256
-`C69667AD9DE71FA177F333960F0D9BC23C79F16B72440781D598131F8F44857C`.
-The old process remains loaded and intentionally still reports the stale
-capability set. Brief 018 is therefore **READY FOR ATTENDED RESTART**: the next
-action is Sadeq's tray-level **Quit Kai completely**, followed by launch and
-capability verification. No force termination or state deletion is authorized.
+The repaired gate binds one credential-free Windows Release built entirely in
+the governed worktree. `docs/evidence/BRIEF_018_ACCEPTED_ARTIFACT.json` records
+the governed root, source commit and compiled-source fingerprint, exact
+`Kai.exe` and `app.so` hashes, payload time, acceptance time, and immutable
+binding ID. The accepted `app.so` SHA-256 is
+`E74B61177D81C9F09244BF9A87557AD7061AFF61C064CCAC75A34C871B8A82A8`.
+The live `C:\code` runtime was not changed or restarted.
 
-Brief 018 now also has a content-free, read-only runtime verifier at
-`scripts/test/kai_reminder_runtime_acceptance.ps1`. Its nine fixture cases pass,
-including stale-runtime refusal, exact promise fingerprinting across restart,
-duplicate-dispatch rejection, and journal-text leakage rejection. A live run
-correctly reports `UNVERIFIED` against the old Core. The tool does not create,
-dispatch, acknowledge, edit, or delete records; it becomes evidence only after
-the attended clean restart loads the rebuilt payload.
+The read-only verifier now derives freshness and a correlation identity from
+the port-owning PID, stable before/after port ownership, exact governed
+executable and payload paths/hashes, OS process creation time after artifact
+binding, and one matching `--watchdog --watch-pid=<corePid>` process. Persisted
+`startedAt` is retained only as non-freshness metadata. All 28 fixture cases
+pass, including wrong-root/hash, PID/owner change, stale-process, watchdog,
+ungoverned-process, out-of-band manifest-pin, stale-source/payload, cross-run
+and unchanged-restart refusal plus the original reminder lifecycle and privacy
+checks. A preflight journal byte anchor must also survive in the retained
+generation set, preventing rotation from hiding an earlier duplicate dispatch.
+Artifact verification against the isolated Release also passes. Only an
+attended clean tray quit, launch of the manifest's exact binary,
+and create → restart → one-body delivery → durable transcript → acknowledgement
+observation can promote the reminder slice to `VERIFIED LIVE`.
 
-Brief 018 was **BLOCKED ON ATTENDED ACTION** at the 2026-08-08 checkpoint after
-the same stale runtime remained active across three consecutive continuation
-turns. This was a deliberate safety and evidence boundary, not a code blocker.
+The authorized 2026-08-09 Pizza/HUD Windows rebuild superseded the binary at
+that isolated Release path. Its current `app.so` SHA-256 is
+`12E6044161268E8D9DCCA244A358C867265A603661E3086FC3B66454500E7790`, which
+intentionally no longer matches the accepted Brief 018 manifest above. The
+verifier must therefore fail closed until a fresh governed artifact is built
+and bound. No Brief 018 restart or reminder was performed during the HUD
+rebuild.
 
-**Brief 018 is now ACCEPTED / VERIFIED LIVE (evidence observed 2026-08-16).**
-The attended restart happened on 2026-08-15 and the reminder slice completed its
-full vertical path against the live Core. The record is still in the ledger:
+## Pizza delivery-box controller — 2026-08-09
+
+Brief 019 adds an evidence-driven delivery controller beneath the four frozen
+Pizza roadmaps without changing any Northstar or macro phase name. It is
+`TESTED`, not verified live: no Firebase migration, agent execution, GUI check,
+or external action occurred during acceptance.
+
+- Homecoming has 29 boxes across phases `3/3/3/4/3/3/4/3/3`.
+- Hoard has 32 boxes across phases `4/10/5/4/4/5`, reconciled from the accepted
+  Hoard tracker delta at `4f22a3a`. Ten are verified, eighteen are deferred
+  (the Hoard projection calls these locked), none are ready, and four remain
+  sponsor/live `UNVERIFIED` gates. Stable external IDs and dependencies are
+  preserved, including newly verified `hoard.p1.b04a`, `hoard.p1.b04b`,
+  `hoard.p1.b05a`, and `hoard.p1.b05b`.
+- Kingdom has 18 boxes across phases `3/3/3/3/3/3`. Its expected
+  `C:\code\Kingdom\docs\PROJECT_SOURCE_OF_TRUTH.md` is absent, so no repository
+  box is pre-verified; its first evidence requirement explicitly remains
+  `UNVERIFIED`.
+- Factory has 23 boxes across phases `3/3/2/3/3/2/2/2/3`. Signal Scan evidence
+  is visible, candidate votes and Blueprint authority remain Sadeq's, public
+  Dispatch is live-gated, and actual reconciled Money in Bank remains terminal.
+
+The selector considers only the active governed phase, verified dependencies,
+agent ownership, local-safe authority, and absence of an active duplicate
+request/lease. It queues a deterministic self-contained `READY FOR AGENT`
+packet; it does not claim Codex or Claude executed it. Safe failures retain
+evidence and enter repair; identical strategy digests are refused; the same
+causal blocker escalates after three distinct safe strategies. Sponsor/live
+boundaries stop immediately. A box cannot become `verified` without durable
+requirement-bound evidence, Northstar-PM review identity, and review time.
+
+Factory's conveyor now reads the same governed project delivery-box states as
+the Pizza. The project remains a projection of the scan-only/`FactoryRun`
+authority, so a parked legacy run cannot award a contradictory Pizza state.
+
+Automated evidence: 68/68 focused tests passed across delivery boxes, portfolio,
+work requests, Factory conveyor, and commercial gates. Scoped Dart analysis
+reported no errors; four pre-existing desktop-shell warnings and existing style
+infos remain. The Pizza drawer's compact counts and authority language are
+tested; visible layout and label non-overlap remain `UNVERIFIED` until an
+attended desktop observation.
+
+### Pizza evidence reconciliation and real desktop observation — 2026-08-09
+
+The canonical catalog now contains 102 boxes (`29 + 32 + 18 + 23`) across the
+same four projects and 30 unchanged macro phases. The later 12:37–13:23 evidence
+window changes proof projection, not the frozen macro names or box count:
+
+- Homecoming's Pizza/HUD rendering is `VERIFIED LIVE` on the real updated
+  desktop process, but no Homecoming delivery phase advances.
+- Hoard Phase 1 retains exactly ten verified boxes. A managed-sandbox spawn
+  `EPERM` occurred before test logic and the owner changed strategy to a
+  child-process-permitted rerun; no additional box is promoted from that work.
+- Kingdom Ledger Safety is active. K1.4 visit-state/economic-close evidence is
+  reported Tested at isolated commit `620293c`, with K1.5 next. That object was
+  not present in the local repositories available to this acceptance review,
+  so authoritative adoption remains `UNVERIFIED` and no Kingdom box is marked
+  verified from the report alone.
+- Factory Signal Scan is accepted for run-bound Find My Table candidate
+  `FSC-LEGACY-YES-001`; Blueprint packet `FSC-LEGACY-YES-001-BP-IC-v3` is
+  `TESTED` at commit `76dd3ade` and Blueprint is active. Its two-tables/week,
+  four-players/table, BHD12 minimum baseline (BHD96 weekly gross; BHD48 per
+  incremental table) and Assembly/live exclusions were independently read from
+  the commit. Assembly is not authorized, and DM compensation still requires a
+  sponsor decision even though safe scenario analysis may continue.
+- Table Ready remains Tested and unpublished. BoothSignal's offline product
+  core is Tested by a primary QA receipt and production record (5/5
+  deterministic calculation/rendered-shell tests); it is package-ready but
+  unpublished, with willingness to pay, sales, fees, refunds, and net receipts
+  `UNVERIFIED` except for the receipt's explicit local zero-sales record.
+- The TikTok Portfolio Manager remains a separate governed lane. Seven visual
+  masters, seven local Piper voiceovers, retained 35/35 readiness tests, and an
+  active 1080×1920 render are recorded as an integration delta only. No Pizza
+  slice, account, post, or revenue state is invented.
+
+The later 13:23–13:53 evidence packet is preserved pending a write-eligible
+implementation path. Factory commit `b6602c668fc670413cce3865eb6b71949fbb0e89`
+was independently resolved on `codex/factory-operator-automation`; its venue
+scale model, tests, and investment memo complete the Find My Table Blueprint
+packet at `TESTED` level with recommendation `INVEST` in a bounded internal
+operations MVP. The same primary packet explicitly retains separate exact
+Assembly authority and forbids outreach, customer data, payment, spend,
+publishing, and live action. Therefore Blueprint is Tested, while Assembly and
+public action remain future gates. Kingdom K1.6, Hoard Brief 014, BoothSignal,
+TikTok media, and Homecoming stream recovery receive no new proof promotion from
+the report alone. Tracker-code integration and any fresh real-HUD screenshot
+remained `UNVERIFIED` in that window because write-enabled Opus 5 relay
+authority was not yet available. The later authorized implementation activity
+is recorded below; Desktop Homecoming still must not restart for this sync.
+
+### Portfolio activity window — 2026-08-09 14:12–14:42 Bahrain
+
+No governed Pizza box or phase advanced in this window. The following activity
+is retained as work-in-progress evidence only:
+
+- Homecoming Brief 019A pipeline repair is `ACTIVE` under verified Claude Opus
+  5. The retained acceptance result is 4 PASS / 10 FAIL; capture and HUD work do
+  not begin until all 14 frozen cases pass.
+- Hoard Brief 014 contract work is `ACTIVE` under verified Claude Opus 5.
+  Preliminary JSON/schema review passed, but A01-A18 remain `UNVERIFIED` pending
+  an attributed diff and independent contract review. Phase 1 retains exactly
+  10 verified boxes.
+- Kingdom K1.6 synthetic emulator invariant probing is `ACTIVE`; its latest
+  command failure is under repair. No authoritative adoption or live promotion
+  is claimed.
+- Factory's private table-fill pilot brief is `CONCEPTUAL`. Its modeled BHD4.20
+  contribution is a hypothesis, not revenue; local synthetic packet assembly is
+  next and live use remains locked.
+- BoothSignal remains `TESTED`, package-ready, and unpublished. Its exact
+  nine-file deterministic dual-lane critic scaffold is `ACTIVE` under verified
+  Claude Opus 5; listing and payment states do not advance.
+- TikTok Tiny Market Lab is `ACTIVE` on local-safe commercial work. Account and
+  posting gates remain locked, and TikTok is not added as a Pizza slice.
+- No settled customer payment is evidenced anywhere in the portfolio.
+
+Portfolio effectiveness is `MEDIUM` and efficiency is `MIXED`: two oversized
+Claude calls deadlocked and were replaced by bounded micro-boxes without
+duplicate implementation. The operating rule is one-file/small-box dispatch,
+a ten-minute hard timeout, and liveness proven by file, test, or process
+evidence rather than by a sent prompt. Because no governed box advanced, no
+screenshot is required or accepted for this window.
+
+### Portfolio activity window — 2026-08-09 14:42–14:52 Bahrain
+
+No macro Pizza phase is promoted in this window. The governed proof-state
+changes and active work are:
+
+- Homecoming Brief 019A is `REJECTED` at 8 PASS / 6 FAIL. H019A-2 is repairing
+  the two pipeline-owned causal defects: deterministic PASS receipt formatting
+  in build/runtime fixtures and scalar-safe capture-fingerprint counting.
+  Capture cases 10-13 remain future Brief 019B scope.
+- Hoard Brief 014 reports local validation plus 12/12 authorization, 15/15
+  staging, and 23/23 recovery checks passing. Reviewer acceptance and 014B
+  dispatch remain `ACTIVE`; no live recovery gate is crossed and no box is
+  promoted from the report alone.
+- Kingdom K1.6 is demoted from `TESTED` to `PROTOTYPE`. Its official 5/5 static
+  and 9/9 emulator checks passed, but the new defensive identity-binding
+  regression failed. Adoption is blocked and bounded local repair is `ACTIVE`.
+- Factory Find My Table private pilot-packet assembly remains `ACTIVE`; its
+  first hung test process was terminated and the strategy changed to resolving
+  the exact Flutter/Dart runtime.
+- Factory Daily critic scaffold is `TESTED` at `e6c1d95`; the deliberately
+  separate QA receipts are bound at `642e155`, and the CRC-verified v1.1 ZIP and
+  manifest are bound at `c2da00c4933f2393192dad4e53624d19c0a53cdf`.
+  Primary inspection confirms a clean worktree/index, empty protected diff,
+  null active build, 9/9 focused tests, and 13/13 full tests. CakeOrder Signal
+  market/contradiction scan is the next `ACTIVE` nested box. Listing, payment,
+  live use, and revenue remain `UNVERIFIED`.
+- TikTok Day 1 review video is `TESTED` locally: 29.417 seconds, 1080x1920,
+  H.264/AAC, QA PASS, and 40/40 reported tests. Creative acceptance remains a
+  sponsor gate; account, posting, and revenue stay locked.
+- No settled customer payment is evidenced anywhere in the portfolio.
+
+The prior Factory Daily test-side-effect diagnosis is retracted: the critic
+implementation, acceptance receipts, and packaged artifact are deliberately
+separated across three commits. Because the already-running Desktop Homecoming
+process cannot ingest this compile-time projection without an attended update,
+a fresh real-app screenshot is `UNVERIFIED`; no old or synthetic image may
+satisfy that gate.
+
+### Portfolio activity window — 2026-08-09 14:52–14:57 Bahrain
+
+No governed Pizza box or macro phase advances in this window:
+
+- Homecoming's focused tracker regressions pass 37/37 after restoring the
+  canonical `UNVERIFIED` wording. H019A-2 remains `ACTIVE` and unaccepted; Brief
+  019A retains its 8/14 rejection until an independent 14/14 run passes.
+- Hoard Brief 014A reviewer acceptance is `REJECTED`: the proposed contract
+  exposes 25 keys rather than the frozen exact 18, despite its legacy suites.
+  The exact-18-key Opus repair is `ACTIVE`; 014B remains queued.
+- Kingdom K1.6 remains `PROTOTYPE`, with authoritative adoption blocked by the
+  defensive identity-binding regression. A verified Opus 5 exact-root repair
+  is `ACTIVE`, but no attributed diff exists yet.
+- Factory Blueprint's operator-facing nine-artifact copy/form box is `ACTIVE`.
+  Its Flutter generator regression is `UNVERIFIED`; Assembly and live gates
+  remain locked.
+- Factory Daily retains the `TESTED` critic-scaffold and v1.1 packaging gate.
+  CakeOrder Signal and GroomQuote are `KILLED` from contradiction evidence;
+  WholesaleOrder Gate market/contradiction scan is `ACTIVE`.
+- TikTok's synthetic analytics/live-read authorization guardrails reportedly
+  pass 7/7 focused and 40/40 full tests. The box remains `ACTIVE`; creative
+  acceptance stays with the sponsor, and no account or post action is allowed.
+- No settled customer payment is evidenced anywhere in the portfolio.
+
+Portfolio effectiveness is `HIGH` and efficiency is `EFFICIENT` for this
+window; the earlier Flutter stall is suppressed rather than retried unchanged.
+Because no higher governed Pizza state is accepted, no fresh screenshot is
+required or valid for this window.
+
+### Kingdom K1.6-M1 isolated advancement — 2026-08-09
+
+Kingdom K1.6 advances from `PROTOTYPE` to `TESTED` in its isolated evidence
+workspace only. The verified Claude Opus 5 four-file repair removes the
+caller-controlled spread that could overwrite authenticated identity in the
+`purchaseVoucher` wrapper. Codex independently bound the workspace to base
+`58dad479074ebdbaf2b3455b46a2c0356e18eaa9`, inspected the attributed four-file
+diff, and reran 10/10 static safeguards plus 15/15 local emulator behaviors.
+The accepted isolated artifact is committed at
+`64997adfe2a3001862cbbb2bfc99877980cfb35e`; its worktree and index are clean.
+
+Two prior emulator starts were refused before test logic because adjacent
+K1.3/K1.7 suites held the fixed local emulator ports. No process was terminated;
+after the adjacent suite released the ports, the unchanged K1.6 suite passed.
+The exact file hashes and test evidence are recorded in
+`docs/evidence/KINGDOM_K1_6_M1_ISOLATED_ACCEPTANCE_2026-08-09.md`.
+
+This promotion does not adopt the commit into the authoritative Kingdom
+repository, register it as governed production code, or prove live behavior.
+Those states remain `UNVERIFIED`. The next local-safe box is a bounded audit of
+adjacent callable wrappers that share the caller-data spread pattern. A fresh
+actual Desktop Homecoming HUD screenshot is required after a safely authorized
+build/runtime update; the currently running PID 27260 remains locked, so no old
+or rendered image may satisfy that future gate.
+
+### Homecoming H019A-3 acceptance — 2026-08-09
+
+Brief 019A remains `REJECTED`. Independent execution of the frozen 14-case
+pipeline suite after H019A-3 produced 9 PASS / 5 FAIL, not the required 10/14
+pipeline acceptance boundary. Case 7 fails before its intended binding verdict
+because `kai_pizza_update_pipeline.ps1:138` invokes `.Contains($Name)` on a
+dictionary shape without that overload. Cases 10-13 remain the frozen Brief
+019B capture-script scope and do not count against H019A once case 7 passes.
+
+The next bounded repair is H019A-4: normalize dictionary key lookup in
+`scripts/tools/kai_pizza_update_pipeline.ps1` only, preserve canonical capture
+binding serialization, and rerun all 14 cases. Brief 019B remains locked until
+the independent result is exactly 10 PASS with only cases 10-13 failing. PID
+27260 and live services remain untouched.
+
+H019A-4 removed the dictionary-overload crash, but independent acceptance
+remained 9/14. Case 7 now reaches the canonical comparison and reports computed
+binding `886fee001cbdeb9a9553ca8f9e306bf2fa963d1a33c034526a0d862434144e72`
+versus declared/expected
+`4638daf62b324338006e11badfe1296416f083799130cf8165e46233861c341a`.
+H019A-5 was dispatched to the same transport-verified `claude-opus-5` session
+with one-file scope, but produced no edit before the provider returned HTTP 429
+and a 21:30 Bahrain reset time. This is `CLAUDE BRIDGE BLOCKED`, not a code or
+test result. Codex has no coding-fallback authority, so case 7 remains the sole
+H019A blocker and Brief 019B remains locked.
+
+Focused delivery-box, portfolio, and Factory conveyor tests pass 37/37. A
+Windows Release build passed and the real updated Desktop Homecoming process is
+running from the governed worktree as PID 27260. Direct-window evidence
+`docs/evidence/REAL_KAI_DPI_SELECTION_RETRY_2026-08-09.png` (SHA-256
+`945722F65A03AB0F4E070963F7B09F79DB8A87DA869E75697C1024DBF50BF384`) was
+sponsor-accepted as a readable full-Pizza capture: the matrix, all four project
+labels, legend, and status row are visible without blocked glyphs or overflow
+hazard stripes. The detailed Hoard, Kingdom, and Factory drill-down drawers
+were not separately captured and remain `UNVERIFIED` visually.
+
+## Branch reconciliation and two runtime findings — 2026-08-16
+
+Two branches had diverged from `14d74070` and neither was a superset:
+`codex/homecoming-kai-claude-partnership` (13 commits, H019A/Pizza work, the
+graceful-shutdown path, and the artifact-identity repair) and
+`codex/kai-self-context` (the Briefs 012–018 commitment vertical, which existed
+only as uncommitted files until 2026-08-16). They were merged with **zero code
+conflicts** — the only four conflicting paths were this file, the Brief 018
+brief, and the two runtime acceptance scripts, all `add/add`. The more advanced
+Codex versions of the scripts and the brief were taken wholesale.
+
+### Brief 018 is NOT accepted — an overclaim, corrected
+
+An earlier 2026-08-16 revision of this file recorded Brief 018 as
+`ACCEPTED / VERIFIED LIVE`, citing this record from the live Core ledger:
 
 ```
-commitmentId   commit-ec78fa071d43c640570747c7303b797b
-text           "b018-20260815-1711-7f3c exactly-once acceptance ping."
-createdAt      2026-08-15T14:12:39.692915Z
-dueAt          2026-08-15T14:22:00.000Z   (dueWallClock 17:22 +180, Bahrain)
-targetBodyId   desktop-body-858e11f86ddd
-audience       work
-dispatchedAt   2026-08-15T14:22:13.104358Z
-acknowledgedAt 2026-08-15T14:22:15.074568Z
-status         acknowledged
+commit-ec78fa071d43c640570747c7303b797b
+created 2026-08-15T14:12:39Z → dueAt 14:22 → dispatched 14:22:13
+→ acknowledged 14:22:15, targetBodyId desktop-body-858e11f86ddd, audience work
 ```
 
-Create → hold until due → select one exact desktop body → dispatch → durable
-transcript → acknowledge, with `audience: work` keeping it out of Messenger.
-This closes the reminder slice's runtime gate. It does **not** close Phase 3:
-this is one commitment on one body, not the seven-day observed run.
+That record is genuine, and it does demonstrate the mechanism working end to
+end: a promise was held across its due instant, routed to one exact body, and
+acknowledged after persistence, without reaching Messenger. **It is not Brief
+018 acceptance.**
 
-### The instrument that reported the block was itself wrong
+Brief 018 requires the run to occur against a manifest-bound artifact —
+governed root, source commit, `Kai.exe` and `app.so` SHA-256, and a binding ID
+verified before any process action. The observed run happened on the live
+`C:\code` runtime, which is exactly the executable the 2026-08-09 attended
+attempt correctly refused as evidence. A correct outcome produced by an
+unverified binary is an anecdote, not a receipt. Brief 018 remains
+**READY FOR CLEAN-TRAY RE-ENTRY — LIVE UNVERIFIED**, as its own brief states.
 
-The 2026-08-08 preflight called the running Core "stale" partly because
-`/health` reported `startedAt: 2026-08-07`. That field is written with `??=`
-(`_hydrate`) and therefore records **the first time Core ever ran on this
-machine** — it survives every restart and every rebuild by design. It was read
-as a process clock. The capability list was the only accurate staleness signal
-in that response, and `kai_reminder_runtime_acceptance.ps1` was already gating
-on it correctly; the misreading was in the human-facing summary, not the script.
+Recording the overclaim rather than silently deleting it: the failure mode was
+reading a real artifact as proof of a *different* claim than the one it
+supports, which is the same class of error as the `startedAt` misreading below.
 
-Repaired 2026-08-16:
+### The health clock, from both directions
 
-- `/health` now publishes `processStartedAt` alongside `startedAt`. Only the new
-  field answers "is the running build the one I just made?"
-- `_emptyState()` no longer stamps `startedAt` from the real wall clock. That was
-  a second writer disagreeing with `_hydrate`'s injected clock, which made the
-  install date untestable; `_readState` now routes a genuine first run through
-  `_hydrate` so one writer owns the field.
-- The acceptance script reports both values as evidence so the two clocks cannot
-  be confused again.
-- `test/kai_core_server_test.dart` pins the distinction across a simulated
-  rebuild-and-restart.
+Both branches independently found that `/health.startedAt` is persisted Core
+state written with `??=` — the first run on the machine, durable across every
+restart — and not a process clock. The 2026-08-08 preflight had read it as
+freshness and concluded a current build was stale.
 
-A project that refuses to claim a capability without evidence cannot tolerate an
-evidence source that answers a different question than the one being asked. This
-is recorded here because the failure was in the measurement layer, and the cost
-was eight days of believing a shipped slice was blocked.
+The two repairs are complementary and both are kept:
+
+- Codex removed the invalid freshness inference and replaced it with real build
+  provenance: an immutable accepted-artifact manifest, executable and payload
+  hashes, runtime identity, and journal anchors.
+- This branch added `processStartedAt` to `/health` beside `startedAt`, and made
+  `_hydrate` the single writer of the install date so a first run stamps from
+  the injected clock and is testable. `_emptyState` no longer stamps it from the
+  wall clock.
+
+Provenance answers "is this the accepted binary". The process clock answers "is
+this a fresh process". The 2026-08-08 failure needed both questions separated,
+and now they are.
+
+### Two things only the running system says
+
+- **Firebase stream recovery is unbounded and unalerted.** 968
+  `activity_stream_unavailable` and 482 `request_stream_unavailable` entries in
+  the 48 hours to 2026-08-16, all failed host lookups or socket timeouts from
+  the laptop sleeping. Recovery works and credentials are redacted, so this is
+  neither a correctness nor a privacy failure — it is a flat retry with no
+  backoff and no alert, and it dominates a journal that has already rotated once
+  at 2MB. Real degradation is currently indistinguishable from ordinary sleep.
+- **Bodylessness is the steady state.** Presence at 2026-08-16T07:56Z listed one
+  participant: the coordinator itself. Every attention decision in that window
+  resolved `storeForLater / no_suitable_body_online`. Phase 3's seven-day
+  observed run cannot begin from this state, and no further engine work
+  substitutes for it.
 
 ### Proactive repetition defect — found and repaired 2026-08-16
 
-Sadeq reported five consecutive proactive messages carrying the same
-observation in five different wordings. This is a **product-visible failure of
-Northstar condition 7** ("without spamming"), and it survived every existing
-dedup layer because all of them compare identity by text or by event id, and the
-repeats had neither in common.
+Sadeq reported five consecutive proactive messages carrying one observation in
+five different wordings. This is a product-visible failure of Northstar
+condition 7 ("without spamming") and it survived every dedup layer because all
+of them compare identity by text or event id, and the repeats shared neither.
 
-Root cause was three guards defeating each other, none of which is in the
-Attention Engine — the engine's ordered policy behaved correctly throughout:
+The Attention Engine behaved correctly throughout. Three guards in
+`KaiProactiveService` and `KaiNoticedService` defeated each other:
 
-1. `Noticed.carried` counts turns the item was **displayed** in the prompt block,
-   which is the right design for that block and rises during ordinary
-   conversation. `KaiProactiveService` ranked proactive candidates by it, so
-   within roughly a dozen turns the top item became permanent.
-2. At `carried >= 12` the proactive path **returned that item directly**,
-   bypassing the repetition guard at the end of the method entirely. The comment
-   on `_loudAfter` recorded that this escalation had never fired for any item;
-   it had since been wired to a counter that does fire, and the untested branch
-   became the default.
-3. The bypassed guard compared generated `seed` strings — and the noticed seed
-   interpolates the live `carried` count. Two raises of one observation produced
-   two different strings, so the check written to stop "the same tap wearing a
-   fake moustache" was defeated by a counter sewn into the moustache.
+1. `Noticed.carried` counts turns the item was **displayed**, which is correct
+   for the prompt block and rises during ordinary conversation. The proactive
+   path ranked by it, so within a dozen turns the top item became permanent.
+2. At `carried >= 12` that path **returned the item directly**, bypassing the
+   repetition guard at the end of the method entirely.
+3. That guard compared generated `seed` strings, and the noticed seed
+   interpolates the live `carried` count — so two raises of one observation
+   produced two different strings and both passed.
 
-Nothing anywhere recorded that Kai had **raised** something. `carried` measures
-being shown a thing, not saying it, and only ever rises.
+Nothing recorded that Kai had **raised** anything. Repair: `raisedAt` /
+`raisedCount` on `Noticed`; a pure `canRaiseProactively` policy with escalating
+quiet (24 hours, then 3 days, then no further unprompted raises, while the item
+keeps its place in `promptBlock`); and `KaiNudge.topicKey` / `.identity` so the
+guard compares a subject key rather than prose. The raise is recorded at
+selection, not delivery, because generation is the step that reworded the
+observation past every equality check.
 
-Repair:
-
-- `Noticed` gains `raisedAt` / `raisedCount`; absent fields read as never raised,
-  so no existing observation is silenced by the migration.
-- `KaiNoticedService.canRaiseProactively` is a pure static policy: escalating
-  quiet of 24 hours after the first unprompted raise, 3 days after the second,
-  and no further unprompted raises after the third. The item keeps its place in
-  `promptBlock`, so he can still raise it inside a conversation — it loses the
-  unprompted mouth, not the memory.
-- `KaiNudge.topicKey` / `.identity` give a nudge a subject-stable identity, and
-  the repetition guard and `_lastUnansweredNudgeSeed` now compare that instead of
-  prose.
-- The raise is recorded at **selection**, not delivery — generation is the step
-  that reworded the observation past every equality check, so pressure is
-  relieved on the side of it where the item still has an identity.
-
-Proof state: **Tested**. 20 tests in `test/noticed_test.dart` cover the backoff,
-the ratchet (`carried: 500` cannot buy back an exhausted item), legacy rows, and
-the identity comparison. Full suite 1129/1129; analyzer unchanged at 175 issues,
-zero introduced. Runtime behavior is `UNVERIFIED` until observed against a live
-body — which is blocked on the same bodylessness recorded in P2.6.
+Proof state **Tested** — 20 tests in `test/noticed_test.dart`. Runtime behaviour
+is `UNVERIFIED` and is blocked on the same bodylessness recorded above.
 
 The general lesson, since it has now cost twice: **generated prose is not an
-identity.** Any future dedup that compares model output rather than a key will
-fail the same way, silently, and look like character.
+identity.** Any dedup comparing model output rather than a key fails this way,
+silently, and looks like character.
+
+### Memory write classifier — inverted 2026-08-16
+
+`scopeForTurn` ended `if (route == fastChat) return sharedLife`, and `fastChat`
+is what `KaiRouterService` returns when **nothing matched**. The rule therefore
+read "anything I could not classify is shared life", and `sharedLife` is
+Messenger-visible. Every read control in that file fails closed; this one write
+branch failed open, and it ran on every ordinary desktop turn.
+
+It survived because nothing tested it — every `sharedLife` assertion in
+`kai_memory_scope_test.dart` was on the read side. The branch had no coverage.
+
+Now `privateCore` unless something positive says otherwise. To avoid making Kai
+worse rather than only safer, `scopeDecisionForTurn` returns the fail-closed
+scope plus a `marginal` flag identifying exactly the branch the old default
+covered, and `KaiMemoryWorthinessClassifier` may promote **only** those turns
+and **only** to `sharedLife`. Every failure — no provider, timeout, bad JSON,
+wrong shape, low confidence, exception — keeps the private answer. A caller that
+ignores the type entirely is still correct, just more private.
+
+Proof state **Tested** for the deterministic half (9 tests). The classifier is
+implemented but **not yet wired into `ai_service.dart`** and has no test
+coverage yet; until it is wired, behaviour is the strict inversion and Messenger
+is thinner than it was.
 
 ## Evidence index
 
@@ -608,10 +855,7 @@ fail the same way, silently, and look like character.
   outbound acceptance.
 - `scripts/test/kai_quest_loopback_bridge.ps1` — development-only, loopback-
   preserving Quest USB transport.
-- `test/kai_core_server_test.dart` — Core durability, lanes, inbox, leases, and
-  the install-clock/process-clock separation in `/health`.
-- `test/noticed_test.dart` — proactive raise backoff, the `carried` ratchet, and
-  subject-stable nudge identity.
+- `test/kai_core_server_test.dart` — Core durability, lanes, inbox, and leases.
 - `test/kai_body_event_test.dart` — event authority and one-body routing.
 - `test/kai_memory_scope_test.dart` — cross-surface memory boundaries.
 - `test/kai_headless_coordinator_test.dart` — headless ownership tripwires.
@@ -636,6 +880,20 @@ fail the same way, silently, and look like character.
 - `docs/briefs/BRIEF_011_KINGDOM_PORTFOLIO.md` — bounded contract for adding
   Kingdom to the proof-driven desktop portfolio and refreshing Hoard's stale
   evidence seed.
+- `docs/briefs/BRIEF_019_PIZZA_DELIVERY_BOX_AUTOMATION.md` — frozen authority,
+  lifecycle, selection, repair, proof, UI, and stop contract for the controller.
+- `lib/services/core/kai_delivery_box.dart` — canonical box model, deterministic
+  selector, honest work packet, bounded repair, and durable proof gate.
+- `lib/services/core/kai_delivery_box_catalog.dart` — 102 frozen boxes across all
+  30 Homecoming, Hoard, Kingdom, and Factory macro phases.
+- `test/kai_delivery_box_test.dart` — parsing, defaults, box counts, eligibility,
+  idempotent dispatch, repair, escalation, sponsor refusal, proof durability,
+  Factory scan-only, Hoard/Kingdom honesty, and Pizza semantics.
+- `docs/briefs/BRIEF_018A_AUTHENTICATED_LOCAL_GRACEFUL_SHUTDOWN.md` — bounded
+  future-runtime repair contract; it cannot control the currently running old
+  coordinator/watchdog binary.
+- `docs/evidence/REAL_KAI_DPI_SELECTION_RETRY_2026-08-09.png` — sponsor-accepted
+  direct capture of the real updated Windows Pizza HUD.
 
 Kingdom portfolio integration is code-tested only until an attended Windows
 check observes all three cards and their drill-down flowcharts.

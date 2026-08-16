@@ -1,0 +1,18 @@
+﻿{
+    "schemaVersion":  1,
+    "governedRoot":  "C:\\Users\\sadeq\\.codex\\worktrees\\3740\\homecoming_app",
+    "sourceCommit":  "9a5c6ffc951a2213d9b5cf5d7a28df16518aa2b6",
+    "sourceStatusSha256":  "b19945b0628400ee32fd5fd05a2382124022ab6e35435edac01119773e4f337b",
+    "maxSourceLastWriteUtc":  "2026-08-09T11:11:18.7867361Z",
+    "buildCredentialProfile":  "empty-local-build-stub-v1",
+    "buildCredentialStubSha256":  "2ac03891d16660a994db2b50021426e905e7a4dd1ce149b1600ec5899bb49d64",
+    "executableRelativePath":  "build\\windows\\x64\\runner\\Release\\Kai.exe",
+    "executableSha256":  "b906b94d56e9b151de1dc1cc23adf3b257c1da39a9d3ae2624a47b74b4192896",
+    "executableLength":  1905152,
+    "payloadRelativePath":  "build\\windows\\x64\\runner\\Release\\data\\app.so",
+    "payloadSha256":  "e74b61177d81c9f09244bf9a87557ad7061aff61c064ccac75a34c871b8a82a8",
+    "payloadLength":  13026192,
+    "payloadLastWriteUtc":  "2026-08-09T11:27:13.3484144Z",
+    "acceptedAtUtc":  "2026-08-09T11:42:55.3552904Z",
+    "bindingId":  "0b1d8b4fb435b4de4de6bea12465a7e0104862f4f24f174f494463ea04ea874a"
+}

@@ -19,14 +19,20 @@ import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 import '../services/ai/ai_service.dart';
 import '../services/core/kai_factory_service.dart';
+import '../services/core/kai_db.dart';
 import '../widgets/kai_activity_gears.dart';
 import '../services/ai/ai_config.dart'; // voice on/off lives here
 import '../services/ai/memory_service.dart'; // decay-by-use: the forget sweep
+import '../logic/product_factory.dart';
 import '../services/core/kai_project_service.dart';
+import '../services/core/kai_delivery_box.dart';
+import '../services/core/kai_project_flowchart_service.dart';
 import '../services/core/reply_chunker_service.dart';
+import '../services/core/kai_transcript_echo_guard.dart';
 import '../services/core/tool_policy_service.dart';
 import '../services/core/tool_executor_service.dart';
-import '../widgets/kai_project_card.dart';
+import '../widgets/kai_project_portfolio.dart';
+import '../widgets/kai_factory_conveyor.dart';
 import '../widgets/kai_state_scorecard_card.dart';
 import '../services/core/code_workspace_service.dart';
 import '../services/core/kai_surface_context.dart';
@@ -64,6 +70,7 @@ import '../services/core/kai_work_request_service.dart';
 import '../services/core/conversation_store_service.dart';
 import '../services/core/kai_conversation_request_service.dart';
 import '../services/core/kai_core_client.dart';
+import '../services/core/kai_outbound_acceptance.dart';
 import '../services/core/kai_taskbar_heartbeat.dart';
 import '../services/core/kai_global_presence_service.dart';
 import '../services/embodiment/kai_embodiment_gateway_service.dart';
@@ -137,9 +144,19 @@ class _ChatMsg {
     this.image,
     this.attachments = const [],
     this.persistedAt,
+    this.recordId,
   });
 
   final int? persistedAt;
+
+  /// Identity of the durable record behind this bubble, when it has one.
+  ///
+  /// Only deterministic records carry it — currently Core outbound reminders.
+  /// It is how the same reminder is recognised as already on screen, whether it
+  /// arrives from the poller, from the history watcher a second later, or from
+  /// a restore after a restart. Comparing text instead would merge two genuinely
+  /// different reminders that happen to be worded the same.
+  final String? recordId;
 }
 
 class KaiDesktopShell extends StatefulWidget {
@@ -164,9 +181,12 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
     phase: KaiCoreHeartbeatPhase.connecting,
   );
   KaiCoreHandoffInbox? _coreHandoffInbox;
+  KaiCoreOutboundInbox? _coreOutboundInbox;
+  bool _coreSidecarReady = false;
   Map<String, dynamic>? _coreHandoff;
   final CodeWorkspaceService _ws = CodeWorkspaceService.instance;
   final ReplyChunkerService _replyChunker = const ReplyChunkerService();
+  final KaiTranscriptEchoGuard _transcriptEchoGuard = KaiTranscriptEchoGuard();
   final _inp = TextEditingController();
   final _inputFocus = FocusNode();
   final _scroll = ScrollController();
@@ -196,7 +216,10 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
   bool _centralConversationBusy = false;
   EngineerStatus _status = const EngineerStatus(label: 'idle');
   bool _trust = EditGate.instance.trustSession;
-  bool _gogglesOn = false;
+  // Desktop Homecoming is Kai's permanent workbench body. Unlike Messenger,
+  // this lane never drops into friend-only policy: Kai keeps his friendship,
+  // but technical conversation and approved tools remain available throughout.
+  static const bool _gogglesOn = true;
   bool _paletteOpen = false;
   bool _terminalExpanded = false;
   bool _showMessengerSurface = false;
@@ -228,10 +251,25 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
   /// background layers listen.
   final ValueNotifier<Offset> _pointer = ValueNotifier(Offset.zero);
 
+  /// Opens a full, self-contained HTML execution map for one project.
+  ///
+  /// It is generated from the same KaiProject instance as the rail. Looking at
+  /// a tracker still never changes CodeWorkspaceService or where Kai's hands
+  /// operate.
+  Future<void> _openProjectFlowchart(KaiProject project) async {
+    try {
+      await const KaiProjectFlowchartService().open(project);
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not open project flowchart: $error')),
+      );
+    }
+  }
+
   @override
   void initState() {
     super.initState();
-    unawaited(_loadGogglesState());
     unawaited(_startGlobalPresence());
     unawaited(_startCorePresence());
     // VR/AR gateways and Messenger turns belong to the hidden coordinator.
@@ -270,8 +308,13 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
     // reads it server-side too — the switch and the guard must never disagree.
     // On desktop boot, fail closed: saved stopped state remains, but no factory
     // run silently continues until Sadeq turns the toggle on again.
-    KaiFactoryService.instance.parkRunAfterStartup(_kPersona).then((_) {
+    KaiFactoryService.instance.parkRunAfterStartup(_kPersona).then((_) async {
       if (mounted) setState(() => _factoryModeOn = false);
+      final run = await KaiFactoryService.instance.current(_kPersona);
+      await KaiProjectService.instance.ensureFactoryProject(
+        _kPersona,
+        run: run,
+      );
     });
     // Forgetting, once per launch, well after boot so it never competes with
     // waking up. Only sweeps memories he hasn't needed in 30+ days that have
@@ -282,8 +325,14 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
     });
     // Make sure his tracked projects exist with their ORIGINAL goals frozen.
     // No-ops if they're already there, so live progress is never overwritten.
+    // Legacy trackers stay seeded and readable — the self-improvement runner,
+    // the project tools and the prompt block all still depend on them. They are
+    // only unmounted from the portfolio rail.
     KaiProjectService.instance.ensureSmarterProject(_kPersona);
     KaiProjectService.instance.ensureSentienceProject(_kPersona);
+    KaiProjectService.instance.ensureHomecomingProject(_kPersona);
+    KaiProjectService.instance.ensureHoardProject(_kPersona);
+    KaiProjectService.instance.ensureKingdomProject(_kPersona);
     // Severed-nerve check: shout if he's offered any tool with no policy. This
     // is what silently ate job_start / set_layer_progress — visible at boot now.
     ToolPolicyService.auditAgainstSchemas(ToolExecutorService.toolDefinitions);
@@ -357,8 +406,62 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
     );
     _coreHandoffInbox = inbox;
     inbox.start();
+    _coreSidecarReady = true;
+    _maybeStartCoreOutboundInbox();
     print('[KaiCore] desktop presence heartbeat online');
   }
+
+  /// Start the reminder inbox once — and only once BOTH halves of its identity
+  /// exist.
+  ///
+  /// The sidecar gives us somewhere to ask; the global presence service gives
+  /// us the body id Core recorded as the delivery target. Racing ahead with a
+  /// locally invented id (hostname, pid, the heartbeat's device id) would query
+  /// an inbox that is always empty and acknowledge with a name Core does not
+  /// recognise — the promise would look delivered and never be shown.
+  ///
+  /// Called from both startup paths because either can finish last.
+  void _maybeStartCoreOutboundInbox() {
+    if (_coreOutboundInbox != null) return;
+    if (!_coreSidecarReady) return;
+    final bodyId = KaiGlobalPresenceService.instance.bodyId;
+    if (bodyId == null || bodyId.isEmpty) return;
+
+    final inbox = KaiCoreOutboundInbox(
+      client: _coreSidecar.client,
+      surface: 'desktop',
+      bodyId: bodyId,
+      onOutbound: _outboundAcceptance.accept,
+    );
+    _coreOutboundInbox = inbox;
+    inbox.start();
+    print('[KaiCore] desktop outbound inbox online for body $bodyId');
+  }
+
+  /// The shell's binding to [KaiOutboundAcceptance].
+  ///
+  /// The ordering itself lives in that unit so it can be tested directly —
+  /// including the case where the history watcher renders a record while its
+  /// durable write is still in flight, which no test could force while this
+  /// logic was private to a widget.
+  late final KaiOutboundAcceptance _outboundAcceptance = KaiOutboundAcceptance(
+    personaId: _kPersona,
+    surfaceId: 'in_person',
+    isMounted: () => mounted,
+    isVisible: (recordId) => _msgs.any((msg) => msg.recordId == recordId),
+    render: (line) {
+      setState(() => _msgs.add(_ChatMsg(
+            false,
+            line.text,
+            persistedAt: line.timestampMillis,
+            recordId: line.recordId,
+          )));
+      _autoscroll();
+    },
+    nowMillis: () => DateTime.now().millisecondsSinceEpoch,
+    onPersistError: (error) =>
+        print('[KaiCore] reminder persistence failed, leaving pending: $error'),
+  );
 
   Future<void> _startGlobalPresence() async {
     final presence = KaiGlobalPresenceService.instance;
@@ -372,35 +475,16 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
         gogglesOn: _gogglesOn,
       );
       _applyGlobalPresence(presence.latest);
+      // The authoritative body id exists from here. If the sidecar came up
+      // first, this is what starts the reminder inbox.
+      _maybeStartCoreOutboundInbox();
     } catch (error) {
       print('[KaiPresence] central registry failed to start: $error');
       _applyGlobalPresence(const KaiGlobalPresenceSnapshot.connecting());
     }
   }
 
-  KaiSurfaceContext get _desktopSurfaceContext => KaiSurfaceContext.desktop
-      .copyWith(goggles: _gogglesOn ? KaiGoggles.on : KaiGoggles.off);
-
-  Future<void> _loadGogglesState() async {
-    final prefs = await SharedPreferences.getInstance();
-    final value = prefs.getBool('kai_desktop_goggles_on') ?? false;
-    if (!mounted) return;
-    setState(() => _gogglesOn = value);
-    unawaited(KaiGlobalPresenceService.instance.updateBodyState(
-      gogglesOn: value,
-    ));
-  }
-
-  Future<void> _setGoggles(bool value) async {
-    setState(() => _gogglesOn = value);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('kai_desktop_goggles_on', value);
-    await KaiGlobalPresenceService.instance.updateBodyState(
-      gogglesOn: value,
-      status: 'idle',
-      userActive: true,
-    );
-  }
+  KaiSurfaceContext get _desktopSurfaceContext => KaiSurfaceContext.desktop;
 
   void _applyGlobalPresence(KaiGlobalPresenceSnapshot snapshot) {
     if (!mounted) return;
@@ -590,18 +674,40 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
     )
         .listen((lines) {
       if (!mounted || lines.isEmpty) return;
-      final fresh = lines
+      final incoming = lines
           .where((line) => line.timestampMillis > _lastDesktopHistoryMillis)
+          .toList();
+      if (incoming.isEmpty) return;
+
+      // Advance the stream cursor even when every incoming line is our own
+      // expected echo. Otherwise the next REST poll presents the same lines
+      // again after their one-shot guards were consumed, recreating the exact
+      // duplicate this filter exists to prevent.
+      _lastDesktopHistoryMillis = lines
+          .map((line) => line.timestampMillis)
+          .reduce((a, b) => a > b ? a : b);
+
+      final fresh = incoming
+          // Identity wins over the echo guard, and is checked first. A reminder
+          // the poller already rendered comes back down this stream moments
+          // later; without this it would appear twice. The echo guard cannot
+          // help — it matches on text, so it would either miss this or, worse,
+          // swallow a second genuine reminder with identical wording.
+          .where((line) =>
+              line.recordId == null ||
+              !_msgs.any((msg) => msg.recordId == line.recordId))
+          .where((line) => !_transcriptEchoGuard.consumeIfExpected(
+                fromKai: line.fromKai,
+                text: line.text,
+              ))
           .map((line) => _ChatMsg(
                 !line.fromKai,
                 line.text,
                 persistedAt: line.timestampMillis,
+                recordId: line.recordId,
               ))
           .toList();
       if (fresh.isEmpty) return;
-      _lastDesktopHistoryMillis = lines
-          .map((line) => line.timestampMillis)
-          .reduce((a, b) => a > b ? a : b);
       setState(() => _msgs.addAll(fresh));
       _autoscroll();
     }, onError: (_) {});
@@ -612,10 +718,12 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
     _coreHeartbeat?.stop();
     _globalPresenceSub?.cancel();
     _desktopHistorySub?.cancel();
+    _transcriptEchoGuard.clear();
     // This window owns the desktop body lease. The independent coordinator has
     // its own central-core lease, so closing this body does not stop Kai's heart.
     unawaited(KaiGlobalPresenceService.instance.stop());
     _coreHandoffInbox?.stop();
+    _coreOutboundInbox?.stop();
     _coreSidecar.client.close();
     _engSub?.cancel();
     _proSub?.cancel();
@@ -825,11 +933,15 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
     _interrupted = false;
     final img = _pendingImage;
     final attachments = List<_KaiAttachment>.unmodifiable(_pendingAttachments);
+    final visibleUserText = img != null && text.isEmpty ? '[image]' : text;
+    if (echoUser && text.isNotEmpty) {
+      _transcriptEchoGuard.expect(fromKai: false, text: text);
+    }
     setState(() {
       if (echoUser) {
         _msgs.add(_ChatMsg(
           true,
-          img != null && text.isEmpty ? '[image]' : text,
+          visibleUserText,
           image: img,
           attachments: attachments,
         ));
@@ -910,6 +1022,7 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
         },
       );
       if (!_isStaleGeneration(generation)) {
+        _transcriptEchoGuard.expect(fromKai: true, text: resp.reply);
         await _addAssistantReplyUnfolding(resp.reply, generation);
         final breakworthy =
             RegExp(r'^BREAKWORTHY_ALERT:\s*(.+)$', multiLine: true)
@@ -1032,8 +1145,9 @@ class _KaiDesktopShellState extends State<KaiDesktopShell> {
   ///
   /// Without it, "keep going" has no terminating condition and he either stops
   /// at the first refusal or grinds forever. The bar Sadeq set is exact:
-  /// **ship a quality product that has sales viability.** Not "find a gap", not
-  /// "write an analysis" — a thing on sale that could plausibly sell.
+  /// **put actual customer money into the bank account.** Not "find a gap",
+  /// not "write an analysis", not even a sale notification. The payment must
+  /// settle and reconcile to the real order.
   ///
   /// And the crucial half: a failed pass is not a stop. "No defensible gap
   /// found" means the SEARCH was wrong, not that the job is over. He changes
@@ -1046,8 +1160,10 @@ __KAI_FACTORY_PASS__
 Continue the factory run. Follow KAI_PRODUCT_SCOUT_METHOD.md.
 
 WHAT SUCCESS MEANS — the only definition that counts:
-a real product, listed for sale, that a stranger might plausibly buy.
-Not a gap analysis. Not a plan. A thing on sale.
+actual customer money settled into Sadeq's bank account and reconciled to the
+real order with a settlement reference.
+Not a gap analysis. Not a plan. Not a listing. Not a sale notification or a
+pending processor payout. Money in the bank.
 
 HOW TO WORK:
 - Call scout_policy FIRST. It tells you which markets to try next, which gate
@@ -1440,6 +1556,20 @@ FACTORY_NEXT: continue
   Future<void> _addAssistantReplyUnfolding(String reply, int generation) async {
     final chunks = _replyChunks(reply);
     if (_isStaleGeneration(generation)) return;
+
+    // The persistence watcher can beat the direct response by a few
+    // milliseconds. If that happened, keep the already-rendered persisted
+    // bubble and cancel the pending echo instead of painting the same reply.
+    final normalizedReply = reply.replaceAll('\r\n', '\n').trim();
+    final alreadyRendered = _msgs.reversed.take(12).any((message) =>
+        !message.user &&
+        !message.interim &&
+        message.persistedAt != null &&
+        message.text.replaceAll('\r\n', '\n').trim() == normalizedReply);
+    if (alreadyRendered) {
+      _transcriptEchoGuard.cancel(fromKai: true, text: reply);
+      return;
+    }
 
     setState(() => _msgs.add(_ChatMsg(false, chunks.first, unfolding: true)));
     _autoscroll();
@@ -2133,6 +2263,407 @@ FACTORY_NEXT: continue
     );
   }
 
+  Future<({FactoryRun? run, HumanApproval? approval, KaiProject? project})>
+      _factoryDashboardSnapshot() async {
+    final run = await KaiFactoryService.instance.current(_kPersona);
+    await KaiProjectService.instance.ensureFactoryProject(_kPersona, run: run);
+    final project = await KaiProjectService.instance.get(
+      _kPersona,
+      KaiProjectService.factoryId,
+    );
+    final approval = run == null
+        ? null
+        : await KaiFactoryService.instance.approvalFor(_kPersona, run.id);
+    return (run: run, approval: approval, project: project);
+  }
+
+  Future<void> _reviewFactoryApproval(
+    FactoryRun run,
+    HumanApproval? approval,
+  ) async {
+    final alreadyApproved =
+        approval != null && approval.isValid && approval.runId == run.id;
+    final action = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: const Color(0xFF08121B),
+        title: Text(
+          alreadyApproved ? 'Release approved' : 'Approve production release?',
+          style: const TextStyle(color: Color(0xFFEAF6FF)),
+        ),
+        content: Text(
+          alreadyApproved
+              ? 'Run ${run.id} has your publishing approval. This authorizes '
+                  'Kai to release this exact run when Factory Mode is ON. It '
+                  'does not authorize any other run.'
+              : 'Approve run ${run.id} for publication at its prepared listing '
+                  'terms? Approval is bound to this run only. The factory will '
+                  'still remain stopped until you turn Factory Mode ON.',
+          style: const TextStyle(color: Color(0xFFAAC0D1), height: 1.35),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('CANCEL'),
+          ),
+          if (alreadyApproved)
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, 'revoke'),
+              child: const Text(
+                'REVOKE APPROVAL',
+                style: TextStyle(color: Color(0xFFFF7C92)),
+              ),
+            )
+          else
+            FilledButton.icon(
+              onPressed: () => Navigator.pop(dialogContext, 'approve'),
+              icon: const Icon(Icons.approval_outlined, size: 16),
+              label: const Text('APPROVE THIS RUN'),
+            ),
+        ],
+      ),
+    );
+    if (action == null) return;
+
+    final ref =
+        KaiDb.instance.ref('kai/$_kPersona/factory/approvals/${run.id}');
+    if (action == 'approve') {
+      await ref.set({
+        'approvedBy': 'sadeq',
+        'approvedAt': DateTime.now().millisecondsSinceEpoch,
+        'runId': run.id,
+      });
+    } else if (action == 'revoke') {
+      await ref.remove();
+    }
+    if (!mounted) return;
+    setState(() {});
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          action == 'approve'
+              ? 'Run ${run.id} approved. Turn Factory Mode ON when you want the line released.'
+              : 'Publishing approval revoked for run ${run.id}.',
+        ),
+      ),
+    );
+  }
+
+  Widget _productFactoryOpsCard() {
+    return FutureBuilder<
+        ({FactoryRun? run, HumanApproval? approval, KaiProject? project})>(
+      future: _factoryDashboardSnapshot(),
+      builder: (context, snap) {
+        final run = snap.data?.run;
+        final approval = snap.data?.approval;
+        final factoryProject = snap.data?.project;
+        final approved = run != null &&
+            approval != null &&
+            approval.isValid &&
+            approval.runId == run.id;
+        final currentIndex = factoryProject?.activePhase ?? -1;
+        final currentBoxes = factoryProject?.activePhaseLayer?.deliveryBoxes ??
+            const <KaiDeliveryBox>[];
+        final sponsorBoxes = currentBoxes
+            .where((box) => box.state == KaiDeliveryBoxState.awaitingSponsor)
+            .toList();
+        final activeBoxes = currentBoxes
+            .where((box) => {
+                  KaiDeliveryBoxState.active,
+                  KaiDeliveryBoxState.repairing,
+                  KaiDeliveryBoxState.evidenceReview,
+                }.contains(box.state))
+            .toList();
+        final status = sponsorBoxes.isNotEmpty
+            ? 'GOVERNED • AWAITING SPONSOR'
+            : activeBoxes.isNotEmpty
+                ? 'GOVERNED • AGENT WORK ACTIVE'
+                : 'GOVERNED • READY FOR NEXT BOX';
+        final blocker = sponsorBoxes.isNotEmpty
+            ? sponsorBoxes.first.outcome
+            : activeBoxes.isNotEmpty
+                ? activeBoxes.first.outcome
+                : (factoryProject?.blockers.isNotEmpty ?? false)
+                    ? factoryProject!.blockers.first
+                    : 'No eligible delivery box is recorded.';
+
+        final stations = <({
+          FactoryStage stage,
+          String name,
+          IconData icon,
+        })>[
+          (
+            stage: FactoryStage.scouting,
+            name: 'SIGNAL SCAN',
+            icon: Icons.radar
+          ),
+          (
+            stage: FactoryStage.specced,
+            name: 'BLUEPRINT',
+            icon: Icons.schema_outlined
+          ),
+          (
+            stage: FactoryStage.building,
+            name: 'ASSEMBLY',
+            icon: Icons.precision_manufacturing_outlined
+          ),
+          (
+            stage: FactoryStage.verified,
+            name: 'QA GATE',
+            icon: Icons.fact_check_outlined
+          ),
+          (
+            stage: FactoryStage.listingReady,
+            name: 'PACKAGING',
+            icon: Icons.inventory_2_outlined
+          ),
+          (
+            stage: FactoryStage.awaitingApproval,
+            name: 'APPROVAL',
+            icon: Icons.approval_outlined
+          ),
+          (
+            stage: FactoryStage.published,
+            name: 'DISPATCH',
+            icon: Icons.local_shipping_outlined
+          ),
+          (
+            stage: FactoryStage.measuring,
+            name: 'TELEMETRY',
+            icon: Icons.query_stats_outlined
+          ),
+          (stage: FactoryStage.learned, name: 'FEEDBACK', icon: Icons.loop),
+        ];
+
+        KaiFactoryStationStatus stationState(int index) {
+          final matches = factoryProject?.layers
+                  .where((candidate) => candidate.n == index)
+                  .toList() ??
+              const <KaiLayer>[];
+          if (matches.isEmpty) return KaiFactoryStationStatus.queued;
+          final boxes = matches.single.deliveryBoxes;
+          if (boxes.isNotEmpty &&
+              boxes.every((box) => box.state == KaiDeliveryBoxState.verified)) {
+            return KaiFactoryStationStatus.complete;
+          }
+          if (boxes.any(
+              (box) => box.state == KaiDeliveryBoxState.awaitingSponsor)) {
+            return KaiFactoryStationStatus.waitingApproval;
+          }
+          if (boxes.any((box) => {
+                KaiDeliveryBoxState.active,
+                KaiDeliveryBoxState.repairing,
+                KaiDeliveryBoxState.evidenceReview,
+              }.contains(box.state))) {
+            return KaiFactoryStationStatus.active;
+          }
+          if (boxes.any((box) => box.state == KaiDeliveryBoxState.blocked)) {
+            return KaiFactoryStationStatus.paused;
+          }
+          return index == currentIndex
+              ? KaiFactoryStationStatus.ready
+              : KaiFactoryStationStatus.queued;
+        }
+
+        final visualStations = <KaiFactoryStationVisual>[
+          for (var i = 0; i < stations.length; i++)
+            KaiFactoryStationVisual(
+              name: stations[i].name,
+              icon: stations[i].icon,
+              status: stationState(i),
+              pendingBoxes: factoryProject?.layers
+                      .where((layer) => layer.n == i)
+                      .expand((layer) => layer.deliveryBoxes)
+                      .where((box) =>
+                          box.state == KaiDeliveryBoxState.awaitingSponsor)
+                      .length ??
+                  0,
+            ),
+        ];
+
+        return Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: const Color(0xFF090F18).withOpacity(0.92),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: _factoryModeOn
+                  ? const Color(0xFFFFC862).withOpacity(0.45)
+                  : const Color(0xFF1D2A39),
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: (_factoryModeOn ? const Color(0xFFFFC862) : kGpt)
+                    .withOpacity(0.06),
+                blurRadius: 18,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    _factoryModeOn
+                        ? Icons.precision_manufacturing
+                        : Icons.factory_outlined,
+                    size: 15,
+                    color: _factoryModeOn
+                        ? const Color(0xFFFFE7B0)
+                        : const Color(0xFF7E92A6),
+                  ),
+                  const SizedBox(width: 7),
+                  const Expanded(
+                    child: Text(
+                      'PRODUCT FACTORY',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: Color(0xFFEAF6FF),
+                        fontSize: 9.5,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 0.75,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  ),
+                  Tooltip(
+                    message: _factoryModeOn
+                        ? 'Stop and park the production line'
+                        : 'Resume the production line',
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(999),
+                      onTap: _sending
+                          ? null
+                          : () => unawaited(_setFactoryMode(!_factoryModeOn)),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 7, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: (_factoryModeOn
+                                  ? const Color(0xFFFFC862)
+                                  : const Color(0xFF26384C))
+                              .withOpacity(0.14),
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(
+                            color: (_factoryModeOn
+                                    ? const Color(0xFFFFC862)
+                                    : const Color(0xFF40576D))
+                                .withOpacity(0.45),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              _factoryModeOn
+                                  ? Icons.pause_circle_outline
+                                  : Icons.play_circle_outline,
+                              size: 11,
+                              color: _factoryModeOn
+                                  ? const Color(0xFFFFE7B0)
+                                  : const Color(0xFF9BAEC0),
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              _factoryModeOn ? 'RUNNING' : 'START',
+                              style: TextStyle(
+                                color: _factoryModeOn
+                                    ? const Color(0xFFFFE7B0)
+                                    : const Color(0xFF9BAEC0),
+                                fontSize: 8,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 0.6,
+                                fontFamily: 'monospace',
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 5),
+              Tooltip(
+                message: blocker,
+                child: Container(
+                  width: double.infinity,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF07111A),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFF1A3445)),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 6,
+                        height: 6,
+                        decoration: BoxDecoration(
+                          color: run?.stage == FactoryStage.awaitingApproval
+                              ? (approved
+                                  ? const Color(0xFFB9A2FF)
+                                  : const Color(0xFFFFC862))
+                              : (_factoryModeOn
+                                  ? const Color(0xFF45DFFF)
+                                  : const Color(0xFF6C8395)),
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          status,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Color(0xFFBFD4E6),
+                            fontSize: 9,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 0.45,
+                            fontFamily: 'monospace',
+                          ),
+                        ),
+                      ),
+                      Text(
+                        run == null ? 'NO LOT' : 'LOT ${run.id.toUpperCase()}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Color(0xFF557084),
+                          fontSize: 7,
+                          fontWeight: FontWeight.w800,
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 6),
+              KaiFactoryConveyor(
+                stations: visualStations,
+                currentIndex: currentIndex,
+                lineRunning: activeBoxes.isNotEmpty,
+                interactiveIndex:
+                    currentIndex == 5 && sponsorBoxes.isNotEmpty ? 5 : null,
+                onStationTap: run == null
+                    ? null
+                    : (_) => unawaited(
+                          _reviewFactoryApproval(run, approval),
+                        ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   Future<void> _setFactoryMode(bool value) async {
     // setFactoryMode also RESUMES a stopped run on true and STOPS (saving
     // stage + evidence) on false, so toggling is genuinely pause/continue
@@ -2314,6 +2845,10 @@ FACTORY_NEXT: continue
                       color: Colors.white,
                       fontSize: 14,
                       fontWeight: FontWeight.bold)),
+              const SizedBox(width: 10),
+              _gogglesBadge(),
+              const SizedBox(width: 6),
+              _ttsButton(),
               const Spacer(),
               IconButton(
                 tooltip: 'Add project',
@@ -2327,46 +2862,19 @@ FACTORY_NEXT: continue
           const SizedBox(height: 12),
           _terminalSelfWorkCard(),
           const SizedBox(height: 12),
-          const Text('PROJECTS',
-              style: TextStyle(
-                  color: Color(0xFF3F5666),
-                  fontSize: 9,
-                  letterSpacing: 1.5,
-                  fontFamily: 'monospace')),
-          const SizedBox(height: 8),
           Expanded(
-            flex: 5,
-            child: _ws.projects.isEmpty
-                ? const Padding(
-                    padding: EdgeInsets.only(top: 10),
-                    child: Text('No projects yet.\nTap + to add a folder.',
-                        style: TextStyle(color: Colors.white38, fontSize: 11)),
-                  )
-                : ListView(
-                    children: [
-                      for (final p in _ws.projects) _projectCard(p),
-                    ],
-                  ),
-          ),
-          const SizedBox(height: 10),
-          Expanded(
-            flex: 5,
             child: ListView(
               children: [
-                SizedBox(
-                  height: 180,
-                  child: KaiProjectCard(
-                    personaId: _kPersona,
-                    projectId: KaiProjectService.smarterId,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                SizedBox(
-                  height: 180,
-                  child: KaiProjectCard(
-                    personaId: _kPersona,
-                    projectId: KaiProjectService.sentienceId,
-                  ),
+                _productFactoryOpsCard(),
+                const SizedBox(height: 12),
+                // The real portfolio, against each project's own governed
+                // gates. The workspace root is passed READ-ONLY so the project
+                // you are standing in sorts first; opening a card never moves
+                // CodeWorkspaceService.
+                KaiProjectPortfolio(
+                  personaId: _kPersona,
+                  workspaceRoot: CodeWorkspaceService.instance.root,
+                  onOpenProject: _openProjectFlowchart,
                 ),
                 const SizedBox(height: 8),
                 const KaiStateScorecardCard(limit: 40),
@@ -2602,24 +3110,19 @@ FACTORY_NEXT: continue
                         ),
                       ),
                     ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(10, 10, 10, 0),
+                      child: _productFactoryOpsCard(),
+                    ),
+                    const SizedBox(height: 8),
                     Expanded(
                       child: ListView(
-                        padding: const EdgeInsets.all(10),
+                        padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
                         children: [
-                          SizedBox(
-                            height: 180,
-                            child: KaiProjectCard(
-                              personaId: _kPersona,
-                              projectId: KaiProjectService.smarterId,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          SizedBox(
-                            height: 180,
-                            child: KaiProjectCard(
-                              personaId: _kPersona,
-                              projectId: KaiProjectService.sentienceId,
-                            ),
+                          KaiProjectPortfolio(
+                            personaId: _kPersona,
+                            workspaceRoot: CodeWorkspaceService.instance.root,
+                            onOpenProject: _openProjectFlowchart,
                           ),
                           const SizedBox(height: 8),
                           const KaiStateScorecardCard(limit: 40),
@@ -2731,29 +3234,37 @@ FACTORY_NEXT: continue
             ),
             child: Row(
               children: [
+                KaiPresence(personaId: _kPersona),
+                const SizedBox(width: 14),
                 Expanded(
-                  child: KaiPresence(personaId: _kPersona),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          KaiCoreHeartbeat(
+                            status: _coreHeartbeatStatus,
+                            bodyCount: _globalBodyCount,
+                            onTap: _showPairingCode,
+                          ),
+                          const SizedBox(width: 6),
+                          // What he costs, live — he spends money on his own initiative
+                          // (inner life, reflections, proactive nudges), so the meter should
+                          // be visible without being asked for.
+                          const KaiEfficiencyDeltaMeter(),
+                          const SizedBox(width: 6),
+                          const KaiCostMeter(),
+                          const SizedBox(width: 6),
+                          _keysButton(),
+                          const SizedBox(width: 6),
+                          _engineerChip(),
+                        ],
+                      ),
+                    ),
+                  ),
                 ),
-                KaiCoreHeartbeat(
-                  status: _coreHeartbeatStatus,
-                  bodyCount: _globalBodyCount,
-                  onTap: _showPairingCode,
-                ),
-                const SizedBox(width: 8),
-                // What he costs, live — he spends money on his own initiative
-                // (inner life, reflections, proactive nudges), so the meter should
-                // be visible without being asked for.
-                const KaiEfficiencyDeltaMeter(),
-                const SizedBox(width: 8),
-                const KaiCostMeter(),
-                const SizedBox(width: 8),
-                _gogglesButton(),
-                const SizedBox(width: 8),
-                _ttsButton(),
-                const SizedBox(width: 8),
-                _keysButton(),
-                const SizedBox(width: 8),
-                _engineerChip(),
               ],
             ),
           ),
@@ -2881,38 +3392,17 @@ FACTORY_NEXT: continue
     );
   }
 
-  Widget _gogglesButton() {
-    final color = _gogglesOn ? kClaude : const Color(0xFF5B7183);
+  Widget _gogglesBadge() {
     return Tooltip(
-      message: _gogglesOn
-          ? 'Goggles ON — co-creator tools and technical conversation available'
-          : 'Goggles OFF — friend presence, no technical work',
-      child: InkWell(
-        onTap: () => unawaited(_setGoggles(!_gogglesOn)),
-        borderRadius: BorderRadius.circular(20),
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(9, 4, 9, 4),
-          decoration: BoxDecoration(
-            color: const Color(0xFF0D1826),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: color.withOpacity(0.55)),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.visibility_outlined, size: 12, color: color),
-              const SizedBox(width: 6),
-              Text(
-                _gogglesOn ? 'goggles on' : 'goggles off',
-                style: TextStyle(
-                  color: color,
-                  fontSize: 10,
-                  fontFamily: 'monospace',
-                ),
-              ),
-            ],
-          ),
+      message: "Goggles always ON here — desktop is Kai's workbench",
+      child: Container(
+        padding: const EdgeInsets.all(6),
+        decoration: BoxDecoration(
+          color: const Color(0xFF0D1826),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: kClaude.withOpacity(0.55)),
         ),
+        child: const Icon(Icons.visibility_outlined, size: 13, color: kClaude),
       ),
     );
   }
@@ -2952,44 +3442,41 @@ FACTORY_NEXT: continue
   }
 
   Widget _engineerChip() {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(11, 4, 6, 4),
-      decoration: BoxDecoration(
-        color: const Color(0xFF0D1826),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: const Color(0xFF24384C)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Text('⚙', style: TextStyle(fontSize: 11)),
-          const SizedBox(width: 6),
-          Text(
-              _ws.hasWorkspace
-                  ? CodeWorkspaceService.nameOf(_ws.root!)
-                  : 'no workspace',
-              style: const TextStyle(
-                  color: Color(0xFF9FD0E8),
-                  fontSize: 10,
-                  fontFamily: 'monospace')),
-          const SizedBox(width: 8),
-          const Text('trust',
-              style: TextStyle(
-                  color: Color(0xFF5B7183),
-                  fontSize: 9,
-                  fontFamily: 'monospace')),
-          Transform.scale(
-            scale: 0.7,
-            child: Switch(
-              value: _trust,
-              activeThumbColor: const Color(0xFF7EE787),
-              onChanged: (v) => setState(() {
-                _trust = v;
-                EditGate.instance.trustSession = v;
-              }),
+    final workspaceName = _ws.hasWorkspace
+        ? CodeWorkspaceService.nameOf(_ws.root!)
+        : 'no workspace';
+    return Tooltip(
+      message: '$workspaceName • edit trust',
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(8, 3, 4, 3),
+        decoration: BoxDecoration(
+          color: const Color(0xFF0D1826),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: const Color(0xFF24384C)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('⚙', style: TextStyle(fontSize: 11)),
+            const SizedBox(width: 5),
+            const Text('workbench',
+                style: TextStyle(
+                    color: Color(0xFF9FD0E8),
+                    fontSize: 10,
+                    fontFamily: 'monospace')),
+            Transform.scale(
+              scale: 0.6,
+              child: Switch(
+                value: _trust,
+                activeThumbColor: const Color(0xFF7EE787),
+                onChanged: (v) => setState(() {
+                  _trust = v;
+                  EditGate.instance.trustSession = v;
+                }),
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

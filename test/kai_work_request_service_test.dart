@@ -61,6 +61,8 @@ void main() {
         createdAt: 10,
         updatedAt: 20,
         startedAt: 15,
+        deliveryBoxId: 'p:p1:box',
+        attemptFingerprint: 'aaaaaaaaaaaaaaaa',
       );
 
       final map = request.toMap();
@@ -79,6 +81,8 @@ void main() {
       expect(back.updatedAt, 20);
       expect(back.startedAt, 15);
       expect(back.completedAt, isNull);
+      expect(back.deliveryBoxId, 'p:p1:box');
+      expect(back.attemptFingerprint, 'aaaaaaaaaaaaaaaa');
       expect(back.isOpen, isTrue);
     });
 
