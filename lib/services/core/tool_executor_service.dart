@@ -28,6 +28,7 @@ import 'web_fetch_service.dart';
 import 'kai_goal_service.dart';
 import 'kai_user_model_service.dart';
 import 'kai_self_service.dart';
+import '../../logic/authority_chain.dart';
 import 'kai_self_context.dart';
 import 'kai_self_revision.dart';
 import 'kai_autobiography_service.dart';
@@ -2195,7 +2196,54 @@ Never claim a tool that is absent from this exact list.$workspaceRecovery''';
         );
   }
 
+  /// The ledger every action answers to.
+  ///
+  /// Null means the authority chain is not yet wired for this executor, which
+  /// is the state every caller was in before it existed. It is deliberately
+  /// nullable for exactly one release: turning it on for a caller is a
+  /// one-line change, and turning it on for ALL callers before any of them
+  /// register a root would stop Kai acting at all.
+  ///
+  /// Once every caller passes one, this becomes required and an unauthorised
+  /// action stops being refusable-in-principle and starts being unbuildable —
+  /// the same move `capabilityManifest` made on the tool path, for the same
+  /// reason: a gate that can be forgotten at a call site will be.
+  AuthorityLedger? authorityLedger;
+
+  /// The authority the CURRENT turn is spending. Set by the caller alongside
+  /// the ledger.
+  String? activeAuthorityId;
+
   Future<String> execute(String toolName, Map<String, dynamic> args) async {
+    // ── Does this trace back to a sentence Sadeq wrote? ──────────────────────
+    //
+    // Checked before policy, because policy answers "is this tool allowed to
+    // exist on this surface" and this answers "did anyone ask for this at all".
+    // The second question is the more basic one, and until now nothing in the
+    // tree asked it: no executed tool carried any record of what authorised it.
+    //
+    // Deferred authority passes — a reminder firing at 5am is spending a
+    // sentence from yesterday. Invented authority does not, because there is no
+    // path here that treats an unknown id as fine.
+    final ledger = authorityLedger;
+    final authorityId = activeAuthorityId;
+    if (ledger != null) {
+      if (authorityId == null) {
+        print('🛡️ [Authority] $toolName has no authority; refused');
+        return 'Tool call blocked: nothing authorised this action.';
+      }
+      final decision = ledger.check(
+        authorityId: authorityId,
+        action: toolName,
+        now: DateTime.now(),
+      );
+      if (!decision.allowed) {
+        print('🛡️ [Authority] Blocked $toolName: ${decision.reasonCode}');
+        return 'Tool call blocked: ${decision.reasonCode}.';
+      }
+      ledger.recordSpend(authorityId);
+    }
+
     final validation = ToolPolicyService.validate(toolName, args);
     if (!validation.ok) {
       final msg = validation.message ?? 'Tool call blocked by policy.';
