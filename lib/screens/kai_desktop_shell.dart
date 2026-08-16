@@ -2873,8 +2873,6 @@ FACTORY_NEXT: continue
                 ],
                 _productFactoryOpsCard(),
                 const SizedBox(height: 12),
-                const KaiGrowthTrackerCard(),
-                const SizedBox(height: 12),
                 // The real portfolio, against each project's own governed
                 // gates. The workspace root is passed READ-ONLY so the project
                 // you are standing in sorts first; opening a card never moves
@@ -3159,8 +3157,6 @@ FACTORY_NEXT: continue
                       child: ListView(
                         padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
                         children: [
-                          const KaiGrowthTrackerCard(),
-                          const SizedBox(height: 8),
                           KaiProjectPortfolio(
                             personaId: _kPersona,
                             workspaceRoot: CodeWorkspaceService.instance.root,

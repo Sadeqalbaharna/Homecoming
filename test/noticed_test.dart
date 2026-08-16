@@ -304,26 +304,27 @@ void main() {
 
     test('identity is stable across the counter that broke it', () {
       final monday = KaiNudge(seedFor(make(id: 'n1', carried: 8)),
-          topicKey: 'noticed:n1');
+          topicId: 'noticed:n1');
       final tuesday = KaiNudge(seedFor(make(id: 'n1', carried: 9)),
-          topicKey: 'noticed:n1');
+          topicId: 'noticed:n1');
       expect(monday.seed, isNot(tuesday.seed));
-      expect(monday.identity, tuesday.identity,
+      expect(monday.topicId, tuesday.topicId,
           reason: 'same observation, same identity, whatever the wording');
     });
 
     test('two different observations stay distinguishable', () {
-      const a = KaiNudge('words', topicKey: 'noticed:n1');
-      const b = KaiNudge('words', topicKey: 'noticed:n2');
-      expect(a.identity, isNot(b.identity),
+      const a = KaiNudge('words', topicId: 'noticed:n1');
+      const b = KaiNudge('words', topicId: 'noticed:n2');
+      expect(a.topicId, isNot(b.topicId),
           reason: 'the guard must not collapse genuinely different things');
     });
 
-    test('an option with no subject still falls back to its text', () {
-      // The fixed-text options carry no key and were never the problem; their
-      // seeds are literals, so comparing them is comparing identity already.
+    test('an option with no subject carries no topic id', () {
+      // The fixed-text options were never the problem: their seeds are literals,
+      // so comparing those IS comparing identity. Only a model-worded subject
+      // needed a durable id.
       const plain = KaiNudge('(proactive) say something small and human');
-      expect(plain.identity, plain.seed);
+      expect(plain.topicId, isNull);
     });
   });
 
