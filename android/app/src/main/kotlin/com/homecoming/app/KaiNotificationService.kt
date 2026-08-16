@@ -126,6 +126,27 @@ class KaiNotificationService : NotificationListenerService() {
             timestamp = sbn.postTime,
         ))
 
+        // ── The one stream that cannot be lossy ────────────────────────────
+        //
+        // The store above keeps 20 per app, in memory. That is right for chat
+        // and wrong for money: bank alerts arrive through the SMS app next to
+        // every OTP and promo, so an afternoon of texts evicts the morning's
+        // transaction — and the whole store dies with the process.
+        //
+        // Enrolled senders therefore get a durable, append-only queue of their
+        // own. Captured HERE, at arrival, rather than on a pull: a transaction
+        // that lands while nothing is asking must still be there later.
+        if (KaiBankAlertStore.isEnrolled(title, pkg)) {
+            runCatching {
+                KaiBankAlertStore.capture(
+                    applicationContext,
+                    title ?: appLabel,
+                    text ?: "",
+                    sbn.postTime,
+                )
+            }.onFailure { Log.w(TAG, "bank alert capture failed: ${it.message}") }
+        }
+
         Log.d(TAG, "Captured from $appLabel: ${title?.take(40)} — ${text?.take(60)}")
     }
 

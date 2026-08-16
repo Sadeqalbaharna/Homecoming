@@ -59,6 +59,9 @@ class KaiToolsPlugin(private val context: Context) : MethodChannel.MethodCallHan
             "readScreen"                -> readScreen(result)
             "checkAccessibilityAccess"  -> checkAccessibilityAccess(result)
             "openAccessibilitySettings" -> openAccessibilitySettings(result)
+            "drainBankAlerts"           -> drainBankAlerts(result)
+            "pendingBankAlerts"         -> result.success(KaiBankAlertStore.pending(context))
+            "enrollBankSender"          -> enrollBankSender(call, result)
             else                        -> result.notImplemented()
         }
     }
@@ -817,4 +820,37 @@ class KaiToolsPlugin(private val context: Context) : MethodChannel.MethodCallHan
             result.error("SETTINGS_ERROR", e.message, null)
         }
     }
+
+    // ── Bank alerts ───────────────────────────────────────────────────────────
+    //
+    // Hands the durable queue to Dart and clears it. Clear-on-read is safe
+    // because every candidate is fingerprinted before it reaches the ledger, so
+    // a drain delivered twice cannot double-count. The failure worth avoiding
+    // is the other one: a queue never cleared becomes the whole SMS history.
+    //
+    // No parsing here. Amount, direction and merchant are decided in pure Dart
+    // where the logic is testable without a phone.
+
+    private fun drainBankAlerts(result: MethodChannel.Result) {
+        if (!isNotificationAccessGranted()) {
+            result.error(
+                "no_notification_access",
+                "Notification access is not granted, so bank alerts cannot be captured.",
+                null,
+            )
+            return
+        }
+        result.success(KaiBankAlertStore.drain(context))
+    }
+
+    private fun enrollBankSender(call: MethodCall, result: MethodChannel.Result) {
+        val sender = call.argument<String>("sender")?.trim()
+        if (sender.isNullOrBlank()) {
+            result.error("bad_sender", "A sender id is required.", null)
+            return
+        }
+        KaiBankAlertStore.enroll(sender)
+        result.success(true)
+    }
+
 }
