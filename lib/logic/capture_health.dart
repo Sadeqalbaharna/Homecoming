@@ -82,6 +82,57 @@ class KaiCaptureHealth {
   String get reasonCode => state.name;
 }
 
+/// What to actually do about a dead listener.
+///
+/// Detection without a remedy just moves the problem: Sadeq still has to
+/// remember which of five Samsung settings it was. Android reports three facts
+/// that separate the cases cleanly, and each has exactly one fix.
+enum KaiCaptureRepair {
+  /// Nothing to do.
+  none,
+
+  /// The binding was dropped while the permission is still granted — the
+  /// common OEM case. `requestRebind` fixes this from inside the app, so it is
+  /// the one failure Kai can repair himself.
+  rebindRequested,
+
+  /// The permission is gone. Nothing in the app can restore it: granting
+  /// notification access is deliberately a human act in Settings, and an app
+  /// that could grant itself that would be the actual security hole.
+  grantAccess,
+
+  /// The OS is allowed to sleep the app, so the listener will keep dying.
+  /// Rebinding treats the symptom; this is the cause.
+  exemptFromBatteryOptimisation,
+
+  /// Android will revoke permissions for disuse. A listener that works today
+  /// and stops after a quiet fortnight is this.
+  disableAutoRevoke,
+}
+
+/// The remedy, in the order that actually fixes things.
+///
+/// Ordered by cause before symptom: a rebind on a phone that is still allowed
+/// to sleep the app will work and then fail again next week, so the standing
+/// causes are named first even though the rebind is what restores service now.
+List<KaiCaptureRepair> kaiCaptureRepairs({
+  required bool accessGranted,
+  required bool rebindRequested,
+  bool? batteryExempt,
+  bool? autoRevokeExempt,
+}) {
+  if (!accessGranted) {
+    // Everything else is moot without the grant, and listing four steps when
+    // one is required is how instructions get ignored.
+    return const [KaiCaptureRepair.grantAccess];
+  }
+  return [
+    if (batteryExempt == false) KaiCaptureRepair.exemptFromBatteryOptimisation,
+    if (autoRevokeExempt == false) KaiCaptureRepair.disableAutoRevoke,
+    if (rebindRequested) KaiCaptureRepair.rebindRequested,
+  ];
+}
+
 class KaiCaptureMonitor {
   const KaiCaptureMonitor({this.silenceThreshold = const Duration(hours: 6)});
 

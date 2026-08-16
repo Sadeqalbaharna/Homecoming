@@ -1,6 +1,10 @@
 package com.homecoming.app
 
 import android.content.ContentValues
+import android.content.ComponentName
+import android.os.Build
+import android.os.PowerManager
+import android.service.notification.NotificationListenerService
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -66,6 +70,7 @@ class KaiToolsPlugin(private val context: Context) : MethodChannel.MethodCallHan
                     mapOf("accessGranted" to isNotificationAccessGranted())
             )
             "setBankSenders"            -> setBankSenders(call, result)
+            "repairCapture"             -> repairCapture(result)
             else                        -> result.notImplemented()
         }
     }
@@ -854,6 +859,59 @@ class KaiToolsPlugin(private val context: Context) : MethodChannel.MethodCallHan
         val senders = call.argument<List<String>>("senders") ?: emptyList()
         KaiBankAlertStore.setEnrolled(context, senders)
         result.success(KaiBankAlertStore.enrolledSenders(context).size)
+    }
+
+
+    // ── Repairing the listener ────────────────────────────────────────────────
+    //
+    // Detection alone leaves Sadeq to fix it by hand every time. Android has a
+    // real recovery path: requestRebind asks the system to re-establish a
+    // binding it dropped, which covers the common OEM case where the service
+    // was unbound for being "unused" while the permission is still granted.
+    //
+    // It cannot fix a REVOKED permission — nothing can, from inside the app,
+    // because granting notification access is deliberately a human act in
+    // Settings. So this reports which of the two it is rather than pretending
+    // one call solves both.
+    //
+    // Diagnosis is reported, never guessed: the three fields below are things
+    // Android actually told us.
+
+    private fun repairCapture(result: MethodChannel.Result) {
+        val granted = isNotificationAccessGranted()
+        var rebindRequested = false
+
+        if (granted) {
+            runCatching {
+                NotificationListenerService.requestRebind(
+                    ComponentName(context, KaiNotificationService::class.java)
+                )
+                rebindRequested = true
+            }
+        }
+
+        // Whether the OS may auto-revoke this app's permissions for disuse.
+        // Whitelisted means it will not, which is the state that keeps a
+        // long-quiet listener alive.
+        val autoRevokeExempt: Boolean? =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                runCatching { context.packageManager.isAutoRevokeWhitelisted }
+                    .getOrNull()
+            } else true
+
+        val batteryExempt: Boolean? = runCatching {
+            val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+            pm.isIgnoringBatteryOptimizations(context.packageName)
+        }.getOrNull()
+
+        result.success(
+            mapOf(
+                "accessGranted" to granted,
+                "rebindRequested" to rebindRequested,
+                "autoRevokeExempt" to autoRevokeExempt,
+                "batteryExempt" to batteryExempt,
+            )
+        )
     }
 
 }

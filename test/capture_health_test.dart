@@ -131,6 +131,83 @@ void main() {
     });
   });
 
+  // ── Detection without a remedy just moves the problem ──────────────────────
+  //
+  // Knowing the listener died still leaves Sadeq guessing which of five Samsung
+  // settings it was. Android reports three facts that separate the cases, and
+  // each has exactly one fix.
+  group('the remedy is specific, not "something is wrong"', () {
+    test('a dropped binding is the one Kai can repair himself', () {
+      expect(
+        kaiCaptureRepairs(
+          accessGranted: true,
+          rebindRequested: true,
+          batteryExempt: true,
+          autoRevokeExempt: true,
+        ),
+        [KaiCaptureRepair.rebindRequested],
+      );
+    });
+
+    test('a revoked permission asks for one thing, not four', () {
+      // Everything else is moot without the grant, and listing four steps when
+      // one is required is how instructions get ignored.
+      expect(
+        kaiCaptureRepairs(
+          accessGranted: false,
+          rebindRequested: false,
+          batteryExempt: false,
+          autoRevokeExempt: false,
+        ),
+        [KaiCaptureRepair.grantAccess],
+      );
+    });
+
+    test('causes are named before the symptom', () {
+      // A rebind on a phone still allowed to sleep the app works now and fails
+      // again next week, so the standing causes come first.
+      final repairs = kaiCaptureRepairs(
+        accessGranted: true,
+        rebindRequested: true,
+        batteryExempt: false,
+        autoRevokeExempt: false,
+      );
+      expect(repairs, [
+        KaiCaptureRepair.exemptFromBatteryOptimisation,
+        KaiCaptureRepair.disableAutoRevoke,
+        KaiCaptureRepair.rebindRequested,
+      ]);
+    });
+
+    test('a healthy phone is told to do nothing', () {
+      expect(
+        kaiCaptureRepairs(
+          accessGranted: true,
+          rebindRequested: false,
+          batteryExempt: true,
+          autoRevokeExempt: true,
+        ),
+        isEmpty,
+      );
+    });
+
+    test('an unknown fact is not treated as a fault', () {
+      // isIgnoringBatteryOptimizations and isAutoRevokeWhitelisted can both
+      // fail or be unavailable on older Android. Null means "not observed", and
+      // reporting a fix for something we never measured is inventing a
+      // diagnosis — the thing this file exists to avoid.
+      expect(
+        kaiCaptureRepairs(
+          accessGranted: true,
+          rebindRequested: false,
+          batteryExempt: null,
+          autoRevokeExempt: null,
+        ),
+        isEmpty,
+      );
+    });
+  });
+
   group('the verdict carries a reason code and no content', () {
     test('reasonCode names the state', () {
       expect(check().reasonCode, 'healthy');
