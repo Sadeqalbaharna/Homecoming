@@ -104,6 +104,31 @@ class Noticed {
   /// an accusation, and it's aimed the right way.
   final int carried;
 
+  /// When he last brought this up UNPROMPTED, in millis. 0 means never.
+  ///
+  /// ── Why this had to exist ───────────────────────────────────────────────────
+  ///
+  /// [carried] counts turns the item was DISPLAYED, because the display is the
+  /// event and a displayed count cannot be flattered. That is the right design
+  /// for the prompt block. It is the wrong signal for the proactive mouth, and
+  /// the two got wired to the same number.
+  ///
+  /// The proactive path ranks by `carried` descending and, past a threshold,
+  /// returns that item unconditionally. But `carried` only ever rises, and it
+  /// rises on ordinary conversation — so within a dozen turns of normal chat the
+  /// top item becomes permanent, and every proactive cycle from then on raises
+  /// the same observation. Each raise is a fresh generation, so it arrives
+  /// reworded, which defeats every text-equality check downstream. Five near
+  /// identical messages about the same two header zones is what that looks like
+  /// from the outside.
+  ///
+  /// Raising is the event that should relieve the pressure, and nothing was
+  /// recording it. This field records it.
+  final int raisedAt;
+
+  /// How many times it has been raised unprompted. Drives the backoff.
+  final int raisedCount;
+
   final NoticedKind kind;
   final bool authoredByKai;
   final String authorReceiptId;
@@ -114,6 +139,8 @@ class Noticed {
     this.context = '',
     required this.notedAt,
     this.carried = 0,
+    this.raisedAt = 0,
+    this.raisedCount = 0,
     this.kind = NoticedKind.observation,
     this.authoredByKai = false,
     this.authorReceiptId = '',
@@ -124,6 +151,8 @@ class Noticed {
         'context': context,
         'notedAt': notedAt,
         'carried': carried,
+        'raisedAt': raisedAt,
+        'raisedCount': raisedCount,
         'kind': kind.name,
         'authoredByKai': authoredByKai,
         'authorReceiptId': authorReceiptId,
@@ -150,6 +179,8 @@ class Noticed {
       carried: (v['carried'] as num?)?.toInt() ??
           (v['raised'] as num?)?.toInt() ??
           0,
+      raisedAt: (v['raisedAt'] as num?)?.toInt() ?? 0,
+      raisedCount: (v['raisedCount'] as num?)?.toInt() ?? 0,
       kind: kind,
       authoredByKai: kind != NoticedKind.observation &&
           v['authoredByKai'] == true &&
@@ -188,6 +219,53 @@ class KaiNoticedService {
   /// authored by him except the text he wrote before he knew it would count —
   /// which is exactly what makes it evidence.
   String get _resolvedPath => 'kai/$_persona/noticed_resolved';
+
+  /// How long an item stays quiet on the proactive channel after being raised.
+  ///
+  /// Escalating, because an unanswered raise is information: the first one may
+  /// simply have been missed, the second says the moment was wrong, the third
+  /// says the channel is not the problem. After that it keeps its place in
+  /// [promptBlock] — where `carried` does its honest work and he can raise it
+  /// inside a conversation — but it loses the unprompted mouth.
+  ///
+  /// This is not "shut up about it". The service's whole point is a friend who
+  /// won't drop the thing he noticed. It is the difference between not dropping
+  /// it and saying it five times before lunch in five different costumes.
+  static const List<Duration> raiseBackoff = [
+    Duration(hours: 24),
+    Duration(days: 3),
+  ];
+
+  /// Whether an observation may be raised UNPROMPTED right now.
+  ///
+  /// Pure and static so the policy can be tested without Firebase, a clock, or
+  /// a model — the same reason `lib/logic/` exists.
+  static bool canRaiseProactively(Noticed n, {required DateTime now}) {
+    if (n.raisedCount <= 0) return true;
+    if (n.raisedCount > raiseBackoff.length) return false;
+    final quietFor = raiseBackoff[n.raisedCount - 1];
+    final since = now.millisecondsSinceEpoch - n.raisedAt;
+    return since >= quietFor.inMilliseconds;
+  }
+
+  /// He just brought this up on his own. Record it before the words are
+  /// generated, not after.
+  ///
+  /// Recording it at selection rather than on delivery is deliberate: the
+  /// generation step is the part that reworded the same observation into
+  /// something no equality check could catch, so the pressure has to be
+  /// relieved on the side of that step where the item still has an identity.
+  /// A raise that fails to send costs one quiet period; a raise that sends
+  /// without being recorded costs the loop this fixes.
+  Future<void> markRaisedProactively(String personaId, Noticed n) async {
+    _persona = personaId;
+    try {
+      await KaiDb.instance.ref('$_path/${n.id}').update({
+        'raisedAt': DateTime.now().millisecondsSinceEpoch,
+        'raisedCount': n.raisedCount + 1,
+      });
+    } catch (_) {}
+  }
 
   /// Open observations he's carrying. More than this and the list stops being a
   /// list and starts being wallpaper — which is how a warning nobody reads gets

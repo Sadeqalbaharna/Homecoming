@@ -136,7 +136,13 @@ if ($Mode -eq 'Preflight') {
         $statusCounts[$status]++
     }
     Write-Result -Verdict PASS -Reason 'Rebuilt Core supports scheduled commitments.' -Evidence @{
+        # startedAt is the FIRST run on this machine and survives every restart.
+        # processStartedAt is this process. Only the second one can answer
+        # "is the running build the one I just made?" - reading the first as a
+        # process clock is what made the Brief 018 preflight call a fresh
+        # runtime stale.
         startedAt = [string]$health.startedAt
+        processStartedAt = [string]$health.processStartedAt
         capabilities = $capabilities
         commitmentCount = $records.Count
         statusCounts = $statusCounts
@@ -173,6 +179,7 @@ if ($ExpectedPromiseFingerprint -and
 
 $baseEvidence = [ordered]@{
     coreStartedAt = [string]$health.startedAt
+    coreProcessStartedAt = [string]$health.processStartedAt
     commitmentId = $CommitmentId
     textSha256 = $textHash
     promiseFingerprint = $fingerprint

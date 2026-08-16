@@ -63,10 +63,30 @@ class KaiNudge {
   /// by the "two unanswered knocks, then shut up" rule.
   final KaiNudgeKind kind;
 
+  /// Stable identity for "this is the same thing again", independent of wording.
+  ///
+  /// ── Why comparing seeds was not enough ──────────────────────────────────────
+  ///
+  /// The repetition guard below used to compare `seed` strings. The noticed seed
+  /// interpolates the live `carried` count — "you have been sitting on it for 9
+  /// turns" — and that number rises every turn. So the guard compared two
+  /// strings that were guaranteed to differ, and a check written to stop the
+  /// same tap wearing a fake moustache was itself defeated by a counter inside
+  /// the moustache.
+  ///
+  /// Generated prose is the wrong thing to compare for identity. Anything with a
+  /// real subject carries its key; the rest fall back to the seed, which is
+  /// correct for the fixed-text options.
+  final String? topicKey;
+
+  /// What the guard should compare. Never the words.
+  String get identity => topicKey ?? seed;
+
   const KaiNudge(
     this.seed, {
     this.wantsHands = false,
     this.kind = KaiNudgeKind.companionship,
+    this.topicKey,
   });
 }
 
@@ -183,7 +203,9 @@ class KaiProactiveService {
     _ctrl.add(nudge);
     _lastNudge = now;
     _lastUnansweredNudgeAt = now;
-    _lastUnansweredNudgeSeed = nudge.seed;
+    // Identity, not words. Storing the seed here is what let a reworded repeat
+    // of the same observation pass the guard that reads it back.
+    _lastUnansweredNudgeSeed = nudge.identity;
     if (nudge.kind == KaiNudgeKind.checkIn) _unansweredCheckIns++;
     _nudgesToday++;
   }
@@ -228,6 +250,10 @@ class KaiProactiveService {
     // all of it has been going down the working pipe.
     final options = <KaiNudge>[];
 
+    // The observation that made it onto the menu, if any. Held so the raise is
+    // recorded only if it is the one actually chosen below.
+    Noticed? pendingRaise;
+
     // 0) THE THING HE ACTUALLY SAW. Not one of six — it comes first, and if he's
     //    been sitting on it long enough it skips the menu entirely.
     //
@@ -252,11 +278,19 @@ class KaiProactiveService {
     // never connected them.
     try {
       final noticed = await KaiNoticedService.instance.open(_persona);
-      if (noticed.isNotEmpty) {
+      // Only things he has not just brought up. Without this filter the ranking
+      // below is a ratchet: `carried` rises on every displayed turn and never
+      // falls, so the top item becomes permanent and every proactive cycle
+      // raises it again in fresh words. See KaiNoticedService.canRaiseProactively.
+      final raisable = noticed
+          .where((n) =>
+              KaiNoticedService.canRaiseProactively(n, now: DateTime.now()))
+          .toList();
+      if (raisable.isNotEmpty) {
         // The one he's been quietest about for longest. `carried` counts turns
         // he was shown it and said nothing; notedAt breaks ties on a fresh list
         // where nothing has been carried yet.
-        final ranked = [...noticed]..sort((a, b) {
+        final ranked = [...raisable]..sort((a, b) {
             final c = b.carried.compareTo(a.carried);
             return c != 0 ? c : a.notedAt.compareTo(b.notedAt);
           });
@@ -279,8 +313,18 @@ class KaiProactiveService {
         // six, it's the thing he's going to say. A list that only ever gets a
         // 1-in-6 shot at his mouth is a list he never brings up — and the whole
         // failure mode here is him going quiet after one mention.
-        if (n.carried >= 12) return KaiNudge(seed);
-        options.add(KaiNudge(seed));
+        //
+        // The early return skips the `lastSeed` repetition guard at the bottom
+        // of this method, which is safe ONLY because the item is now known to be
+        // outside its quiet period. It was not safe before: `carried` crosses 12
+        // during ordinary conversation, so this branch became the permanent
+        // answer and the one guard against repeating himself was never reached.
+        if (n.carried >= 12) {
+          await KaiNoticedService.instance.markRaisedProactively(_persona, n);
+          return KaiNudge(seed, topicKey: 'noticed:${n.id}');
+        }
+        options.add(KaiNudge(seed, topicKey: 'noticed:${n.id}'));
+        pendingRaise = n;
       }
     } catch (_) {}
 
@@ -420,10 +464,19 @@ class KaiProactiveService {
 
     // If he has not answered the previous proactive within 2–12 hours, a second
     // tap may be okay, but it cannot be the same tap wearing a fake moustache.
+    // Compared on `identity`, not on the generated words — see KaiNudge.topicKey.
     final eligible = lastSeed == null
         ? options
-        : options.where((n) => n.seed != lastSeed).toList();
+        : options.where((n) => n.identity != lastSeed).toList();
     if (eligible.isEmpty) return null;
-    return eligible[_rnd.nextInt(eligible.length)];
+    final chosen = eligible[_rnd.nextInt(eligible.length)];
+
+    // Only relieve the pressure on the observation he actually picked. Ranking
+    // it is not raising it; the other five options are still on the menu.
+    if (pendingRaise != null && chosen.topicKey == 'noticed:${pendingRaise.id}') {
+      await KaiNoticedService.instance
+          .markRaisedProactively(_persona, pendingRaise);
+    }
+    return chosen;
   }
 }

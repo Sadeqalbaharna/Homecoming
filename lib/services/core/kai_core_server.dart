@@ -23,6 +23,19 @@ class KaiCoreServer {
   final DateTime Function() _clock;
 
   HttpServer? _server;
+
+  /// When THIS process began serving.
+  ///
+  /// Distinct from `state['startedAt']`, which is written once with `??=` and
+  /// therefore records the first time Core ever ran on this machine — it
+  /// survives every restart and rebuild. Reading it as a process clock is what
+  /// made the Brief 018 preflight declare a freshly built runtime "stale": the
+  /// capability list was current, the date was from the original install.
+  ///
+  /// An evidence-governed project cannot afford an instrument that reports a
+  /// value nobody means. Both are published; neither is guessed from the other.
+  DateTime? _processStartedAt;
+
   late final File _stateFile =
       File('${dataDirectory.path}${Platform.pathSeparator}state.json');
   Map<String, dynamic> _state = _emptyState();
@@ -37,6 +50,7 @@ class KaiCoreServer {
     _state = await _readState();
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, port);
     _server = server;
+    _processStartedAt = _clock().toUtc();
     server.listen(
       _handle,
       onError: (Object error, StackTrace stack) {
@@ -62,7 +76,11 @@ class KaiCoreServer {
           'ok': true,
           'service': 'kai-core',
           'version': 2,
+          // First run on this machine. Durable across restarts by design.
           'startedAt': _state['startedAt'],
+          // This process. The only field that answers "is the running build
+          // the one I just made?"
+          'processStartedAt': _processStartedAt?.toIso8601String(),
           'capabilities': [
             'presence',
             'handoffs',
@@ -1283,7 +1301,12 @@ class KaiCoreServer {
     // Genuinely nothing usable. If bytes are present but unreadable they are
     // retained as evidence and quarantined on the first successful save.
     _backupWasUnreadable = await _backupStateFile.exists();
-    return _emptyState();
+    // Through _hydrate so a genuine first run stamps `startedAt` from the
+    // injected clock, like every other path. _emptyState is a static shape and
+    // cannot reach _clock(); routing it here keeps _hydrate the single writer
+    // of that field instead of two writers disagreeing about which clock is
+    // authoritative.
+    return _hydrate(_emptyState());
   }
 
   /// Present on disk, but not parseable as a Core state map.
@@ -1475,9 +1498,11 @@ class KaiCoreServer {
     }
   }
 
+  // No `startedAt` here on purpose. _hydrate owns that field and stamps it from
+  // the injected clock; a second writer using the real wall clock made the
+  // install date untestable and disagreed with every other path.
   static Map<String, dynamic> _emptyState() => {
         'version': 2,
-        'startedAt': DateTime.now().toUtc().toIso8601String(),
         'presence': <String, dynamic>{},
         'handoffs': <String, dynamic>{},
         'outbound': <String, dynamic>{},

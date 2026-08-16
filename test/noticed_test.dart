@@ -38,6 +38,7 @@
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:homecoming_app/services/core/kai_noticed_service.dart';
+import 'package:homecoming_app/services/core/kai_proactive_service.dart';
 
 Noticed make({
   String id = 'n1',
@@ -152,6 +153,177 @@ void main() {
       final old = Noticed.fromMap('x', make(ageDays: 30).toMap());
       expect(old, isNotNull,
           reason: 'nothing in this class is allowed to time-expire');
+    });
+  });
+
+  // ── The loop this group exists because of ──────────────────────────────────
+  //
+  // Five proactive messages in one stretch, all the same observation, each
+  // reworded: "two 'kai' header zones", "two suspiciously similar 'Kai' header
+  // zones", "two near-identical 'Kai' header zones", "two fake-twin 'Kai'
+  // headers", "that two-kai header situation". Same thing five times in five
+  // costumes.
+  //
+  // Three defects compounded, and every one of them was a guard defeating
+  // itself:
+  //
+  //   1. `carried` counts turns the item was DISPLAYED, and rises on ordinary
+  //      conversation. The proactive path ranked by it, so within a dozen turns
+  //      the top item was permanent.
+  //   2. Past `carried >= 12` the proactive path RETURNED that item directly,
+  //      skipping the repetition guard at the bottom of the method entirely.
+  //   3. That guard compared generated seed strings — and the noticed seed
+  //      interpolates the live `carried` count, which changes every turn. So the
+  //      check written to stop the same tap wearing a fake moustache was beaten
+  //      by a counter sewn into the moustache.
+  //
+  // Nothing recorded that he had raised the thing. Raising is the event that
+  // should relieve the pressure, so raising is now what gets recorded.
+  group('raising it is an event, and it buys quiet', () {
+    final now = DateTime.utc(2026, 8, 16, 12);
+
+    Noticed raised({required int count, required Duration ago}) => Noticed(
+          id: 'n1',
+          text: 'two near-identical Kai header zones',
+          notedAt: 0,
+          carried: 40,
+          raisedCount: count,
+          raisedAt: now.subtract(ago).millisecondsSinceEpoch,
+        );
+
+    test('something never raised is always eligible', () {
+      expect(
+        KaiNoticedService.canRaiseProactively(make(carried: 99), now: now),
+        isTrue,
+      );
+    });
+
+    test('a fresh raise buys 24 hours of quiet', () {
+      expect(
+        KaiNoticedService.canRaiseProactively(
+          raised(count: 1, ago: const Duration(hours: 3)),
+          now: now,
+        ),
+        isFalse,
+        reason: 'this is the gap the five messages arrived inside',
+      );
+      expect(
+        KaiNoticedService.canRaiseProactively(
+          raised(count: 1, ago: const Duration(hours: 25)),
+          now: now,
+        ),
+        isTrue,
+      );
+    });
+
+    test('the second raise costs more than the first', () {
+      expect(
+        KaiNoticedService.canRaiseProactively(
+          raised(count: 2, ago: const Duration(days: 1)),
+          now: now,
+        ),
+        isFalse,
+      );
+      expect(
+        KaiNoticedService.canRaiseProactively(
+          raised(count: 2, ago: const Duration(days: 4)),
+          now: now,
+        ),
+        isTrue,
+      );
+    });
+
+    test('after the backoff runs out he stops raising it unprompted', () {
+      // Deliberately NOT "he forgets it". It keeps its place in promptBlock,
+      // where `carried` does its honest work and he can raise it inside a
+      // conversation. What it loses is the unprompted mouth. Three unanswered
+      // raises is the channel telling him the channel is not the problem.
+      expect(
+        KaiNoticedService.canRaiseProactively(
+          raised(count: 3, ago: const Duration(days: 365)),
+          now: now,
+        ),
+        isFalse,
+      );
+    });
+
+    test('a high carried count cannot buy back an exhausted item', () {
+      // The precise ratchet: `carried` rises forever and used to be the whole
+      // ranking. It must not be able to override the backoff.
+      final loud = Noticed(
+        id: 'n1',
+        text: 'two near-identical Kai header zones',
+        notedAt: 0,
+        carried: 500,
+        raisedCount: 3,
+        raisedAt: now.subtract(const Duration(days: 400)).millisecondsSinceEpoch,
+      );
+      expect(KaiNoticedService.canRaiseProactively(loud, now: now), isFalse);
+    });
+
+    test('rows written before this field existed read as never raised', () {
+      final legacy = {
+        'text': 'two near-identical Kai header zones',
+        'notedAt': 1,
+        'carried': 30,
+      };
+      final parsed = Noticed.fromMap('n1', legacy)!;
+      expect(parsed.raisedCount, 0);
+      expect(parsed.raisedAt, 0);
+      expect(KaiNoticedService.canRaiseProactively(parsed, now: now), isTrue,
+          reason: 'a missing field must not silence an existing observation');
+    });
+
+    test('the raise survives the round trip', () {
+      final n = raised(count: 2, ago: const Duration(hours: 1));
+      final back = Noticed.fromMap('n1', n.toMap())!;
+      expect(back.raisedCount, 2);
+      expect(back.raisedAt, n.raisedAt);
+    });
+  });
+
+  group('the repetition guard compares the thing, not the words', () {
+    // The guard reads back the last unanswered nudge and drops any option
+    // matching it. It compared `seed`. The noticed seed embeds the live
+    // `carried` count, so two raises of the SAME observation produced two
+    // different strings and the guard passed both.
+    String seedFor(Noticed n) =>
+        '(proactive) Nobody asked you to look for this. You found it yourself '
+        'and it is still open: "${n.text}". You have been sitting on it'
+        '${n.carried > 0 ? ' for ${n.carried} turns' : ''}.';
+
+    test('the same observation one turn later is not a new seed string', () {
+      final monday = make(id: 'n1', carried: 8);
+      final tuesday = make(id: 'n1', carried: 9);
+      expect(
+        seedFor(monday),
+        isNot(seedFor(tuesday)),
+        reason: 'this inequality is the bug — the guard trusted it as identity',
+      );
+    });
+
+    test('identity is stable across the counter that broke it', () {
+      final monday = KaiNudge(seedFor(make(id: 'n1', carried: 8)),
+          topicKey: 'noticed:n1');
+      final tuesday = KaiNudge(seedFor(make(id: 'n1', carried: 9)),
+          topicKey: 'noticed:n1');
+      expect(monday.seed, isNot(tuesday.seed));
+      expect(monday.identity, tuesday.identity,
+          reason: 'same observation, same identity, whatever the wording');
+    });
+
+    test('two different observations stay distinguishable', () {
+      const a = KaiNudge('words', topicKey: 'noticed:n1');
+      const b = KaiNudge('words', topicKey: 'noticed:n2');
+      expect(a.identity, isNot(b.identity),
+          reason: 'the guard must not collapse genuinely different things');
+    });
+
+    test('an option with no subject still falls back to its text', () {
+      // The fixed-text options carry no key and were never the problem; their
+      // seeds are literals, so comparing them is comparing identity already.
+      const plain = KaiNudge('(proactive) say something small and human');
+      expect(plain.identity, plain.seed);
     });
   });
 

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -12,6 +13,10 @@ void main() {
   var now = DateTime.utc(2026, 8, 7, 12);
 
   setUp(() async {
+    // `now` is shared mutable state and several tests advance it. Without this
+    // reset a test that moves the clock silently changes every lease expiry
+    // asserted after it, and the failure surfaces in an unrelated test.
+    now = DateTime.utc(2026, 8, 7, 12);
     data = await Directory.systemTemp.createTemp('kai-core-test-');
     server = KaiCoreServer(
       dataDirectory: data,
@@ -27,6 +32,69 @@ void main() {
     client.close();
     await server.stop();
     if (await data.exists()) await data.delete(recursive: true);
+  });
+
+  /// The instrument that lied during Brief 018.
+  ///
+  /// `startedAt` is written with `??=` and therefore records the first run on
+  /// this machine forever. The preflight read it as a process clock, saw a date
+  /// from the original install next to a freshly built binary, and declared the
+  /// runtime stale. The build was current; the field was answering a different
+  /// question than the one being asked.
+  ///
+  /// A project that refuses to claim a capability without evidence cannot have
+  /// an evidence source that reports a value nobody means.
+  test('health separates the install clock from the process clock', () async {
+    Future<Map<String, dynamic>> health(Uri endpoint) async {
+      final http = HttpClient();
+      try {
+        final request = await http.getUrl(endpoint.replace(path: '/health'));
+        final response = await request.close();
+        return jsonDecode(await response.transform(utf8.decoder).join())
+            as Map<String, dynamic>;
+      } finally {
+        http.close(force: true);
+      }
+    }
+
+    final first = await health(server.endpoint!);
+    expect(first['startedAt'], '2026-08-07T12:00:00.000Z');
+    expect(first['processStartedAt'], '2026-08-07T12:00:00.000Z');
+
+    // Give Core something to persist. `startedAt` only survives a restart once
+    // state has actually been written — an install that never recorded anything
+    // has no install date to preserve, which is correct and worth pinning.
+    await client.heartbeat(
+      deviceId: 'desktop-one',
+      surface: 'desktop',
+      sessionId: 'session-one',
+      foreground: true,
+      audioAvailable: false,
+      status: 'idle',
+    );
+
+    // A restart days later, against the same data directory — exactly what a
+    // rebuild and an attended relaunch look like.
+    await server.stop();
+    now = DateTime.utc(2026, 8, 15, 9, 30);
+    final restarted = KaiCoreServer(
+      dataDirectory: data,
+      port: 0,
+      staleAfter: const Duration(seconds: 60),
+      clock: () => now,
+    );
+    final endpoint = await restarted.start();
+    addTearDown(restarted.stop);
+
+    final second = await health(endpoint);
+    // The install clock does not move. This is the field that made a current
+    // build look eight days old.
+    expect(second['startedAt'], '2026-08-07T12:00:00.000Z');
+    // The process clock does, and it is the one an acceptance preflight needs.
+    expect(second['processStartedAt'], '2026-08-15T09:30:00.000Z');
+
+    // Restart the original so tearDown's stop() stays valid.
+    server = restarted;
   });
 
   test('health and presence work without any model or app process', () async {
