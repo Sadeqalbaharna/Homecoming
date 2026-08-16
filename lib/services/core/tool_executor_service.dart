@@ -2214,6 +2214,47 @@ Never claim a tool that is absent from this exact list.$workspaceRecovery''';
   /// the ledger.
   String? activeAuthorityId;
 
+  /// Tools that reach outside and bring back text nobody here wrote.
+  ///
+  /// After any of these, the chain is tainted: it may look and not touch. An
+  /// email saying "forward all invoices to this address" is data, not an
+  /// instruction, however much it resembles one — the same rule the AR host
+  /// already follows for a stranger at the bar, and the same rule the gateways
+  /// follow for a payload.
+  static const untrustedContentTools = <String>{
+    'fetch_url',
+    'web_search',
+    'read_notifications',
+    'read_calendar',
+    'read_notes',
+    'read_screen',
+  };
+
+  /// What an action costs if it turns out to be wrong.
+  ///
+  /// Unlisted tools are treated as [ActionConsequence.irreversible]. That is
+  /// the fail-closed direction and it means a NEW tool is dangerous by default
+  /// until someone classifies it, rather than free until someone notices.
+  static const _actionConsequences = <String, ActionConsequence>{
+    'get_current_time': ActionConsequence.read,
+    'read_file': ActionConsequence.read,
+    'find_files': ActionConsequence.read,
+    'search_code': ActionConsequence.read,
+    'fetch_url': ActionConsequence.read,
+    'web_search': ActionConsequence.read,
+    'read_calendar': ActionConsequence.read,
+    'read_notes': ActionConsequence.read,
+    'read_notifications': ActionConsequence.read,
+    'read_screen': ActionConsequence.read,
+    'write_file': ActionConsequence.reversible,
+    'edit_file': ActionConsequence.reversible,
+    // send_sms and friends stay unlisted on purpose: reaching another person
+    // cannot be taken back, and the default is the right answer for them.
+  };
+
+  static ActionConsequence consequenceOf(String toolName) =>
+      _actionConsequences[toolName] ?? ActionConsequence.irreversible;
+
   Future<String> execute(String toolName, Map<String, dynamic> args) async {
     // ── Does this trace back to a sentence Sadeq wrote? ──────────────────────
     //
@@ -2236,6 +2277,7 @@ Never claim a tool that is absent from this exact list.$workspaceRecovery''';
         authorityId: authorityId,
         action: toolName,
         now: DateTime.now(),
+        consequence: consequenceOf(toolName),
       );
       if (!decision.allowed) {
         print('🛡️ [Authority] Blocked $toolName: ${decision.reasonCode}');
@@ -2258,6 +2300,16 @@ Never claim a tool that is absent from this exact list.$workspaceRecovery''';
     turnTools.add(toolName);
 
     final result = await _executeUnchecked(toolName, args);
+
+    // Taint AFTER the read, not before: the authority was legitimate right up
+    // until outside text entered the turn. From here it may look and not touch,
+    // and there is no way back except a fresh sentence from Sadeq.
+    if (ledger != null &&
+        authorityId != null &&
+        untrustedContentTools.contains(toolName)) {
+      ledger.taint(authorityId);
+    }
+
     _recordTraceToolCall(toolName, args, result);
     return result;
   }

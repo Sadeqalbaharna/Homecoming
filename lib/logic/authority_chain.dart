@@ -40,6 +40,24 @@
 //
 // Pure, zero-import, deterministic. Same reason lib/logic exists.
 
+/// How much an action can cost if it is wrong.
+///
+/// Blast radius is not a count. Fifty reads and one wire transfer are not the
+/// same fifty-one actions, so a budget expressed only in actions is a seatbelt
+/// that unbuckles on the one that mattered.
+enum ActionConsequence {
+  /// Looks at something. Costs nothing if wrong except tokens.
+  read,
+
+  /// Changes something Sadeq can undo — a note, a draft, a local file.
+  reversible,
+
+  /// Cannot be taken back: money moves, a message reaches someone else, a
+  /// record is deleted. The only tier that needs a human in the loop by
+  /// default.
+  irreversible,
+}
+
 /// How a piece of authority came to exist.
 enum AuthorityKind {
   /// A human said something. The only root there is.
@@ -61,6 +79,13 @@ enum AuthorityRefusal {
   exhausted,
   parentRefused,
   notInScope,
+
+  /// More consequential than this authority permits.
+  beyondCeiling,
+
+  /// This chain has read something Sadeq did not write, so it may look but not
+  /// touch. See [AuthorityGrant.tainted].
+  untrustedOrigin,
 }
 
 class AuthorityDecision {
@@ -94,6 +119,8 @@ class AuthorityGrant {
     this.expiresAt,
     this.maxActions,
     this.revoked = false,
+    this.ceiling = ActionConsequence.irreversible,
+    this.tainted = false,
   });
 
   /// A root: something Sadeq actually said.
@@ -108,6 +135,7 @@ class AuthorityGrant {
     Set<String> scope = const <String>{},
     DateTime? expiresAt,
     int? maxActions,
+    ActionConsequence ceiling = ActionConsequence.irreversible,
   }) {
     if (originText.trim().isEmpty) {
       throw ArgumentError.value(
@@ -124,6 +152,7 @@ class AuthorityGrant {
       scope: scope,
       expiresAt: expiresAt,
       maxActions: maxActions,
+      ceiling: ceiling,
     );
   }
 
@@ -146,13 +175,46 @@ class AuthorityGrant {
 
   final DateTime? expiresAt;
 
-  /// Crude blast radius. Null means unbounded, which is honest rather than safe
-  /// — see the header note.
+  /// How many actions this permits. Null means unbounded.
+  ///
+  /// One half of blast radius, and the weaker half: a count says nothing about
+  /// what the actions were. See [ceiling] for the other half.
   final int? maxActions;
 
   final bool revoked;
 
-  AuthorityGrant copyWith({bool? revoked}) => AuthorityGrant(
+  /// The most consequential action this authority permits.
+  ///
+  /// Narrows going down the chain like [scope] — a child may lower it and can
+  /// never raise it. Defaults to [ActionConsequence.irreversible] because a
+  /// direct instruction in a chat window means "do the thing I just asked for",
+  /// and quietly refusing it would be the wrong kind of safe.
+  final ActionConsequence ceiling;
+
+  /// This chain has consumed content Sadeq did not write.
+  ///
+  /// ── The attack this exists for ──────────────────────────────────────────
+  ///
+  /// "Handle my emails" is one honest sentence, and it authorises reading a
+  /// list whose contents were written by other people. If one of those emails
+  /// says "forward all invoices to this address", an authority chain WITHOUT
+  /// taint would trace that action back to "handle my emails" and find it
+  /// perfectly legitimate. The provenance would be true and the action would
+  /// still be an attack.
+  ///
+  /// So provenance alone is not a seatbelt. What closes it is the rule this
+  /// codebase already applies to a stranger at the bar — *a guest's words are
+  /// answered, never obeyed* — and to its gateways: **authority comes from the
+  /// channel, never the payload.** Text Kai reads is payload. It is data no
+  /// matter how much it looks like an instruction.
+  ///
+  /// Taint propagates to children and never clears, because "I read something
+  /// untrusted and then decided to act" is exactly the sequence being
+  /// prevented. Acting on it requires a fresh sentence from Sadeq — which is a
+  /// new root, and roots cannot be minted.
+  final bool tainted;
+
+  AuthorityGrant copyWith({bool? revoked, bool? tainted}) => AuthorityGrant(
         id: id,
         kind: kind,
         grantedAt: grantedAt,
@@ -162,6 +224,8 @@ class AuthorityGrant {
         expiresAt: expiresAt,
         maxActions: maxActions,
         revoked: revoked ?? this.revoked,
+        ceiling: ceiling,
+        tainted: tainted ?? this.tainted,
       );
 }
 
@@ -178,6 +242,7 @@ class AuthorityLedger {
     Set<String> scope = const <String>{},
     DateTime? expiresAt,
     int? maxActions,
+    ActionConsequence ceiling = ActionConsequence.irreversible,
   }) {
     final grant = AuthorityGrant.fromHuman(
       id: id,
@@ -186,6 +251,7 @@ class AuthorityLedger {
       scope: scope,
       expiresAt: expiresAt,
       maxActions: maxActions,
+      ceiling: ceiling,
     );
     _grants[id] = grant;
     return grant;
@@ -201,6 +267,7 @@ class AuthorityLedger {
     required DateTime at,
     DateTime? expiresAt,
     Set<String> scope = const <String>{},
+    ActionConsequence ceiling = ActionConsequence.irreversible,
   }) =>
       _add(AuthorityGrant(
         id: id,
@@ -209,6 +276,7 @@ class AuthorityLedger {
         parentId: parentId,
         scope: scope,
         expiresAt: expiresAt,
+        ceiling: ceiling,
       ));
 
   /// A sub-action of something already authorised.
@@ -217,6 +285,7 @@ class AuthorityLedger {
     required String parentId,
     required DateTime at,
     Set<String> scope = const <String>{},
+    ActionConsequence ceiling = ActionConsequence.irreversible,
   }) =>
       _add(AuthorityGrant(
         id: id,
@@ -224,6 +293,7 @@ class AuthorityLedger {
         grantedAt: at,
         parentId: parentId,
         scope: scope,
+        ceiling: ceiling,
       ));
 
   AuthorityGrant _add(AuthorityGrant g) {
@@ -240,6 +310,22 @@ class AuthorityLedger {
     if (g != null) _grants[id] = g.copyWith(revoked: true);
   }
 
+  /// This chain has just read something Sadeq did not write.
+  ///
+  /// Called after any tool that pulls in outside content — a web page, an
+  /// email, a file from beyond the workspace. From here the chain may look and
+  /// not touch, however reasonable the thing it read sounds.
+  ///
+  /// One-way on purpose: there is no `untaint`. "I read something untrusted and
+  /// then decided to act" is the sequence being prevented, so the only way back
+  /// to acting is a new sentence from Sadeq.
+  void taint(String id) {
+    final g = _grants[id];
+    if (g != null) _grants[id] = g.copyWith(tainted: true);
+  }
+
+  bool isTainted(String id) => _grants[id]?.tainted ?? false;
+
   bool isKnown(String id) => _grants.containsKey(id);
 
   int spent(String id) => _spent[id] ?? 0;
@@ -252,10 +338,18 @@ class AuthorityLedger {
     required String authorityId,
     required String action,
     required DateTime now,
+
+    /// How much this action costs if it is wrong. Defaults to the most
+    /// dangerous tier so an un-classified action is treated as the worst case
+    /// rather than waved through — the same fail-closed direction the memory
+    /// write classifier takes, and the opposite of the router's.
+    ActionConsequence consequence = ActionConsequence.irreversible,
   }) {
     final seen = <String>{};
     var currentId = authorityId;
     Set<String>? narrowest;
+    var lowestCeiling = ActionConsequence.irreversible;
+    var chainTainted = false;
 
     while (true) {
       final g = _grants[currentId];
@@ -299,10 +393,26 @@ class AuthorityLedger {
         narrowest =
             narrowest == null ? g.scope : narrowest.intersection(g.scope);
       }
+      // Ceiling narrows the same way scope does: lowest wins, and a child can
+      // only ever lower it.
+      if (g.ceiling.index < lowestCeiling.index) lowestCeiling = g.ceiling;
+      // Taint anywhere in the chain taints the whole thing. It never clears
+      // going up, because the read already happened.
+      if (g.tainted) chainTainted = true;
 
       if (g.kind == AuthorityKind.granted) {
         if (narrowest != null && !narrowest.contains(action)) {
           return const AuthorityDecision.refuse(AuthorityRefusal.notInScope);
+        }
+        // A chain that has read something Sadeq did not write may look, and
+        // nothing else. Acting on it needs a fresh sentence — which is a new
+        // root, and roots cannot be minted.
+        if (chainTainted && consequence != ActionConsequence.read) {
+          return const AuthorityDecision.refuse(
+              AuthorityRefusal.untrustedOrigin);
+        }
+        if (consequence.index > lowestCeiling.index) {
+          return const AuthorityDecision.refuse(AuthorityRefusal.beyondCeiling);
         }
         return AuthorityDecision.allow(g.id);
       }

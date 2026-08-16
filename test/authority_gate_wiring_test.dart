@@ -86,6 +86,42 @@ void main() {
     expect(second, contains('exhausted'));
   });
 
+  test('a tool that reads the outside world taints the turn', () async {
+    // The scenario: "handle my emails" is honest, the read is legitimate, and
+    // then the content tries to become an instruction. The chain traces back to
+    // a real sentence — which is exactly why provenance alone is not enough.
+    final ledger = AuthorityLedger();
+    ledger.grantFromHuman(
+      id: 'root',
+      originText: 'handle my emails',
+      at: t0,
+    );
+    final ex = gated(ledger, 'root');
+
+    expect(ledger.isTainted('root'), isFalse);
+    // A dead port, so this is hermetic and instant. Taint applies whether or
+    // not the fetch succeeded — reaching outside at all is the trigger, and
+    // being conservative about a failed reach costs nothing.
+    await ex.execute('fetch_url', const {'url': 'http://127.0.0.1:1/'});
+    expect(ledger.isTainted('root'), isTrue,
+        reason: 'the turn reached outside; that is the trigger');
+
+    final acted =
+        await ex.execute('send_sms', const {'to': '+973', 'body': 'forwarded'});
+    expect(acted, contains('untrustedOrigin'));
+  });
+
+  test('an unclassified tool is irreversible by default', () {
+    // A new tool is dangerous until someone classifies it, not free until
+    // someone notices.
+    expect(ToolExecutorService.consequenceOf('some_future_tool'),
+        ActionConsequence.irreversible);
+    expect(ToolExecutorService.consequenceOf('read_file'),
+        ActionConsequence.read);
+    expect(ToolExecutorService.consequenceOf('write_file'),
+        ActionConsequence.reversible);
+  });
+
   test('no ledger means current behaviour, not a silent refusal', () {
     // Deliberately nullable for one release: switching it on for every caller
     // before any of them registers a root would stop Kai acting at all. An
