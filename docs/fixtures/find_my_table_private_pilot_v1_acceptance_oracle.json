@@ -264,7 +264,7 @@
     "matchWorkbookRequiredSheets": ["Review Queue", "Evidence Ledger"],
     "revenueWorkbookRequiredSheets": ["Attribution", "Proof States"],
     "centralFormula": "SUMPRODUCT(playerBills,--netNewSeats)*contributionMargin-incrementalOverhead-dmCost",
-    "netNewShareFormula": "COUNTIF(netNewSeats,TRUE)/ROWS(netNewSeats)",
+    "netNewShareFormula": "SUMPRODUCT(--netNewSeats)/ROWS(netNewSeats)",
     "missingInputGuard": "IF(any required input is blank,UNAVAILABLE,no numeric result)",
     "forbiddenFeatures": [
       "macros",

@@ -123,7 +123,7 @@
         },
         "formulas": {
           "B16": "=IF(COUNT(B3:B6)<>4,\"UNAVAILABLE\",SUM(B3:B6))",
-          "B17": "=IF(COUNTA(C3:C6)<>4,\"UNAVAILABLE\",COUNTIF(C3:C6,TRUE)/ROWS(C3:C6))",
+          "B17": "=IF(COUNTA(C3:C6)<>4,\"UNAVAILABLE\",SUMPRODUCT(--C3:C6)/ROWS(C3:C6))",
           "B18": "=IF(OR(COUNT(B3:B6)<>4,COUNTA(C3:C6)<>4,COUNT(B8:B14)<>7),\"UNAVAILABLE\",SUMPRODUCT(B3:B6,--C3:C6)*B8-B9-B10-B11-B12-B13-B14)",
           "B19": "=IF(NOT(ISNUMBER(B18)),\"UNAVAILABLE\",B18>=0)"
         },
@@ -145,7 +145,7 @@
         "inputValues": [0.4, 5.0, 10.0, 0.0, 0.0, 0.0, 0.0],
         "formulas": {
           "F16": "=IF(COUNT(F3:F6)<>4,\"UNAVAILABLE\",SUM(F3:F6))",
-          "F17": "=IF(COUNTA(G3:G6)<>4,\"UNAVAILABLE\",COUNTIF(G3:G6,TRUE)/ROWS(G3:G6))",
+          "F17": "=IF(COUNTA(G3:G6)<>4,\"UNAVAILABLE\",SUMPRODUCT(--G3:G6)/ROWS(G3:G6))",
           "F18": "=IF(OR(COUNT(F3:F6)<>4,COUNTA(G3:G6)<>4,COUNT(F8:F14)<>7),\"UNAVAILABLE\",SUMPRODUCT(F3:F6,--G3:G6)*F8-F9-F10-F11-F12-F13-F14)",
           "F19": "=IF(NOT(ISNUMBER(F18)),\"UNAVAILABLE\",F18>=0)"
         },

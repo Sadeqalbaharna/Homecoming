@@ -2,7 +2,7 @@
 
 Owner: Claude only if Relay v2 reports an exact model identifier proving Opus 5+
 Reviewer: Codex
-Status: BLOCKED — CLAUDE BRIDGE BLOCKED; CODE NOT DISPATCHED
+Status: BLOCKED — VERIFIED OPUS 5 DISPATCHED; SESSION QUOTA BEFORE FIRST WRITE
 Factory run: `factory-run-legacy-recovery-20260809-tablefinder-01`
 Candidate: `FSC-LEGACY-YES-001`
 Assembly authority: standing repository-local safe-work authority
@@ -136,9 +136,10 @@ artifact SHA-256 values, PASS/FAIL/UNVERIFIED by criterion, remaining risks, and
 rollback. Do not use real data, contact anyone, offer DM compensation, book a
 table, access receipts, publish, charge, spend, or advance beyond Assembly.
 
-## Relay v2 dispatch record — 2026-08-09
+## Historical pre-restoration Relay v2 record — 2026-08-09
 
-Claude implementation eligibility is **UNVERIFIED / INELIGIBLE**. Three
+At that time, Claude implementation eligibility was **UNVERIFIED / INELIGIBLE**.
+Three
 materially different safe bridge attempts ended before any model identifier or
 allowlist verdict was returned:
 
@@ -170,3 +171,51 @@ Result: **20/20 PASS**, exit code 0, approximately 4.5 seconds. This proves the
 current synthetic operator and repository contracts used by the acceptance and
 workbook oracles. It does not prove Brief 022 generation, workbook validity,
 visual quality, or live operation; those remain `UNVERIFIED` until implemented.
+
+## Relay v2 restored-route dispatch record — 2026-08-09
+
+The restored relay was treated as a new execution hypothesis rather than a
+continuation of the historical bridge failures.
+
+### Eligibility handshake
+
+- Harness session: `7ebe772b-eb17-4583-9fbd-78a2ba3582d7`.
+- Requested model: `claude-opus-5`; requested effort: `high`.
+- Harness `actualModels`: `claude-opus-5`.
+- Harness `modelVerified`: `true`, sourced from `result.modelUsage`.
+- The read-only partnership endpoint exposed no write access; it was used only
+  for the required content-free handshake.
+
+Claude's prose cautioned that it could not self-verify its model. That does not
+override the relay harness evidence above; eligibility was established from the
+tool result, not model self-description.
+
+### Full implementation dispatch
+
+One exact-path Brief 022 implementation packet was sent through
+`start_claude_implementation`. The relay timed out at 300 seconds before
+returning a report. Repository inspection found no owned file created or
+modified. Failure fingerprint: `relay_timeout_300s_before_first_write`.
+
+### One smaller restart
+
+The single permitted restart used session
+`cdcbf0b6-54d0-44dc-a189-00f66d9b83ae` and narrowed scope to the generator and
+eleven output artifacts. The harness again reported only `claude-opus-5` in
+`modelUsage`. It exited before its first write after:
+
+1. four Bash permission denials while trying to inspect the local Dart package
+   cache; and
+2. Anthropic API status `429`: `You've hit your session limit · resets 9:30pm
+   (Asia/Bahrain)`.
+
+Relay-reported usage for the smaller restart was 15 input tokens, 51,489 cache
+creation input tokens, 1,006,359 cache-read input tokens, 11,170 output tokens,
+and USD 1.2973945. These are provider-reported values, not estimates.
+
+Post-failure inspection found no generator, test, or packet artifact. Claude
+authored zero files; Codex did not duplicate implementation. The current causal
+blocker is the external session quota plus the implementation relay's denied
+dependency-inspection commands. Do not retry the same packet before the quota
+reset. Brief 022 generation, deterministic workbooks, visual QA, and packet
+tests remain `UNVERIFIED`; all live gates remain locked.
