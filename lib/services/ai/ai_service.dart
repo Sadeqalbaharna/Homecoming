@@ -32,6 +32,8 @@ import '../core/kai_router_service.dart';
 import '../core/kai_capability_broker.dart';
 import '../core/kai_context_manifest.dart';
 import '../core/kai_memory_scope.dart';
+import '../core/kai_memory_worthiness.dart';
+import 'local_llm_service.dart';
 import '../core/kai_surface_context.dart';
 import '../core/kai_job_service.dart';
 import '../core/reply_recovery_service.dart';
@@ -177,6 +179,28 @@ class AIService {
   final _emotionalEvents = EmotionalEventService();
   final _convStore = ConversationStoreService();
   final _brain = BrainExtractionService();
+
+  /// Decides whether an unplaceable turn was actually about Sadeq's life.
+  ///
+  /// Local only, on purpose. This is classification, which the model-role rule
+  /// puts firmly on the mechanical side — it never speaks, and nothing it
+  /// produces is read back as something Kai said. It also means the judgement
+  /// is free and stays on the machine, so no turn is sent anywhere new to
+  /// decide where its own record belongs.
+  ///
+  /// If Ollama is not running, `complete` returns null, the verdict is closed,
+  /// and the scope stays private. That is the intended degraded behaviour: a
+  /// missing classifier makes Messenger thinner, never leakier.
+  final _memoryWorthinessClassifier = KaiMemoryWorthinessClassifier(
+    providers: [
+      (system, user) => LocalLLMService().complete(
+            system: system,
+            user: user,
+            maxTokens: 40,
+            think: false,
+          ),
+    ],
+  );
 
   /// What he said last turn — so if Sadeq's next message is "no, that's wrong",
   /// the ledger records the correction against the actual claim it lands on.
@@ -2779,12 +2803,33 @@ ${a.text}
       // chose to remember. The gateway already avoids saving the user seed,
       // but remember() used to run independently and persisted "Sadeq entered
       // our shared space" as relationship memory anyway.
-      final turnMemoryScope = scopeForTurn(
+      // The deterministic decision first. It is the boundary, and it is already
+      // safe to persist on its own — the classifier below can only ever widen
+      // it, and only to sharedLife, and only for turns the router could not
+      // place at all. See KaiMemoryWorthinessClassifier for why every failure
+      // here keeps the private answer.
+      //
+      // This runs after the reply is generated and shown, so a slow or absent
+      // local model costs a thinner Messenger, never a slower turn.
+      final turnMemoryDecision = scopeDecisionForTurn(
         context: activeSurface,
         route: routeDecision.route,
         requestedRoute: proposedRoute.route,
         userText: text,
         kaiReply: reply,
+      );
+      final turnMemoryScope = await resolveMemoryScope(
+        decision: turnMemoryDecision,
+        classifier: _memoryWorthinessClassifier,
+        userText: text,
+        kaiReply: reply,
+        onDecision: (reasonCode, confidence) {
+          // Reason code only. The audit line must never carry the message.
+          debugService.addStep(
+            BrainPhase.consolidation,
+            'Memory scope: ${turnMemoryDecision.scope.name} · $reasonCode',
+          );
+        },
       );
       final Future<String?> memoryShardFuture = !shouldFormMemoryForTurn(
               activeSurface)
