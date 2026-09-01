@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../overlay/avatar_overlay.dart';
 import '../../../features/voice/voice_service.dart';
+import 'no_drinks_september_tracker.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -60,22 +61,33 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.transparent,
-      body: Stack(
-        children: [
-          // Avatar anchored bottom-right
-          Positioned(
-            right: 24,
-            bottom: 24,
-            child: CompositedTransformTarget(
-              link: _anchor,
-              child: GestureDetector(
-                onTap: _toggleMenu,
-                behavior: HitTestBehavior.translucent,
-                child: const AvatarOverlay(),
+      body: SafeArea(
+        child: Stack(
+          children: [
+            const Positioned.fill(
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(20, 24, 20, 112),
+                child: Align(
+                  alignment: Alignment.topCenter,
+                  child: NoDrinksSeptemberTracker(),
+                ),
               ),
             ),
-          ),
-        ],
+            // Avatar anchored bottom-right
+            Positioned(
+              right: 24,
+              bottom: 24,
+              child: CompositedTransformTarget(
+                link: _anchor,
+                child: GestureDetector(
+                  onTap: _toggleMenu,
+                  behavior: HitTestBehavior.translucent,
+                  child: const AvatarOverlay(),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
